@@ -1,0 +1,15 @@
+{"threshold": 0.65, "margin": 0.04, "cases": 12, "false_quote_routes": 1, "false_quote_rate": 0.08333333333333333, "missed_quote_rate": 0.6666666666666666, "clarify_rate": 0.8333333333333334}
+{"threshold": 0.65, "margin": 0.08, "cases": 12, "false_quote_routes": 1, "false_quote_rate": 0.08333333333333333, "missed_quote_rate": 0.6666666666666666, "clarify_rate": 0.8333333333333334}
+{"threshold": 0.65, "margin": 0.12, "cases": 12, "false_quote_routes": 1, "false_quote_rate": 0.08333333333333333, "missed_quote_rate": 0.6666666666666666, "clarify_rate": 0.8333333333333334}
+{"threshold": 0.7, "margin": 0.04, "cases": 12, "false_quote_routes": 0, "false_quote_rate": 0.0, "missed_quote_rate": 0.6666666666666666, "clarify_rate": 0.9166666666666666}
+{"threshold": 0.7, "margin": 0.08, "cases": 12, "false_quote_routes": 0, "false_quote_rate": 0.0, "missed_quote_rate": 0.6666666666666666, "clarify_rate": 0.9166666666666666}
+{"threshold": 0.7, "margin": 0.12, "cases": 12, "false_quote_routes": 0, "false_quote_rate": 0.0, "missed_quote_rate": 0.6666666666666666, "clarify_rate": 0.9166666666666666}
+{"threshold": 0.75, "margin": 0.04, "cases": 12, "false_quote_routes": 0, "false_quote_rate": 0.0, "missed_quote_rate": 0.6666666666666666, "clarify_rate": 0.9166666666666666}
+{"threshold": 0.75, "margin": 0.08, "cases": 12, "false_quote_routes": 0, "false_quote_rate": 0.0, "missed_quote_rate": 0.6666666666666666, "clarify_rate": 0.9166666666666666}
+{"threshold": 0.75, "margin": 0.12, "cases": 12, "false_quote_routes": 0, "false_quote_rate": 0.0, "missed_quote_rate": 0.6666666666666666, "clarify_rate": 0.9166666666666666}
+{"threshold": 0.78, "margin": 0.04, "cases": 12, "false_quote_routes": 0, "false_quote_rate": 0.0, "missed_quote_rate": 1.0, "clarify_rate": 1.0}
+{"threshold": 0.78, "margin": 0.08, "cases": 12, "false_quote_routes": 0, "false_quote_rate": 0.0, "missed_quote_rate": 1.0, "clarify_rate": 1.0}
+{"threshold": 0.78, "margin": 0.12, "cases": 12, "false_quote_routes": 0, "false_quote_rate": 0.0, "missed_quote_rate": 1.0, "clarify_rate": 1.0}
+{"threshold": 0.82, "margin": 0.04, "cases": 12, "false_quote_routes": 0, "false_quote_rate": 0.0, "missed_quote_rate": 1.0, "clarify_rate": 1.0}
+{"threshold": 0.82, "margin": 0.08, "cases": 12, "false_quote_routes": 0, "false_quote_rate": 0.0, "missed_quote_rate": 1.0, "clarify_rate": 1.0}
+{"threshold": 0.82, "margin": 0.12, "cases": 12, "false_quote_routes": 0, "false_quote_rate": 0.0, "missed_quote_rate": 1.0, "clarify_rate": 1.0}

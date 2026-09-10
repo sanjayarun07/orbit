@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+if [ -x .venv/bin/python ]; then
+  exec .venv/bin/python scripts/check_secrets.py
+fi
+exec python3 scripts/check_secrets.py

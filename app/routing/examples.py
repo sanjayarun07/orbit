@@ -1,0 +1,52 @@
+"""Versioned semantic examples; deliberately separate from held-out evals.
+
+Labels describe speech acts. A quote request is never an execution permission.
+"""
+
+EXAMPLE_VERSION = "2"
+
+# (speech act, domain, example)
+EXAMPLES = (
+    ("advice", "crypto", "Should I buy BONK?"),
+    ("advice", "crypto", "Would selling SOL now be a good idea?"),
+    ("advice", "crypto", "Is it worth buying this meme coin?"),
+    ("advice", "crypto", "What are the risks if I swap all my savings?"),
+    ("advice", "crypto", "Recommend the best exchange for SOL"),
+    ("research", "crypto", "Show buy and sell volume for BONK"),
+    ("research", "crypto", "Which exchange has the best liquidity for SOL?"),
+    ("research", "crypto", "How much did whales buy yesterday?"),
+    ("research", "crypto", "What is driving the price of ANSEM?"),
+    ("research", "crypto", "Compare bridge fees between Solana and Base"),
+    ("research", "crypto", "Check the top holders of this token"),
+    ("explain", "crypto", "How do I trade meme coins?"),
+    ("explain", "crypto", "Explain how a cross chain bridge works"),
+    ("explain", "crypto", "What happens when a swap fails?"),
+    ("explain", "crypto", "Tell me how to buy a token with Jupiter"),
+    ("quote", "crypto", "Buy BONK with 0.5 SOL"),
+    ("quote", "crypto", "Swap 0.1 SOL on Solana to USDC on Base with 10 bps slippage"),
+    ("quote", "crypto", "Please buy ANSEM on Solana"),
+    ("quote", "crypto", "I want to sell 100 BONK for SOL"),
+    ("quote", "crypto", "Can you prepare a quote for 0.02 SOL to ANSEM?"),
+    ("quote", "crypto", "Exchange 10 USDC for ETH on Base"),
+    ("quote", "crypto", "Buy a meme coin on Robinhood Chain with ETH"),
+    ("portfolio", "wallet", "Show my recent transactions"),
+    ("portfolio", "wallet", "How much ANSEM do I own?"),
+    ("portfolio", "wallet", "List the tokens in my wallet"),
+    ("portfolio", "wallet", "What is my portfolio worth?"),
+    ("research", "equity", "Research NVDA earnings and outlook"),
+    ("research", "equity", "Buy NVDA"),
+    ("advice", "equity", "Should I buy Reliance shares?"),
+    ("research", "equity", "What is happening in the Indian stock market?"),
+    ("research", "general", "What is the latest news in robotics?"),
+    ("research", "general", "Who won the election today?"),
+    ("explain", "general", "Hello, what can you do?"),
+    ("explain", "general", "Explain what inflation means"),
+    ("abstain", "crypto", "Do not buy BONK"),
+    ("abstain", "crypto", "If SOL drops below 100 buy BONK"),
+    ("abstain", "crypto", "Buy SOL and sell BONK at the same time"),
+    ("abstain", "general", "Do it"),
+    ("research", "general", "Who is Vitalik Buterin?"),
+    ("research", "crypto", "Did WIF rug or is it safe?"),
+    ("research", "crypto", "Show me new meme coins launching on Solana"),
+    ("advice", "general", "Should I invest in index funds?"),
+)

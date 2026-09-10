@@ -1,0 +1,14 @@
+[
+  {"symbol":"NVDA","aliases":["NVDA","NVIDIA","NASDAQ:NVDA"]},
+  {"symbol":"AAPL","aliases":["AAPL","APPLE","NASDAQ:AAPL"]},
+  {"symbol":"MSFT","aliases":["MSFT","MICROSOFT"]},
+  {"symbol":"TSLA","aliases":["TSLA","TESLA"]},
+  {"symbol":"AMZN","aliases":["AMZN","AMAZON"]},
+  {"symbol":"GOOGL","aliases":["GOOGL","GOOG","ALPHABET"]},
+  {"symbol":"PLTR","aliases":["PLTR","PALANTIR"]},
+  {"symbol":"INFY","aliases":["INFY","INFOSYS","NSE:INFY","NYSE:INFY"]},
+  {"symbol":"RELIANCE","aliases":["RELIANCE","NSE:RELIANCE","BSE:RELIANCE"]},
+  {"symbol":"TCS","aliases":["TCS","NSE:TCS"]},
+  {"symbol":"HDFCBANK","aliases":["HDFCBANK","NSE:HDFCBANK"]},
+  {"symbol":"ICICIBANK","aliases":["ICICIBANK","NSE:ICICIBANK"]}
+]

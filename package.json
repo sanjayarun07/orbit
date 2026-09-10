@@ -1,0 +1,31 @@
+{
+  "name": "orbit-relay-client",
+  "private": true,
+  "scripts": {
+    "build:executors": "esbuild web/executors.ts --bundle --minify --format=iife --platform=browser --target=es2022 --outfile=app/static/executors.js",
+    "build:relay": "esbuild web/relay.ts --bundle --minify --format=iife --platform=browser --target=es2022 --outfile=app/static/relay.js",
+    "build:privy": "esbuild web/privy.ts --bundle --minify --format=iife --platform=browser --target=es2022 --outfile=app/static/privy.js",
+    "build:reown": "esbuild web/reown.ts --bundle --minify --format=iife --platform=browser --target=es2022 --outfile=app/static/reown.js",
+    "build:coinbase": "esbuild web/coinbase.ts --bundle --minify --format=iife --platform=browser --target=es2022 --outfile=app/static/coinbase.js",
+    "build:web": "npm run build:executors && npm run build:coinbase && npm run build:relay && npm run build:privy && npm run build:reown",
+    "check:relay": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@coinbase/wallet-sdk": "^4.3.7",
+    "@privy-io/js-sdk-core": "^0.73.0",
+    "@relayprotocol/relay-sdk": "8.0.0",
+    "@relayprotocol/relay-svm-wallet-adapter": "22.0.0",
+    "@reown/appkit": "^1.8.23",
+    "@reown/appkit-adapter-ethers": "^1.8.23",
+    "@solana/web3.js": "~1.98.2",
+    "ethers": "^6.17.0",
+    "viem": "^2.26.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.0.4"
+  },
+  "overrides": {
+    "axios": ">=1.18.0"
+  }
+}

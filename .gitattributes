@@ -1,0 +1,2 @@
+# Bundled dependencies contain intentional whitespace inside template literals.
+app/static/*.js linguist-generated=true -whitespace
