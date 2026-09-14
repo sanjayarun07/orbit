@@ -15,14 +15,27 @@ _LABELED_TOKEN_ADDRESS = re.compile(
     re.IGNORECASE,
 )
 _TOKEN_WORD = re.compile(r"\b(?:token|coin|contract|mint|memecoin|meme coin|erc-?20)\b", re.IGNORECASE)
+# A message that's just a pronoun reference back to the canonical focus --
+# "it"/"that"/"this", optionally "... one". Deliberately anchored (^...$)
+# only where used standalone (_PRONOUN.match on an already-isolated capture
+# group); the phrase-level patterns below embed the same alternation
+# in-line instead of anchoring the whole message.
+_PRONOUN = re.compile(r"^(?:it|that|this)(?:\s+one)?$", re.IGNORECASE)
 _TOKEN_FOLLOWUP = re.compile(
     r"\b(?:this|that|the)\s+(?:token|coin|contract)\b"
-    r"|\b(?:its|their)\s+(?:holders?|liquidity|volume|price|trades?|safety|risk)\b",
+    r"|\b(?:its|their)\s+(?:holders?|liquidity|volume|price|trades?|safety|risk)\b"
+    # Bare pronoun follow-ups ("how about that one?", "tell me more about it") --
+    # verified live these previously resolved to nothing at all, unlike the
+    # "this/that + noun" phrasing above, which was already handled.
+    r"|\b(?:how|what)\s+about\s+(?:it|that|this)(?:\s+one)?\b"
+    r"|\b(?:tell\s+me\s+more\s+about|check|analyze)\s+(?:it|that|this)(?:\s+one)?\b",
     re.IGNORECASE,
 )
 _WALLET_FOLLOWUP = re.compile(
     r"\b(?:this|that|the)\s+(?:wallet|address|portfolio)\b"
-    r"|\b(?:its|their)\s+(?:transactions?|balances?|holdings?|counterparties|pnl|leverage|positions?)\b",
+    r"|\b(?:its|their)\s+(?:transactions?|balances?|holdings?|counterparties|pnl|leverage|positions?)\b"
+    r"|\b(?:how|what)\s+about\s+(?:it|that|this)(?:\s+one)?\b"
+    r"|\b(?:tell\s+me\s+more\s+about|check|analyze)\s+(?:it|that|this)(?:\s+one)?\b",
     re.IGNORECASE,
 )
 _WALLET_WORD = re.compile(
@@ -40,9 +53,72 @@ _NAMED_TOKEN = re.compile(
     re.IGNORECASE,
 )
 _NAMED_TRADE_TARGET = re.compile(
-    r"\b(?:buy|swap(?:\s+[^\n]{0,40}?\s+to)?|sell|trade|exchange)\s+\$?([A-Za-z][A-Za-z0-9._-]{1,15})\b",
+    # An optional quantity phrase ("half of", "50% of", "all") between the verb
+    # and the actual target -- without this, "sell half of it" captured "half"
+    # as the target instead of "it" (verified live).
+    r"\b(?:buy|swap(?:\s+[^\n]{0,40}?\s+to)?|sell|trade|exchange)\s+"
+    r"(?:(?:all|half|most|some)\s+(?:of\s+)?|\d+(?:\.\d+)?%?\s+(?:of\s+)?)?"
+    r"\$?([A-Za-z][A-Za-z0-9._-]{1,15})\b",
     re.IGNORECASE,
 )
+
+
+_ORDINAL_WORDS = {
+    "first": 0, "1st": 0, "one": 0,
+    "second": 1, "2nd": 1, "two": 1,
+    "third": 2, "3rd": 2, "three": 2,
+    "fourth": 3, "4th": 3, "four": 3,
+    "fifth": 4, "5th": 4, "five": 4,
+}
+_ORDINAL = re.compile(
+    r"\b(?:the\s+|number\s+|#|option\s+)?(" + "|".join(_ORDINAL_WORDS) + r"|[1-5])\b(?:\s+one)?",
+    re.IGNORECASE,
+)
+
+
+def _chain_key(chain: str) -> str:
+    """Canonicalize a chain label so a DEX Screener chainId and the user's
+    wording compare equal (bsc<->bnb, and case)."""
+    key = (chain or "").strip().lower()
+    return {"bsc": "bnb"}.get(key, key)
+
+
+def resolve_pending_token(request: str, pending: dict) -> str | None:
+    """Match a disambiguation reply to one of the pending token candidates and
+    rewrite the ORIGINAL request with that token's address+chain, so the data
+    question re-runs against the chain the user picked. Returns None when the
+    reply names no candidate (the caller then treats it as a fresh query).
+
+    A reply may pick a candidate by pasted contract, by chain name ("Base"), or
+    by position ("the second one", "2").
+    """
+    candidates = pending.get("candidates") or []
+    original = pending.get("original_request") or ""
+    if not candidates or not original:
+        return None
+    chosen: dict | None = None
+    # 1. Pasted contract address that matches one of the candidates.
+    for addr in _ANY_ADDRESS.findall(request):
+        chosen = next((c for c in candidates if str(c.get("address", "")).lower() == addr.lower()), None)
+        if chosen:
+            break
+    # 2. A named chain.
+    if chosen is None:
+        wanted = {_chain_key(m) for m in _CHAINS.findall(request)}
+        if wanted:
+            chosen = next((c for c in candidates if _chain_key(c.get("chain", "")) in wanted), None)
+    # 3. A position ("the second one", "2"). Only when the reply is essentially
+    #    just the ordinal -- avoids a stray number in a fresh question selecting.
+    if chosen is None and len(request.split()) <= 4:
+        match = _ORDINAL.search(request)
+        if match:
+            token = match.group(1).lower()
+            index = _ORDINAL_WORDS.get(token, int(token) - 1 if token.isdigit() else -1)
+            if 0 <= index < len(candidates):
+                chosen = candidates[index]
+    if chosen is None:
+        return None
+    return f"{original} {chosen['address']} on {chosen['chain']}"
 
 
 @dataclass(frozen=True)
@@ -78,7 +154,13 @@ def _addresses(text: str) -> list[re.Match]:
 def _chain_for(address: str, text: str) -> str | None:
     if not address.startswith("0x"):
         return "solana"
-    matches = list(_CHAINS.finditer(text))
+    # A 0x address can never exist on Solana -- "solana" can still appear in
+    # the combined request/answer/history text for an unrelated reason (a
+    # Hyperliquid section, an earlier unrelated mention, ...), and this looks
+    # at the *last* chain word in that text, not something scoped to the
+    # address itself. Without this exclusion an EVM wallet's context chip
+    # (and anything built from it) gets mislabeled "solana".
+    matches = [match for match in _CHAINS.finditer(text) if match.group(1).lower() != "solana"]
     if not matches:
         return None
     chain = matches[-1].group(1).lower()
@@ -147,6 +229,15 @@ def resolve_contextual_request(
     request: str, conversation_history: str, session_context: dict | None = None
 ) -> str:
     """Attach prior token or wallet identity to an unambiguous follow-up."""
+    pending = (session_context or {}).get("pending_token")
+    if pending:
+        # The previous turn asked which chain a symbol is on. If this reply picks
+        # a candidate, re-run the original data question against that token; the
+        # pending state is cleared afterwards regardless (main.py rewrites it from
+        # this turn's outcome), so a non-matching reply falls through as fresh.
+        resolved = resolve_pending_token(request, pending)
+        if resolved is not None:
+            return resolved
     request_addresses = _addresses(request)
     if not conversation_history or request_addresses:
         if not session_context or request_addresses:
@@ -159,16 +250,21 @@ def resolve_contextual_request(
     trade_target = _NAMED_TRADE_TARGET.search(request)
     focus_label = str(focus.get("label") or "")
     named_research = re.search(r"\b(?:about|analy[sz]e|research)\s+\$?([A-Za-z][A-Za-z0-9._-]{1,15})\b", request, re.I)
-    if named_research and focus.get("kind") == "token" and named_research.group(1).casefold() == focus_label.casefold():
+    if named_research and focus.get("kind") == "token" and (
+        named_research.group(1).casefold() == focus_label.casefold()
+        or _PRONOUN.match(named_research.group(1))
+    ):
         address = f" mint {focus['address']}" if focus.get("address") else ""
         chain = f" on {focus['chain']}" if focus.get("chain") else ""
         return f"{request}\nResolved subject: token {focus_label}{address}{chain}."
     if (
         trade_target
         and focus.get("kind") == "token"
-        and focus_label
-        and trade_target.group(1).lower() == focus_label.lower()
         and focus.get("chain")
+        and (
+            (focus_label and trade_target.group(1).lower() == focus_label.lower())
+            or _PRONOUN.match(trade_target.group(1))
+        )
     ):
         address = f" with mint {focus['address']}" if focus.get("address") else ""
         return (

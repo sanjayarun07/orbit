@@ -8,6 +8,7 @@ DSPy while concurrent callers are coalesced and bounded.
 
 import asyncio
 import concurrent.futures
+import contextvars
 import hashlib
 import json
 import logging
@@ -26,6 +27,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
+from app.call_budget import charge_and_check
 from app.metrics import increment
 from app.capability_router import infer_tool_capabilities, infer_tool_chains, infer_tool_risk
 from app.settings import settings
@@ -69,8 +71,40 @@ class _AsyncRunner:
     def run(self, coroutine, timeout: float | None = None):
         self._ensure_started()
         assert self._loop is not None
-        future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
-        return future.result(timeout=timeout)
+        # asyncio.run_coroutine_threadsafe does NOT propagate contextvars
+        # across the thread boundary onto this runner's own persistent
+        # background loop -- a ContextVar set on the calling thread (e.g.
+        # app.call_budget's per-turn budget) would be invisible inside
+        # `coroutine`, silently no-op'ing anything that relies on it
+        # (verified live: a budget of 0 failed to stop a real MCP call
+        # before this fix). Capture the caller's context here (still on the
+        # calling thread, so it's the correct one) and create the task
+        # under that context on the target loop, so any ContextVar reads
+        # deep inside `coroutine` see the caller's values.
+        ctx = contextvars.copy_context()
+        result_future: concurrent.futures.Future = concurrent.futures.Future()
+
+        def _submit() -> None:
+            try:
+                task = ctx.run(self._loop.create_task, coroutine)
+            except Exception as exc:  # pragma: no cover -- task creation itself failing
+                result_future.set_exception(exc)
+                return
+
+            def _resolve(done_task: asyncio.Task) -> None:
+                if done_task.cancelled():
+                    result_future.cancel()
+                    return
+                exc = done_task.exception()
+                if exc is not None:
+                    result_future.set_exception(exc)
+                else:
+                    result_future.set_result(done_task.result())
+
+            task.add_done_callback(_resolve)
+
+        self._loop.call_soon_threadsafe(_submit)
+        return result_future.result(timeout=timeout)
 
     def submit(self, coroutine) -> concurrent.futures.Future:
         self._ensure_started()
@@ -270,7 +304,11 @@ class MCPGateway:
             self._redis = None
         return self._redis
 
-    async def _cache_get(self, key: str) -> str | None:
+    @staticmethod
+    def _ttl_for(tool_name: str) -> int:
+        return settings.mcp_tool_cache_ttl_seconds.get(tool_name, settings.mcp_cache_ttl_seconds)
+
+    async def _cache_get(self, key: str, tool_name: str) -> str | None:
         item = self._cache.get(key)
         if item is not None:
             expires, value = item
@@ -283,24 +321,24 @@ class MCPGateway:
             try:
                 value = await client.get(f"mcp:result:{key}")
                 if value is not None:
-                    self._remember(key, value)
+                    self._remember(key, value, self._ttl_for(tool_name))
                     return value
             except Exception:
                 logger.debug("MCP Redis cache read failed", exc_info=True)
         return None
 
-    def _remember(self, key: str, value: str) -> None:
-        self._cache[key] = (time.monotonic() + settings.mcp_cache_ttl_seconds, value)
+    def _remember(self, key: str, value: str, ttl: int) -> None:
+        self._cache[key] = (time.monotonic() + ttl, value)
         self._cache.move_to_end(key)
         while len(self._cache) > settings.mcp_cache_max_entries:
             self._cache.popitem(last=False)
 
-    async def _cache_set(self, key: str, value: str) -> None:
-        self._remember(key, value)
+    async def _cache_set(self, key: str, value: str, ttl: int) -> None:
+        self._remember(key, value, ttl)
         client = await self._redis_client()
         if client is not None:
             try:
-                await client.setex(f"mcp:result:{key}", settings.mcp_cache_ttl_seconds, value)
+                await client.setex(f"mcp:result:{key}", ttl, value)
             except Exception:
                 logger.debug("MCP Redis cache write failed", exc_info=True)
 
@@ -319,7 +357,7 @@ class MCPGateway:
 
     async def call(self, server_name: str, tool_name: str, arguments: dict) -> str:
         key = self._key(server_name, tool_name, arguments)
-        cached = await self._cache_get(key)
+        cached = await self._cache_get(key, tool_name)
         if cached is not None:
             increment("mcp_cache_hits")
             return cached
@@ -327,6 +365,13 @@ class MCPGateway:
         task = self._inflight.get(key)
         creator = task is None
         if creator:
+            # Only a genuine new external call is charged against the
+            # turn's budget -- a cache hit above never reaches here, and a
+            # call already in flight (the `else` branch, coalesced into the
+            # same task) is the same external call, not a second one.
+            if not charge_and_check():
+                increment("mcp_budget_skips")
+                return "MCP tool call failed: per-turn data budget reached"
             task = asyncio.create_task(self._uncached_call(server_name, tool_name, arguments))
             self._inflight[key] = task
         else:
@@ -334,7 +379,7 @@ class MCPGateway:
         try:
             result = await asyncio.shield(task)
             if creator:
-                await self._cache_set(key, result)
+                await self._cache_set(key, result, self._ttl_for(tool_name))
             return result
         finally:
             if creator:

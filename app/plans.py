@@ -171,6 +171,46 @@ def _token_info(item: dict) -> TokenInfo:
     )
 
 
+async def simulate_swap(input_mint: str, output_mint: str, amount_atomic: int) -> dict:
+    """Read-only: a real Jupiter quote and real token info, nothing else.
+
+    Deliberately does NOT call jupiter.shield()/swap_transaction(),
+    simulate_transaction(), or create/store a TradePlan -- there is no
+    wallet interaction here at all, no signable transaction is ever built,
+    and no CONFIRM token is ever issued. This is a different, shorter
+    function than create_trade_plan(), not a flag on it -- there is no
+    code path from here into the real trade-execution pipeline.
+    """
+    input_mint = normalize_mint(input_mint)
+    output_mint = normalize_mint(output_mint)
+    input_token = _token_info(await jupiter.token_by_mint(input_mint))
+    output_token = _token_info(await jupiter.token_by_mint(output_mint))
+    quote = await jupiter.quote(input_mint, output_mint, amount_atomic, slippage_bps=50)
+
+    input_amount = amount_atomic / (10 ** input_token.decimals)
+    input_value_usd = input_amount * input_token.usd_price if input_token.usd_price is not None else None
+
+    out_amount_raw = quote.get("outAmount")
+    output_amount = float(out_amount_raw) / (10 ** output_token.decimals) if out_amount_raw is not None else None
+    output_value_usd = (
+        output_amount * output_token.usd_price
+        if output_amount is not None and output_token.usd_price is not None
+        else None
+    )
+    price_impact_pct = float(quote.get("priceImpactPct") or 0) * 100
+
+    return {
+        "input_token": input_token,
+        "output_token": output_token,
+        "input_amount": input_amount,
+        "input_value_usd": input_value_usd,
+        "output_amount": output_amount,
+        "output_value_usd": output_value_usd,
+        "price_impact_pct": price_impact_pct,
+        "quote": quote,
+    }
+
+
 def _flatten_warnings(payload: dict) -> list[str]:
     warnings: list[str] = []
     for mint, entries in (payload.get("warnings") or {}).items():

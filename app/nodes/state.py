@@ -20,9 +20,13 @@ class AgentState(TypedDict, total=False):
     proposal: SwapProposal | None
     trade_plan: TradePlan | None
     cross_chain_swap: CrossChainSwapDraft | None
+    risk_assessment: object | None
+    team_subintent: str
+    team_report: dict | None
     error: str | None
     session_context: dict
     quick_action: dict | None
+    pending_token: dict | None
 
 
 def effective_request(state: AgentState) -> str:

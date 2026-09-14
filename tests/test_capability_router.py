@@ -7,7 +7,106 @@ from app.capability_router import (
     is_trade_modifier,
     route_capabilities,
 )
+import asyncio
+
+from app.nodes import research as research_node_mod
 from app.nodes.research import direct_mcp_request, wallet_portfolio_answer
+
+
+def test_resolve_named_token_injects_mint_for_holders_query(monkeypatch):
+    # BONK has a verified Solana canonical and no serious same-ticker EVM token
+    # -> resolve to Solana (authoritative; immune to DEX Screener pollution).
+    monkeypatch.setattr(research_node_mod, "search_verified_tokens",
+                        lambda q: [{"mint": "BONKmint1111", "symbol": "BONK", "tags": ["verified"]}])
+    monkeypatch.setattr(research_node_mod, "token_candidates", lambda symbol, chains=(): [])
+    monkeypatch.setattr(research_node_mod, "bitquery_evm_candidates",
+                        lambda symbol, chain: (_ for _ in ()).throw(AssertionError("no EVM lookup when Solana is authoritative")))
+    caps = {"token_discovery", "token_security"}
+    out = asyncio.run(research_node_mod._resolve_named_token("top holders of BONK token", caps))
+    assert "BONKmint1111" in out.request and "on solana" in out.request
+    assert out.chain == "solana" and out.clarification is None
+    # "trending tokens on solana" must NOT be read as a "TRENDING" ticker.
+    out2 = asyncio.run(research_node_mod._resolve_named_token("trending tokens on solana", {"token_discovery", "market_data"}))
+    assert out2.request == "trending tokens on solana" and out2.chain is None
+    # Non-token requests and already-addressed requests are left untouched.
+    out3 = asyncio.run(research_node_mod._resolve_named_token("holders of BONK", set()))
+    assert out3.request == "holders of BONK" and out3.chain is None
+    addressed = "top holders of 9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump on solana"
+    assert asyncio.run(research_node_mod._resolve_named_token(addressed, caps)).request == addressed
+
+
+def test_resolve_named_token_asks_when_symbol_is_ambiguous_across_chains(monkeypatch):
+    # No verified Solana canonical for PEPE -> DEX Screener enumerates the chains,
+    # Bitquery validates each with real volume. Comparable -> ask.
+    monkeypatch.setattr(research_node_mod, "search_verified_tokens", lambda q: [])
+    bq = {
+        "ethereum": [{"chain": "ethereum", "address": "0x6982", "symbol": "PEPE", "liquidity_usd": 3.9e6, "traders": 120}],
+        "base": [{"chain": "base", "address": "0x6921", "symbol": "PEPE", "liquidity_usd": 1.5e6, "traders": 80}],
+    }
+    monkeypatch.setattr(research_node_mod, "bitquery_evm_candidates", lambda symbol, chain: bq.get(chain, []))
+    monkeypatch.setattr(research_node_mod, "token_candidates",
+                        lambda symbol, chains=(): [
+                            {"chain": "ethereum", "address": "0x6982", "symbol": "PEPE", "liquidity_usd": 310_000_000.0},
+                            {"chain": "base", "address": "0x6921", "symbol": "PEPE", "liquidity_usd": 120_000_000.0},
+                        ])
+    caps = {"token_discovery", "token_security"}
+    # Comparable volume on Base and Ethereum -> ask, don't guess.
+    out = asyncio.run(research_node_mod._resolve_named_token("top holders of PEPE", caps))
+    assert out.clarification is not None and out.pending is not None
+    assert out.pending["symbol"] == "PEPE"
+    assert {c["chain"] for c in out.pending["candidates"]} == {"ethereum", "base"}
+    # Naming the chain resolves it directly (Bitquery), no question.
+    out2 = asyncio.run(research_node_mod._resolve_named_token("top holders of PEPE on Base", caps))
+    assert out2.clarification is None
+    assert "0x6921" in out2.request and out2.chain == "base"
+
+
+def test_resolve_named_token_asks_when_verified_solana_has_evm_rival(monkeypatch):
+    # A verified Solana PEPE AND a large Ethereum PEPE share the ticker -> ask,
+    # listing the verified Solana option first, rather than silently picking it.
+    monkeypatch.setattr(research_node_mod, "search_verified_tokens",
+                        lambda q: [{"mint": "SolPEPEmint", "symbol": "PEPE", "tags": ["verified"]}])
+    # Bitquery confirms a real Ethereum PEPE; Base has none.
+    monkeypatch.setattr(research_node_mod, "bitquery_evm_candidates",
+                        lambda symbol, chain: [{"chain": "ethereum", "address": "0x6982", "symbol": "PEPE",
+                                                "liquidity_usd": 3.9e6, "traders": 120}] if chain == "ethereum" else [])
+    monkeypatch.setattr(research_node_mod, "token_candidates",
+                        lambda symbol, chains=(): [
+                            {"chain": "ethereum", "address": "0x6982", "symbol": "PEPE", "liquidity_usd": 3.1e8},
+                            {"chain": "solana", "address": "SolPEPEmint", "symbol": "PEPE", "liquidity_usd": 40_000.0},
+                        ])
+    out = asyncio.run(research_node_mod._resolve_named_token("top holders of PEPE", {"token_discovery", "token_security"}))
+    assert out.clarification is not None
+    chains = [c["chain"] for c in out.pending["candidates"]]
+    assert chains[0] == "solana" and "ethereum" in chains
+
+    # A verified Solana token with no real same-ticker EVM activity resolves.
+    monkeypatch.setattr(research_node_mod, "bitquery_evm_candidates", lambda symbol, chain: [])
+    monkeypatch.setattr(research_node_mod, "token_candidates",
+                        lambda symbol, chains=(): [
+                            {"chain": "solana", "address": "BONKmint", "symbol": "BONK", "liquidity_usd": 5e6},
+                            {"chain": "base", "address": "0xdust", "symbol": "BONK", "liquidity_usd": 500.0},
+                        ])
+    monkeypatch.setattr(research_node_mod, "search_verified_tokens",
+                        lambda q: [{"mint": "BONKmint", "symbol": "BONK", "tags": ["verified"]}])
+    out2 = asyncio.run(research_node_mod._resolve_named_token("top holders of BONK", {"token_discovery", "token_security"}))
+    assert out2.clarification is None and out2.chain == "solana" and "BONKmint" in out2.request
+
+
+def test_resolve_named_token_picks_evm_when_no_verified_solana(monkeypatch):
+    # AERO: not verified on Solana; DEX Screener's inflated "Solana AERO" must be
+    # ignored, and Bitquery's real Base volume wins -> resolve to Base.
+    monkeypatch.setattr(research_node_mod, "search_verified_tokens", lambda q: [])
+    monkeypatch.setattr(research_node_mod, "bitquery_evm_candidates",
+                        lambda symbol, chain: [{"chain": "base", "address": "0x9401", "symbol": "AERO",
+                                                "liquidity_usd": 5.2e7, "traders": 318}] if chain == "base" else [])
+    monkeypatch.setattr(research_node_mod, "token_candidates",
+                        lambda symbol, chains=(): [
+                            {"chain": "solana", "address": "93Wvz", "symbol": "AERO", "liquidity_usd": 1.0e9},
+                            {"chain": "base", "address": "0x9401", "symbol": "AERO", "liquidity_usd": 5.1e7},
+                        ])
+    out = asyncio.run(research_node_mod._resolve_named_token("top holders of AERO", {"token_discovery", "token_security"}))
+    assert out.clarification is None and out.chain == "base" and "0x9401" in out.request
 
 
 def test_cross_chain_chat_routes_to_relay_workflow():
@@ -42,6 +141,45 @@ def test_latest_token_profiles_use_discovery_capability():
     assert route is not None
     assert "token_discovery" in route.capabilities
     assert route.chains == ("base",)
+
+
+def test_connected_wallet_this_wallet_transactions_route_to_portfolio():
+    # "this wallet's recent transactions" is the connected-wallet quick action
+    # the app itself emits; it must route to the wallet path, not web search.
+    for request in (
+        "Show this wallet's recent transactions",
+        "the wallet's recent transactions",
+    ):
+        route = route_capabilities(request)
+        assert route is not None, request
+        assert route.intent == "portfolio", request
+        assert "wallet_transactions" in route.capabilities, request
+
+
+def test_hyperliquid_market_queries_classify_as_market_data_without_a_price_word():
+    # "funding rate for BTC on Hyperliquid" has no generic market word; it must
+    # still reach market_data so goldrush_hyperliquid_market can serve it,
+    # rather than falling through to web_research.
+    for request in (
+        "What is the funding rate for BTC on Hyperliquid?",
+        "Show open interest for ETH on Hyperliquid",
+        "BTC perps funding rate",
+    ):
+        route = route_capabilities(request)
+        assert route is not None, request
+        assert "market_data" in route.capabilities, request
+
+
+def test_trending_tokens_on_launchpad_classifies_as_discovery_not_general():
+    for request in (
+        "latest trending tokens on pump.fun",
+        "trending tokens on robinhood",
+    ):
+        route = route_capabilities(request)
+        assert route is not None, request
+        assert route.intent == "research", request
+        assert "token_discovery" in route.capabilities, request
+        assert "market_sentiment" not in route.capabilities, request
 
 
 def test_us_and_india_equities_use_restricted_equity_capability():
@@ -96,6 +234,28 @@ def test_named_wallet_analysis_starts_with_current_portfolio(monkeypatch):
     )
 
 
+def test_evm_wallet_analysis_never_picks_solana_even_if_it_appears_in_the_request(monkeypatch):
+    """A 0x address can never exist on Solana. The chain picker used to take
+    extract_chains(request)[0] unconditionally -- if 'solana' happened to
+    appear anywhere in the (possibly multi-turn) effective request text, an
+    EVM wallet's Nansen call (and everything keyed off its payload, like the
+    Bitquery fallback) got pinned to the wrong chain entirely.
+    """
+    def portfolio_tool(**_kwargs):
+        return ""
+
+    portfolio_tool.__name__ = "mcp_nansen_address_portfolio"
+    monkeypatch.setattr("app.nodes.runtime._mcp_registry.get", lambda name: portfolio_tool if name == "address_portfolio" else None)
+    wallet = "0x6DbA597fe4bA47F97F1f0C32feEC4bf6Aea11460"
+    # "solana" appears in the text (e.g. carried over from a prior turn)
+    # alongside a real EVM chain -- the EVM chain must win, never solana.
+    request = direct_mcp_request(f"portfolio for {wallet} on ethereum, previously discussed on solana")
+    assert request[1]["request"].get("chain") == "ethereum"
+    # And with no other chain word at all, "solana" must not be picked either.
+    request = direct_mcp_request(f"portfolio for {wallet}, previously discussed on solana")
+    assert request[1]["request"].get("chain") != "solana"
+
+
 def test_token_contract_analysis_does_not_use_wallet_portfolio_fast_path(monkeypatch):
     monkeypatch.setattr("app.nodes.runtime._mcp_registry.get", lambda _name: object())
     assert direct_mcp_request(
@@ -136,6 +296,76 @@ def test_wallet_portfolio_summary_exposes_leverage_and_debt_without_an_llm():
     assert "**$2.9k in debt**" in answer
     assert "**$56.2k total notional**" in answer
     assert "substantial leveraged exposure" in answer
+
+
+def test_wallet_portfolio_summary_does_not_claim_leverage_for_an_all_zero_wallet():
+    """A wallet with no DeFi assets or debt ('0' for both) must not produce
+    'debt materially offsets assets' -- the string '0' is truthy, so the
+    naive check for that sentence needs a real numeric comparison.
+    """
+    answer = wallet_portfolio_answer(
+        "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+        """## DeFi Summary
+**Net Value (USD)**: 0
+**Total Assets (USD)**: 0
+**Total Debts (USD)**: 0
+""",
+    )
+    assert "materially offsets" not in answer
+    assert "No DeFi assets or debt were reported" in answer
+
+
+def test_wallet_portfolio_summary_discloses_sections_that_failed_on_credit_exhaustion():
+    """When Nansen's multi-section address_portfolio response has some
+    sections fail (e.g. 403 insufficient credits) while others succeed, the
+    answer must disclose which sections failed rather than opening with
+    'has current portfolio data shown below', which implies full success
+    while genuine 403 failures sit right below the answer in the evidence
+    panel.
+    """
+    answer = wallet_portfolio_answer(
+        "0x6DbA597fe4bA47F97F1f0C32feEC4bf6Aea11460",
+        """# Token Holdings
+**Error retrieving token balances**: API request to profiler/address/current-balance failed with status 403: Insufficient credits remaining to call this endpoint.. The request body was
+
+{
+  "address": "0x6DbA597fe4bA47F97F1f0C32feEC4bf6Aea11460"
+}
+
+# DeFi Positions
+**Error retrieving DeFi positions**: API request to portfolio/defi-holdings failed with status 403: Insufficient credits remaining to call this endpoint.. The request body was
+
+{
+  "wallet_address": "0x6DbA597fe4bA47F97F1f0C32feEC4bf6Aea11460"
+}
+
+# Hyperliquid Positions
+## Account Summary
+**Account Value (USD)**: 5.4k
+
+**Total Notional (USD)**: 53.9k
+## Perp Positions
+""",
+    )
+    assert "has current portfolio data shown below" not in answer
+    assert "Token Holdings" in answer
+    assert "DeFi Positions" in answer
+    assert "credits are exhausted" in answer
+    assert "**$5.4k**" in answer
+    assert "**$53.9k total notional**" in answer
+
+
+def test_wallet_portfolio_summary_stays_unqualified_when_all_sections_succeed():
+    answer = wallet_portfolio_answer(
+        "0x6DbA597fe4bA47F97F1f0C32feEC4bf6Aea11460",
+        """## DeFi Summary
+**Net Value (USD)**: 258.4
+**Total Assets (USD)**: 3.1k
+**Total Debts (USD)**: 2.9k
+""",
+    )
+    assert "has current portfolio data shown below" in answer
+    assert "could not be retrieved" not in answer
 
 
 def test_tool_metadata_is_inferred_independently_of_provider():
@@ -389,3 +619,44 @@ def test_wallet_health_and_scenario_routes():
     scenario = route_capabilities("What if my portfolio drops 20%?")
     assert scenario.intent == "portfolio"
     assert "portfolio_scenario" in scenario.capabilities
+
+
+def test_hypothetical_trade_questions_route_to_trade_simulation():
+    """These previously fell through to generic web_research (which can't
+    know the user's real balance or fetch a real quote) -- verified live
+    this session. Past-tense ("sold") is the important case: TRADE's word
+    list doesn't match it at all, so before this fix it skipped straight to
+    the OPEN_QUESTION fallback without ever getting a chance at real
+    handling.
+    """
+    for request in (
+        "What would happen if I sold half my SOL?",
+        "What if I sell my SOL now?",
+        "Should I sell my SOL?",
+        "Simulate selling half my SOL",
+        "Simulate buying 1 ETH with SOL",
+    ):
+        route = route_capabilities(request)
+        assert route is not None, request
+        assert route.intent == "portfolio", request
+        assert "trade_simulation" in route.capabilities, request
+
+
+def test_hypothetical_trade_questions_never_reach_real_execution():
+    """The existing execution safety net (has_competing_speech) must stay
+    intact -- trade_simulation is a distinct, read-only outcome, not a
+    replacement for that net or a new path into plan_execution_route.
+    """
+    for request in ("What would happen if I sold half my SOL?", "Should I sell my SOL?"):
+        route = route_capabilities(request)
+        assert route.intent != "trade"
+        assert route.execution_provider is None
+
+
+def test_real_execution_commands_still_route_to_trade():
+    """Non-regression: a genuine imperative command must still reach the
+    real execution path -- this new capability must not swallow it.
+    """
+    route = route_capabilities("Sell half my SOL now")
+    assert route.intent == "trade"
+    assert route.mode == "quote"

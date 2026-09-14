@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 
 from .contracts import CapabilityRoute, WorkflowIntent
-from .controls import is_execution_explanation, is_trade_cancellation, is_trade_confirmation
+from .controls import is_charter_command, is_execution_explanation, is_team_command, is_trade_cancellation, is_trade_confirmation
 from .entities import extract_chains, has_evm_address, has_solana_address
 from . import lexicon as lx
 from .speech import has_competing_speech
@@ -72,6 +72,13 @@ def route_capabilities(request: str) -> CapabilityRoute | None:
         return _route("general", (), chains, reason="trade_cancel", mode="control")
     if is_trade_confirmation(request):
         return _route("general", (), chains, reason="trade_confirm", mode="control")
+    # Risk-charter commands are pure control: handled in general_node and
+    # persisted by advance_session_context; they never touch the trade path.
+    if is_charter_command(request):
+        return _route("general", (), chains, reason="risk_charter", mode="control")
+    # Team-mode toggle is pure control too (enable/disable/status the desk).
+    if is_team_command(request):
+        return _route("general", (), chains, reason="team_mode", mode="control")
 
     # Equity language is checked before execution verbs: "buy-rated NVDA" and
     # "recent stock move" are research, not orders.
@@ -80,6 +87,13 @@ def route_capabilities(request: str) -> CapabilityRoute | None:
         and not re.search(r"\b(?:swap|buy|sell|exchange|bridge|trade|convert)\b", request, re.I)
     ):
         return _route("research", ("equity_research",), chains, reason="equity")
+    # Checked ahead of the generic TRADE rule and PORTFOLIO_SCENARIO below --
+    # more specific than either (a real swap-quote simulation, not a price-
+    # shock stress test), and must catch past-tense phrasing ("sold") TRADE
+    # doesn't match at all. Never reaches plan_execution_route -- this is a
+    # dedicated read-only path (see app/plans.py's simulate_swap()).
+    if lx.SIMULATE_TRADE.search(request):
+        return _route("portfolio", ("trade_simulation", "portfolio"), chains, reason="trade_simulation")
     if lx.TRADE.search(request) or lx.IMPERATIVE_MOVE.search(request):
         if has_competing_speech(request):
             return _route("general", (), chains, reason="semantic_required", confidence=0.0, mode="collect")
@@ -133,11 +147,16 @@ def route_capabilities(request: str) -> CapabilityRoute | None:
         return _route("research", ("defi_data",), chains, reason="defi")
     if lx.FINANCE.search(request) and not lx.MARKET.search(request):
         return _route("research", ("finance_data",), chains, reason="finance")
+    if lx.SENTIMENT.search(request):
+        # Checked ahead of the generic MARKET rule: "market sentiment"
+        # contains the bare word "market" and would otherwise be swallowed
+        # by it, losing the dedicated Fear & Greed / Altcoin Season signal.
+        return _route("research", ("market_sentiment",), chains, reason="market_sentiment")
     if lx.MARKET.search(request):
         capabilities = ["market_data"]
         if lx.FINANCE.search(request):
             capabilities.append("finance_data")
-        if re.search(r"\b(?:trending|gainers?|new pairs?|discover|token profiles?|launches?)\b", request, re.I):
+        if re.search(r"\b(?:trending|gainers?|losers?|new pairs?|discover|token profiles?|launches?)\b", request, re.I):
             capabilities.append("token_discovery")
         if lx.CURRENT.search(request):
             capabilities.append("web_research")

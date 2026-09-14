@@ -25,6 +25,13 @@ _redis_client: redis.Redis | None = None
 _redis_unavailable = False
 _redis_init_lock = asyncio.Lock()
 _redis_retry_at = 0.0
+# The event loop the cached async client + lock belong to. A redis.asyncio client
+# binds its connections to the loop that created it; production runs one loop for
+# the process lifetime, but anything that spins up a fresh loop (tests calling
+# asyncio.run per assertion, a worker that restarts its loop) would otherwise
+# reuse a client bound to a now-closed loop -> "Event loop is closed". We rebind
+# when the running loop changes.
+_redis_loop: "asyncio.AbstractEventLoop | None" = None
 
 _PLANS_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS trade_plans (
@@ -88,6 +95,17 @@ async def _initialize_pg_pool() -> asyncpg.Pool | None:
 
 
 async def get_redis() -> "redis.Redis | None":
+    global _redis_loop, _redis_init_lock, _redis_client, _redis_unavailable, _redis_retry_at
+    loop = asyncio.get_running_loop()
+    if _redis_loop is not loop:
+        # New loop: the cached client and lock are bound to the previous one and
+        # cannot be reused. Drop the stale client (it cannot be awaited-closed on
+        # a dead loop) and rebind fresh state to this loop.
+        _redis_loop = loop
+        _redis_init_lock = asyncio.Lock()
+        _redis_client = None
+        _redis_unavailable = False
+        _redis_retry_at = 0.0
     async with _redis_init_lock:
         return await _initialize_redis()
 

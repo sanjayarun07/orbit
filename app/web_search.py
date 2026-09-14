@@ -9,8 +9,10 @@ from urllib.parse import urlparse
 
 from openai import OpenAI
 
+from app.call_budget import charge_and_check
+from app.metrics import increment
 from app.settings import settings
-from app.tool_results import compact_tool_result
+from app.tool_results import compact_tool_result, strip_inline_citation_markers
 
 _client: OpenAI | None = None
 _MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)]+)\)")
@@ -63,6 +65,14 @@ def _openai_web_search(query: str) -> str:
             "event happened from the date an article was published. Include "
             "clickable source links in the answer."
         )
+    if not charge_and_check(settings.openai_web_search_cost_usd):
+        # This is the ReAct-loop's hosted web-search fallback -- unlike
+        # MCPGateway.call()/ProviderRouter.route(), it has no existing
+        # raise-on-failure convention (it always just returns text), so
+        # match that style: a short, honestly-labeled string the calling
+        # agent can reason about, not an exception.
+        increment("openai_web_search_budget_skips")
+        return "Web search unavailable: per-turn data budget reached."
     response = _get_client().responses.create(
         model=settings.openai_web_search_model,
         tools=[{"type": "web_search"}],
@@ -85,7 +95,7 @@ def _openai_web_search(query: str) -> str:
             if all(existing_url != url for _, existing_url in sources):
                 sources.append((title, url))
 
-    answer = _dedupe_response(response.output_text)
+    answer = _dedupe_response(strip_inline_citation_markers(response.output_text))
     if sources and not any(url in answer for _, url in sources):
         links = "\n".join(f"- [{title}]({url})" for title, url in sources[:8])
         answer = f"{answer}\n\nSources:\n{links}"

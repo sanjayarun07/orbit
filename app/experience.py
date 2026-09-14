@@ -20,7 +20,12 @@ from app.models import (
 )
 from app.capability_router import (
     extract_chains,
+    extract_charter,
     extract_cross_chain_draft,
+    is_charter_clear,
+    is_charter_set,
+    is_team_disable,
+    is_team_enable,
     is_trade_cancellation,
     is_trade_confirmation,
     is_trade_modifier,
@@ -222,6 +227,20 @@ def advance_session_context(
     context = dict(previous or {})
     context["revision"] = int(context.get("revision", 0)) + 1
     context["last_intent"] = intent
+    # Risk charter persists across turns in session context (Minara-style
+    # "Custom Prompt"). Set/clear it here so the next trade turn's Risk agent
+    # sees it; a plain message leaves whatever is already stored untouched.
+    if is_charter_set(request):
+        rules = extract_charter(request)
+        if rules:
+            context["risk_charter"] = rules
+    elif is_charter_clear(request):
+        context["risk_charter"] = None
+    # Team-mode ("trading desk") toggle persists across turns in session context.
+    if is_team_enable(request):
+        context["team_mode"] = True
+    elif is_team_disable(request):
+        context["team_mode"] = False
     context["last_capabilities"] = list(capabilities)
     if connected_wallet:
         context["connected_wallet"] = {

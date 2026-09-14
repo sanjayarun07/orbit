@@ -34,9 +34,29 @@ _GOLDRUSH_CHAINS = {
     "ethereum": "eth-mainnet", "bsc": "bsc-mainnet", "polygon": "matic-mainnet",
     "avalanche": "avalanche-mainnet", "arbitrum": "arbitrum-mainnet", "base": "base-mainnet",
     "optimism": "optimism-mainnet",
+    # Solana balances (not transactions -- verified live: GoldRush's
+    # Foundational API on Solana currently has exactly one working
+    # endpoint, balances_v2; no transaction-history endpoint exists there).
+    "solana": "solana-mainnet",
 }
+# GoldRush chains that support the balances_v2 endpoint on a non-EVM
+# (base58) address -- today just Solana. Transactions stays EVM-only.
+_GOLDRUSH_NON_EVM_CHAINS = {"solana"}
 _SECURITY = re.compile(r"\b(?:safe|safety|security|risk|rug|scam|honeypot|sellability|audit)\b", re.I)
 _WALLET_ACTIVITY = re.compile(r"\b(?:wallet|transactions?|activity|history|transfers?)\b", re.I)
+# CoinGecko's curated "ecosystem" category per chain -- the closest free,
+# keyless proxy for "tokens native to/associated with this chain" their
+# public API offers. Verified live: their own order=..._desc sort param is
+# silently ignored on the free tier, so ranking is done client-side instead.
+_GAINERS_CATEGORY = {
+    "solana": "solana-ecosystem", "base": "base-ecosystem", "ethereum": "ethereum-ecosystem",
+    "arbitrum": "arbitrum-ecosystem", "avalanche": "avalanche-ecosystem", "polygon": "polygon-ecosystem",
+    "sui": "sui-ecosystem", "bsc": "binance-smart-chain",
+}
+_GAINERS_LOSERS = re.compile(
+    r"\bgainers?\b|\blosers?\b|\b(?:top|biggest|best|worst)\s+(?:movers?|performers?)\b|\bwinners?\b", re.I
+)
+_LOSER_WORDS = re.compile(r"\blosers?\b|\bworst\b|\bdump(?:ing)?\b|\bdeclin\w*\b|\bfalling\b", re.I)
 
 
 def _utc() -> str:
@@ -46,6 +66,29 @@ def _utc() -> str:
 def _evm_exact(request: str) -> bool:
     try:
         return _chain(request) in _EVM_CHAIN_IDS and _address(request).startswith("0x")
+    except ValueError:
+        return False
+
+
+def _goldrush_balances_exact(request: str) -> bool:
+    """Like _evm_exact, but also accepts a Solana chain + base58 address --
+    GoldRush's balances_v2 endpoint covers Solana; its other endpoints
+    (transactions) don't, so this is deliberately not used for those.
+    """
+    try:
+        chain, address = _chain(request), _address(request)
+    except ValueError:
+        return False
+    if chain not in _GOLDRUSH_CHAINS:
+        return False
+    if chain in _GOLDRUSH_NON_EVM_CHAINS:
+        return not address.startswith("0x")
+    return address.startswith("0x")
+
+
+def _has_gainers_chain(request: str) -> bool:
+    try:
+        return _chain(request) in _GAINERS_CATEGORY
     except ValueError:
         return False
 
@@ -76,12 +119,78 @@ class CoinGeckoProvider:
         }
         return _snapshot("CoinGecko", data, "https://docs.coingecko.com/reference/coins-contract-address")
 
+    def gainers_losers(self, request: str) -> str:
+        chain = _chain(request)
+        category = _GAINERS_CATEGORY.get(chain)
+        if not category:
+            raise ValueError(f"CoinGecko gainers/losers has no curated ecosystem category for {chain}")
+        losers = bool(_LOSER_WORDS.search(request))
+        headers = {"x-cg-pro-api-key": settings.coingecko_api_key} if settings.coingecko_api_key else {}
+        with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
+            response = client.get(
+                f"{settings.coingecko_base_url}/coins/markets",
+                params={
+                    "vs_currency": "usd", "category": category, "per_page": 100, "page": 1,
+                    "price_change_percentage": "24h",
+                },
+                headers=headers,
+            )
+            response.raise_for_status()
+            rows = response.json()
+        # A tiny-volume coin can show a huge % swing from one thin trade --
+        # a $10K 24h-volume floor keeps the list to moves with some real
+        # trading behind them, without requiring a paid liquidity provider.
+        candidates = [
+            row for row in (rows if isinstance(rows, list) else [])
+            if row.get("price_change_percentage_24h") is not None and (row.get("total_volume") or 0) >= 10_000
+        ]
+        candidates.sort(key=lambda row: row["price_change_percentage_24h"], reverse=not losers)
+        top = candidates[:10]
+        label = "Losers" if losers else "Gainers"
+        if not top:
+            return (
+                f"# {label} on {chain.title()}\n\nNo {chain.title()}-ecosystem coins with at least $10K in 24h "
+                "volume were returned by CoinGecko right now.\n\n"
+                "Source: [CoinGecko markets](https://docs.coingecko.com/reference/coins-markets)"
+            )
+        lines = [
+            f"# {label} on {chain.title()}",
+            f"**Data freshness**: {_utc()}",
+            "",
+            "| Token | Price | 24h change | 24h volume |",
+            "|---|---:|---:|---:|",
+        ]
+        for row in top:
+            change = row["price_change_percentage_24h"]
+            lines.append(
+                f"| {(row.get('symbol') or '?').upper()} | {_money(row.get('current_price'))} | "
+                f"{change:+.1f}% | {_money(row.get('total_volume'))} |"
+            )
+        lines.extend([
+            "",
+            f"Source: [CoinGecko markets, {category} category](https://docs.coingecko.com/reference/coins-markets)",
+            "",
+            "**Note**: CoinGecko's ecosystem category can include bridged/wrapped assets alongside "
+            "natively-deployed tokens. A large 24h move on modest volume can reverse quickly -- check "
+            "liquidity before trading.",
+        ])
+        return compact_tool_result("\n".join(lines))
+
     def register(self, router: ProviderRouter) -> None:
         router.register(ProviderTool(
             "coingecko_token_by_contract", self.name, ("token_discovery", "market_data"), self.token,
             matches=_has_chain_and_address, keywords=("identity", "metadata", "token", "contract", "price"),
             chains=tuple(_CG_PLATFORMS), quota_per_minute=settings.coingecko_requests_per_minute,
             cache_ttl_seconds=60, priority=2,
+            description="Token identity, price, volume, and market cap for a token, looked up by chain and contract address",
+        ))
+        router.register(ProviderTool(
+            "coingecko_gainers_losers", self.name, ("token_discovery", "market_data"), self.gainers_losers,
+            matches=lambda request: bool(_GAINERS_LOSERS.search(request)) and _has_gainers_chain(request),
+            keywords=("gainers", "losers", "movers", "winners", "performers"),
+            chains=tuple(_GAINERS_CATEGORY), quota_per_minute=settings.coingecko_requests_per_minute,
+            cache_ttl_seconds=120, priority=8,
+            description="Top gaining or losing tokens by 24h price change within a specific chain's ecosystem",
         ))
 
 
@@ -122,6 +231,7 @@ class CoinMarketCapProvider:
             enabled=self.enabled, matches=_has_chain_and_address,
             keywords=("identity", "metadata", "token", "contract", "price"),
             quota_per_minute=settings.coinmarketcap_requests_per_minute, cache_ttl_seconds=60, priority=1,
+            description="Token identity, price, volume, and market cap for an EVM token, looked up by contract address",
         ))
 
 
@@ -170,6 +280,7 @@ class GoPlusProvider:
             matches=lambda request: _evm_exact(request) and bool(_SECURITY.search(request)),
             keywords=("security", "risk", "honeypot", "safe"), chains=tuple(_EVM_CHAIN_IDS),
             quota_per_minute=settings.goplus_requests_per_minute, cache_ttl_seconds=90, priority=10,
+            description="Token security scan for an EVM contract: honeypot/blacklist/mintable flags, buy/sell tax, holder concentration",
         ))
 
 
@@ -204,7 +315,23 @@ class HoneypotProvider:
             matches=lambda request: _evm_exact(request) and bool(_SECURITY.search(request)),
             keywords=("honeypot", "sellability", "security", "risk"), chains=tuple(_EVM_CHAIN_IDS),
             quota_per_minute=settings.honeypot_requests_per_minute, cache_ttl_seconds=60, priority=8,
+            description="Honeypot simulation for an EVM token: buy/sell/transfer tax, sellability, proxy/open-source contract check",
         ))
+
+
+_DEFI_CHAIN_WORDS = {"ethereum", "solana", "base", "arbitrum", "bsc", "avalanche", "polygon", "optimism"}
+_DEFI_IGNORED_WORDS = {
+    "show", "top", "defi", "protocol", "protocols", "tvl", "on", "for", "the", "total",
+    "value", "locked", "chain", "what", "whats", "s", "is", "are", "current", "latest",
+} | _DEFI_CHAIN_WORDS
+
+
+def _named_defi_subject(request: str) -> set[str]:
+    """Words in the request that aren't generic DeFi/TVL vocabulary or a chain
+    name -- i.e. a specific protocol like "Aave" or "Uniswap". A non-empty
+    result means the request is about one protocol, not a chain's total TVL.
+    """
+    return {word.lower() for word in re.findall(r"[A-Za-z0-9-]+", request) if word.lower() not in _DEFI_IGNORED_WORDS}
 
 
 class DefiLlamaProvider:
@@ -250,16 +377,28 @@ class DefiLlamaProvider:
 
     def register(self, router: ProviderRouter) -> None:
         router.register(ProviderTool(
+            # Chain TVL only when there's no leftover named subject (e.g. "Aave")
+            # after removing generic DeFi/TVL words and chain names -- a
+            # specific-protocol query like "Aave TVL" must not be answered
+            # with an unrelated list of blockchain totals.
             "defillama_chain_tvl", self.name, ("defi_data",), self.tvl,
-            matches=lambda request: bool(re.search(r"\b(?:defi|tvl|total value locked|chain tvl)\b", request, re.I)) and not bool(re.search(r"\bprotocols?\b", request, re.I)),
+            matches=lambda request: bool(re.search(r"\b(?:defi|tvl|total value locked|chain tvl)\b", request, re.I))
+                and not bool(re.search(r"\bprotocols?\b", request, re.I))
+                and not _named_defi_subject(request),
             keywords=("defi", "tvl", "protocol"), quota_per_minute=settings.defillama_requests_per_minute,
             cache_ttl_seconds=120, priority=9,
+            description="Total value locked (TVL) for a whole blockchain -- not a specific named protocol",
         ))
         router.register(ProviderTool(
+            # Also catches "<Protocol> TVL" (e.g. "Aave TVL", "Uniswap TVL"):
+            # a TVL request with a named subject beyond chain/DeFi vocabulary.
+            # protocols() does its own name/slug matching against that subject.
             "defillama_protocols", self.name, ("defi_data",), self.protocols,
-            matches=lambda request: bool(re.search(r"\b(?:defi protocols?|protocol tvl|top protocols?)\b", request, re.I)),
+            matches=lambda request: bool(re.search(r"\b(?:defi protocols?|protocol tvl|top protocols?)\b", request, re.I))
+                or (bool(re.search(r"\btvl\b", request, re.I)) and bool(_named_defi_subject(request))),
             keywords=("defi", "protocol", "tvl"), quota_per_minute=settings.defillama_requests_per_minute,
             cache_ttl_seconds=120, priority=10,
+            description="Total value locked (TVL) for a specific named DeFi protocol like Aave or Uniswap, or a ranked list of top protocols",
         ))
 
 
@@ -292,6 +431,275 @@ class GoldRushProvider:
         lines.extend(["", "Source: [GoldRush Address Activity](https://goldrush.dev/docs/)"])
         return compact_tool_result("\n".join(lines))
 
+    def balances(self, request: str) -> str:
+        """Current multi-chain token balances -- unlike Bitquery's fallback
+        (limited to whatever dataset:realtime happens to have indexed
+        recently, since our Bitquery plan blocks the combined/archive
+        datasets that would give a true current-state read), Covalent's
+        balances_v2 endpoint is a real indexed current-balance snapshot,
+        not a realtime-window-limited approximation.
+        """
+        chain, address = _chain(request), _address(request)
+        if chain not in _GOLDRUSH_CHAINS:
+            raise ValueError(f"GoldRush balances does not support {chain}")
+        with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
+            response = client.get(
+                f"{settings.goldrush_base_url}/{_GOLDRUSH_CHAINS[chain]}/address/{address}/balances_v2/",
+                params={"quote-currency": "USD", "no-spam": "true"},
+                headers={"Authorization": f"Bearer {settings.goldrush_api_key}"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        rows = (payload.get("data") or {}).get("items") or payload.get("items") or []
+
+        def as_float(raw: Any) -> float:
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                return 0.0
+
+        entries = []
+        for row in rows:
+            decimals = row.get("contract_decimals")
+            raw_balance = as_float(row.get("balance"))
+            if raw_balance <= 0 or not isinstance(decimals, int):
+                continue
+            amount = raw_balance / (10 ** decimals)
+            entries.append((row, amount))
+        entries.sort(key=lambda item: as_float(item[0].get("quote")), reverse=True)
+        if not entries:
+            return f"# Wallet token balances\n\nNo positive token balances were returned for `{address}` on {chain}.\n\nSource: [GoldRush Balances](https://goldrush.dev/docs/)"
+        lines = [
+            "# Wallet token balances",
+            f"**Provider**: GoldRush · **Checked**: {_utc()}",
+            "",
+            "| Token | Balance | USD Value |",
+            "|---|---:|---:|",
+        ]
+        for row, amount in entries[:25]:
+            # Solana SPL entries can come back with a null ticker/display
+            # name (verified live) -- fall back to a shortened mint address
+            # rather than showing a bare "?" for an otherwise-real balance.
+            contract = str(row.get("contract_address") or "")
+            fallback = f"{contract[:4]}…{contract[-4:]}" if len(contract) > 10 else "?"
+            symbol = row.get("contract_ticker_symbol") or row.get("contract_display_name") or fallback
+            lines.append(f"| {symbol} | {amount:,.4f} | {_money(row.get('quote'))} |")
+        lines.extend(["", "Source: [GoldRush Balances](https://goldrush.dev/docs/)"])
+        return compact_tool_result("\n".join(lines))
+
+    def hyperliquid_positions(self, request: str) -> str:
+        """Hyperliquid perp + spot account state -- a separate GoldRush
+        product (hypercore.goldrushdata.com), not the Foundational API used
+        by balances/transactions above, but the same API key. A drop-in
+        for Hyperliquid's own public /info API's batch* endpoints; verified
+        live against a real account (matching figures Nansen independently
+        reported for the same wallet).
+        """
+        address = _address(request)
+        if not address.startswith("0x"):
+            raise ValueError("Hyperliquid accounts are EVM-addressed")
+        with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
+            headers = {"Authorization": f"Bearer {settings.goldrush_api_key}"}
+            perp_response = client.post(
+                "https://hypercore.goldrushdata.com/info", headers=headers,
+                json={"type": "batchClearinghouseState", "users": [address]},
+            )
+            perp_response.raise_for_status()
+            spot_response = client.post(
+                "https://hypercore.goldrushdata.com/info", headers=headers,
+                json={"type": "batchSpotClearinghouseState", "users": [address]},
+            )
+            spot_response.raise_for_status()
+        perp_rows = perp_response.json()
+        spot_rows = spot_response.json()
+        perp_state = perp_rows[0] if isinstance(perp_rows, list) and perp_rows else {}
+        spot_state = spot_rows[0] if isinstance(spot_rows, list) and spot_rows else {}
+        margin = perp_state.get("marginSummary") or {}
+        positions = perp_state.get("assetPositions") or []
+        balances = [row for row in (spot_state.get("balances") or []) if float(row.get("total") or 0) > 0]
+
+        if not margin and not positions and not balances:
+            return f"# Hyperliquid positions\n\nNo Hyperliquid account state was returned for `{address}`.\n\nSource: [GoldRush Hyperliquid API](https://goldrush.dev/platform/products/hyperliquid/)"
+
+        lines = ["# Hyperliquid positions", f"**Provider**: GoldRush · **Checked**: {_utc()}", ""]
+        if margin:
+            lines.extend([
+                "## Account Summary",
+                f"**Account Value (USD)**: {_money(margin.get('accountValue'))}",
+                "",
+                f"**Total Notional (USD)**: {_money(margin.get('totalNtlPos'))}",
+                "",
+                f"**Margin Used (USD)**: {_money(margin.get('totalMarginUsed'))}",
+                "",
+                f"**Withdrawable (USD)**: {_money(perp_state.get('withdrawable'))}",
+                "",
+            ])
+        if positions:
+            lines.extend([
+                "## Perp Positions",
+                "| Token | Side | Leverage | Position Value (USD) | Size | Entry Price | Liquidation Price | Funding (USD) | Unrealized PnL (USD) | ROI |",
+                "|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
+            ])
+            for entry in positions:
+                position = entry.get("position") or {}
+                size = float(position.get("szi") or 0)
+                leverage = position.get("leverage") or {}
+                funding = (position.get("cumFunding") or {}).get("sinceOpen")
+                roi = position.get("returnOnEquity")
+                roi_str = f"{float(roi) * 100:+.1f}%" if roi is not None else "—"
+                lines.append(
+                    f"| {position.get('coin') or '?'} | {'Short' if size < 0 else 'Long'} | "
+                    f"{leverage.get('value', '—')}x ({leverage.get('type', '—')}) | "
+                    f"{_money(position.get('positionValue'))} | {abs(size):,.4f} | "
+                    f"{_money(position.get('entryPx'))} | {_money(position.get('liquidationPx'))} | "
+                    f"{_money(funding)} | {_money(position.get('unrealizedPnl'))} | {roi_str} |"
+                )
+            lines.append("")
+        if balances:
+            lines.extend(["## Spot Balances", "| Token | Amount |", "|---|---:|"])
+            for row in balances:
+                lines.append(f"| {row.get('coin') or '?'} | {float(row.get('total') or 0):,.4f} |")
+            lines.append("")
+        lines.append("Source: [GoldRush Hyperliquid API](https://goldrush.dev/platform/products/hyperliquid/)")
+        return compact_tool_result("\n".join(lines))
+
+    def token_top_holders(self, request: str) -> str:
+        """Ranked token-holder list -- EVM only. Verified live: Covalent's
+        token_holders_v2 endpoint explicitly rejects Solana
+        ("Chain: solana-mainnet is not currently supported for this
+        endpoint"), unlike balances_v2 -- see BitqueryProvider.token_top_holders
+        for the Solana equivalent this deliberately leaves to Bitquery.
+        """
+        chain, address = _chain(request), _address(request)
+        if chain not in _GOLDRUSH_CHAINS or chain in _GOLDRUSH_NON_EVM_CHAINS:
+            raise ValueError(f"GoldRush top-holders does not support {chain}")
+        with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
+            response = client.get(
+                # No page-size param -- verified live it 400s ("Page size not
+                # supported") on this endpoint, unlike balances_v2. Default
+                # page size (100) is plenty for a top-25 ranking.
+                f"{settings.goldrush_base_url}/{_GOLDRUSH_CHAINS[chain]}/tokens/{address}/token_holders_v2/",
+                headers={"Authorization": f"Bearer {settings.goldrush_api_key}"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        rows = (payload.get("data") or {}).get("items") or []
+        if not rows:
+            return f"# Top token holders\n\nNo holder data was returned for `{address}` on {chain}.\n\nSource: [GoldRush Token Holders](https://goldrush.dev/docs/)"
+
+        def as_float(raw: Any) -> float:
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                return 0.0
+
+        total_supply = as_float(rows[0].get("total_supply"))
+        decimals = rows[0].get("contract_decimals")
+        symbol = rows[0].get("contract_ticker_symbol") or "?"
+        lines = [
+            "# Top token holders",
+            f"**Provider**: GoldRush · **Checked**: {_utc()} · **Token**: {symbol} on {chain}",
+            "",
+            "| # | Holder | Balance | % of Supply |",
+            "|---:|---|---:|---:|",
+        ]
+        for rank, row in enumerate(rows[:25], start=1):
+            raw_balance = as_float(row.get("balance"))
+            amount = raw_balance / (10 ** decimals) if isinstance(decimals, int) else raw_balance
+            pct = f"{raw_balance / total_supply * 100:.2f}%" if total_supply else "—"
+            holder = str(row.get("address") or "—")
+            lines.append(f"| {rank} | `{holder[:6]}…{holder[-4:]}` | {amount:,.2f} | {pct} |")
+        lines.extend([
+            "",
+            "**Note**: this ranks raw on-chain balances, so a DEX pool's own reserve address, a locked-LP "
+            "vault, or another program-owned account can appear in this list alongside real individual "
+            "holders -- it is not pre-filtered to exclude them.",
+            "",
+            "Source: [GoldRush Token Holders](https://goldrush.dev/docs/)",
+        ])
+        return compact_tool_result("\n".join(lines))
+
+    def hyperliquid_market(self, request: str) -> str:
+        """Hyperliquid perp market data (funding, mark/oracle price, open
+        interest, 24h volume) -- chain-agnostic and does NOT require a
+        wallet address, unlike hyperliquid_positions above. Verified live:
+        hypercore.goldrushdata.com/info's metaAndAssetCtxs type returns all
+        234 listed perps' current market context in one call.
+        """
+        with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
+            response = client.post(
+                "https://hypercore.goldrushdata.com/info",
+                headers={"Authorization": f"Bearer {settings.goldrush_api_key}"},
+                json={"type": "metaAndAssetCtxs"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        if not isinstance(payload, list) or len(payload) < 2:
+            raise RuntimeError("Unexpected metaAndAssetCtxs response shape")
+        universe = (payload[0] or {}).get("universe") or []
+        ctxs = payload[1] or []
+        rows = list(zip(universe, ctxs))
+
+        # A named coin (e.g. "BTC", "funding rate for kPEPE") -- match
+        # against the real listed universe (verified live: 234 real assets,
+        # including mixed-case "scaled" tickers like kPEPE/kSHIB/kBONK, so a
+        # blanket all-caps requirement would miss those) rather than a fixed
+        # symbol list. Short (<=2 char) tickers require a case-SENSITIVE
+        # all-caps match in the request -- verified live that case-
+        # insensitive matching false-positives hard here: "Show me
+        # Hyperliquid market data" matched the common word "me" against a
+        # real ticker, ME (Magic Eden), and silently narrowed to one asset
+        # instead of a general overview. Longer tickers are safer to match
+        # case-insensitively (collisions with common English words get rarer
+        # as length grows), still guarded by an explicit stopword list.
+        known = {asset.get("name", ""): idx for idx, (asset, _ctx) in enumerate(rows)}
+        known_upper = {name.upper(): name for name in known}
+        _STOPWORDS = {"THE", "FOR", "AND", "PRICE", "RATE", "ARE", "NOW", "GET", "ALL", "ANY", "ONE"}
+        named = None
+        for word in re.findall(r"\b[A-Za-z0-9]{2,10}\b", request):
+            if len(word) <= 2:
+                if word in known:  # case-sensitive for short tickers
+                    named = word
+                    break
+            elif word.upper() in known_upper and word.upper() not in _STOPWORDS:
+                named = known_upper[word.upper()]
+                break
+
+        lines = ["# Hyperliquid market data", f"**Provider**: GoldRush · **Checked**: {_utc()}", ""]
+        if named:
+            asset, ctx = rows[known[named]]
+            lines.extend([
+                f"## {named}",
+                f"**Mark Price (USD)**: {_money(ctx.get('markPx'))}",
+                "",
+                f"**Oracle Price (USD)**: {_money(ctx.get('oraclePx'))}",
+                "",
+                f"**Funding Rate**: {float(ctx.get('funding') or 0) * 100:.4f}% (per hour)",
+                "",
+                f"**Open Interest**: {float(ctx.get('openInterest') or 0):,.2f} {named}",
+                "",
+                f"**24h Volume (USD)**: {_money(ctx.get('dayNtlVlm'))}",
+                "",
+                f"**Max Leverage**: {asset.get('maxLeverage', '—')}x",
+                "",
+            ])
+        else:
+            ranked = sorted(rows, key=lambda pair: float(pair[1].get("dayNtlVlm") or 0), reverse=True)[:15]
+            lines.extend([
+                "## Top perps by 24h volume",
+                "| Asset | Mark Price | Funding (hourly) | Open Interest | 24h Volume |",
+                "|---|---:|---:|---:|---:|",
+            ])
+            for asset, ctx in ranked:
+                lines.append(
+                    f"| {asset.get('name') or '?'} | {_money(ctx.get('markPx'))} | "
+                    f"{float(ctx.get('funding') or 0) * 100:.4f}% | "
+                    f"{float(ctx.get('openInterest') or 0):,.0f} | {_money(ctx.get('dayNtlVlm'))} |"
+                )
+            lines.append("")
+        lines.append("Source: [GoldRush Hyperliquid API](https://goldrush.dev/platform/products/hyperliquid/)")
+        return compact_tool_result("\n".join(lines))
+
     def register(self, router: ProviderRouter) -> None:
         router.register(ProviderTool(
             "goldrush_wallet_transactions", self.name, ("wallet_intelligence",), self.transactions,
@@ -299,6 +707,62 @@ class GoldRushProvider:
             matches=lambda request: _evm_exact(request) and bool(_WALLET_ACTIVITY.search(request)),
             keywords=("wallet", "transactions", "activity", "history"), chains=tuple(_GOLDRUSH_CHAINS),
             quota_per_minute=settings.goldrush_requests_per_minute, cache_ttl_seconds=30, priority=9,
+            description="Recent transaction history for an EVM wallet address on a specific chain",
+        ))
+        router.register(ProviderTool(
+            # Priority above Bitquery's wallet_balances (7): a real indexed
+            # current-balance snapshot is preferable to a realtime-window
+            # approximation whenever GoldRush is configured.
+            "goldrush_wallet_balances", self.name, ("wallet_intelligence",), self.balances,
+            enabled=self.enabled,
+            matches=lambda request: _goldrush_balances_exact(request) and bool(re.search(r"\b(?:balances?|holdings?)\b", request, re.IGNORECASE)),
+            keywords=("balances", "holdings", "tokens"), chains=tuple(_GOLDRUSH_CHAINS),
+            quota_per_minute=settings.goldrush_requests_per_minute, cache_ttl_seconds=120, priority=10,
+            description="Current token balances and holdings for an EVM wallet address",
+        ))
+        router.register(ProviderTool(
+            # Separate product/endpoint (hypercore.goldrushdata.com, not the
+            # Foundational API) -- Hyperliquid accounts are EVM-addressed,
+            # so this only ever matches a 0x address, on any chain (the
+            # account isn't itself chain-scoped the way balances/
+            # transactions are).
+            "goldrush_hyperliquid_positions", self.name, ("wallet_intelligence",), self.hyperliquid_positions,
+            enabled=self.enabled,
+            matches=lambda request: bool(re.search(r"0x[0-9a-fA-F]{40}", request))
+                and bool(re.search(r"\b(?:hyperliquid|perps?|perpetuals?|leverage|liquidation|funding)\b", request, re.IGNORECASE)),
+            keywords=("hyperliquid", "perps", "leverage", "liquidation"),
+            quota_per_minute=settings.goldrush_requests_per_minute, cache_ttl_seconds=30, priority=10,
+            description="A wallet's open Hyperliquid perpetual futures positions, leverage, and liquidation price",
+        ))
+        router.register(ProviderTool(
+            # Registered under token_discovery/token_security -- verified
+            # live this session that a "top holders" request classifies into
+            # those capabilities (checked ahead of market_data), where it was
+            # previously falling through to dexscreener_token_pairs (no
+            # keyword gate, so it wins any chain+address request by default).
+            # A higher priority + a "holders" keyword requirement here wins
+            # specifically for holder queries without displacing dexscreener
+            # for other chain+address requests under the same capabilities.
+            "goldrush_token_top_holders", self.name, ("token_discovery", "token_security"), self.token_top_holders,
+            enabled=self.enabled,
+            matches=lambda request: _has_chain_and_address(request) and bool(re.search(r"\b(?:top\s+)?holders?\b", request, re.IGNORECASE))
+                and _chain(request) not in _GOLDRUSH_NON_EVM_CHAINS,
+            keywords=("holders", "top holders", "holder distribution"), chains=tuple(c for c in _GOLDRUSH_CHAINS if c not in _GOLDRUSH_NON_EVM_CHAINS),
+            quota_per_minute=settings.goldrush_requests_per_minute, cache_ttl_seconds=300, priority=10,
+            description="Top wallet holders and their percentage of supply for an EVM token, by contract address",
+        ))
+        router.register(ProviderTool(
+            # Chain-agnostic and deliberately does NOT require a wallet
+            # address (unlike hyperliquid_positions above) -- this answers
+            # "what's the funding rate/price on Hyperliquid for X", not
+            # "what does wallet X hold on Hyperliquid".
+            "goldrush_hyperliquid_market", self.name, ("market_data",), self.hyperliquid_market,
+            enabled=self.enabled,
+            matches=lambda request: bool(re.search(r"\bhyperliquid\b", request, re.IGNORECASE))
+                and bool(re.search(r"\b(?:funding|mark\s*price|oracle\s*price|open\s*interest|market|price|rate)\b", request, re.IGNORECASE)),
+            keywords=("hyperliquid", "funding rate", "mark price", "open interest"),
+            quota_per_minute=settings.goldrush_requests_per_minute, cache_ttl_seconds=15, priority=10,
+            description="Hyperliquid perpetual futures market data: mark price, oracle price, funding rate, open interest, 24h volume",
         ))
 
 
@@ -352,6 +816,7 @@ class HeliusProvider:
             matches=lambda request: _has_chain_and_address(request) and _chain(request) == "solana" and bool(_WALLET_ACTIVITY.search(request)),
             keywords=("wallet", "transactions", "activity", "history"), chains=("solana",),
             quota_per_minute=settings.helius_requests_per_minute, cache_ttl_seconds=20, priority=11,
+            description="Recent transaction history for a Solana wallet address",
         ))
 
 
@@ -373,6 +838,7 @@ class ExchangeAnnouncementsProvider:
             keywords=("listing", "delisting", "announcement", "binance", "bybit", "okx"),
             cost_usd=settings.perplexity_web_search_cost_usd, quota_per_minute=settings.perplexity_requests_per_minute,
             cache_ttl_seconds=60, priority=10,
+            description="Recent official exchange listing or delisting announcements for a token, from Binance, Bybit, or OKX",
         ))
 
 

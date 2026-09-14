@@ -4,10 +4,12 @@ from app.tracing import trace
 import asyncio
 import re
 from app.context_entities import extract_token_reference
+from app.plans import simulate_swap
 from app.portfolio import build_portfolio_snapshot
 from app.provider_registry import get_provider_router
+from app.trade_context import complete_swap_fields
 from app.wallet_insights import portfolio_scenario, wallet_health
-from app.nodes.research import _nansen_wallet_tool_call, _provider_trajectory, call_direct_mcp_tool
+from app.nodes.research import _nansen_wallet_tool_call, _provider_trajectory, _sanitize_react_answer, call_direct_mcp_tool
 
 @trace(name="portfolio", as_type="agent")
 async def portfolio_node(state: AgentState) -> dict:
@@ -24,9 +26,22 @@ async def portfolio_node(state: AgentState) -> dict:
                 "trajectory": None,
             }
         chain = chains[0] if chains else "solana"
-        # Nansen is the primary on-chain-intelligence source for the connected
-        # wallet's activity; GoldRush/Helius (via the capability router) are
-        # tried only if Nansen isn't discovered or its call fails.
+        # GoldRush/Helius (via the capability router) are already chain-scoped
+        # and prioritized above Nansen for wallet activity, so try them first;
+        # Nansen is the last-resort fallback if the router has nothing configured.
+        provider_request = f"Show recent wallet transactions for {wallet} on {chain}"
+        result = await asyncio.to_thread(
+            get_provider_router().try_route,
+            provider_request,
+            "wallet_intelligence",
+            (chain,),
+        )
+        if result is not None:
+            return {
+                "answer": result.output,
+                "trajectory": _provider_trajectory(result, provider_request, "wallet_intelligence"),
+            }
+        router_error = "No configured wallet-activity provider succeeded"
         nansen = _nansen_wallet_tool_call(wallet, chain, "recent transactions activity")
         if nansen is not None:
             tool_name, arguments = nansen
@@ -35,39 +50,27 @@ async def portfolio_node(state: AgentState) -> dict:
                 return {
                     "answer": observation,
                     "trajectory": {
-                        "thought_0": "Nansen is the primary source for connected-wallet on-chain activity.",
+                        "thought_0": "No configured wallet-activity provider succeeded; falling back to Nansen.",
                         "tool_name_0": tool_name,
                         "tool_args_0": arguments,
                         "observation_0": observation,
                     },
                 }
-            # Nansen failed or exceeded the fast-path timeout; fall through.
-        provider_request = f"Show recent wallet transactions for {wallet} on {chain}"
-        try:
-            result = await asyncio.to_thread(
-                get_provider_router().route,
-                provider_request,
-                "wallet_intelligence",
-                (chain,),
-            )
-            return {
-                "answer": result.output,
-                "trajectory": _provider_trajectory(result, provider_request, "wallet_intelligence"),
-            }
-        except RuntimeError as exc:
-            return {
-                "answer": (
-                    f"I couldn’t retrieve the connected wallet’s recent {chain.title()} transactions "
-                    "because neither Nansen nor a configured wallet-activity provider succeeded. "
-                    "No web-search result was substituted."
-                ),
-                "trajectory": {
-                    "thought_0": "Use only an on-chain wallet activity provider for connected-wallet transactions.",
-                    "tool_name_0": "wallet_activity_router",
-                    "tool_args_0": {"wallet_address": wallet, "chain": chain},
-                    "observation_0": f"Wallet activity lookup failed: {exc}",
-                },
-            }
+            # Nansen failed or exceeded the fast-path timeout too.
+            router_error = f"{router_error}; Nansen fallback: {observation}"
+        return {
+            "answer": (
+                f"I couldn’t retrieve the connected wallet’s recent {chain.title()} transactions "
+                "because neither a configured wallet-activity provider nor Nansen succeeded. "
+                "No web-search result was substituted."
+            ),
+            "trajectory": {
+                "thought_0": "Use only an on-chain wallet activity provider for connected-wallet transactions.",
+                "tool_name_0": "wallet_activity_router",
+                "tool_args_0": {"wallet_address": wallet, "chain": chain},
+                "observation_0": f"Wallet activity lookup failed: {router_error}",
+            },
+        }
     if "token_balance" in capabilities:
         snapshot = await build_portfolio_snapshot(state["wallet_address"])
         reference = extract_token_reference(request)
@@ -166,10 +169,67 @@ async def portfolio_node(state: AgentState) -> dict:
             ),
             "trajectory": {"thought_0": "Apply a deterministic price shock to current priced holdings.", "tool_name_0": "portfolio_scenario", "tool_args_0": {"change_pct": change, "symbol": report["target"]}, "observation_0": report},
         }
+    if "trade_simulation" in capabilities:
+        result = await runtime._call_lm(
+            runtime.trade_simulator,
+            request=request,
+            wallet_address=state["wallet_address"],
+            conversation_history=state.get("history", ""),
+        )
+        answer = _sanitize_react_answer(result.answer)
+        trajectory = getattr(result, "trajectory", None)
+        # complete_swap_fields is the same boundary the real trade path uses
+        # (app/nodes/trading.py) -- verified live this fix was needed: a
+        # DSPy ReAct output can literally be the string "null" rather than
+        # Python None, and doesn't reliably substitute the native-SOL mint
+        # constant on its own even when it correctly reasons about SOL in
+        # its own trajectory.
+        input_mint, output_mint, amount_atomic, _slippage = complete_swap_fields(
+            request, state.get("history", ""), result.input_mint, result.output_mint, result.amount_atomic, None,
+        )
+        if result.should_simulate and input_mint and output_mint and amount_atomic:
+            try:
+                sim = await simulate_swap(input_mint, output_mint, amount_atomic)
+            except Exception as exc:
+                answer = f"I couldn't compute a simulated quote: {exc}. No trade was prepared or submitted."
+            else:
+                in_value = f" (${sim['input_value_usd']:,.2f})" if sim["input_value_usd"] is not None else ""
+                out_value = f" (${sim['output_value_usd']:,.2f})" if sim["output_value_usd"] is not None else ""
+                out_amount = f"{sim['output_amount']:,.6g}" if sim["output_amount"] is not None else "an unknown amount of"
+                answer = (
+                    f"**This is a simulation only -- nothing has been prepared or submitted.**\n\n"
+                    f"Selling **{sim['input_amount']:,.6g} {sim['input_token'].symbol}**{in_value} would get you "
+                    f"approximately **{out_amount} {sim['output_token'].symbol}**{out_value} at the current Jupiter "
+                    f"quote, with an estimated **{sim['price_impact_pct']:.2f}% price impact**.\n\n"
+                    f"This is a live quote, not a guarantee -- the actual amount at execution time can differ with "
+                    f"market movement and slippage."
+                )
+                trajectory = trajectory or {}
+                # sim's input_token/output_token are TokenInfo model instances and
+                # quote is Jupiter's raw response -- both must become plain
+                # JSON-serializable data before landing in trajectory, which gets
+                # json.dumps()'d into session history (verified live: an
+                # unconverted TokenInfo instance here broke chat history storage
+                # with "Object of type TokenInfo is not JSON serializable").
+                trajectory = {
+                    **trajectory,
+                    "tool_name_sim": "jupiter_simulate_swap",
+                    "tool_args_sim": {"input_mint": input_mint, "output_mint": output_mint, "amount_atomic": amount_atomic},
+                    "observation_sim": {
+                        "input_token": sim["input_token"].model_dump(),
+                        "output_token": sim["output_token"].model_dump(),
+                        "input_amount": sim["input_amount"],
+                        "input_value_usd": sim["input_value_usd"],
+                        "output_amount": sim["output_amount"],
+                        "output_value_usd": sim["output_value_usd"],
+                        "price_impact_pct": sim["price_impact_pct"],
+                    },
+                }
+        return {"answer": answer, "trajectory": trajectory}
     result = await runtime._call_lm(
         runtime.portfolio_agent,
         request=request,
         wallet_address=state["wallet_address"],
         conversation_history=state.get("history", ""),
     )
-    return {"answer": result.answer, "trajectory": getattr(result, "trajectory", None)}
+    return {"answer": _sanitize_react_answer(result.answer), "trajectory": getattr(result, "trajectory", None)}

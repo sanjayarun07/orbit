@@ -1,8 +1,31 @@
 """Normalize external tool observations before they enter an LLM prompt/UI."""
 
+import re
 from typing import Any
 
 from app.settings import settings
+
+
+# Hosted-search providers (OpenAI's Responses API, and defensively any other
+# using the same convention) sometimes embed inline citation annotations
+# directly in their answer text using Unicode Private Use Area sentinel
+# characters -- a paired U+E200 ... U+E201 span wrapping a "cite" marker, an
+# internal turn/search reference, and the source URLs -- meant to be resolved
+# via the response's structured annotations array, never shown to a user.
+# Confirmed live leaking verbatim into a user-facing answer (and, once cached,
+# replayed identically to every subsequent caller until eviction). Callers
+# rebuild a clean, clickable source list separately from the structured
+# fields, so the raw span is pure noise: drop the whole span, then sweep any
+# stray delimiter left over from an unpaired open. The E200-E20F band is not
+# used for any legitimate glyph, so this never removes real content.
+_INLINE_CITATION_SPAN = re.compile(".*?", re.DOTALL)
+_STRAY_ANNOTATION_CHARS = re.compile("[-]")
+
+
+def strip_inline_citation_markers(text: str) -> str:
+    if not text:
+        return text
+    return _STRAY_ANNOTATION_CHARS.sub("", _INLINE_CITATION_SPAN.sub("", text))
 
 
 def text_from_mcp_content(content: list[Any]) -> str:

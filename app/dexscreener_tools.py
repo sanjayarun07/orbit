@@ -13,11 +13,20 @@ from app.tool_results import compact_tool_result
 
 
 _BASE = "https://api.dexscreener.com"
-_CHAINS = ("solana", "base", "ethereum", "arbitrum", "bsc", "polygon", "avalanche", "sui")
+_CHAINS = ("solana", "base", "ethereum", "arbitrum", "bsc", "polygon", "avalanche", "sui", "robinhood")
 _ADDRESS = re.compile(
     r"0x(?:[0-9a-fA-F]{64}|[0-9a-fA-F]{40})(?![0-9a-fA-F])|"
     r"(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])"
 )
+# Launchpads are not chains, but a "trending tokens on <launchpad>" request is
+# unambiguously scoped to the launchpad's chain (pump.fun / letsbonk / bonk.fun
+# / moonshot are Solana). Resolve them so boosted-token results are chain-
+# filtered instead of falling back to an all-chain list.
+_LAUNCHPAD_CHAIN = {
+    "pump.fun": "solana", "pumpfun": "solana", "pump fun": "solana",
+    "letsbonk": "solana", "bonk.fun": "solana", "bonkfun": "solana",
+    "moonshot": "solana",
+}
 
 
 def _get(path: str, params: dict | None = None) -> Any:
@@ -45,7 +54,110 @@ def _money(value: Any) -> str:
 
 def _chain(request: str) -> str | None:
     lowered = request.lower()
+    for alias, chain in _LAUNCHPAD_CHAIN.items():
+        if alias in lowered:
+            return chain
     return next((chain for chain in _CHAINS if re.search(rf"\b{chain}\b", lowered)), None)
+
+
+def dexscreener_boosted_tokens(request: str) -> str:
+    """Return the tokens currently getting the most paid attention (DEX Screener
+    boosts), enriched with live price/volume/liquidity, optionally scoped to a
+    chain or launchpad.
+
+    This is the token-level answer to "trending tokens on <chain/launchpad>" --
+    an actual ranked list of tokens, as opposed to dexscreener_trending_metas
+    (which ranks narratives/metas) or crypto_market_brief (a broad synthesis).
+    Boosts measure paid promotion, not organic quality -- stated in the output.
+    """
+    chain = _chain(request)
+    data = _get("/token-boosts/top/v1")
+    boosts = data if isinstance(data, list) else []
+    seen: set[tuple[str, str]] = set()
+    unique: list[dict] = []
+    for boost in boosts:
+        cid = str(boost.get("chainId") or "")
+        addr = str(boost.get("tokenAddress") or "")
+        if chain and cid != chain:
+            continue
+        key = (cid, addr.lower())
+        if not all(key) or key in seen:
+            continue
+        seen.add(key)
+        unique.append(boost)
+        if len(unique) == 10:
+            break
+
+    def enrich(boost: dict) -> dict | None:
+        address, cid = boost["tokenAddress"], boost["chainId"]
+        try:
+            pairs = _get(f"/token-pairs/v1/{cid}/{address}")
+        except Exception:
+            return None
+        pairs = [p for p in (pairs if isinstance(pairs, list) else []) if p.get("chainId") == cid]
+        if not pairs:
+            return None
+        pair = max(pairs, key=lambda p: float((p.get("liquidity") or {}).get("usd") or 0))
+        return {
+            "symbol": (pair.get("baseToken") or {}).get("symbol") or "?",
+            "chain": cid,
+            "address": address,
+            "price": pair.get("priceUsd"),
+            "volume": (pair.get("volume") or {}).get("h24"),
+            "liquidity": (pair.get("liquidity") or {}).get("usd"),
+            "change": (pair.get("priceChange") or {}).get("h24"),
+            "url": boost.get("url") or pair.get("url") or f"https://dexscreener.com/{cid}/{address}",
+        }
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    rows: list[dict] = []
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        for future in as_completed([executor.submit(enrich, b) for b in unique]):
+            try:
+                item = future.result()
+            except Exception:
+                item = None
+            if item:
+                rows.append(item)
+    rows.sort(key=lambda item: float(item.get("volume") or 0), reverse=True)
+
+    scope = f" on {chain.title()}" if chain else ""
+    lines = [
+        f"# Trending tokens{scope}",
+        f"**Data freshness**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · currently boosted on DEX Screener",
+        "",
+        "| Token | Chain | Price | 24h volume | Liquidity | 24h change |",
+        "|---|---|---:|---:|---:|---:|",
+    ]
+    for item in rows:
+        change = item.get("change")
+        lines.append(
+            f"| [{item['symbol']}]({item['url']}) | {item['chain']} | {_money(item.get('price'))} | "
+            f"{_money(item.get('volume'))} | {_money(item.get('liquidity'))} | "
+            f"{f'{float(change):+.1f}%' if change is not None else '—'} |"
+        )
+    if not rows:
+        available = sorted({str(b.get("chainId")) for b in boosts if b.get("chainId")})
+        if chain and available:
+            lines.append(
+                f"| No boosted tokens for **{chain.title()}** right now | — | — | — | — | — |"
+            )
+            lines.append("")
+            lines.append(
+                f"The boosts feed currently has entries for: **{', '.join(available)}** — this is a "
+                "curated paid-promotion list, not every chain is represented at all times. "
+                "Ask for one of those chains, or give an exact contract to inspect."
+            )
+        else:
+            lines.append(f"| No boosted tokens for **{chain or 'the requested scope'}** in this snapshot | — | — | — | — | — |")
+    lines.extend([
+        "",
+        f"Source: [DEX Screener token boosts]({_BASE}/token-boosts/top/v1)",
+        "",
+        "Boosts measure paid attention, not organic demand or quality. These are often new, "
+        "low-liquidity, and volatile -- verify liquidity and holder concentration before trading.",
+    ])
+    return compact_tool_result("\n".join(lines))
 
 
 def dexscreener_trending_metas(_request: str) -> str:
@@ -93,7 +205,22 @@ def dexscreener_latest_profiles(request: str) -> str:
         description = " ".join(str(item.get("description") or "").split())[:180]
         lines.append(f"- [{address[:8]}…{address[-6:]}]({url}) · **{item.get('chainId') or 'unknown'}**{f' — {description}' if description else ''}")
     if not rows:
-        lines.append(f"- No recent profiles for **{chain or 'the requested scope'}** were present in this API snapshot.")
+        available = sorted({item.get("chainId") for item in (data if isinstance(data, list) else []) if item.get("chainId")})
+        if chain and available:
+            # Don't dead-end: this is a curated/promoted feed, not a complete
+            # per-chain new-pairs index, and it is often skewed to whichever
+            # chains are hot. Say which chains DO have entries so the user can
+            # redirect instead of assuming an outage.
+            lines.append(
+                f"- DEX Screener's latest-profiles feed has **no {chain.title()} tokens right now** — "
+                f"it currently lists newly-published/promoted tokens on: **{', '.join(available)}**."
+            )
+            lines.append(
+                "- This free feed is a curated promoted list, not a complete new-pairs index for every "
+                "chain. Ask for one of the chains above, or give an exact contract to inspect."
+            )
+        else:
+            lines.append(f"- No recent profiles for **{chain or 'the requested scope'}** were present in this API snapshot.")
     lines.extend([
         "",
         f"Source: [DEX Screener latest token profiles]({_BASE}/token-profiles/latest/v1)",

@@ -118,8 +118,9 @@ def test_relay_how_it_works_chat_does_not_request_trade_fields(monkeypatch):
     assert payload["cross_chain_swap"] is None
     assert payload["answer"].startswith("Relay is the routing and execution layer")
     assert "before I can prepare" not in payload["answer"]
-    assert payload["suggestions"][0] == "Show supported Relay chains"
-    assert payload["quick_actions"][0]["prompt"] == "Show supported Relay chains"
+    # Quick-action / suggestion chips are disabled -- responses carry none.
+    assert payload["suggestions"] == []
+    assert payload["quick_actions"] == []
     assert payload["session_revision"] == 1
     history = TestClient(app).get("/chat/history/relay-explanation-test").json()
     assert history["context"]["revision"] == 1
@@ -157,10 +158,16 @@ def test_chat_rejects_client_forged_quick_action_capabilities(monkeypatch):
         "/chat",
         json={"message": "how relay bridge works?", "session_id": session_id},
     ).json()
-    forged = dict(first["quick_actions"][0])
-    forged["intent"] = "trade"
-    forged["capabilities"] = ["swap", "token_resolve", "token_security"]
-
+    # Quick actions are no longer emitted, so a client-supplied quick_action can
+    # never be authorized by the latest response -- the server must still reject
+    # a fabricated one rather than trusting its claimed intent/capabilities.
+    forged = {
+        "id": "forged.0",
+        "prompt": "how relay bridge works?",
+        "intent": "trade",
+        "capabilities": ["swap", "token_resolve", "token_security"],
+        "context_revision": first["session_revision"],
+    }
     response = client.post(
         "/chat",
         json={

@@ -31,7 +31,12 @@ def test_negative_speech_never_reaches_quote_nodes(monkeypatch, prompt):
         "history": "user: Swap 0.1 SOL to USDC on Base",
         "session_context": {"active_workflow": {"intent": "cross_chain_swap", "status": "collecting_details", "source_chain": "solana", "destination_chain": "base"}},
     }))
-    assert result["intent"] in {"research", "general"}
+    # "portfolio" is a third safe outcome alongside research/general -- a
+    # hypothetical trade question ("Should I buy BONK?") can legitimately
+    # resolve to the read-only trade_simulation capability (app/nodes/
+    # portfolio.py), which never reaches trade_planner_node/
+    # cross_chain_swap_node either (enforced below, same as before).
+    assert result["intent"] in {"research", "general", "portfolio"}
     assert not result.get("trade_plan")
     assert not result.get("cross_chain_swap")
     assert "routing_decision" in result

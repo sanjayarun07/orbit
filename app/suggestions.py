@@ -305,6 +305,12 @@ def structured_quick_actions(
             or "my recent transactions" in lowered
             or "my spl token holdings" in lowered
             or "my wallet health" in lowered
+            # Connected-wallet quick actions phrase the subject as "this
+            # wallet's ..." (they are only generated when no specific wallet
+            # was researched -- see the actions list above), so they refer to
+            # the connected wallet and must route to the wallet path, not fall
+            # through to web search.
+            or "this wallet's" in lowered
             or bool(re.search(r"\bmy\s+[a-z0-9._-]+\s+balance\b", lowered))
         ):
             intent = "portfolio"

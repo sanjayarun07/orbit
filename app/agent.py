@@ -50,3 +50,13 @@ def token_safety_warnings(mint: str) -> dict:
     """Get Jupiter Shield warnings for one exact Solana token mint."""
     return _run(jupiter.shield([mint]))
 
+
+def token_identity(mint: str) -> dict | None:
+    """Full Jupiter token-registry record for one exact mint (identity, tags,
+    verification, organic score, holder count, audit, and mint/freeze
+    authorities). None when the mint is not uniquely in the registry."""
+    try:
+        return _run(jupiter.token_by_mint(mint))
+    except Exception:
+        return None
+

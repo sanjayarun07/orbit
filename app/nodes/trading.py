@@ -1,12 +1,17 @@
 from app.nodes.state import AgentState, effective_request as _effective_request
 from app.nodes import runtime
 from app.tracing import trace
+import logging
 import re
 from app.capability_router import extract_cross_chain_draft, is_trade_modifier
-from app.models import CrossChainSwapDraft, SwapProposal
-from app.plans import create_trade_plan
+from app.nodes.research import _sanitize_react_answer
+from app.models import CrossChainSwapDraft, RiskAssessment, SwapProposal, TradePlan
+from app.plans import create_trade_plan, mark_plan_superseded
+from app.portfolio import build_portfolio_snapshot
 from app.settings import settings
 from app.trade_context import complete_swap_fields
+
+logger = logging.getLogger(__name__)
 
 @trace(name="trade_planner", as_type="agent")
 async def trade_planner_node(state: AgentState) -> dict:
@@ -14,12 +19,23 @@ async def trade_planner_node(state: AgentState) -> dict:
         return {"answer": "I need a wallet address to prepare a swap.", "trajectory": None}
     if state.get("execution_provider") is None and "chain" in state.get("missing_fields", []):
         draft = extract_cross_chain_draft(state["request"], tuple(state.get("chains", [])))
-        subject = f" {draft['output_token']}" if draft.get("output_token") else " this token"
+        output_token = draft.get("output_token")
+        subject = output_token or "this asset"
+        # An unrecognized symbol is not necessarily crypto -- a real equity
+        # ticker outside the curated registry (app/routing/instruments.json)
+        # reaches this same branch. Never presuppose the domain: ask, and
+        # point toward research instead of assuming a token/chain exists.
+        research_hint = (
+            f' If {subject} is a stock or other equity, I can research it -- try "research {subject}" -- '
+            "but I can't place equity trades."
+            if output_token else ""
+        )
         return {
             "answer": (
-                f"Which chain is{subject} on? I need the network before choosing the execution provider. "
-                "Solana swaps use Jupiter; Base, Robinhood Chain, other EVM chains, and cross-chain swaps use Relay. "
-                "No quote or transaction has been created."
+                f"I need more information before I can continue with {subject}. If it's a crypto token, "
+                "tell me which chain it's on (Solana, Base, Ethereum, etc.) so I can pick the right "
+                f"execution provider -- Solana swaps use Jupiter, other chains and cross-chain swaps use "
+                f"Relay.{research_hint} No quote or transaction has been created."
             ),
             "trajectory": None,
         }
@@ -30,7 +46,7 @@ async def trade_planner_node(state: AgentState) -> dict:
         wallet_address=state["wallet_address"],
         conversation_history=state.get("history", ""),
     )
-    update: dict = {"answer": result.answer, "trajectory": getattr(result, "trajectory", None)}
+    update: dict = {"answer": _sanitize_react_answer(result.answer), "trajectory": getattr(result, "trajectory", None)}
     if result.should_propose_swap:
         input_mint, output_mint, amount_atomic, slippage_bps = complete_swap_fields(
             request,
@@ -63,6 +79,17 @@ async def trade_planner_node(state: AgentState) -> dict:
 @trace(name="cross_chain_swap", as_type="agent")
 async def cross_chain_swap_node(state: AgentState) -> dict:
     """Prepare a chat-native Relay quote without server-side signing."""
+    if not state.get("wallet_address"):
+        # trade_planner_node (the Solana/Jupiter path) has always gated on
+        # this; this path did not, so a request could reach "I'm preparing a
+        # Relay quote... nothing will be signed until you confirm" with no
+        # wallet connected at all. The frontend's getFreshQuote() would still
+        # refuse to sign, but only after implying a swap was already underway
+        # -- and on some setups a bare EVM provider present-but-unconnected
+        # would auto-prompt eth_requestAccounts as a side effect of loading
+        # the quote, bypassing the app's own connect flow. Gate here instead,
+        # before any draft or quote is prepared.
+        return {"answer": "I need a connected wallet to prepare a swap.", "trajectory": None, "cross_chain_swap": None}
     chains = state.get("chains", [])
     values = extract_cross_chain_draft(state["request"], tuple(chains))
     required = ("source_chain", "destination_chain", "amount", "input_token", "output_token")
@@ -165,6 +192,73 @@ async def quote_and_simulate_node(state: AgentState) -> dict:
         if len(detail) > 400 or "<!DOCTYPE" in detail or "jsonrpc" in detail.lower():
             detail = "The trade provider could not prepare a safe quote. Please retry shortly."
         return {"error": detail}
+
+
+def _trade_summary(plan: TradePlan) -> str:
+    """One-line factual summary of the quoted plan for the Risk agent."""
+    input_token, output_token = plan.input_token, plan.output_token
+    amount = plan.proposal.amount_atomic / (10 ** input_token.decimals)
+    impact = float((plan.quote or {}).get("priceImpactPct") or 0) * 100
+    notional = f"${plan.input_value_usd:.2f}" if plan.input_value_usd is not None else "unknown"
+    warnings = "; ".join(plan.warnings) if plan.warnings else "none"
+    return (
+        f"Swap {amount:g} {input_token.symbol} -> {output_token.symbol}. "
+        f"USD notional: {notional}. Price impact: {impact:.2f}%. "
+        f"Max slippage: {plan.proposal.slippage_bps} bps. "
+        f"Output token verified by Jupiter: {output_token.verified}. "
+        f"Security warnings: {warnings}."
+    )
+
+
+@trace(name="charter_risk", as_type="agent")
+async def charter_risk_node(state: AgentState) -> dict:
+    """Soft, user-configurable Risk gate between the quote and the CONFIRM card.
+
+    Runs AFTER the deterministic caps (create_trade_plan) so it has the real
+    quote, and BEFORE the card. Advisory when no charter is set (annotate,
+    never block); a hard veto against a set charter (supersede the plan so its
+    CONFIRM token can't execute, suppress the card).
+    """
+    plan = state.get("trade_plan")
+    if plan is None:
+        return {}
+    charter = ((state.get("session_context") or {}).get("risk_charter") or "").strip()
+
+    portfolio_context = "unknown"
+    try:
+        snapshot = await build_portfolio_snapshot(state["wallet_address"])
+        total = snapshot.get("total_usd_value")
+        if total is not None:
+            portfolio_context = f"Total wallet value: ${float(total):.2f}"
+    except Exception:
+        logger.warning("charter_risk: portfolio snapshot unavailable", exc_info=True)
+
+    try:
+        result = await runtime._call_lm(
+            runtime.risk_agent,
+            charter=charter,
+            trade_summary=_trade_summary(plan),
+            portfolio_context=portfolio_context,
+        )
+        verdict = "blocked" if str(getattr(result, "verdict", "ok")).strip().lower() == "blocked" else "ok"
+        summary = (getattr(result, "summary", "") or "").strip()
+        blocked_reason = (getattr(result, "blocked_reason", "") or "").strip()
+    except Exception:
+        # Never let a Risk-agent failure decide a trade either way: fall back to
+        # advisory (the deterministic caps already passed to reach here).
+        logger.warning("charter_risk: risk agent failed; passing through advisory", exc_info=True)
+        return {"risk_assessment": RiskAssessment(verdict="ok", summary="Risk check unavailable.", charter_applied=bool(charter))}
+
+    # A set charter can only make things STRICTER: without one, never block.
+    if charter and verdict == "blocked":
+        await mark_plan_superseded(plan.plan_id)
+        detail = blocked_reason or summary or "A rule in your risk charter was not met."
+        return {
+            "trade_plan": None,
+            "answer": f"🚫 Blocked by your risk charter: {detail} No confirmation card was created; adjust the trade or your charter and try again.",
+            "risk_assessment": RiskAssessment(verdict="blocked", summary=summary or detail, charter_applied=True),
+        }
+    return {"risk_assessment": RiskAssessment(verdict="ok", summary=summary or "Within your risk rules.", charter_applied=bool(charter))}
 
 
 def finalize_trade_node(state: AgentState) -> dict:

@@ -28,3 +28,19 @@ def test_latest_profiles_filter_chain_and_label_limit(monkeypatch):
     assert "base" in output.lower()
     assert "solana/a" not in output
     assert "not a complete chronological list" in output
+
+
+def test_latest_profiles_empty_chain_discloses_available_chains(monkeypatch):
+    # "new pairs on Base" when the feed has no Base entries must not dead-end:
+    # it should say which chains DO have data so the user can redirect.
+    monkeypatch.setattr(
+        dexscreener_tools,
+        "_get",
+        lambda *_args: [
+            {"chainId": "solana", "tokenAddress": "11111111111111111111111111111111", "url": "u"},
+            {"chainId": "robinhood", "tokenAddress": "0x2222222222222222222222222222222222222222", "url": "u"},
+        ],
+    )
+    output = dexscreener_tools.dexscreener_latest_profiles("show new pairs on Base")
+    assert "no Base tokens right now" in output
+    assert "solana" in output and "robinhood" in output

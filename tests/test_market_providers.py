@@ -1,4 +1,4 @@
-from app.market_providers import BirdeyeProvider, BitqueryProvider, MobulaProvider
+from app.market_providers import BirdeyeProvider, BitqueryProvider, MarketSentimentProvider, MobulaProvider
 from app.provider_registry import get_provider_router
 from app.settings import settings
 
@@ -84,6 +84,127 @@ def test_bitquery_provider_posts_parameterized_graphql(monkeypatch):
     assert "uniswap_v3" in output
 
 
+def test_bitquery_wallet_balances_posts_parameterized_graphql_and_filters_zero_rows(monkeypatch):
+    captured = {}
+    payload = {
+        "data": {
+            "EVM": {
+                "BalanceUpdates": [
+                    {"Currency": {"Symbol": "USDC", "SmartContract": "0xusdc"}, "balance": "1000.5"},
+                    {"Currency": {"Symbol": "DUST", "SmartContract": "0xdust"}, "balance": "0"},
+                ]
+            }
+        }
+    }
+    _client(monkeypatch, payload, captured)
+    monkeypatch.setattr(settings, "bitquery_api_key", "bitquery-key")
+    output = BitqueryProvider().wallet_balances(f"Show token balances and holdings for {EVM_TOKEN} on Ethereum")
+    assert captured["method"] == "POST"
+    assert captured["headers"]["Authorization"] == "Bearer bitquery-key"
+    assert captured["json"]["variables"] == {"network": "eth", "address": EVM_TOKEN}
+    assert "USDC" in output
+    assert "DUST" not in output  # zero balance filtered out
+
+
+def test_bitquery_wallet_balances_is_registered_for_wallet_intelligence(monkeypatch):
+    monkeypatch.setattr(settings, "bitquery_api_key", "bitquery-key")
+    get_provider_router.cache_clear()
+    names = [tool.name for tool in get_provider_router().candidates(
+        "Show token balances and holdings for 0x1111111111111111111111111111111111111111 on Ethereum",
+        "wallet_intelligence",
+    )]
+    assert "bitquery_wallet_balances" in names
+
+
+def test_market_sentiment_combines_fear_greed_and_altcoin_season(monkeypatch):
+    calls = []
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, url, **kwargs):
+            calls.append(url)
+            if "alternative.me" in url:
+                return _Response({"data": [{"value": "72", "value_classification": "Greed"}]})
+            return _Response({"data": {"altcoin_index": 82, "yearly_high": 90, "yearly_low": 10}})
+
+    monkeypatch.setattr("app.market_providers.httpx.Client", Client)
+    output = MarketSentimentProvider().snapshot("What's the fear and greed index?")
+    assert len(calls) == 2
+    assert "**Fear & Greed Index**: 72/100 -- Greed" in output
+    assert "**Altcoin Season Index**: 82/100 -- Altcoin season" in output
+
+
+def test_market_sentiment_is_registered_without_an_api_key(monkeypatch):
+    get_provider_router.cache_clear()
+    names = [tool.name for tool in get_provider_router().candidates(
+        "What's the crypto fear and greed index?", "market_sentiment",
+    )]
+    assert "market_sentiment_snapshot" in names
+
+
+_SOL_MINT = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+
+
+def test_trending_tokens_query_selects_geckoterminal_not_narrative_metas():
+    get_provider_router.cache_clear()
+    names = [tool.name for tool in get_provider_router().candidates(
+        "latest trending tokens on pump.fun", "token_discovery",
+    )]
+    # A token-level ask must reach a real per-chain token/pool list
+    # (GeckoTerminal wins; DEX Screener boosted-tokens stays as failover), and
+    # must NOT reach the narrative/meta tool (which answers a different
+    # question).
+    assert names[0] == "geckoterminal_pools"
+    assert "dexscreener_boosted_tokens" in names  # failover still available
+    assert "dexscreener_trending_metas" not in names
+
+
+def test_top_holders_query_does_not_match_trending_tokens():
+    # Regression: "top holders of BONK token" must NOT be read as "top ...
+    # tokens" (a trending-token discovery query). The discovery word has to
+    # modify tokens/coins directly, not merely co-occur with the word "token".
+    from app.market_providers import TRENDING_TOKENS
+    for holders in (
+        "top holders of BONK token",
+        "top holders of this token",
+        "show the top 10 holders of the token",
+        "who owns the most BONK token",
+    ):
+        assert not TRENDING_TOKENS.search(holders), holders
+    for trending in ("top tokens on solana", "trending tokens on robinhood", "hottest new gems"):
+        assert TRENDING_TOKENS.search(trending), trending
+
+
+def test_trending_narratives_query_still_selects_metas():
+    get_provider_router.cache_clear()
+    names = [tool.name for tool in get_provider_router().candidates(
+        "what narratives are trending right now?", "token_discovery",
+    )]
+    # No token word -> the narrative tool is still the right one.
+    assert "dexscreener_trending_metas" in names
+    assert "dexscreener_boosted_tokens" not in names
+
+
+def test_solana_token_safety_selects_jupiter_shield_over_dexscreener_pairs():
+    get_provider_router.cache_clear()
+    candidates = get_provider_router().candidates(
+        f"check token safety for {_SOL_MINT} on solana", "token_security",
+    )
+    names = [tool.name for tool in candidates]
+    # Solana security must reach the Jupiter Shield tool, ranked above the
+    # generic dexscreener pair lookup (which is not a safety assessment).
+    assert names[0] == "solana_token_security"
+    assert names.index("solana_token_security") < names.index("dexscreener_token_pairs")
+
+
 def test_registry_contains_all_named_market_providers(monkeypatch):
     monkeypatch.setattr(settings, "birdeye_api_key", None)
     monkeypatch.setattr(settings, "mobula_api_key", None)
@@ -99,3 +220,42 @@ def test_sui_address_is_not_truncated():
     from app.market_providers import _address
 
     assert _address(f"Analyze {address} on Sui") == address
+
+
+SOLANA_MINT = "6GmAFSYs4gk3FDao5FzzySQpPZaWsa4rUJHacpMpUNgx"
+
+
+def test_bitquery_top_holders_sorts_client_side_and_filters_zero_balances(monkeypatch):
+    """Bitquery's own orderBy on an aggregated field was verified live NOT
+    to actually sort the results -- this must be corrected client-side,
+    not trust the API's row order.
+    """
+    captured = {}
+    payload = {"data": {"Solana": {"BalanceUpdates": [
+        {"BalanceUpdate": {"Account": {"Owner": "SmallSmallSmallSmallSmallSmall01"}, "Currency": {"Symbol": "STONK"}}, "balance": "100"},
+        {"BalanceUpdate": {"Account": {"Owner": "BiggestBiggestBiggestBiggestBig02"}, "Currency": {"Symbol": "STONK"}}, "balance": "900000"},
+        {"BalanceUpdate": {"Account": {"Owner": "ZeroZeroZeroZeroZeroZeroZeroZero03"}, "Currency": {"Symbol": "STONK"}}, "balance": "0"},
+        {"BalanceUpdate": {"Account": {"Owner": "MidMidMidMidMidMidMidMidMidMid04"}, "Currency": {"Symbol": "STONK"}}, "balance": "5000"},
+    ]}}}
+    _client(monkeypatch, payload, captured)
+    monkeypatch.setattr(settings, "bitquery_api_key", "bitquery-key")
+    output = BitqueryProvider().token_top_holders(f"Top holders for {SOLANA_MINT} on Solana")
+    assert captured["json"]["variables"] == {"token": SOLANA_MINT}
+    assert output.index("Bigges") < output.index("MidMid") < output.index("SmallS")  # 6-char address prefix, per the output's own truncation
+    assert "ZeroZero" not in output  # zero-balance row filtered out
+    assert "pool" in output.lower() and "not pre-filtered" in output.lower()  # disclosed, not silently hidden
+
+
+def test_bitquery_top_holders_rejects_non_solana_chain():
+    import pytest
+
+    with pytest.raises(ValueError):
+        BitqueryProvider().token_top_holders(f"Top holders for {EVM_TOKEN} on Base")
+
+
+def test_bitquery_top_holders_is_registered_under_token_discovery_and_security():
+    get_provider_router.cache_clear()
+    router = get_provider_router()
+    catalog = {row["name"]: row for row in router.catalog()}
+    assert set(catalog["bitquery_token_top_holders"]["capabilities"]) == {"token_discovery", "token_security"}
+    assert catalog["bitquery_token_top_holders"]["chains"] == ["solana"]

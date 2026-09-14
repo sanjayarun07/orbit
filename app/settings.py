@@ -6,6 +6,16 @@ class Settings(BaseSettings):
 
     model: str = "openai/gpt-4.1-mini"
     openai_api_key: str | None = None
+    # LLM-hop resilience (app/nodes/runtime.py `_call_lm`). Without an explicit
+    # timeout litellm waits up to 600s on a wedged provider call; retries below
+    # are litellm's own exponential-backoff attempts against the SAME model, and
+    # the fallback model is tried once when the primary exhausts them with a
+    # transient/provider error (set it to a DIFFERENT provider you have keys for
+    # -- e.g. "anthropic/claude-haiku-4-5" -- so a full OpenAI outage still
+    # answers; leave empty to disable cross-provider failover).
+    llm_request_timeout_seconds: float = 60.0
+    llm_num_retries: int = 2
+    llm_fallback_model: str | None = None
     intent_embedding_enabled: bool = True
     intent_embedding_model: str = "text-embedding-3-small"
     intent_embedding_threshold: float = 0.78
@@ -13,6 +23,31 @@ class Settings(BaseSettings):
     intent_embedding_timeout_seconds: float = 8.0
     intent_embedding_cache_entries: int = 512
     intent_model_confidence_threshold: float = 0.90
+    # Per-capability tool-selection semantic fallback (app/routing/tool_semantic.py) --
+    # a second chance for a description-bearing tool whose regex `matches`
+    # gate returned False, not a replacement for the intent-classification
+    # embedding settings above. threshold=0.45 is calibrated against REAL
+    # request text, not a guess -- live-tested (2026-09-13,
+    # text-embedding-3-small) twice: an initial pass using clean natural-
+    # language phrasing alone scored correct matches at 0.62-0.69, but a
+    # second pass using actual production-shaped text (a real hex contract/
+    # mint address embedded inline, as every real request has) scored
+    # correct matches meaningfully lower (0.46-0.56) -- raw addresses dilute
+    # the semantic signal an embedding model picks up. 0.45 is calibrated
+    # against that second, realistic pass, sitting just above the nearest
+    # wrong-sibling scores observed (0.42, 0.44) in the same gated
+    # capability. Biased toward a missed fallback (safe: falls through to
+    # existing behavior) over a false positive (routes to the wrong
+    # specialized tool with wrong data). Re-run the calibration script (see
+    # the plan) with real address-bearing request text -- not clean
+    # phrasing alone -- before trusting this number again if the pilot
+    # descriptions change.
+    tool_embedding_enabled: bool = True
+    tool_embedding_model: str = "text-embedding-3-small"
+    tool_embedding_threshold: float = 0.45
+    tool_embedding_timeout_seconds: float = 8.0
+    tool_embedding_cache_entries: int = 512
+    tool_embedding_cost_usd: float = 0.0
     perplexity_api_key: str | None = None
     perplexity_agent_url: str = "https://api.perplexity.ai/v1/agent"
     perplexity_model: str = "perplexity/sonar"
@@ -37,15 +72,29 @@ class Settings(BaseSettings):
     birdeye_api_key: str | None = None
     birdeye_base_url: str = "https://public-api.birdeye.so"
     birdeye_requests_per_minute: int = 60
+    # Left at 0.0: Birdeye's production API is a paid add-on with no public
+    # per-request price (their pricing page only advertises a flat add-on
+    # fee and points to sales for API terms) -- an invented number would be
+    # less honest than leaving this unbound. Set it from your actual
+    # contract if you have one.
     birdeye_request_cost_usd: float = 0.0
     mobula_api_key: str | None = None
     mobula_base_url: str = "https://api.mobula.io/api/2"
     mobula_requests_per_minute: int = 60
+    # Left at 0.0: Mobula bills in credits (1 per chain for most reads, 10
+    # for DeFi positions) with no published credit-to-dollar rate for paid
+    # tiers (only the 10k-credit/month free tier is public) -- same
+    # reasoning as Birdeye above.
     mobula_request_cost_usd: float = 0.0
     bitquery_api_key: str | None = None
     bitquery_graphql_url: str = "https://streaming.bitquery.io/eap"
     bitquery_requests_per_minute: int = 30
-    bitquery_request_cost_usd: float = 0.0
+    # Estimated from Bitquery's published points pricing: dataset:realtime
+    # costs 5 points/cube (docs.bitquery.io/docs/ide/points), and the
+    # Personal plan is $49/mo for 100k points -> ~$0.00049/point -> ~$0.00245
+    # per call. A real, sourced estimate for budget-triggering purposes, not
+    # a reconciled bill -- recalibrate against your actual plan/invoices.
+    bitquery_request_cost_usd: float = 0.00245
     coingecko_api_key: str | None = None
     coingecko_base_url: str = "https://api.coingecko.com/api/v3"
     coingecko_requests_per_minute: int = 30
@@ -85,6 +134,17 @@ class Settings(BaseSettings):
     clickhouse_password: str | None = None
     clickhouse_database: str = "default"
     clickhouse_secure: bool = True
+    dune_api_key: str | None = None
+    dune_base_url: str = "https://api.dune.com/api/v1"
+    dune_requests_per_minute: int = 10
+    dune_query_performance: str = "small"
+    dune_poll_interval_seconds: float = 2.0
+    dune_poll_timeout_seconds: float = 120.0
+    # Round-trip detection thresholds for the wash-trading detector -- kept
+    # as settings (not hardcoded) so they can be tuned against known cases
+    # without a redeploy-and-edit-code cycle.
+    wash_trading_round_trip_max_gap_seconds: float = 30.0
+    wash_trading_round_trip_size_tolerance_pct: float = 0.05
     rootdata_api_key: str | None = None
     rootdata_base_url: str = "https://api.rootdata.com/open"
     rootdata_requests_per_minute: int = 60
@@ -146,12 +206,49 @@ class Settings(BaseSettings):
     max_mcp_tools_per_request: int = 5
     max_concurrent_mcp_calls: int = 8
     mcp_connections_per_server: int = 2
-    mcp_call_timeout_seconds: float = 45.0
+    # Testing showed 45s was mostly providing headroom to already-failing
+    # calls, not ones that need that long to succeed (successful Nansen calls
+    # were consistently single-digit seconds). 20s still gives a legitimately
+    # slower analytics query room while bounding worst-case chat latency.
+    mcp_call_timeout_seconds: float = 20.0
     mcp_result_max_chars: int = 12000
     mcp_cache_ttl_seconds: int = 60
     mcp_cache_max_entries: int = 512
+    # Per-tool overrides for slow-changing data (raw MCP tool names, not the
+    # wrapped mcp_<server>_<tool> name) -- entity labels and portfolio
+    # composition don't change second-to-second the way prices do, so one
+    # global TTL either wastes cache hits on slow data or risks staleness
+    # on fast data. Anything not listed keeps mcp_cache_ttl_seconds.
+    mcp_tool_cache_ttl_seconds: dict[str, int] = {
+        "address_labels": 3600,
+        "address_portfolio": 300,
+        "address_transactions": 120,
+        "token_current_top_holders": 300,
+        "token_quant_scores": 300,
+        "token_info": 300,
+    }
     mcp_env_allowlist: str = "NANSEN_API_KEY"
     expose_tool_trajectory: bool = False
+    # Step-7 answer validator (app/answer_validator.py): data older than this (per
+    # the provider's own timestamp) is flagged as a freshness warning. Advisory only.
+    answer_freshness_warn_minutes: float = 30.0
+    # Enrich the Solana token security/identity dossier with a short web-sourced
+    # "latest context" section (issuer confirmation, recent incidents/depeg news)
+    # when Perplexity is configured. Adds one cached, budget-gated web call.
+    token_security_web_context: bool = True
+    # Role-memory reflection loop (app/role_memory.py): where deep-dive decisions +
+    # their reflected lessons persist. None -> in-process only (resets on restart).
+    role_memory_path: str | None = "data/role_memory.json"
+    # Cross-source consistency: a headline metric reported by two providers for the
+    # SAME token that differs by more than this percent is flagged. Advisory only.
+    answer_consistency_tolerance_pct: float = 25.0
+    # Per-chat-turn cap on external provider/MCP calls and their tracked
+    # cost -- see app/call_budget.py. The cost ceiling is real, wired
+    # infrastructure but every *_request_cost_usd setting defaults to 0.0,
+    # so it isn't meaningfully binding until real per-call costs are
+    # populated; the call-count cap is what actually does work today.
+    max_external_calls_per_turn: int = 12
+    max_paid_data_cost_usd_per_turn: float = 0.50
 
     # In production, set false so missing shared infrastructure fails visibly
     # rather than creating isolated per-worker sessions and trade plans.

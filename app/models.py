@@ -129,6 +129,38 @@ class GasAdvisory(BaseModel):
     message: str
 
 
+class RiskAssessment(BaseModel):
+    """Risk-agent verdict on a proposed trade against the user's risk charter.
+
+    A soft, user-configurable layer on top of the deterministic execution caps.
+    `charter_applied` is False in advisory mode (no charter set) -- then
+    `verdict` is always "ok" and `summary` is informational only.
+    """
+
+    verdict: Literal["ok", "blocked"]
+    summary: str
+    charter_applied: bool = False
+
+
+class ValidationCheck(BaseModel):
+    name: Literal["provenance", "freshness", "grounding", "consistency"]
+    status: Literal["ok", "warn", "not_applicable"]
+    detail: str
+
+
+class AnswerValidation(BaseModel):
+    """Advisory step-7 validation of a surfaced answer (see app/answer_validator.py):
+    does its data trace to a source (provenance), is it timestamped and recent
+    (freshness), and do its figures appear in the tool evidence (grounding). Never
+    blocks or rewrites the answer -- it is surfaced for the client and monitoring."""
+
+    status: Literal["ok", "warn"]
+    checks: list[ValidationCheck] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
+    as_of: str | None = None
+    age_minutes: float | None = None
+
+
 class AgentResponse(BaseModel):
     answer: str
     trade_plan: TradePlan | None = None
@@ -145,6 +177,9 @@ class AgentResponse(BaseModel):
     evidence: EvidenceSummary | None = None
     trade_readiness: TradeReadiness | None = None
     gas_advisory: GasAdvisory | None = None
+    risk_assessment: RiskAssessment | None = None
+    team_report: dict | None = None
+    validation: AnswerValidation | None = None
 
 
 class IntentPreviewRequest(BaseModel):
@@ -194,6 +229,23 @@ class RoutePreviewRequest(BaseModel):
     request: str = Field(min_length=1, max_length=2000)
     capability: str = Field(min_length=1, max_length=80)
     chains: list[str] = Field(default_factory=list, max_length=10)
+
+
+class WashTradingDetectionRequest(BaseModel):
+    # Solana-only detector (dex_solana.trades): the mint is a base58 address.
+    # The pattern rejects anything with a quote/backslash/whitespace at the
+    # API boundary, so it can never break out of the quoted SQL literal it is
+    # interpolated into (app/dune_tools.py re-validates as defense in depth).
+    token_mint: str = Field(pattern=r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+    # NOTE: pool_filter is spliced into the Dune query as a RAW SQL FRAGMENT by
+    # design (an analyst writing e.g. "project = 'raydium'"), so this endpoint's
+    # admin key effectively grants arbitrary-SQL power against the Dune account.
+    # That is why /admin/wash-trading/runs is admin-only; keep it that way.
+    pool_filter: str | None = Field(default=None, max_length=200)
+    window_start: datetime
+    window_end: datetime
+    top_n: int = Field(default=100, ge=1, le=500)
+    label: str | None = Field(default=None, max_length=120)
 
 
 class LifiQuoteRequest(BaseModel):

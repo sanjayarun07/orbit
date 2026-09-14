@@ -10,3 +10,7 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 .DS_Store
+
+# scripts/optimize_signature.py's output -- a local artifact to inspect
+# manually, not something to commit (examples/README alongside it are kept).
+data/optimized_prompts/trade_simulation_compiled.json

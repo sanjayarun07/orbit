@@ -87,7 +87,7 @@ async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> d
         else:
             update = {"intent": "general", "capabilities": [], "chains": [], "route_source": "session_context",
                       "clarification": "There is no active trade to modify. Please describe the swap you want to prepare."}
-    elif candidate is not None and candidate.reason != "semantic_required":
+    elif candidate is not None and candidate.reason != "semantic_required" and candidate.confidence >= 0.8:
         update = route_fields(candidate, "session_entity" if contextual != request else None)
     else:
         match = await asyncio.to_thread(embedding_factory(settings.intent_embedding_model).classify, request)
@@ -126,6 +126,23 @@ async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> d
                 update = _speech_route(understanding, method)
             metadata.update(speech_act=understanding.speech_act, domain=understanding.domain,
                             explicit_action=understanding.explicit_action)
+
+    # Team mode ("trading desk"): route content requests through the multi-agent
+    # Coordinator, which reuses the underlying single-agent nodes. Stash the
+    # original intent as team_subintent and keep capabilities/chains/
+    # execution_provider so the Coordinator knows trade vs analysis. Control and
+    # general messages resolve to non-content intents and are never redirected;
+    # explicit quick actions keep their typed route.
+    team_mode = bool((state.get("session_context") or {}).get("team_mode"))
+    intent0 = update.get("intent")
+    caps0 = update.get("capabilities") or []
+    # Content intents the desk handles: a real swap (trade), asset research
+    # (research), and "should I buy X?" (which the single-agent app routes to
+    # portfolio/trade_simulation) -- the latter two are analysis to the desk.
+    is_content = intent0 in {"trade", "research"} or (intent0 == "portfolio" and "trade_simulation" in caps0)
+    if team_mode and is_content and update.get("route_source") != "quick_action":
+        update["team_subintent"] = "trade" if intent0 == "trade" else "analysis"
+        update["intent"] = "team"
 
     metadata["method"] = update.get("route_source", metadata["method"])
     metadata["intent"] = update["intent"]

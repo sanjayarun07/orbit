@@ -16,10 +16,11 @@ from typing import Any
 
 import httpx
 
+from app.call_budget import charge_and_check
 from app.metrics import increment
 from app.provider_router import is_usable_provider_output
 from app.settings import settings
-from app.tool_results import compact_tool_result
+from app.tool_results import compact_tool_result, strip_inline_citation_markers
 
 
 _TOOL_CAPABILITIES = {
@@ -132,7 +133,17 @@ def _invoke(tool_type: str, prompt: str, instructions: str) -> str:
         _inflight.add(key)
 
     increment(f"perplexity_{tool_type}_calls")
-    increment("perplexity_estimated_cost_microusd", round(_costs()[tool_type] * 1_000_000))
+    effective_cost = _costs()[tool_type]
+    increment("perplexity_estimated_cost_microusd", round(effective_cost * 1_000_000))
+    if not charge_and_check(effective_cost):
+        # Same failure convention _invoke already uses for every other
+        # failure mode below (raise RuntimeError; callers already handle
+        # it as "this call didn't work") -- see app/call_budget.py.
+        increment("perplexity_budget_skips")
+        with _condition:
+            _inflight.discard(key)
+            _condition.notify_all()
+        raise RuntimeError("Per-turn data budget reached")
     try:
         today = datetime.now().astimezone().date().isoformat()
         with httpx.Client(timeout=settings.perplexity_timeout_seconds) as client:
@@ -155,7 +166,7 @@ def _invoke(tool_type: str, prompt: str, instructions: str) -> str:
             )
             response.raise_for_status()
             payload = response.json()
-        answer = _extract_text(payload)
+        answer = strip_inline_citation_markers(_extract_text(payload))
         if not answer:
             raise RuntimeError("Perplexity returned no answer text")
         if not is_usable_provider_output(prompt, answer, require_live_quote=tool_type == "finance_search"):

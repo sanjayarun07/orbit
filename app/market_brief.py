@@ -21,10 +21,13 @@ _cache: dict[str, tuple[float, str]] = {}
 _building: set[str] = set()
 
 
-def _cache_key(query: str) -> str:
+def _requested_chains(query: str) -> tuple[str, ...]:
     lowered = query.lower()
-    requested = tuple(chain for chain in _CHAINS if chain in lowered)
-    return ",".join(requested) or "global"
+    return tuple(chain for chain in _CHAINS if chain in lowered)
+
+
+def _cache_key(query: str) -> str:
+    return ",".join(_requested_chains(query)) or "global"
 
 
 def _get_json(url: str) -> Any:
@@ -97,18 +100,27 @@ def _boost_details(boosts: list[dict]) -> list[dict]:
 
 
 def _build_crypto_market_brief(query: str) -> str:
+    requested_chains = _requested_chains(query)
+    # When the request names a specific chain (e.g. "trending tokens on
+    # solana"), scope every fetch to that chain instead of pulling the full
+    # multi-chain snapshot -- a request naming one chain shouldn't come back
+    # with an unfiltered all-chain table that buries the chain actually asked
+    # about among six others.
+    fetch_chains = requested_chains or _CHAINS
     urls = {"total": _TOTAL_DEX_URL, "prices": _PRICE_URL, "boosts": _BOOSTS_URL}
-    urls.update({f"chain:{chain}": _DEX_URL.format(chain=chain) for chain in _CHAINS})
+    urls.update({f"chain:{chain}": _DEX_URL.format(chain=chain) for chain in fetch_chains})
     results: dict[str, Any] = {}
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(_get_json, url): key for key, url in urls.items()}
+        chain_label = ", ".join(chain.upper() for chain in requested_chains)
+        scope = f" Focus specifically on {chain_label} -- exclude other chains." if requested_chains else ""
         narrative_request = (
             "Show trending crypto narratives and metas using current measurable DEX activity, "
-            "volume and liquidity. Exclude generic news and crime stories. "
+            f"volume and liquidity. Exclude generic news and crime stories.{scope} "
             f"Tailor the brief to this user request: {query}"
         )
         narrative_future = executor.submit(
-            get_provider_router().route, narrative_request, "token_discovery", ()
+            get_provider_router().try_route, narrative_request, "token_discovery", requested_chains
         )
         for future in as_completed(futures):
             try:
@@ -116,12 +128,17 @@ def _build_crypto_market_brief(query: str) -> str:
             except Exception:
                 continue
         try:
-            narratives = narrative_future.result().output
+            narrative_result = narrative_future.result()
+            narratives = (
+                narrative_result.output
+                if narrative_result is not None
+                else "Narrative search is temporarily unavailable."
+            )
         except Exception:
             narratives = "Narrative search is temporarily unavailable."
 
     lines = [
-        "# Crypto market brief",
+        f"# {chain_label} crypto market brief" if requested_chains else "# Crypto market brief",
         f"**Data freshness**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
     ]
     coins = (results.get("prices") or {}).get("coins") or {}
@@ -140,13 +157,14 @@ def _build_crypto_market_brief(query: str) -> str:
             )
 
     chain_rows = []
-    for chain in _CHAINS:
+    for chain in fetch_chains:
         data = results.get(f"chain:{chain}") or {}
         if data.get("total24h") is not None:
             chain_rows.append((chain, data))
     chain_rows.sort(key=lambda item: float(item[1].get("total24h") or 0), reverse=True)
     if chain_rows:
-        lines.extend(["", "## Where the volume is", "| Chain | DEX volume (24h) | 1d change | 7d change |", "|---|---:|---:|---:|"])
+        table_title = f"## {chain_label} DEX volume" if requested_chains else "## Where the volume is"
+        lines.extend(["", table_title, "| Chain | DEX volume (24h) | 1d change | 7d change |", "|---|---:|---:|---:|"])
         for chain, data in chain_rows:
             source = _DEX_URL.format(chain=chain)
             lines.append(
@@ -156,11 +174,14 @@ def _build_crypto_market_brief(query: str) -> str:
 
     lines.extend(["", "## Narratives and protocols", narratives])
 
-    promoted = _boost_details(results.get("boosts") or [])
+    boosts = results.get("boosts") or []
+    if requested_chains:
+        boosts = [boost for boost in boosts if str(boost.get("chainId") or "").lower() in requested_chains]
+    promoted = _boost_details(boosts)
     if promoted:
         lines.extend([
             "",
-            "## Promoted-token attention",
+            f"## Promoted {chain_label} tokens" if requested_chains else "## Promoted-token attention",
             "These are currently boosted on DEX Screener. Boosts measure paid attention—not quality or organic demand.",
         ])
         for item in promoted:
@@ -177,7 +198,9 @@ def _build_crypto_market_brief(query: str) -> str:
         "",
         "## If you want, I can:",
         "- Show new token launches on a chain with a new-pairs view.",
-        "- Pull live trending tokens and gainers for Solana, Base, Robinhood, Arbitrum, or another supported chain.",
+        (f"- Pull the same brief for another chain (Solana, Base, Robinhood, Arbitrum, ...) instead of {chain_label}."
+         if requested_chains else
+         "- Pull live trending tokens and gainers for Solana, Base, Robinhood, Arbitrum, or another supported chain."),
         "- Show tokenized-stock leaders and their current activity.",
         "",
         "**Note**: Launchpad tokens and DEX Screener-boosted coins are often extremely volatile and low-liquidity. Verify on-chain liquidity, holder concentration, and contract metadata before trading. I can run those checks for any specific token you choose.",

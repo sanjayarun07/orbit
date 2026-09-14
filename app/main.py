@@ -38,10 +38,12 @@ from app.experience import (
     build_intent_lock,
     build_trade_readiness,
 )
+from app.answer_validator import validate_answer
 from app.limits import acquire_chat_slot, allow_chat_request, allow_rpc_request, release_chat_slot
 from app.lifi import get_quote as get_lifi_quote, get_status as get_lifi_status
 from app.mcp_tools import close_mcp_gateway, discover_mcp_tools, get_mcp_registry
 from app.metrics import increment, snapshot
+from app.wash_trading import nansen_enrich, pipeline as wash_trading_pipeline, schema as wash_trading_schema
 from app.models import (
     AgentResponse,
     ChatRequest,
@@ -55,6 +57,7 @@ from app.models import (
     SignedTransactionRequest,
     WalletAuthChallengeRequest,
     WalletAuthVerifyRequest,
+    WashTradingDetectionRequest,
 )
 from app.plans import get_plan, mark_plan_superseded
 from app.routing.workflow import WorkflowState, WorkflowEvent, apply_event
@@ -438,6 +441,87 @@ async def test_admin_provider(body: ProviderTestRequest, request: Request):
     }
 
 
+@app.post("/admin/wash-trading/runs")
+async def create_wash_trading_run(body: WashTradingDetectionRequest, request: Request):
+    """Kick off a wash-trading/wallet-clustering detection run (Phase 1:
+    concentration stats, round-trip detection, single-hop funding fan-out).
+    Every output here is a lead for a human analyst to review, never an
+    automated verdict -- see app/wash_trading/pipeline.py's module docstring.
+    """
+    _require_admin(request)
+    try:
+        run = await asyncio.to_thread(
+            wash_trading_pipeline.run_detection,
+            body.token_mint, body.pool_filter, body.window_start, body.window_end, body.top_n, body.label,
+        )
+    except RuntimeError as exc:
+        # DUNE_API_KEY / BITQUERY_API_KEY / CLICKHOUSE_HOST unconfigured, or a
+        # Dune execution failure -- see app/dune_tools.py's DuneQueryError.
+        raise HTTPException(502, _safe_detail(exc, "Wash-trading detection run failed")) from exc
+    return {
+        "run_id": run.run_id,
+        "token_mint": run.token_mint,
+        "pool_filter": run.pool_filter,
+        "window_start": run.window_start.isoformat(),
+        "window_end": run.window_end.isoformat(),
+        "top_n": run.top_n,
+        "concentration": vars(run.concentration),
+        "round_trip_count": run.round_trip_count,
+        "fan_out_clusters": run.fan_out_clusters,
+    }
+
+
+@app.get("/admin/wash-trading/runs/{run_id}")
+async def get_wash_trading_run(run_id: str, request: Request):
+    _require_admin(request)
+
+    def _read() -> dict:
+        client = wash_trading_schema.get_client()
+        run_rows = client.query(
+            "SELECT * FROM wash_trading_runs WHERE run_id = {run_id:String} ORDER BY created_at DESC LIMIT 1",
+            parameters={"run_id": run_id},
+        ).named_results()
+        run_row = next(iter(run_rows), None)
+        if run_row is None:
+            return {}
+        stats_rows = list(client.query(
+            "SELECT * FROM wash_trading_wallet_stats WHERE run_id = {run_id:String} ORDER BY total_volume_usd DESC",
+            parameters={"run_id": run_id},
+        ).named_results())
+        cluster_rows = list(client.query(
+            "SELECT * FROM wash_trading_clusters WHERE run_id = {run_id:String} ORDER BY cluster_volume_usd DESC",
+            parameters={"run_id": run_id},
+        ).named_results())
+        return {"run": run_row, "wallet_stats": stats_rows, "clusters": cluster_rows}
+
+    result = await asyncio.to_thread(_read)
+    if not result:
+        raise HTTPException(404, f"No wash-trading run found for run_id={run_id}")
+    return result
+
+
+@app.get("/admin/wash-trading/runs/{run_id}/wallets/{wallet}")
+async def get_wash_trading_wallet(run_id: str, wallet: str, request: Request):
+    _require_admin(request)
+
+    def _read() -> dict:
+        client = wash_trading_schema.get_client()
+        trades = list(client.query(
+            "SELECT * FROM wash_trading_trades WHERE run_id = {run_id:String} AND trader_id = {wallet:String} ORDER BY block_time",
+            parameters={"run_id": run_id, "wallet": wallet},
+        ).named_results())
+        round_trips = [row for row in trades if row.get("is_round_trip_leg")]
+        funding = list(client.query(
+            "SELECT * FROM wash_trading_funding_edges WHERE run_id = {run_id:String} AND wallet = {wallet:String} LIMIT 1",
+            parameters={"run_id": run_id, "wallet": wallet},
+        ).named_results())
+        return {"trades": trades, "round_trip_legs": round_trips, "funding": funding}
+
+    result = await asyncio.to_thread(_read)
+    label = await asyncio.to_thread(nansen_enrich.label_wallet, wallet)
+    return {**result, "nansen_label": label}
+
+
 @app.get("/portfolio/{wallet_address}")
 async def portfolio(wallet_address: str):
     try:
@@ -561,24 +645,21 @@ async def chat(body: ChatRequest, request: Request):
         increment(f"intent_{run.intent}")
         answer, trajectory, plan = run
         client_trajectory = trajectory if settings.expose_tool_trajectory else public_activity(trajectory)
-        suggestions = suggested_actions(
-            body.message,
-            run.intent,
-            history,
-            run.capabilities,
-            answer,
-            plan.output_token.mint if plan else (
-                run.cross_chain_swap.output_token if run.cross_chain_swap else None
-            ),
-            "solana" if plan else (
-                run.cross_chain_swap.destination_chain if run.cross_chain_swap else None
-            ),
-        )
+        # Quick-action / suggestion chips are disabled: they were often generic
+        # and unrelated to the query. Empty lists render nothing (the UI only
+        # shows the "Quick next actions" section when quick_actions is non-empty).
+        suggestions: list[str] = []
         intent_lock = build_intent_lock(plan, run.cross_chain_swap, body.wallet_address)
         context_capsules = build_context_capsules(
             body.message, history, answer, plan, run.cross_chain_swap, body.wallet_address
         )
         evidence = build_evidence_summary(trajectory)
+        # Step-7 answer validation: provenance / freshness / grounding of the
+        # surfaced answer against the tool evidence. Advisory only -- attached for
+        # the client and monitoring, never blocks or rewrites the answer.
+        validation = validate_answer(body.message, answer, trajectory, run.intent)
+        if validation is not None and validation.status == "warn":
+            increment("answer_validation_warn")
         trade_readiness = build_trade_readiness(plan)
         gas_advisory = build_gas_advisory(run.cross_chain_swap)
         next_context = advance_session_context(
@@ -591,6 +672,10 @@ async def chat(body: ChatRequest, request: Request):
             intent_lock,
             run.cross_chain_swap,
         )
+        # A pending token disambiguation lives exactly one turn: set when this
+        # turn asked which chain a symbol is on, otherwise cleared (the follow-up
+        # consumes it before the graph runs -- see resolve_pending_token).
+        next_context["pending_token"] = run.pending_token
         if next_context.get("active_workflow") and plan:
             next_context["active_workflow"]["plan_id"] = plan.plan_id
         old_workflow = WorkflowState.from_context(session_context.get("active_workflow"))
@@ -600,23 +685,7 @@ async def chat(body: ChatRequest, request: Request):
         if superseded_plan:
             await mark_plan_superseded(superseded_plan)
         next_context["active_workflow"] = next_workflow.as_context() if next_workflow else None
-        preferred_token = plan.output_token.mint if plan else (
-            run.cross_chain_swap.output_token if run.cross_chain_swap else None
-        )
-        preferred_chain = "solana" if plan else (
-            run.cross_chain_swap.destination_chain if run.cross_chain_swap else None
-        )
-        if preferred_token is None:
-            focus = next_context.get("focus") or {}
-            if focus.get("kind") == "token":
-                preferred_token = focus.get("address") or focus.get("label")
-                preferred_chain = focus.get("chain")
-        quick_actions = structured_quick_actions(
-            suggestions,
-            next_context["revision"],
-            preferred_token,
-            preferred_chain,
-        )
+        quick_actions: list = []
         assistant_metadata = {
             "routing_decision": getattr(run, "routing_decision", None),
             "trajectory": client_trajectory,
@@ -632,6 +701,9 @@ async def chat(body: ChatRequest, request: Request):
             "evidence": evidence.model_dump(mode="json") if evidence else None,
             "trade_readiness": trade_readiness.model_dump() if trade_readiness else None,
             "gas_advisory": gas_advisory.model_dump() if gas_advisory else None,
+            "risk_assessment": run.risk_assessment.model_dump() if run.risk_assessment else None,
+            "team_report": run.team_report,
+            "validation": validation.model_dump() if validation else None,
         }
         await commit_turn(
             session_id,
@@ -656,6 +728,9 @@ async def chat(body: ChatRequest, request: Request):
             evidence=evidence,
             trade_readiness=trade_readiness,
             gas_advisory=gas_advisory,
+            risk_assessment=run.risk_assessment,
+            team_report=run.team_report,
+            validation=validation,
         )
     except asyncio.TimeoutError as exc:
         increment("chat_timeouts")

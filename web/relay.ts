@@ -14,6 +14,7 @@ import {
   createPublicClient,
   createWalletClient,
   custom,
+  formatUnits,
   http,
   parseUnits,
   type Address,
@@ -30,6 +31,13 @@ const ERC20_DECIMALS_ABI = [{
   stateMutability: "view",
   inputs: [],
   outputs: [{ type: "uint8" }]
+}] as const;
+const ERC20_BALANCE_ABI = [{
+  type: "function",
+  name: "balanceOf",
+  stateMutability: "view",
+  inputs: [{ name: "account", type: "address" }],
+  outputs: [{ type: "uint256" }]
 }] as const;
 
 type PhantomProvider = {
@@ -259,6 +267,31 @@ async function currencyDecimals(chain: RelayChain, currency: string) {
   return Number(await publicClient.readContract({ address: currency as Address, abi: ERC20_DECIMALS_ABI, functionName: "decimals" }));
 }
 
+async function sourceBalance(chain: RelayChain, currency: string, address: string): Promise<bigint> {
+  if (chain.vmType === "svm") {
+    const { PublicKey } = await import("@solana/web3.js");
+    const connection = new Connection(SOLANA_RPC_PROXY, "confirmed");
+    if (currency.toLowerCase() === SOLANA_NATIVE.toLowerCase()) {
+      return BigInt(await connection.getBalance(new PublicKey(address)));
+    }
+    const accounts = await connection.getParsedTokenAccountsByOwner(new PublicKey(address), { mint: new PublicKey(currency) });
+    const raw = accounts.value[0]?.account.data.parsed?.info?.tokenAmount?.amount;
+    return raw ? BigInt(raw) : 0n;
+  }
+  if (!chain.viemChain) throw new Error("Missing EVM chain configuration.");
+  const publicClient = createPublicClient({ chain: chain.viemChain, transport: http(chain.httpRpcUrl) });
+  if (currency.toLowerCase() === EVM_NATIVE) {
+    return publicClient.getBalance({ address: address as Address });
+  }
+  return publicClient.readContract({ address: currency as Address, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [address as Address] });
+}
+
+async function symbolFor(chainId: number, currency: string) {
+  const chain = (await supportedChains()).find((item) => item.id === chainId);
+  const match = chain?.currencies.find((token) => token.address.toLowerCase() === currency.toLowerCase());
+  return match?.symbol || `${currency.slice(0, 6)}…${currency.slice(-4)}`;
+}
+
 type QuoteInput = {
   chainId: number;
   toChainId: number;
@@ -276,6 +309,30 @@ async function getFreshQuote(input: QuoteInput) {
   const { wallet, address } = await walletFor(sourceChain);
   const decimals = await currencyDecimals(sourceChain, input.currency);
   const amount = parseUnits(input.amount, decimals).toString();
+  // Relay's quote API prices a hypothetical swap regardless of whether the
+  // connected wallet actually holds the funds -- it will happily return a
+  // route for a wallet with a zero balance, and the shortfall only surfaces
+  // when the wallet is asked to sign. Checking the balance here fails fast,
+  // before the user is walked through a quote card and a sign prompt that
+  // was always going to be rejected.
+  try {
+    const available = await sourceBalance(sourceChain, input.currency, address);
+    const required = BigInt(amount);
+    if (available < required) {
+      const symbol = await symbolFor(input.chainId, input.currency);
+      const have = formatUnits(available, decimals);
+      const chainName = sourceChain.displayName || sourceChain.name;
+      throw new Error(
+        `Insufficient balance: this wallet holds ${have} ${symbol} on ${chainName}, but the swap needs `
+        + `${input.amount} ${symbol}. Fund the wallet or reduce the amount, then request a fresh quote.`
+      );
+    }
+  } catch (error) {
+    // A balance-read failure (unsupported RPC method, flaky endpoint, etc.)
+    // should not block quoting -- only a confirmed, read shortfall should.
+    // Re-throw only the insufficient-balance error we raised above.
+    if (error instanceof Error && error.message.startsWith("Insufficient balance:")) throw error;
+  }
   const quote = await relayClient.actions.getQuote({
     chainId: input.chainId,
     toChainId: input.toChainId,
