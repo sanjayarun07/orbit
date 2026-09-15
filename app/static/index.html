@@ -645,6 +645,10 @@ loadX402Config();
 const PROFILE_KEY = "orbit_profile_v1";
 const CHAT_LIST_KEY = "orbit_chats_v1";
 const AUTO_SCROLL_KEY = "orbit_auto_scroll_v1";
+// An MCP host (Claude, ChatGPT) hands the user here with ?session=<id> so they
+// can connect a wallet and confirm a quote in the same session it prepared.
+const handoffSession = new URLSearchParams(location.search).get("session");
+if (handoffSession && /^[A-Za-z0-9._:-]{1,128}$/.test(handoffSession)) { sessionStorage.setItem("orbit_session_id", handoffSession); history.replaceState(null, "", location.pathname); }
 let sessionId = sessionStorage.getItem("orbit_session_id") || null;
 let sessionRevision = 0;
 let chatTurnEpoch = 0;

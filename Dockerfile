@@ -38,6 +38,7 @@ RUN groupadd --system --gid 10001 orbit \
 COPY --from=deps /install /usr/local
 COPY --chown=orbit:orbit app ./app
 COPY --chown=orbit:orbit mcp.json pyproject.toml ./
+COPY --chown=orbit:orbit skills ./skills
 COPY --chown=orbit:orbit --from=web /src/app/static/*.js ./app/static/
 COPY --chown=orbit:orbit docker/entrypoint.sh /usr/local/bin/orbit-entrypoint
 RUN chmod +x /usr/local/bin/orbit-entrypoint

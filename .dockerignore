@@ -26,6 +26,7 @@ tests/
 scripts/
 *.md
 !README.md
+!skills/**/SKILL.md
 
 # Built bundles are produced in the image's node stage from web/*.ts.
 app/static/*.js

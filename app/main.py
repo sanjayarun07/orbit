@@ -44,7 +44,7 @@ from app.lifi import get_quote as get_lifi_quote, get_status as get_lifi_status
 from app.mcp_tools import close_mcp_gateway, discover_mcp_tools, get_mcp_registry
 from app.metrics import increment, snapshot
 from app.wash_trading import nansen_enrich, pipeline as wash_trading_pipeline, schema as wash_trading_schema
-from app import tool_outcomes, x402_gate
+from app import mcp_server, tool_outcomes, x402_gate
 from app.models import TRADING_CHAINS
 from app.models import (
     AgentResponse,
@@ -98,7 +98,8 @@ async def lifespan(_app: FastAPI):
     relay_reconciliation = asyncio.create_task(relay_tracking.worker())
     outcomes_refresh = asyncio.create_task(tool_outcomes.refresh_worker())
     try:
-        yield
+        async with mcp_server.mcp.session_manager.run():
+            yield
     finally:
         reconciliation.cancel()
         relay_reconciliation.cancel()
@@ -125,6 +126,20 @@ async def auth_admission(request: Request, call_next):
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
+
+
+@app.middleware("http")
+async def mcp_admission(request: Request, call_next):
+    # The MCP endpoint is the one surface an outside agent host drives directly;
+    # a configured key gates it (the chat UI never needs it).
+    if request.url.path.startswith("/mcp") and settings.mcp_api_key:
+        supplied = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+        if not supplied or not hmac.compare_digest(supplied, settings.mcp_api_key):
+            return JSONResponse({"error": "MCP requires a valid Authorization: Bearer key"}, status_code=401)
+    return await call_next(request)
+
+
+app.mount("/mcp", mcp_server.mcp.streamable_http_app(), name="mcp")
 
 @app.get("/health")
 async def health():
@@ -580,8 +595,13 @@ async def portfolio_scenario_report(wallet_address: str, body: PortfolioScenario
 
 @app.post("/chat", response_model=AgentResponse)
 async def chat(body: ChatRequest, request: Request):
+    return await execute_chat_turn(body, _client_identity(request))
+
+
+async def execute_chat_turn(body: ChatRequest, identity: str) -> AgentResponse:
+    """One chat turn with the same admission, per-session locking, budgets and
+    persistence as POST /chat. Also the entry point for the MCP server."""
     session_id = body.session_id or str(uuid4())
-    identity = _client_identity(request)
     allowed, retry_after = await allow_chat_request(identity)
     if not allowed:
         increment("chat_rate_limited")

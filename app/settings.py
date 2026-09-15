@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     # tier than the answer model (e.g. "openai/gpt-4.1-nano"); empty = `model`.
     intent_model: str | None = None
     intent_classifier_cache_entries: int = 512
+    # MCP server (app/mcp_server.py) mounted at /mcp for Claude / ChatGPT / any
+    # MCP host. When MCP_API_KEY is set, /mcp requires `Authorization: Bearer`.
+    # PUBLIC_BASE_URL builds the hand-off links an MCP host shows the user to
+    # connect a wallet and confirm a quote in the web UI.
+    mcp_api_key: str | None = None
+    public_base_url: str = "http://localhost:8000"
     # x402 pay-per-message on POST /chat (app/x402_gate.py). Off by default;
     # when on, an unpaid request gets HTTP 402 with the payment requirements
     # and the browser pays in USDC from the connected EVM wallet. The default

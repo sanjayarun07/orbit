@@ -395,6 +395,46 @@ CI builds and smoke-tests the image on every push and publishes it from `main`.
 Release gates, credential rotation and reconciliation guidance are in
 `docs/production-operations.md`.
 
+## Use Orbit from Claude or ChatGPT (MCP)
+
+Orbit is also an MCP server, so any agent host can use it as a skill. The
+server is mounted at `/mcp` (Streamable HTTP) and can also run over stdio. The
+tools — `orbit_chat`, `orbit_connect_wallet`, `orbit_prepare_swap`,
+`orbit_policy`, `orbit_handoff_url` — go through the same chat turn as the web
+UI (admission, budgets, validation, persistence), and the playbook in
+`skills/orbit/SKILL.md` is served as the server's instructions, as the
+`orbit://skill` resource and as the `orbit_skill` prompt.
+
+**Claude Code**
+
+```bash
+claude mcp add --transport http orbit https://orbit.yourdomain.com/mcp \
+  --header "Authorization: Bearer $MCP_API_KEY"
+```
+
+**Claude Desktop** (`claude_desktop_config.json`, stdio, runs Orbit locally
+from this checkout with its `.env`):
+
+```json
+{ "mcpServers": { "orbit": { "command": "/path/to/orbit/.venv/bin/python", "args": ["-m", "app.mcp_server"], "cwd": "/path/to/orbit" } } }
+```
+
+**ChatGPT**: Settings → Connectors → add a remote MCP server with the URL
+`https://orbit.yourdomain.com/mcp`. ChatGPT's connectors authenticate with
+OAuth or run without auth; a bearer key is not a supported option there, so
+either leave `MCP_API_KEY` unset on a deployment reserved for that connector or
+put an OAuth-issuing proxy in front of `/mcp`.
+
+**How wallets work from an agent host.** The host has no wallet and must never
+hold keys, so Orbit separates knowing a wallet from signing with it:
+`orbit_connect_wallet` binds a *public* address to the session for read-only
+analysis; any turn that produces a quote returns a `handoff_url`
+(`PUBLIC_BASE_URL/ui/?session=<id>`) that opens the very same session in the
+web UI, where the user connects Phantom, Coinbase Wallet, MetaMask, Privy or
+WalletConnect, reviews the card and confirms — the wallet signs, Orbit does
+not. Quotes expire, so the UI offers a fresh one if the hand-off was slow. The
+conversation can never sign, submit, raise a cap or bypass the risk charter.
+
 ## Configuration
 
 Everything is environment-driven; `.env.example` documents every variable.
