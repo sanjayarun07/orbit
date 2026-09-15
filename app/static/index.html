@@ -547,7 +547,7 @@
   .main::before { content: ""; right: 0; top: 0; width: min(38vw, 340px); height: min(38vw, 340px); border-radius: 0 var(--shell-radius) 0 100%; background: linear-gradient(200deg, var(--brand-soft-strong), transparent 70%); opacity: .9; }
   .main::after { content: ""; right: 8%; top: 12%; width: clamp(60px, 7vw, 104px); height: clamp(60px, 7vw, 104px); border-radius: 50%; background: var(--brand-grad); opacity: .85; box-shadow: 0 20px 60px rgba(31,209,191,.25); }
   .deco { right: 24px; top: 0; bottom: 40%; width: 110px; background-image: radial-gradient(circle, var(--border) 1.2px, transparent 1.6px); background-size: 14px 14px; opacity: .8; mask-image: linear-gradient(180deg, transparent 20%, #000 45%, #000 80%, transparent); -webkit-mask-image: linear-gradient(180deg, transparent 20%, #000 45%, #000 80%, transparent); }
-  .topbar, .conversation, .composer-shell, .jump-latest { position: relative; z-index: 1; }
+  .topbar, .conversation, .composer-shell { position: relative; z-index: 1; }
   .main:not(:has(#welcome))::after { display: none; }
   .topbar { border-bottom: 0; height: 64px; padding: 0 22px; }
   .model-label { font-weight: 600; }
@@ -616,8 +616,29 @@
   .explore-item small { display: block; color: var(--subtle); font-size: 11px; margin-top: 3px; }
   @media (max-width: 1100px) { .prompts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .prompt-card { min-height: 130px; } .main::after { display: none; } }
   @media (max-width: 720px) {
-    .app { padding: 0; gap: 0; }
-    .main { border-radius: 0; border: 0; }
+    .app { padding: 0; gap: 0; grid-template-columns: 1fr; }
+    .main { border-radius: 0; border: 0; box-shadow: none; }
+    .topbar { padding-right: 12px; }
+    .top-actions { gap: 6px; }
+    .network-pill { display: none; }
+    .wallet-button { padding: 0 10px; font-size: 12px; }
+    .avatar-button { padding: 0 3px; }
+    .avatar-button .icon { display: none; }
+    .composer-shell { padding: 8px 10px max(12px, env(safe-area-inset-bottom)); }
+    .composer { padding: 12px 12px 10px 14px; }
+    .composer-tools { gap: 6px; }
+    .composer-context { display: none; }
+    .composer-plus, .send { width: 36px; height: 36px; }
+    .team-toggle, .credits-chip, .policy-chip { height: 30px; padding: 0 10px; font-size: 11px; }
+    .policy-chip { max-width: calc(100% - 52px); }
+    .credits-chip { max-width: 40%; }
+    .msg-actions time { display: none; }
+    .message.user .message-body { max-width: 92%; }
+    .welcome h1 { font-size: 32px; }
+    .prompt-card { padding: 12px; min-height: 0; }
+    .prompt-tile { width: 36px; height: 36px; margin-bottom: 10px; }
+    .prompt-card strong { font-size: 13px; }
+    .prompt-arrow { display: none; }
     .sidebar { border-radius: 0 var(--shell-radius) var(--shell-radius) 0; }
     .prompts { grid-template-columns: 1fr 1fr; }
     .prompt-card:nth-child(n+3) { display: flex; }
