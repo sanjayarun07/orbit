@@ -139,6 +139,20 @@ async def auth_admission(request: Request, call_next):
     return await call_next(request)
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+@app.middleware("http")
+async def ui_revalidation(request: Request, call_next):
+    # The UI is a handful of hand-edited files that change with every deploy.
+    # Without this header browsers cache them heuristically and keep showing a
+    # stale page (seen live: the admin page rendered its previous design for a
+    # day). no-cache + the ETag StaticFiles already sends = one cheap 304 per load.
+    response = await call_next(request)
+    if request.url.path.startswith("/ui") and response.status_code == 200:
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
 
 
