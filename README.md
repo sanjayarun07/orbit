@@ -36,6 +36,18 @@ verified-only tokens, allowed chains — and those rules are checked exactly on
 the real quote before a card is shown; a violation blocks the trade with the
 precise reason.
 
+**Pay per message with x402 (optional).** When `X402_ENABLED` is on, `POST /chat`
+answers HTTP 402 with x402 v2 payment requirements (USDC on Base or Base
+Sepolia, `X402_PRICE` per message, paid to `X402_PAY_TO`); the browser signs an
+EIP-3009 authorization with the connected EVM wallet and retries, and the
+facilitator verifies it before the turn runs and settles it after. The composer
+shows the price and whether a paying wallet is connected. Off by default.
+
+**Light and dark themes**, following the OS by default and switchable from the
+top bar or Profile & settings. Conversations can be deleted one at a time from
+the sidebar or the top bar (inline confirm, no browser dialogs), or all at once
+from Profile & settings; deletion removes the server-side history.
+
 **Team desk.** A switch in the composer routes requests through a multi-agent
 trading desk: a Coordinator fans each request to Market Research, Execution and
 Risk specialists and returns one synthesized answer and card.
@@ -394,6 +406,7 @@ The groups that matter most:
 | Trading caps | `MAX_TRADE_USD`, `MAX_SLIPPAGE_BPS`, `MAX_PRICE_IMPACT_PCT`, `PLAN_TTL_SECONDS`, `LIVE_TRADING` |
 | Providers | `PERPLEXITY_API_KEY`, `BIRDEYE_API_KEY`, `MOBULA_API_KEY`, `BITQUERY_API_KEY`, `GOLDRUSH_API_KEY`, `HELIUS_API_KEY`, `NANSEN_API_KEY`, `ROOTDATA_API_KEY`, `DUNE_API_KEY`, … |
 | Wallets | `PRIVY_APP_ID`, `PRIVY_CLIENT_ID`, `REOWN_PROJECT_ID`, `EVM_AUTH_RPC_URLS`, `SOLANA_RPC_URL` |
+| Payments | `X402_ENABLED`, `X402_PAY_TO`, `X402_NETWORK`, `X402_PRICE`, `X402_FACILITATOR_URL` |
 | Budgets | `MAX_EXTERNAL_CALLS_PER_TURN`, `MAX_PAID_DATA_COST_USD_PER_TURN`, `PROVIDER_*` quotas and weights, `PROVIDER_OUTCOME_WEIGHT` |
 | State & ops | `DATABASE_URL`, `REDIS_URL`, `ALLOW_MEMORY_FALLBACK`, `ADMIN_API_KEY`, `TRUSTED_PROXY_HOSTS`, `FORWARDED_ALLOW_IPS`, `CLICKHOUSE_*`, `LANGFUSE_*` |
 

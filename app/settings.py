@@ -28,6 +28,19 @@ class Settings(BaseSettings):
     # tier than the answer model (e.g. "openai/gpt-4.1-nano"); empty = `model`.
     intent_model: str | None = None
     intent_classifier_cache_entries: int = 512
+    # x402 pay-per-message on POST /chat (app/x402_gate.py). Off by default;
+    # when on, an unpaid request gets HTTP 402 with the payment requirements
+    # and the browser pays in USDC from the connected EVM wallet. The default
+    # network and facilitator are Base Sepolia testnet; for Base mainnet set
+    # eip155:8453 and a facilitator that supports it.
+    x402_enabled: bool = False
+    x402_pay_to: str | None = None
+    x402_network: str = "eip155:84532"
+    x402_price: str = "$0.01"
+    x402_description: str = "One Orbit chat turn"
+    x402_max_timeout_seconds: int = 300
+    x402_facilitator_url: str = "https://x402.org/facilitator"
+    x402_sync_facilitator_on_start: bool = True
     # Outcome-scored tools (app/tool_outcomes.py): a smoothed grounded-success
     # rate per tool, learned from real turns, adds weight*(rate - prior) to
     # ProviderRouter._score. An unobserved tool sits at the prior (0 adjustment).

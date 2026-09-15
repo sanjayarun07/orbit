@@ -44,7 +44,7 @@ from app.lifi import get_quote as get_lifi_quote, get_status as get_lifi_status
 from app.mcp_tools import close_mcp_gateway, discover_mcp_tools, get_mcp_registry
 from app.metrics import increment, snapshot
 from app.wash_trading import nansen_enrich, pipeline as wash_trading_pipeline, schema as wash_trading_schema
-from app import tool_outcomes
+from app import tool_outcomes, x402_gate
 from app.models import TRADING_CHAINS
 from app.models import (
     AgentResponse,
@@ -108,6 +108,11 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Orbit Web3 Copilot", version="0.3.0", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def x402_payment(request: Request, call_next):
+    return await x402_gate.chat_payment_gate(request, call_next)
 
 
 @app.middleware("http")
@@ -305,6 +310,7 @@ async def public_config():
             "relay": True,
             "lifi_backup": settings.lifi_enabled,
         },
+        "x402": x402_gate.public_config(),
         "execution_policy": {
             "live_trading": settings.live_trading,
             "max_trade_usd": settings.max_trade_usd,

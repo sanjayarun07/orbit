@@ -7,7 +7,8 @@
     "build:privy": "esbuild web/privy.ts --bundle --minify --format=iife --platform=browser --target=es2022 --outfile=app/static/privy.js",
     "build:reown": "esbuild web/reown.ts --bundle --minify --format=iife --platform=browser --target=es2022 --outfile=app/static/reown.js",
     "build:coinbase": "esbuild web/coinbase.ts --bundle --minify --format=iife --platform=browser --target=es2022 --outfile=app/static/coinbase.js",
-    "build:web": "npm run build:executors && npm run build:coinbase && npm run build:relay && npm run build:privy && npm run build:reown",
+    "build:x402": "esbuild web/x402.ts --bundle --minify --format=iife --platform=browser --target=es2022 --outfile=app/static/x402.js",
+    "build:web": "npm run build:executors && npm run build:coinbase && npm run build:relay && npm run build:privy && npm run build:reown && npm run build:x402",
     "check:relay": "tsc --noEmit"
   },
   "dependencies": {
@@ -18,6 +19,8 @@
     "@reown/appkit": "^1.8.23",
     "@reown/appkit-adapter-ethers": "^1.8.23",
     "@solana/web3.js": "~1.98.2",
+    "@x402/evm": "^2.25.0",
+    "@x402/fetch": "^2.25.0",
     "ethers": "^6.17.0",
     "viem": "^2.26.0"
   },
