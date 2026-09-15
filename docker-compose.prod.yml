@@ -1,0 +1,40 @@
+# Production overlay: run the CI-built image behind Caddy (automatic TLS).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Set ORBIT_DOMAIN in .env (e.g. orbit.example.com) and point its DNS at this
+# host; Caddy obtains and renews the certificate. Pin ORBIT_IMAGE_TAG to a
+# sha-<commit> tag to roll back.
+services:
+  api:
+    image: ghcr.io/sanjayarun07/orbit:${ORBIT_IMAGE_TAG:-main}
+    build: !reset null
+    # Only Caddy is reachable from outside; the API stays on the compose network.
+    ports: !reset []
+    environment:
+      # X-Forwarded-* is trusted from the private compose network only, where
+      # Caddy is the sole caller; the application-level rate limits key on the
+      # same proxy name.
+      FORWARDED_ALLOW_IPS: "*"
+      TRUSTED_PROXY_HOSTS: caddy
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      ORBIT_DOMAIN: ${ORBIT_DOMAIN:?set ORBIT_DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:

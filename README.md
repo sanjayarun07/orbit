@@ -72,6 +72,19 @@ docker run --rm -p 8000:8000 --env-file .env \
   -v orbit-data:/app/data orbit-api
 ```
 
+For a server, `docker-compose.prod.yml` swaps the local build for the CI-built
+image (`ghcr.io/sanjayarun07/orbit:main`, or `ORBIT_IMAGE_TAG=sha-<commit>` to
+roll back) and puts Caddy in front with automatic TLS. Set `ORBIT_DOMAIN` in
+`.env`, point its DNS at the host, then:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+Only Caddy is exposed (80/443); the API, Postgres and Redis stay on the compose
+network. Update with `pull` + `up -d api` (in-flight requests drain).
+
 `UVICORN_WORKERS` defaults to 1 per container; scale with replicas rather than
 workers so the in-process semantic caches and the two reconciliation workers are
 not duplicated inside one instance. Set `FORWARDED_ALLOW_IPS` (uvicorn) and
