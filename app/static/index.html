@@ -572,7 +572,12 @@
   .prompt-card[data-tone="violet"] .prompt-tile { background: rgba(155,135,245,.16); color: #b8a8ff; }
   .prompt-card[data-tone="amber"] .prompt-tile { background: rgba(251,191,36,.14); color: #fbbf24; }
   .prompt-card strong { font-size: 14px; line-height: 1.4; margin-bottom: 4px; }
-  .prompt-card > span:not(.prompt-tile) { display: none; }
+  .prompt-card > span:not(.prompt-tile):not(.prompt-desc) { display: none; }
+  .prompt-desc { display: block; margin-top: 4px; font-size: 11.5px; line-height: 1.45; color: var(--subtle); }
+  .prompt-source { margin-top: auto; padding-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; color: var(--subtle); }
+  .prompt-source .prompt-arrow { margin-top: 0; }
+  .mono-cap { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--subtle); margin: -14px 0 14px; }
+  .prompt-card[data-kind="stocks"] .prompt-tile { background: rgba(47,107,255,.14); color: #6d9bff; }
   .prompt-arrow { margin-top: auto; width: 18px; height: 18px; color: var(--muted); }
   .message { padding: 12px 0; }
   .message.user .message-body { position: relative; background: var(--surface-2); border: 1px solid var(--border); border-radius: 16px; padding: 12px 16px; display: flex; align-items: baseline; gap: 14px; }
@@ -695,6 +700,7 @@
           <div class="welcome-mark"></div>
           <h1><span id="greetingWord">Good morning</span>, <em id="greetingName">there</em></h1>
           <p>How can I help you with Web3 today?</p>
+          <div class="mono-cap" id="highlightsCaption" hidden></div>
           <div class="prompts">
             <button class="prompt-card" data-action="portfolio" data-tone="teal"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/></svg></span><strong>Analyze my portfolio and concentration risk</strong><span>Review holdings, allocation, and concentration risk</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
             <button class="prompt-card" data-msg="Check my SOL balance and list my SPL token balances. Do not prepare any trade." data-tone="blue"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2"/></svg></span><strong>Check my wallet balances</strong><span>Read SOL and SPL balances from your connected wallet</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
@@ -1162,13 +1168,19 @@ async function deleteChat(id) {
   chatRegistry = chatRegistry.filter(chat => chat.id !== id); saveChats();
   if (sessionId === id) startNewChat(); else renderChatList();
 }
+const HIGHLIGHT_ICONS={crypto:'<svg class="icon" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/></svg>',stocks:'<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15l3-3 3 2 4-5"/></svg>',action:'<svg class="icon" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/></svg>'};
+let highlights=null;
+async function loadHighlights(){try{const res=await fetch("/home/highlights");if(!res.ok)throw new Error();highlights=await res.json();}catch{highlights=null;}renderHighlights();}
+function renderHighlights(){const grid=$("#welcome .prompts");const cap=$("#highlightsCaption");if(!grid||!highlights||!(highlights.cards||[]).length)return;
+  grid.innerHTML=highlights.cards.map(c=>{const attrs=c.action?`data-action="${escapeHtml(c.action)}"`:`data-msg="${escapeHtml(c.prompt||c.title)}"`;return `<button class="prompt-card" ${attrs} data-tone="${escapeHtml(c.tone||"teal")}" data-kind="${escapeHtml(c.kind||"action")}"><span class="prompt-tile">${HIGHLIGHT_ICONS[c.kind]||HIGHLIGHT_ICONS.action}</span><strong>${escapeHtml(c.title)}</strong><span class="prompt-desc">${escapeHtml(c.summary||"")}</span><span class="prompt-source"><span>${escapeHtml(c.source||(c.kind==="action"?"Orbit":""))}</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></button>`;}).join("");
+  if(cap){const when=highlights.as_of?new Date(highlights.as_of):null;cap.hidden=false;cap.textContent=highlights.source==="news"?`Today · crypto & stocks · as of ${when?when.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"now"}`:highlights.source==="market"?`Live market · as of ${when?when.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"now"}`:"";}}
 function fillGreeting(){const h=new Date().getHours();const word=h<5?"Good night":h<12?"Good morning":h<17?"Good afternoon":h<22?"Good evening":"Good night";const w=$("#greetingWord"),n=$("#greetingName");if(w)w.textContent=word;
   const name=(typeof account!=="undefined"&&account?.user?.display_name)||(typeof profile!=="undefined"&&profile?.name)||(typeof account!=="undefined"&&account?.user?.email?.split("@")[0])||"there";if(n)n.textContent=name;
   const avatar=$("#topAvatar");if(avatar)avatar.textContent=(name==="there"?"W":name).trim()[0].toUpperCase();}
 function setNav(id){document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("active",b.id===id));}
 function startNewChat() {
   if (busy) return;
-  chatTurnEpoch++;sessionId = null;sessionRevision=0; sessionStorage.removeItem("orbit_session_id"); messagesEl.innerHTML = welcomeMarkup; fillGreeting(); setNav("navHome"); renderChatList(); syncTeamMode(false); syncPolicy(null,null); autoFollow=true;conversationEl.scrollTop=0;closeSidebar();input.focus();
+  chatTurnEpoch++;sessionId = null;sessionRevision=0; sessionStorage.removeItem("orbit_session_id"); messagesEl.innerHTML = welcomeMarkup; fillGreeting(); renderHighlights(); setNav("navHome"); renderChatList(); syncTeamMode(false); syncPolicy(null,null); autoFollow=true;conversationEl.scrollTop=0;closeSidebar();input.focus();
 }
 const welcomeMarkup = messagesEl.innerHTML;
 
@@ -1559,7 +1571,7 @@ let account=null;
 async function loadAccount(){try{const res=await fetch("/me",{headers:{"X-Orbit-Device":deviceId}});account=await res.json();}catch{account=null;}renderAccount();}
 function renderCredits(){const chip=$("#creditsChip");if(!account){chip.hidden=true;return;}const balance=Number(account.credits?.balance??0);chip.hidden=false;$("#creditsCount").textContent=balance.toLocaleString();$("#creditsPlan").textContent=account.plan?.name||"Trial";chip.classList.toggle("low",balance<10);$("#accountCredits").textContent=balance.toLocaleString();$("#profileRisk").textContent=account.authenticated?`${account.plan?.name} · ${balance.toLocaleString()} credits`:`Trial · ${balance} credits left`;}
 function renderAccount(){
-  renderCredits();fillGreeting();
+  renderCredits();fillGreeting();loadHighlights();
   const signedIn=Boolean(account?.authenticated);const user=account?.user||{};
   $("#accountEmail").textContent=signedIn?user.email:"Not signed in";$("#accountEmail").classList.toggle("muted",!signedIn);
   $("#accountPlan").textContent=account?.plan?.name||"Trial";

@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     # One thumbs up/down on an answer counts as this many automatic outcomes
     # for every tool that contributed to it (app/feedback.py).
     tool_feedback_weight: float = 2.0
+    # Welcome-screen highlights (app/home_highlights.py): one news/market build per window.
+    home_highlights_ttl_seconds: int = 1800
     # Per-capability tool-selection semantic fallback (app/routing/tool_semantic.py) --
     # a second chance for a description-bearing tool whose regex `matches`
     # gate returned False, not a replacement for the intent-classification
