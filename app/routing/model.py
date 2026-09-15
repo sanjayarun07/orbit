@@ -20,6 +20,10 @@ class SpeechResolution(dspy.Signature):
     portfolio: anything about the user's OWN holdings, balances, exposure or
     activity -- 'what's my exposure to SOL', 'how much SOL do I have', 'should I
     sell everything and go to stables?'.
+    policy: a question about THIS assistant's own trading limits, safety rules
+    or risk settings for the user -- 'my wallet policy?', 'max spend policy?',
+    'what are my trading limits', 'what is my risk charter', 'how much can I
+    spend per trade here'. It asks about configured rules, not about holdings.
     'Buy NVDA' is equity research; this application does not execute stock
     orders. Negated, conditional, mixed, or unclear actions are abstain. Only
     explicit crypto quote requests may set explicit_action=true. Context can

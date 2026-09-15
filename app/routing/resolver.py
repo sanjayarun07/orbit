@@ -43,8 +43,11 @@ from .trade_parser import extract_cross_chain_draft
 _ANCHORED_REASONS = frozenset({
     "conceptual", "trade_cancel", "trade_confirm", "risk_charter", "team_mode", "equity",
     "trade_simulation", "own_token_balance", "own_token_holdings", "own_wallet_activity",
-    "wallet_health", "portfolio_scenario", "own_wallet", "token_address", "wallet_address", "url",
+    "wallet_health", "portfolio_scenario", "token_address", "wallet_address", "url",
 })
+# "own_wallet" (bare "my wallet" + anything) is deliberately NOT anchored: "my
+# wallet policy?" is a policy question, "analyze my wallet" is a portfolio one;
+# the model tells them apart and the rule survives as the capability hint.
 
 _understanding_cache: "OrderedDict[str, SpeechUnderstanding]" = OrderedDict()
 _cache_lock = threading.Lock()
@@ -66,7 +69,7 @@ def _speech_route(understanding: SpeechUnderstanding, method: str, chains: list[
         return {"intent": "research", "capabilities": ["equity_research"], "chains": [], "route_source": method}
     if understanding.speech_act == "portfolio":
         return {"intent": "portfolio", "capabilities": ["portfolio", "wallet_intelligence"], "chains": chains, "route_source": method}
-    if understanding.speech_act == "explain":
+    if understanding.speech_act in {"explain", "policy"}:
         return {"intent": "general", "capabilities": [], "chains": [], "route_source": method}
     if understanding.speech_act == "advice":
         # Advice is answered as research, never as a quote path, and is tagged

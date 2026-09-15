@@ -532,5 +532,38 @@
     "expected_intent": "trade",
     "router": false,
     "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
+  },
+  {
+    "id": "policy-wallet",
+    "query": "my wallet policy?",
+    "expected_tools": [],
+    "forbidden_tools": [
+      "portfolio_snapshot"
+    ],
+    "expected_intent": "general",
+    "router": false,
+    "notes": "policy question: answered from settings + charter, never the portfolio or the model (2026-09-15)"
+  },
+  {
+    "id": "policy-max-spend",
+    "query": "max spend policy?",
+    "expected_tools": [],
+    "forbidden_tools": [
+      "portfolio_snapshot"
+    ],
+    "expected_intent": "general",
+    "router": false,
+    "notes": "policy question: answered from settings + charter, never the portfolio or the model (2026-09-15)"
+  },
+  {
+    "id": "policy-limits",
+    "query": "what are my trading limits",
+    "expected_tools": [],
+    "forbidden_tools": [
+      "portfolio_snapshot"
+    ],
+    "expected_intent": "general",
+    "router": false,
+    "notes": "policy question: answered from settings + charter, never the portfolio or the model (2026-09-15)"
   }
 ]

@@ -220,6 +220,31 @@ def _trade_summary(plan: TradePlan) -> str:
     )
 
 
+def _charter_field_violations(fields: dict, plan, total_usd: float | None) -> list[str]:
+    """Deterministic checks of the structured charter against the real quote.
+    A rule that cannot be evaluated (unknown notional, no portfolio value) is
+    not a violation -- the charter can only make things stricter, never guess."""
+    violations: list[str] = []
+    notional = plan.input_value_usd
+    cap = fields.get("max_trade_usd")
+    if cap is not None and notional is not None and notional > cap:
+        violations.append(f"the trade is ${notional:,.2f} but your max per trade is ${cap:,.2f}")
+    pct = fields.get("max_position_pct")
+    if pct is not None and notional is not None and total_usd:
+        share = notional / total_usd * 100
+        if share > pct:
+            violations.append(f"the trade is {share:.1f}% of your ${total_usd:,.2f} portfolio but your max per position is {pct:g}%")
+    bps = fields.get("max_slippage_bps")
+    if bps is not None and plan.proposal.slippage_bps > bps:
+        violations.append(f"slippage is {plan.proposal.slippage_bps} bps but your max is {bps} bps")
+    if fields.get("verified_only") and not plan.output_token.verified:
+        violations.append(f"{plan.output_token.symbol} is not Jupiter-verified and your charter allows only verified tokens")
+    chains = fields.get("allowed_chains") or []
+    if chains and "solana" not in chains:
+        violations.append("this is a Solana swap but your charter allows only " + ", ".join(chains))
+    return violations
+
+
 @trace(name="charter_risk", as_type="agent")
 async def charter_risk_node(state: AgentState) -> dict:
     """Soft, user-configurable Risk gate between the quote and the CONFIRM card.
@@ -232,16 +257,37 @@ async def charter_risk_node(state: AgentState) -> dict:
     plan = state.get("trade_plan")
     if plan is None:
         return {}
-    charter = ((state.get("session_context") or {}).get("risk_charter") or "").strip()
+    context = state.get("session_context") or {}
+    charter = (context.get("risk_charter") or "").strip()
+    fields = context.get("risk_charter_fields") or {}
 
     portfolio_context = "unknown"
+    total_usd: float | None = None
     try:
         snapshot = await build_portfolio_snapshot(state["wallet_address"])
         total = snapshot.get("total_usd_value")
         if total is not None:
-            portfolio_context = f"Total wallet value: ${float(total):.2f}"
+            total_usd = float(total)
+            portfolio_context = f"Total wallet value: ${total_usd:.2f}"
     except Exception:
         logger.warning("charter_risk: portfolio snapshot unavailable", exc_info=True)
+
+    if charter and fields:
+        violations = _charter_field_violations(fields, plan, total_usd)
+        if violations:
+            await mark_plan_superseded(plan.plan_id)
+            detail = "; ".join(violations) + "."
+            return {
+                "trade_plan": None,
+                "answer": f"🚫 Blocked by your risk charter: {detail} No confirmation card was created; adjust the trade or your charter and try again.",
+                "risk_assessment": RiskAssessment(verdict="blocked", summary=detail, charter_applied=True),
+            }
+        if not fields.get("notes"):
+            # Every rule was checked exactly; nothing is left for the model to interpret.
+            checked = [k for k in ("max_trade_usd", "max_position_pct", "max_slippage_bps", "verified_only", "allowed_chains") if fields.get(k)]
+            return {"risk_assessment": RiskAssessment(
+                verdict="ok", summary="Within your risk rules (checked: " + ", ".join(c.replace("_", " ") for c in checked) + ").",
+                charter_applied=True)}
 
     try:
         result = await runtime._call_lm(

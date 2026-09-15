@@ -44,6 +44,7 @@ from app.lifi import get_quote as get_lifi_quote, get_status as get_lifi_status
 from app.mcp_tools import close_mcp_gateway, discover_mcp_tools, get_mcp_registry
 from app.metrics import increment, snapshot
 from app.wash_trading import nansen_enrich, pipeline as wash_trading_pipeline, schema as wash_trading_schema
+from app.models import TRADING_CHAINS
 from app.models import (
     AgentResponse,
     ChatRequest,
@@ -634,6 +635,17 @@ async def chat(body: ChatRequest, request: Request):
             await mark_plan_superseded(active_plan_id)
         if body.team_mode is not None:
             session_context = {**session_context, "team_mode": body.team_mode}
+        charter_fields = body.risk_charter_fields
+        if charter_fields is not None:
+            if charter_fields.is_empty():
+                raise HTTPException(400, "Choose at least one rule for the risk charter.")
+            if charter_fields.max_trade_usd is not None and charter_fields.max_trade_usd > settings.max_trade_usd:
+                raise HTTPException(400, f"Max per trade cannot exceed the built-in cap of ${settings.max_trade_usd:,.2f}.")
+            if charter_fields.max_slippage_bps is not None and charter_fields.max_slippage_bps > settings.max_slippage_bps:
+                raise HTTPException(400, f"Max slippage cannot exceed the built-in cap of {settings.max_slippage_bps} bps.")
+            # The canonical text is what the chat phrase path would have stored,
+            # so the transcript, the chip and the Risk agent all see one rendering.
+            body.message = f"set my risk charter: {charter_fields.render()}"
         run = await asyncio.wait_for(
             run_agent(
                 body.message,
@@ -679,6 +691,8 @@ async def chat(body: ChatRequest, request: Request):
         # consumes it before the graph runs -- see resolve_pending_token).
         next_context["pending_token"] = run.pending_token
         next_context["pending_wallet_request"] = run.pending_wallet_request
+        if charter_fields is not None:
+            next_context["risk_charter_fields"] = charter_fields.model_dump()
         if next_context.get("active_workflow") and plan:
             next_context["active_workflow"]["plan_id"] = plan.plan_id
         old_workflow = WorkflowState.from_context(session_context.get("active_workflow"))
@@ -735,6 +749,8 @@ async def chat(body: ChatRequest, request: Request):
             team_report=run.team_report,
             validation=validation,
             team_mode=bool(next_context.get("team_mode")),
+            risk_charter=next_context.get("risk_charter") or None,
+            risk_charter_fields=next_context.get("risk_charter_fields") or None,
         )
     except asyncio.TimeoutError as exc:
         increment("chat_timeouts")
@@ -753,6 +769,17 @@ async def chat(body: ChatRequest, request: Request):
         if session_lease is not None:
             await session_lease.release()
         release_chat_slot()
+
+
+@app.get("/chat/risk-charter/limits")
+async def risk_charter_limits():
+    """The built-in caps a charter can only tighten, and the chains it may name."""
+    return {
+        "max_trade_usd": settings.max_trade_usd,
+        "max_slippage_bps": settings.max_slippage_bps,
+        "max_price_impact_pct": settings.max_price_impact_pct,
+        "chains": list(TRADING_CHAINS),
+    }
 
 
 @app.get("/chat/history/{session_id}")

@@ -4,6 +4,62 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+from pydantic import ConfigDict, field_validator
+
+# Chains a charter may restrict trading to. Jupiter plans are Solana; Relay
+# routes cover the rest.
+TRADING_CHAINS = ("solana", "ethereum", "base", "arbitrum", "optimism", "polygon", "bnb", "avalanche", "robinhood")
+
+
+class RiskCharterFields(BaseModel):
+    """A structured risk charter. Every field except `notes` is enforced
+    deterministically by charter_risk_node on the real quote; `notes` is the
+    only part the Risk agent has to interpret."""
+
+    model_config = ConfigDict(extra="forbid")
+    max_trade_usd: float | None = Field(default=None, gt=0, le=1_000_000)
+    max_position_pct: float | None = Field(default=None, gt=0, le=100)
+    max_slippage_bps: int | None = Field(default=None, ge=1, le=500)
+    verified_only: bool = False
+    allowed_chains: list[str] = Field(default_factory=list, max_length=len(TRADING_CHAINS))
+    notes: str | None = Field(default=None, max_length=300)
+
+    @field_validator("allowed_chains")
+    @classmethod
+    def _known_chains(cls, chains: list[str]) -> list[str]:
+        cleaned = list(dict.fromkeys(c.strip().lower() for c in chains if c and c.strip()))
+        unknown = [c for c in cleaned if c not in TRADING_CHAINS]
+        if unknown:
+            raise ValueError(f"unknown chain(s): {', '.join(unknown)}")
+        return cleaned
+
+    @field_validator("notes")
+    @classmethod
+    def _clean_notes(cls, notes: str | None) -> str | None:
+        notes = " ".join((notes or "").split())
+        return notes or None
+
+    def is_empty(self) -> bool:
+        return not any((self.max_trade_usd, self.max_position_pct, self.max_slippage_bps,
+                        self.verified_only, self.allowed_chains, self.notes))
+
+    def render(self) -> str:
+        parts = []
+        if self.max_trade_usd is not None:
+            parts.append(f"max ${self.max_trade_usd:,.2f} per trade")
+        if self.max_position_pct is not None:
+            parts.append(f"max {self.max_position_pct:g}% of portfolio per position")
+        if self.max_slippage_bps is not None:
+            parts.append(f"max {self.max_slippage_bps} bps slippage")
+        if self.verified_only:
+            parts.append("only Jupiter-verified tokens")
+        if self.allowed_chains:
+            parts.append("chains: " + ", ".join(self.allowed_chains))
+        if self.notes:
+            parts.append(f"also: {self.notes}")
+        return "; ".join(parts)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     wallet_address: str | None = Field(default=None, max_length=128)
@@ -13,6 +69,9 @@ class ChatRequest(BaseModel):
     # Explicit trading-desk switch from the UI; None leaves the session's
     # current setting (or a chat phrase like "enable team mode") in charge.
     team_mode: bool | None = None
+    # The risk-charter card. When present the message is rewritten to the
+    # canonical "set my risk charter: ..." so history shows exactly what was set.
+    risk_charter_fields: RiskCharterFields | None = None
 
 
 class QuickAction(BaseModel):
@@ -184,6 +243,8 @@ class AgentResponse(BaseModel):
     team_report: dict | None = None
     validation: AnswerValidation | None = None
     team_mode: bool = False
+    risk_charter: str | None = None
+    risk_charter_fields: dict | None = None
 
 
 class IntentPreviewRequest(BaseModel):

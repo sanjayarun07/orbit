@@ -1,5 +1,6 @@
 from app.nodes.state import AgentState, effective_request as _effective_request
 from app.nodes import runtime
+from app.settings import settings
 from app.tracing import trace
 from app.capability_router import (
     extract_charter,
@@ -15,17 +16,60 @@ from app.capability_router import (
     is_trade_modifier,
 )
 
+# A complete, sendable example for the chat path; the UI's Risk charter card
+# offers the same rules as exact fields.
+CHARTER_EXAMPLE = (
+    "set my risk charter: only Jupiter-verified tokens, max $10 per trade, "
+    "max 1% of my portfolio per position, max 0.5% slippage, "
+    "no tokens under $1M liquidity, never more than 3 trades a day"
+)
+_HOW_TO_SET = (
+    "Set one by sending a message in this form (edit the rules to taste):\n\n"
+    f"`{CHARTER_EXAMPLE}`\n\n"
+    "Review it any time with `show my risk charter`, remove it with `clear my risk charter`."
+)
+
+
+def policy_summary(state: AgentState) -> str:
+    """The rules Orbit actually enforces for this session, from settings and the
+    session context -- never narrated by the model, so it cannot drift."""
+    context = state.get("session_context") or {}
+    charter = context.get("risk_charter")
+    wallet = state.get("wallet_address") or ""
+    wallet_line = f"`{wallet[:6]}…{wallet[-4:]}`" if len(wallet) > 12 else "none connected"
+    lines = [
+        "**Your trading policy in Orbit**",
+        "",
+        f"- **Wallet**: {wallet_line}",
+        f"- **Risk charter**: {'> ' + charter if charter else 'not set — advisory mode (risk is shown on every trade but never blocks it)'}",
+        f"- **Max per trade**: ${settings.max_trade_usd:,.2f}",
+        f"- **Max slippage**: {settings.max_slippage_bps} bps ({settings.max_slippage_bps / 100:.2f}%)",
+        f"- **Max price impact**: {settings.max_price_impact_pct:g}%",
+        f"- **Quote validity**: {settings.plan_ttl_seconds}s, then a fresh quote is required",
+        f"- **Server-side signing**: {'ON' if settings.live_trading else 'OFF — every swap is signed in your own wallet after you confirm the card'}",
+        f"- **Team desk**: {'ON' if context.get('team_mode') else 'OFF'}",
+        "",
+        "The per-trade, slippage and price-impact caps are enforced on every quote and cannot be raised from chat.",
+        "",
+        _HOW_TO_SET if not charter else
+        "Change it with a new `set my risk charter: ...` message, or remove it with `clear my risk charter`.",
+    ]
+    return "\n".join(lines)
+
+
 @trace(name="general", as_type="agent")
 async def general_node(state: AgentState) -> dict:
     """No tool calls: a single lightweight LM call for chit-chat/conceptual replies."""
     if state.get("clarification"):
         return {"answer": state["clarification"], "trajectory": None}
     request = state["request"]
+    if (state.get("routing_decision") or {}).get("speech_act") == "policy":
+        return {"answer": policy_summary(state), "trajectory": None}
     current_charter = (state.get("session_context") or {}).get("risk_charter")
     if is_charter_set(request):
         rules = extract_charter(request)
         if not rules:
-            return {"answer": "Tell me the rules after the command, e.g. `set my risk charter: only verified tokens, max $10 per trade, max 1% of portfolio`.", "trajectory": None}
+            return {"answer": f"Tell me the rules after the command, for example:\n\n`{CHARTER_EXAMPLE}`", "trajectory": None}
         # The charter is persisted by advance_session_context; echo it back so
         # the user sees exactly what the Risk agent will now enforce.
         return {
@@ -39,7 +83,7 @@ async def general_node(state: AgentState) -> dict:
     if is_charter_show(request):
         if current_charter:
             return {"answer": f"Your active risk charter:\n\n> {current_charter}", "trajectory": None}
-        return {"answer": "No risk charter is set — trades run in advisory mode (risk is shown but never blocks; the built-in caps still apply). Set one with `set my risk charter: ...`.", "trajectory": None}
+        return {"answer": "No risk charter is set — trades run in advisory mode (risk is shown but never blocks; the built-in caps still apply). " + _HOW_TO_SET, "trajectory": None}
     if is_charter_clear(request):
         return {"answer": "Risk charter cleared. Trades return to advisory mode — the Risk agent will show risk metrics but won't block; the built-in slippage/notional/impact/security caps still apply.", "trajectory": None}
     if is_team_enable(request):

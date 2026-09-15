@@ -243,8 +243,12 @@ def advance_session_context(
         rules = extract_charter(request)
         if rules:
             context["risk_charter"] = rules
+            # A charter typed as free text has no structured fields; the card
+            # path re-attaches them after this (app/main.py).
+            context["risk_charter_fields"] = None
     elif is_charter_clear(request):
         context["risk_charter"] = None
+        context["risk_charter_fields"] = None
     # Team-mode ("trading desk") toggle persists across turns in session context.
     if is_team_enable(request):
         context["team_mode"] = True
