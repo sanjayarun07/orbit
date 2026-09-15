@@ -496,9 +496,20 @@ and trades all require sign-in; anonymous visitors can research on the trial.
 
 **API keys** (`orb_live_…`, shown once, SHA-256 stored) authenticate `/chat`
 and the MCP server as the owning user with scopes `chat`, `data`, `mcp`; they
-never grant execution. Manage them under Profile → API keys. Stripe Checkout
-(cards and USDC), credit packs and the Customer Portal are the next billing
-step; the plan catalog already carries the Stripe price ids.
+never grant execution. Manage them under Profile → API keys.
+
+**Payments** go through Stripe-hosted pages only — Orbit never sees a card or
+wallet. `POST /billing/checkout` opens Checkout for a plan (subscription mode)
+or a one-time **credit pack** (500 / 2,000 / 10,000 credits; payment mode),
+`POST /billing/portal` opens the Customer Portal (upgrade, cancel, invoices),
+and `POST /billing/webhook` applies verified events idempotently: pack
+purchases credit the ledger, `invoice.paid` grants the plan's monthly
+allowance per invoice, subscription updates/deletions move the plan, and
+`charge.refunded` claws pack credits back pro rata — each keyed by the Stripe
+event id. Cards are always accepted; set `STRIPE_CRYPTO_ENABLED=true` once
+Stripe's USDC payment method is active for your entity. Everything works
+against test-mode keys; without keys the billing endpoints answer 503 and the
+UI shows the catalog read-only.
 
 | Endpoint | Purpose |
 |---|---|
@@ -508,6 +519,7 @@ step; the plan catalog already carries the Stripe price ids.
 | `PUT /me/preferences` | Display name, risk preference, default wallet, theme |
 | `GET/POST/DELETE /me/api-keys` | List, create (secret shown once), revoke |
 | `GET /billing/plans` | The plan catalog with entitlements |
+| `POST /billing/checkout`, `POST /billing/portal`, `POST /billing/webhook` | Stripe Checkout (plan or credit pack), Customer Portal, verified webhook intake |
 
 ## API surface
 

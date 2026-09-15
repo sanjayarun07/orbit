@@ -314,6 +314,13 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str | None = None
     stripe_price_pro: str | None = None
     stripe_price_max: str | None = None
+    stripe_price_pack_500: str | None = None
+    stripe_price_pack_2000: str | None = None
+    stripe_price_pack_10000: str | None = None
+    # Stripe's "crypto" payment method (USDC) needs to be enabled on the Stripe
+    # account for the entity; off until it is, so Checkout never errors.
+    stripe_crypto_enabled: bool = False
+    stripe_tax_enabled: bool = False
 
 
 settings = Settings()

@@ -55,6 +55,8 @@ def _row_to_user(row) -> dict:
         "display_name": row["display_name"],
         "plan_id": row["plan_id"],
         "stripe_customer_id": row["stripe_customer_id"],
+        "stripe_subscription_id": row.get("stripe_subscription_id") if hasattr(row, "get") else row["stripe_subscription_id"],
+        "subscription_status": row.get("subscription_status") if hasattr(row, "get") else row["subscription_status"],
         "preferences": json.loads(row["preferences"]) if isinstance(row["preferences"], str) else (row["preferences"] or {}),
         "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else row["created_at"],
     }
@@ -94,6 +96,8 @@ async def get_or_create_user(email: str) -> tuple[dict, bool]:
         "display_name": None,
         "plan_id": "free",
         "stripe_customer_id": None,
+        "stripe_subscription_id": None,
+        "subscription_status": None,
         "preferences": {},
         "created_at": _now(),
     }
@@ -115,9 +119,20 @@ async def get_or_create_user(email: str) -> tuple[dict, bool]:
     return dict(user), True
 
 
+async def get_user_by_stripe_customer(customer_id: str) -> dict | None:
+    pool = await get_pg_pool()
+    if pool is not None:
+        row = await pool.fetchrow("SELECT * FROM users WHERE stripe_customer_id = $1", customer_id)
+        return _row_to_user(row) if row else None
+    for user in _users.values():
+        if user.get("stripe_customer_id") == customer_id:
+            return dict(user)
+    return None
+
+
 async def update_user(user_id: str, **fields) -> dict | None:
     """Update a whitelisted set of columns; preferences are merged, not replaced."""
-    allowed = {"display_name", "plan_id", "stripe_customer_id", "preferences"}
+    allowed = {"display_name", "plan_id", "stripe_customer_id", "stripe_subscription_id", "subscription_status", "preferences"}
     changes = {key: value for key, value in fields.items() if key in allowed}
     if not changes:
         return await get_user(user_id)

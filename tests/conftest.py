@@ -4,7 +4,7 @@ without this one test could exhaust the next one's credits), plus a helper
 that signs a TestClient in through the magic-link flow."""
 import pytest
 
-from app import accounts, api_keys, credits
+from app import accounts, api_keys, billing, credits
 
 
 @pytest.fixture(autouse=True)
@@ -14,8 +14,9 @@ def _reset_account_stores(monkeypatch):
     async def no_pool():
         return None
 
-    for module in (accounts, credits, api_keys):
+    for module in (accounts, credits, api_keys, billing):
         monkeypatch.setattr(module, "get_pg_pool", no_pool)
+    billing.reset()
     # The /auth/ rate limit is per IP and lives in Redis when configured; every
     # test signs in from the same client IP, so it must not carry across tests.
     from app import main

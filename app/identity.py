@@ -63,7 +63,11 @@ def client_ip(request: Request) -> str:
 async def _identity_for_user(user: dict, ip: str, api_key: dict | None = None) -> Identity:
     plan = get_plan(user.get("plan_id"))
     account_id = credits.user_account_id(user["id"])
-    await credits.ensure_monthly_grant(account_id, plan)
+    # Paid plans get their allowance from Stripe's invoice.paid webhook; the
+    # lazy monthly grant is for the Free tier and admin-set plans without a
+    # subscription behind them.
+    if plan.price_usd_month <= 0 or not user.get("stripe_subscription_id"):
+        await credits.ensure_monthly_grant(account_id, plan)
     return Identity("api_key" if api_key else "user", account_id, ip, user=user, api_key=api_key, plan=plan)
 
 

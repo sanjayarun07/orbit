@@ -100,6 +100,11 @@ class AdminCreditGrant(BaseModel):
     reference: str | None = Field(default=None, max_length=120)
 
 
+class CheckoutRequest(BaseModel):
+    kind: Literal["subscription", "pack"]
+    item_id: str = Field(max_length=32)
+
+
 class ApiKeyCreate(BaseModel):
     name: str = Field(default="API key", max_length=60)
     scopes: list[str] | None = None

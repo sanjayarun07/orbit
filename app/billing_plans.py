@@ -76,6 +76,39 @@ PLANS: dict[str, Plan] = {plan.id: plan for plan in (ANONYMOUS, FREE, PRO, MAX)}
 PAID_PLAN_IDS = ("pro", "max")
 
 
+@dataclass(frozen=True)
+class Pack:
+    """A one-time credit top-up (Stripe Checkout in payment mode)."""
+    id: str
+    name: str
+    credits: int
+    price_usd: float
+
+    def stripe_price_id(self) -> str | None:
+        return getattr(settings, f"stripe_price_{self.id}", None) or None
+
+    def public(self) -> dict:
+        return {
+            "id": self.id, "name": self.name, "credits": self.credits, "price_usd": self.price_usd,
+            "purchasable": bool(self.stripe_price_id()),
+        }
+
+
+# Placeholder prices (roughly the Pro rate without the subscription discount);
+# set the real amounts on the Stripe Prices -- Checkout charges what Stripe says.
+PACKS: dict[str, Pack] = {
+    pack.id: pack for pack in (
+        Pack("pack_500", "Starter pack", 500, 6.0),
+        Pack("pack_2000", "Builder pack", 2000, 20.0),
+        Pack("pack_10000", "Desk pack", 10000, 85.0),
+    )
+}
+
+
+def get_pack(pack_id: str | None) -> Pack | None:
+    return PACKS.get(pack_id or "")
+
+
 def get_plan(plan_id: str | None) -> Plan:
     return PLANS.get(plan_id or "", FREE)
 

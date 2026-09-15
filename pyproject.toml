@@ -25,6 +25,7 @@ dependencies = [
   "eth-account>=0.13.7,<1",
   "eth-abi>=5,<6",
   "x402[fastapi,evm]==2.22.0",
+  "stripe>=13,<14",
   # FastAPI 0.115 pins Starlette below 0.47; prevent an incompatible SSE major.
   "sse-starlette>=1.6.1,<3",
 ]

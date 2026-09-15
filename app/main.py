@@ -45,7 +45,7 @@ from app.lifi import get_quote as get_lifi_quote, get_status as get_lifi_status
 from app.mcp_tools import close_mcp_gateway, discover_mcp_tools, get_mcp_registry
 from app.metrics import increment, snapshot
 from app.wash_trading import nansen_enrich, pipeline as wash_trading_pipeline, schema as wash_trading_schema
-from app import accounts, api_keys, billing_plans, credits, mcp_server, tool_outcomes, x402_gate
+from app import accounts, api_keys, billing, billing_plans, credits, mcp_server, tool_outcomes, x402_gate
 from app.identity import Identity, current_identity, require_user, resolve_identity, service_identity
 from app.models import TRADING_CHAINS
 from app.models import (
@@ -53,6 +53,7 @@ from app.models import (
     AdminPlanUpdate,
     AgentResponse,
     ApiKeyCreate,
+    CheckoutRequest,
     ChatRequest,
     ConfirmRequest,
     EmailSigninStart,
@@ -915,6 +916,11 @@ async def _me_payload(identity: Identity) -> dict:
         "credits": {"balance": balance},
         "wallets": await accounts.list_wallets(user["id"]),
         "api_key": {"id": identity.api_key["id"], "name": identity.api_key["name"]} if identity.api_key else None,
+        "billing": {
+            "configured": billing.configured(),
+            "has_billing_account": bool(user.get("stripe_customer_id")),
+            "subscription_status": user.get("subscription_status"),
+        },
     }
 
 
@@ -1045,7 +1051,57 @@ async def admin_grant_credits(email: str, body: AdminCreditGrant, request: Reque
 
 @app.get("/billing/plans")
 async def billing_catalog():
-    return {"plans": billing_plans.catalog(), "trial_credits": billing_plans.ANONYMOUS.trial_credits}
+    return {"plans": billing_plans.catalog(), "trial_credits": billing_plans.ANONYMOUS.trial_credits, **billing.public_config()}
+
+
+def _public_base(request: Request) -> str:
+    return settings.public_base_url or f"{request.url.scheme}://{request.headers.get('host', request.url.netloc)}"
+
+
+@app.post("/billing/checkout")
+async def billing_checkout(body: CheckoutRequest, request: Request, identity: Identity = Depends(require_user)):
+    """A Stripe-hosted Checkout URL. Orbit never handles the card or wallet."""
+    if identity.api_key is not None:
+        raise HTTPException(403, "Billing is managed from a signed-in browser session")
+    try:
+        return await billing.create_checkout(identity.user, body.kind, body.item_id, _public_base(request))
+    except billing.BillingNotConfigured as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/billing/portal")
+async def billing_portal(request: Request, identity: Identity = Depends(require_user)):
+    if identity.api_key is not None:
+        raise HTTPException(403, "Billing is managed from a signed-in browser session")
+    try:
+        return {"url": await billing.create_portal(identity.user, _public_base(request))}
+    except billing.BillingNotConfigured as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/billing/webhook")
+async def billing_webhook(request: Request):
+    """Stripe -> Orbit. Verified with the signing secret, recorded by event id,
+    applied idempotently; always 200 once verified so Stripe stops retrying."""
+    payload = await request.body()
+    signature = request.headers.get("stripe-signature", "")
+    try:
+        event = billing._api_construct_event(payload, signature)
+    except billing.BillingNotConfigured as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except billing.WebhookError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    try:
+        result = await billing.handle_event(event)
+    except Exception as exc:
+        # A handler bug must surface as a retryable failure, not a silent 200.
+        raise HTTPException(500, "Webhook handling failed") from exc
+    increment(f"stripe_{result.get('status', 'unknown')}")
+    return {"received": True, **result}
 
 
 @app.get("/chat/risk-charter/limits")
