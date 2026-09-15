@@ -496,6 +496,20 @@ class ProviderRouter:
             lambda: self.candidates(request, capability, chains, provider),
         )
 
+    def invoke(self, tool_name: str, request: str, chains: tuple[str, ...] = ()) -> ProviderResult | None:
+        """Run ONE named read-only tool on a request. The caller chose the tool
+        explicitly (an MCP host, the admin lab), so the request->tool matchers
+        are bypassed -- but not quota, circuit breaker, budget, cache, retries
+        or outcome accounting, which all live in _route_ranked. Raises KeyError
+        for an unknown name; returns None when the tool is disabled,
+        unconfigured, not read-only, or fails."""
+        tool = next((t for t in self._tools if t.name == tool_name), None)
+        if tool is None:
+            raise KeyError(tool_name)
+        if tool.risk != "read_only" or not self._enabled(tool):
+            return None
+        return self._route_ranked(request, f"{tool.capabilities[0]}@tool:{tool.name}", lambda: [tool])
+
     def try_route_across(
         self,
         request: str,

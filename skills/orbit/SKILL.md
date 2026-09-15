@@ -17,6 +17,11 @@ their own wallet, in the Orbit web UI, never inside this conversation.
 
 ## Tools
 
+Everything the web UI can do is here, in four families. Start with
+`orbit_chat` for anything phrased in natural language; reach for the
+specific tools when you already know exactly what you need.
+
+**Conversation and session**
 - `orbit_chat(message, session_id?, wallet_address?)` — one turn of the
   copilot. Send the user's request as written. Returns the answer, the
   `session_id` to reuse for follow-ups, the detected intent, the providers
@@ -24,16 +29,41 @@ their own wallet, in the Orbit web UI, never inside this conversation.
   `handoff_url` where the user confirms it. Always pass the `session_id` from
   the previous call so pronouns ("sell half of it") and follow-ups resolve.
 - `orbit_connect_wallet(session_id, address)` — attach a **public** wallet
-  address (Solana base58 or EVM 0x) to the session for read-only use:
-  balances, exposure, portfolio scenarios, and quotes sized to real holdings.
+  address (Solana base58 or EVM 0x) to the session for read-only use.
   Orbit never asks for or accepts a private key or seed phrase.
 - `orbit_prepare_swap(session_id, amount, input_token, output_token, source_chain, destination_chain?, slippage_bps?)`
-  — quote a swap (Jupiter on Solana, Relay across chains). Returns the reviewed
-  quote and a `handoff_url`; nothing executes until the user confirms there.
-- `orbit_policy(session_id)` — the risk rules Orbit enforces for this session:
-  the built-in caps and the user's risk charter, if set.
-- `orbit_handoff_url(session_id)` — a link that opens this exact session in the
-  Orbit web UI so the user can connect a wallet and confirm pending quotes.
+  — quote a swap (Jupiter on Solana, Relay across chains); returns the reviewed
+  quote and a `handoff_url`. `orbit_trade_simulation(...)` is the read-only
+  "what would I get" variant that never creates a plan.
+- `orbit_set_team_mode(session_id, enabled)` — the multi-agent trading desk.
+- `orbit_set_risk_charter(session_id, max_trade_usd?, max_position_pct?, max_slippage_bps?, verified_only?, allowed_chains?, notes?)`,
+  `orbit_clear_risk_charter`, `orbit_risk_charter_limits`, `orbit_policy` —
+  the user's exact risk rules, checked on every quote; caps cannot be raised.
+- `orbit_history(session_id)`, `orbit_delete_history(session_id)`,
+  `orbit_handoff_url(session_id)`.
+
+**Analytics (deterministic, no model involved)**
+- `orbit_portfolio`, `orbit_wallet_health`, `orbit_portfolio_scenario(change_pct, symbol?)`
+  — the bound wallet's holdings, diagnostics and price-shock simulation.
+- `orbit_market_overview()` — the market card; `orbit_token_deep_dive(token, chain?)`
+  — ten-dimension due diligence.
+- `orbit_trade_plan(plan_id)`, `orbit_execution_status(signature)`,
+  `orbit_relay_status(request_id)` — quotes and submitted transactions.
+- `orbit_capabilities()`, `orbit_route_preview(request, capability, chains?)`,
+  `orbit_health()` — what Orbit can route to, and how it would.
+
+**Data sources, one tool each** — `orbit_data_<provider_tool>` (DexScreener,
+GeckoTerminal, Birdeye, Mobula, Bitquery, CoinGecko, CoinMarketCap, GoPlus,
+Honeypot.is, DeFiLlama, Dune, Helius, GoldRush, RootData, Perplexity, …). Each
+takes a natural-language `request` and optional `chains`, runs through the
+same quotas, circuit breakers, cache and budget as the copilot, and returns
+that provider's evidence verbatim. `orbit_mcp_catalog()` / `orbit_mcp_call(tool_name, arguments)`
+reach the tools Orbit itself discovers from MCP servers (e.g. Nansen);
+execution-risk tools are refused.
+
+**Resources**: `orbit://skill` (this playbook), `orbit://capabilities`,
+`orbit://health`, `orbit://history/{session_id}`, `orbit://policy/{session_id}`.
+**Prompts**: `orbit_skill`, `orbit_deep_dive(token, chain?)`, `orbit_market_brief`.
 
 ## How wallet connection works from here
 

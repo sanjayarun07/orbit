@@ -397,13 +397,31 @@ Release gates, credential rotation and reconciliation guidance are in
 
 ## Use Orbit from Claude or ChatGPT (MCP)
 
-Orbit is also an MCP server, so any agent host can use it as a skill. The
-server is mounted at `/mcp` (Streamable HTTP) and can also run over stdio. The
-tools — `orbit_chat`, `orbit_connect_wallet`, `orbit_prepare_swap`,
-`orbit_policy`, `orbit_handoff_url` — go through the same chat turn as the web
-UI (admission, budgets, validation, persistence), and the playbook in
-`skills/orbit/SKILL.md` is served as the server's instructions, as the
-`orbit://skill` resource and as the `orbit_skill` prompt.
+Orbit is also an MCP server with the same surface as the web UI, so any agent
+host can use it as a skill. The server is mounted at `/mcp` (Streamable HTTP)
+and can also run over stdio. Four families of tools:
+
+- **Conversation and session** — `orbit_chat` (the same turn as the web chat),
+  `orbit_connect_wallet`, `orbit_prepare_swap`, `orbit_trade_simulation`,
+  `orbit_set_team_mode`, `orbit_set_risk_charter` / `orbit_clear_risk_charter` /
+  `orbit_risk_charter_limits` / `orbit_policy`, `orbit_history`,
+  `orbit_delete_history`, `orbit_handoff_url`.
+- **Analytics** — `orbit_portfolio`, `orbit_wallet_health`,
+  `orbit_portfolio_scenario`, `orbit_market_overview`, `orbit_token_deep_dive`,
+  `orbit_trade_plan`, `orbit_execution_status`, `orbit_relay_status`,
+  `orbit_capabilities`, `orbit_route_preview`, `orbit_health`.
+- **Data sources** — one `orbit_data_<tool>` per read-only provider tool
+  (35 today), each running through the router's quotas, circuit breakers,
+  cache, budget and outcome accounting with the request→tool matchers
+  bypassed because the host chose the tool; plus `orbit_mcp_catalog` /
+  `orbit_mcp_call` for tools Orbit discovers from its own MCP servers
+  (execution-risk tools are refused).
+- **Resources and prompts** — `orbit://skill`, `orbit://capabilities`,
+  `orbit://health`, `orbit://history/{session_id}`, `orbit://policy/{session_id}`;
+  prompts `orbit_skill`, `orbit_deep_dive`, `orbit_market_brief`.
+
+The playbook in `skills/orbit/SKILL.md` is served as the server's instructions
+and describes every tool and the wallet flow.
 
 **Claude Code**
 

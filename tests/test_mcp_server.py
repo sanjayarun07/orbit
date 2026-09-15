@@ -73,3 +73,91 @@ def test_mcp_endpoint_requires_the_configured_key(monkeypatch):
     assert client.post("/mcp", json={}).status_code == 401
     assert client.post("/mcp", json={}, headers={"Authorization": "Bearer wrong"}).status_code == 401
     assert client.get("/health").status_code == 200  # only /mcp is gated
+
+
+def test_full_web_surface_is_exposed():
+    tools = {t.name: t for t in asyncio.run(mcp_server.mcp.list_tools())}
+    core = {"orbit_chat", "orbit_connect_wallet", "orbit_prepare_swap", "orbit_trade_simulation", "orbit_set_team_mode",
+            "orbit_set_risk_charter", "orbit_clear_risk_charter", "orbit_risk_charter_limits", "orbit_policy", "orbit_history",
+            "orbit_delete_history", "orbit_handoff_url", "orbit_portfolio", "orbit_wallet_health", "orbit_portfolio_scenario",
+            "orbit_market_overview", "orbit_token_deep_dive", "orbit_trade_plan", "orbit_execution_status", "orbit_relay_status",
+            "orbit_capabilities", "orbit_route_preview", "orbit_health", "orbit_mcp_catalog", "orbit_mcp_call"}
+    assert core <= set(tools)
+    data_tools = [n for n in tools if n.startswith("orbit_data_")]
+    assert len(data_tools) >= 30 and "orbit_data_birdeye_token_overview" in tools
+    assert "birdeye" in tools["orbit_data_birdeye_token_overview"].description
+    resources = {str(r.uri) for r in asyncio.run(mcp_server.mcp.list_resources())}
+    assert {"orbit://skill", "orbit://capabilities", "orbit://health"} <= resources
+    prompts = {p.name for p in asyncio.run(mcp_server.mcp.list_prompts())}
+    assert {"orbit_skill", "orbit_deep_dive", "orbit_market_brief"} <= prompts
+
+
+def test_data_tool_invokes_the_named_provider_tool_through_the_router(monkeypatch):
+    from app.provider_registry import get_provider_router
+    from app.provider_router import ProviderResult
+
+    calls = []
+
+    def fake_invoke(name, request, chains=()):
+        calls.append((name, request, chains))
+        return ProviderResult("**Price**: $1.23", name, "birdeye")
+
+    monkeypatch.setattr(get_provider_router(), "invoke", fake_invoke)
+    out = asyncio.run(mcp_server.mcp.call_tool("orbit_data_birdeye_token_overview", {"request": "price of BONK", "chains": ["solana"]}))
+    payload = out[1] if isinstance(out, tuple) else out
+    text = json.dumps(payload, default=str) if not isinstance(payload, list) else "".join(getattr(c, "text", "") for c in payload)
+    assert calls == [("birdeye_token_overview", "price of BONK", ("solana",))]
+    assert "$1.23" in text
+
+
+def test_router_invoke_bypasses_matchers_but_refuses_non_read_only_and_unknown(monkeypatch):
+    from app.provider_registry import get_provider_router
+    router = get_provider_router()
+    with pytest.raises(KeyError):
+        router.invoke("no_such_tool", "x")
+    tool = next(t for t in router._tools if t.name == "birdeye_token_overview")
+    monkeypatch.setattr(router, "_route_ranked", lambda request, cap, cands: ("routed", cap, [t.name for t in cands()]))
+    assert router.invoke("birdeye_token_overview", "anything at all")[2] == ["birdeye_token_overview"]
+    monkeypatch.setattr(router, "_enabled", lambda t: False)
+    assert router.invoke("birdeye_token_overview", "x") is None
+
+
+def test_session_controls_go_through_the_chat_turn(monkeypatch):
+    seen = []
+
+    async def fake_run(message, wallet, history, session_context, action):
+        seen.append((message, dict(session_context)))
+        return AgentRun(answer=message, trajectory=None, trade_plan=None, intent="general", capabilities=[])
+
+    monkeypatch.setattr(main, "run_agent", fake_run)
+    monkeypatch.setattr(settings, "max_trade_usd", 25.0)
+    on = asyncio.run(mcp_server.orbit_set_team_mode(None, True))
+    sid = on["session_id"]
+    assert on["team_mode"] is True and seen[-1][1]["team_mode"] is True
+    charter = asyncio.run(mcp_server.orbit_set_risk_charter(sid, max_trade_usd=10, verified_only=True))
+    assert charter["risk_charter"] == "max $10.00 per trade; only Jupiter-verified tokens"
+    assert charter["risk_charter_fields"]["verified_only"] is True
+    too_high = asyncio.run(mcp_server.orbit_set_risk_charter(sid, max_trade_usd=100))
+    assert too_high["status"] == 400 and "built-in cap" in too_high["error"]
+    cleared = asyncio.run(mcp_server.orbit_clear_risk_charter(sid))
+    assert cleared["risk_charter"] is None
+    history = asyncio.run(mcp_server.orbit_history(sid))
+    assert [m["role"] for m in history["messages"]][:2] == ["user", "assistant"] and history["context"]["team_mode"] is True
+    assert asyncio.run(mcp_server.orbit_delete_history(sid)) == {"session_id": sid, "deleted": True}
+    assert asyncio.run(mcp_server.orbit_history(sid))["messages"] == []
+    limits = asyncio.run(mcp_server.orbit_risk_charter_limits())
+    assert limits["max_trade_usd"] == 25.0 and "solana" in limits["chains"]
+
+
+def test_mcp_call_refuses_execution_tools_and_unknown_names(monkeypatch):
+    from app.nodes import runtime
+
+    def risky(**kwargs):
+        return "should not run"
+
+    risky.__name__ = "mcp_nansen_swap"
+    risky.mcp_risk = "execution"
+    registry_get = {"mcp_nansen_swap": risky}
+    monkeypatch.setattr(runtime._mcp_registry, "get", lambda name: registry_get.get(name))
+    assert asyncio.run(mcp_server.orbit_mcp_call("mcp_nansen_swap", {}))["status"] == 403
+    assert asyncio.run(mcp_server.orbit_mcp_call("mcp_nansen_missing", {}))["status"] == 404
