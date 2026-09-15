@@ -67,6 +67,22 @@ def test_registry_bootstrap_builds_entities_and_first_edges():
     assert registry.guess_docs_url(aave) == "https://docs.aave.com"
 
 
+def test_docs_url_candidates_strip_app_hosts():
+    """DefiLlama's url is usually the app (app.morpho.org, portal.arbitrum.io):
+    the guess must fall back to the registrable domain and offer /docs paths."""
+    from app.knowledge.models import Protocol
+
+    def proto(website, docs_url=None):
+        return Protocol(id="protocol:x", slug="x", name="X", website=website, docs_url=docs_url)
+
+    assert registry.guess_docs_urls(proto("https://app.morpho.org")) == ["https://docs.morpho.org", "https://morpho.org/docs", "https://www.morpho.org/docs"]
+    assert registry.guess_docs_urls(proto("https://portal.arbitrum.io/bridge"))[0] == "https://docs.arbitrum.io"
+    assert registry.guess_docs_urls(proto("https://docs.base.org/base-chain/bridges")) == ["https://docs.base.org", "https://base.org/docs", "https://www.base.org/docs"]
+    assert registry.guess_docs_urls(proto("https://kelpdao.xyz/restake/?utm_source=abc"))[0] == "https://docs.kelpdao.xyz"
+    assert registry.guess_docs_urls(proto("https://app.sky.money/", docs_url="https://developers.sky.money/"))[0] == "https://developers.sky.money"
+    assert registry.guess_docs_urls(proto(None)) == []
+
+
 def test_entity_resolution_ladder():
     asyncio.run(registry.bootstrap(limit=10))
     resolver = asyncio.run(kb_tool.resolver())

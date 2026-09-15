@@ -65,7 +65,10 @@ async def ingest_document(doc: NormalizedDocument, store=None, resolver: EntityR
     current = await store.live_document(doc.url)
     if current and current.content_hash == doc.content_hash:
         return False, 0, 0
-    pieces = chunk_markdown(doc.content)
+    # Chunking, embedding and mention extraction are CPU-bound (regex over the
+    # whole document, hundreds of entity names): keep them off the event loop
+    # so chat requests stay responsive while a large docs site is ingested.
+    pieces = await asyncio.to_thread(chunk_markdown, doc.content)
     if not pieces:
         return False, 0, 0
     embedder = get_embedder()
@@ -78,7 +81,7 @@ async def ingest_document(doc: NormalizedDocument, store=None, resolver: EntityR
     doc.id = doc_id
     written = 0
     resolver = resolver or await _resolver(store)
-    for rel in extract_relationships(doc, resolver):
+    for rel in await asyncio.to_thread(extract_relationships, doc, resolver):
         written += int(await store.upsert_relationship(rel))
     return True, len(chunks), written
 
@@ -127,6 +130,31 @@ async def run_protocol(protocol_id: str, connectors: list | None = None, store=N
         if not connector.applies(protocol):
             continue
         results.append(await run_source(connector, protocol, store))
+    return results
+
+
+async def run_all(parallel: int = 3, limit: int | None = None, only_due: bool = True, connectors: list | None = None) -> list[IngestionResult]:
+    """Every registry protocol, `parallel` at a time, most valuable first.
+    Meant for the standalone ingest process (scripts/kb_ingest.py): the API
+    process should only ever run small `tick`s."""
+    store = await get_store()
+    connectors = connectors or default_connectors()
+    protocols = await store.list_protocols(limit=limit or settings.knowledge_registry_limit)
+    semaphore = asyncio.Semaphore(max(1, parallel))
+    results: list[IngestionResult] = []
+
+    async def one(protocol: Protocol) -> None:
+        async with semaphore:
+            for connector in connectors:
+                if not connector.applies(protocol):
+                    continue
+                if only_due and not await due(connector, protocol, store):
+                    continue
+                result = await run_source(connector, protocol, store)
+                results.append(result)
+                logger.info("knowledge: %s/%s seen=%d changed=%d chunks=%d errors=%d", protocol.slug, connector.name, result.documents_seen, result.documents_changed, result.chunks_written, len(result.errors))
+
+    await asyncio.gather(*(one(p) for p in protocols))
     return results
 
 

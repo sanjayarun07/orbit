@@ -123,13 +123,38 @@ async def bootstrap(limit: int = 50, items: list[dict] | None = None) -> dict:
     return {"protocols": written, "entities": entities_written, "relationships": relationships_written}
 
 
-def guess_docs_url(protocol: Protocol) -> str | None:
-    """Docs live at predictable places for most protocols; the crawler
-    verifies the guess (a 404 is skipped, not indexed)."""
+# DefiLlama's `url` is usually the app, not the site: app.morpho.org, portal.arbitrum.io,
+# data.grove.finance. Strip those labels back to the registrable domain before guessing.
+_APP_LABELS = {"app", "www", "docs", "portal", "data", "stake", "bridge", "dashboard", "swap", "trade", "mainnet", "go", "my"}
+
+
+def _registrable_domain(host: str) -> str:
+    labels = [label for label in host.lower().split(".") if label]
+    while len(labels) > 2 and labels[0] in _APP_LABELS:
+        labels.pop(0)
+    return ".".join(labels)
+
+
+def guess_docs_urls(protocol: Protocol) -> list[str]:
+    """Ranked candidates for where a protocol's docs live. The crawler tries
+    them in order and keeps the first root that actually serves a docs site
+    (a 404 or a link-less app shell is skipped, not indexed)."""
+    out: list[str] = []
     if protocol.docs_url:
-        return protocol.docs_url
-    site = (protocol.website or "").rstrip("/")
-    if not site:
-        return None
-    host = re.sub(r"^https?://(www\.)?", "", site)
-    return f"https://docs.{host}"
+        out.append(protocol.docs_url.rstrip("/"))
+    site = (protocol.website or "").strip()
+    host = re.sub(r"^https?://", "", site).split("/", 1)[0].split("?", 1)[0].lower()
+    if host:
+        if host.startswith("docs."):
+            out.append(f"https://{host}")
+        domain = _registrable_domain(host)
+        if domain:
+            out.extend([f"https://docs.{domain}", f"https://{domain}/docs", f"https://www.{domain}/docs"])
+    seen: set[str] = set()
+    return [u for u in out if not (u in seen or seen.add(u))]
+
+
+def guess_docs_url(protocol: Protocol) -> str | None:
+    """The most likely docs root (first candidate of `guess_docs_urls`)."""
+    candidates = guess_docs_urls(protocol)
+    return candidates[0] if candidates else None

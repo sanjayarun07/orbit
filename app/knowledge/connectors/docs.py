@@ -16,7 +16,7 @@ import httpx
 from app.knowledge.connectors.base import SourceRef
 from app.knowledge.models import NormalizedDocument, Protocol
 from app.knowledge.normalize import clean_markdown, content_hash, html_to_markdown
-from app.knowledge.registry import guess_docs_url
+from app.knowledge.registry import guess_docs_urls
 
 logger = logging.getLogger(__name__)
 _HREF = re.compile(r'href=["\']([^"\'#]+)', re.I)
@@ -35,42 +35,51 @@ class DocsConnector:
         self.timeout = timeout
 
     def applies(self, protocol: Protocol) -> bool:
-        return bool(guess_docs_url(protocol))
+        return bool(guess_docs_urls(protocol))
 
     def discover(self, protocol: Protocol):
-        root = guess_docs_url(protocol)
-        if not root:
-            return []
-        refs: list[SourceRef] = []
+        """First docs root that serves a real site wins. A root counts when it
+        returns pages with same-host links; an app shell or a 404 is skipped."""
         with httpx.Client(timeout=self.timeout, follow_redirects=True, headers={"User-Agent": "Dopamint-Knowledge/0.1 (+docs crawler)"}) as client:
-            # llms.txt: curated markdown links -- best case.
-            for candidate in (f"{root}/llms.txt", f"{root}/llms-full.txt"):
-                try:
-                    resp = client.get(candidate)
-                    if resp.status_code == 200 and "http" in resp.text:
-                        for url in re.findall(r"\((https?://[^)\s]+)\)", resp.text):
-                            if self._same_host(root, url) and len(refs) < self.page_budget:
-                                refs.append(SourceRef(url=url, kind="page"))
-                        if refs:
-                            return refs
-                except httpx.HTTPError:
-                    pass
+            for root in guess_docs_urls(protocol):
+                refs = self._discover_root(client, root)
+                if len(refs) >= self.MIN_PAGES:
+                    logger.info("knowledge: %s docs root %s (%d pages)", protocol.slug, root, len(refs))
+                    return refs
+        return []
+
+    MIN_PAGES = 2
+
+    def _discover_root(self, client: httpx.Client, root: str) -> list[SourceRef]:
+        refs: list[SourceRef] = []
+        # llms.txt: curated markdown links -- best case.
+        for candidate in (f"{root}/llms.txt", f"{root}/llms-full.txt"):
             try:
-                resp = client.get(root)
+                resp = client.get(candidate)
+                if resp.status_code == 200 and "http" in resp.text:
+                    for url in re.findall(r"\((https?://[^)\s]+)\)", resp.text):
+                        if self._same_host(root, url) and len(refs) < self.page_budget:
+                            refs.append(SourceRef(url=url, kind="page"))
+                    if refs:
+                        return refs
             except httpx.HTTPError:
-                return []
-            if resp.status_code >= 400:
-                return []
-            final_root = str(resp.url)
-            refs.append(SourceRef(url=final_root, kind="page"))
-            seen = {final_root}
-            queue = [u for u in self._links(final_root, resp.text) if u not in seen]
-            while queue and len(refs) < self.page_budget:
-                url = queue.pop(0)
-                if url in seen:
-                    continue
-                seen.add(url)
-                refs.append(SourceRef(url=url, kind="page"))
+                pass
+        try:
+            resp = client.get(root)
+        except httpx.HTTPError:
+            return []
+        if resp.status_code >= 400 or "html" not in (resp.headers.get("content-type") or ""):
+            return []
+        final_root = str(resp.url)
+        refs.append(SourceRef(url=final_root, kind="page"))
+        seen = {final_root}
+        queue = [u for u in self._links(final_root, resp.text) if u not in seen]
+        while queue and len(refs) < self.page_budget:
+            url = queue.pop(0)
+            if url in seen:
+                continue
+            seen.add(url)
+            refs.append(SourceRef(url=url, kind="page"))
         return refs
 
     def fetch(self, protocol: Protocol, ref: SourceRef) -> NormalizedDocument | None:

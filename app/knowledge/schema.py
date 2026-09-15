@@ -127,6 +127,10 @@ CREATE TABLE IF NOT EXISTS kb_ingestion_runs (
 DDL_VECTOR = "ALTER TABLE kb_chunks ADD COLUMN IF NOT EXISTS embedding vector({dim});"
 DDL_VECTOR_INDEX = "CREATE INDEX IF NOT EXISTS kb_chunks_embedding ON kb_chunks USING hnsw (embedding vector_cosine_ops);"
 DDL_FLOAT_ARRAY = "ALTER TABLE kb_chunks ADD COLUMN IF NOT EXISTS embedding real[];"
+# A database that started life without pgvector (embeddings as real[]) upgrades in
+# place once the extension is installed: the cast keeps every stored embedding.
+DDL_MIGRATE_ARRAY = "ALTER TABLE kb_chunks ALTER COLUMN embedding TYPE vector({dim}) USING embedding::vector({dim});"
+SQL_EMBEDDING_TYPE = "SELECT udt_name FROM information_schema.columns WHERE table_name = 'kb_chunks' AND column_name = 'embedding'"
 
 
 async def ensure_schema(pool, embedding_dim: int) -> bool:
@@ -136,6 +140,9 @@ async def ensure_schema(pool, embedding_dim: int) -> bool:
         await conn.execute(DDL_BASE)
         try:
             await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            if await conn.fetchval(SQL_EMBEDDING_TYPE) == "_float4":
+                await conn.execute(DDL_MIGRATE_ARRAY.format(dim=int(embedding_dim)))
+                logger.info("knowledge: migrated kb_chunks.embedding from real[] to vector(%d)", int(embedding_dim))
             await conn.execute(DDL_VECTOR.format(dim=int(embedding_dim)))
             try:
                 await conn.execute(DDL_VECTOR_INDEX)

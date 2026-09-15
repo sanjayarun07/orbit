@@ -59,11 +59,17 @@ class OpenAIEmbedder:
         self.model = model
         self.dim = dim
 
+    # OpenAI caps one embeddings request at 300k tokens and 2,048 inputs; a docs
+    # site's llms-full.txt can be a single 470k-token document, so batch.
+    BATCH = 128
+
     def embed(self, texts: list[str]) -> list[list[float]]:
-        if not texts:
-            return []
-        response = self._client.embeddings.create(model=self.model, input=[t[:8000] for t in texts], dimensions=self.dim)
-        return [item.embedding for item in response.data]
+        out: list[list[float]] = []
+        for start in range(0, len(texts), self.BATCH):
+            batch = [t[:8000] for t in texts[start:start + self.BATCH]]
+            response = self._client.embeddings.create(model=self.model, input=batch, dimensions=self.dim)
+            out.extend(item.embedding for item in response.data)
+        return out
 
 
 _embedder: Embedder | None = None

@@ -55,11 +55,36 @@ GET  /knowledge/status                           # counts, backend, embedder, re
 GET  /knowledge/search?q=Aave%20E-mode           # hits, entities, graph expansion, citations
 ```
 
-Set `KNOWLEDGE_INGEST_ENABLED=true` to run the worker continuously
+Bulk ingestion belongs in its own process. Crawling, chunking and mention
+extraction are CPU-bound, and running fifty docs sites inside the API process
+pushed chat latency to ~30 s. Use the standalone ingester, which shares the
+database (the API refreshes its resolver snapshot every two minutes):
+
+```bash
+.venv/bin/python scripts/kb_ingest.py --parallel 4        # every due (protocol, source) pair
+.venv/bin/python scripts/kb_ingest.py --slug aave-v3 lido # specific protocols, timers ignored
+.venv/bin/python scripts/kb_ingest.py --loop              # worker mode
+```
+
+Docs roots are guessed from the DefiLlama website by stripping app-style
+labels (`app.`, `portal.`, `data.`) and trying `docs.<domain>`, `<domain>/docs`
+and `www.<domain>/docs` in order; the first root that serves at least two
+pages wins.
+
+Set `KNOWLEDGE_INGEST_ENABLED=true` to run small in-process ticks
 (`KNOWLEDGE_INGEST_INTERVAL_SECONDS`, `KNOWLEDGE_INGEST_BATCH`). With
 `DATABASE_URL` set the schema is created on first use; pgvector is used when
-`CREATE EXTENSION vector` succeeds, otherwise embeddings are stored as
-`real[]` and cosine runs in Python over lexical candidates.
+`CREATE EXTENSION vector` succeeds (native `<=>` cosine + an HNSW index),
+otherwise embeddings are stored as `real[]` and cosine runs in Python over
+lexical candidates. A database that started as `real[]` migrates itself to
+`vector(N)` the first time the extension is available; `GET /knowledge/status`
+reports `vector_native`. On a Homebrew PostgreSQL 14 the bottled `pgvector`
+only ships 17/18 builds, so build from source:
+
+```bash
+git clone --branch v0.8.0 --depth 1 https://github.com/pgvector/pgvector.git
+cd pgvector && make PG_CONFIG=$(which pg_config) && make install PG_CONFIG=$(which pg_config)
+```
 
 ## Routing
 
@@ -70,8 +95,9 @@ research path (KB + market + news + social) with no new classifier.
 
 ## Next steps
 
-1. Run bootstrap + ingest for the first 50 protocols on Postgres; watch
-   `kb_ingestion_runs` and the docs crawler's page yield per host.
+1. Per-protocol `docs_url` overrides in the registry for the sites whose
+   docs live on another domain (GitBook subdomains, `docs.kamino.finance`
+   for `kamino.com`); the guess list should not grow to cover them.
 2. Discourse forum connector (same `NormalizedDocument` shape) and
    `COMPETITOR_OF` edges derived from shared category + chain.
 3. Model-based relation extraction behind `extract_relationships`, only

@@ -13,6 +13,7 @@ version (valid_to) and inserts the new one, re-chunking only that document.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -248,17 +249,25 @@ class PostgresStore:
                 )
                 for chunk in chunks:
                     chunk.document_id = doc.id
+                if chunks:
+                    # Rows are built off the loop (a 1,500-chunk docs page means
+                    # 1.5M float formats) and inserted in one batch.
+                    rows = await asyncio.to_thread(self._chunk_rows, chunks)
                     if self.vector_native:
-                        await conn.execute(
-                            "INSERT INTO kb_chunks (id, document_id, protocol_id, heading, content, position, embedding, metadata) VALUES ($1,$2,$3,$4,$5,$6,$7::vector,$8)",
-                            chunk.id, doc.id, chunk.protocol_id, chunk.heading, chunk.content, chunk.position, "[" + ",".join(f"{v:.6f}" for v in (chunk.embedding or [])) + "]" if chunk.embedding else None, json.dumps(chunk.metadata),
-                        )
+                        await conn.executemany("INSERT INTO kb_chunks (id, document_id, protocol_id, heading, content, position, embedding, metadata) VALUES ($1,$2,$3,$4,$5,$6,$7::vector,$8)", rows)
                     else:
-                        await conn.execute(
-                            "INSERT INTO kb_chunks (id, document_id, protocol_id, heading, content, position, embedding, metadata) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-                            chunk.id, doc.id, chunk.protocol_id, chunk.heading, chunk.content, chunk.position, chunk.embedding, json.dumps(chunk.metadata),
-                        )
+                        await conn.executemany("INSERT INTO kb_chunks (id, document_id, protocol_id, heading, content, position, embedding, metadata) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", rows)
         return doc.id, True
+
+    def _chunk_rows(self, chunks: list[Chunk]) -> list[tuple]:
+        rows = []
+        for chunk in chunks:
+            if self.vector_native:
+                embedding = "[" + ",".join(f"{v:.6f}" for v in chunk.embedding) + "]" if chunk.embedding else None
+            else:
+                embedding = chunk.embedding
+            rows.append((chunk.id, chunk.document_id, chunk.protocol_id, chunk.heading, chunk.content, chunk.position, embedding, json.dumps(chunk.metadata)))
+        return rows
 
     async def get_document(self, document_id: str) -> NormalizedDocument | None:
         row = await self.pool.fetchrow("SELECT * FROM kb_documents WHERE id = $1", document_id)
