@@ -69,3 +69,20 @@ td button { padding: 6px 10px; font-size: 12px; }
 .lab-body pre { padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); max-height: 360px; overflow: auto; }
 .error { color: var(--bad); }
 @media (max-width: 860px) { .lab-grid { grid-template-columns: 1fr; } .hero h1 { font-size: 32px; } .hero::after { display: none; } }
+
+/* Accounts & billing ops */
+.ops-grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 20px; }
+.ops-h { margin: 14px 0 6px; font-size: 11px; color: var(--subtle); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+.ops-list { display: grid; gap: 4px; }
+.ops-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 12.5px; background: var(--panel-2); }
+.ops-row a { color: var(--text-strong); text-decoration: none; font-weight: 600; }
+.ops-row code { font-size: 11px; color: var(--muted); }
+.muted { color: var(--subtle); font-size: 12px; }
+button.mini { padding: 4px 9px; font-size: 11px; }
+.ops-user { margin-top: 12px; border: 1px solid var(--line); border-radius: 14px; padding: 14px; background: var(--panel-2); }
+.ops-userhead { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.ops-bal span { display: block; color: var(--subtle); font-size: 11px; text-transform: uppercase; } .ops-bal strong { font-size: 22px; }
+.ops-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+.ops-actions label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.ops-actions select, .ops-actions input { padding: 6px 8px; border-radius: 8px; }
+@media (max-width: 960px) { .ops-grid { grid-template-columns: 1fr; } }

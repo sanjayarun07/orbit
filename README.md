@@ -511,6 +511,13 @@ threshold, receipts) and Data & privacy (JSON export, delete all conversations,
 delete account with typed confirmation). The Max plan adds **Members**: up to
 five seats sharing the owner's plan and credit pool, invited by email.
 
+**Admin & ops** (Profile → "Open provider admin dashboard", `ADMIN_API_KEY`)
+adds an *Accounts & billing* panel on top of the provider control plane: MRR,
+users / paid / conversion, credits burned by feature, failed payments,
+ratings, recent Stripe events with replay, and an account finder that opens a
+support view — plan override, grant or claw back credits with a reason, API
+key revocation, sign out everywhere, 30-day usage and the ledger.
+
 **Payments** go through Stripe-hosted pages only — Orbit never sees a card or
 wallet. `POST /billing/checkout` opens Checkout for a plan (subscription mode)
 or a one-time **credit pack** (500 / 2,000 / 10,000 credits; payment mode),
@@ -535,6 +542,10 @@ UI shows the catalog read-only.
 | `GET /me/usage`, `GET /me/invoices`, `GET /me/sessions`, `POST /me/sessions/revoke-all` | Credits by day/feature/key, Stripe invoices, signed-in devices, sign out everywhere |
 | `GET /me/export`, `DELETE /me/conversations`, `DELETE /me` | Data export (JSON), delete all conversations, delete the account (ledger kept anonymously) |
 | `GET /me/team`, `POST /me/team/invites`, `DELETE /me/team/members/{email}`, `POST /me/team/accept`, `POST /me/team/leave` | Team seats on Max: members share the owner's plan and credit pool |
+| `POST /chat/feedback` | Rate a turn (up / down / none); the tools behind it move in outcome scoring |
+| `GET /admin/metrics/business`, `GET /admin/users`, `GET /admin/users/{email}` | MRR, plan mix, conversion, credits burned per feature, failed payments, sign-ups; account search and a full support view |
+| `PUT /admin/users/{email}/plan`, `POST /admin/users/{email}/credits`, `…/api-keys/{id}/revoke`, `…/sessions/revoke` | Support actions: plan override, grant / claw back credits with an audit reference, revoke a key, sign out everywhere |
+| `GET /admin/billing/events`, `POST /admin/billing/events/{id}/replay` | Recent Stripe events and a safe replay (credit effects stay keyed by event id) |
 | `POST /billing/checkout`, `POST /billing/portal`, `POST /billing/webhook` | Stripe Checkout (plan or credit pack), Customer Portal, verified webhook intake |
 
 ## API surface

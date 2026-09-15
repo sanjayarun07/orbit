@@ -240,6 +240,47 @@ async def release(account_id: str, turn_id: str, reserved: int) -> None:
         await append(account_id, reserved, "release", "turn_refund", turn_id, {"charged": 0})
 
 
+async def usage_all(days: int = 30) -> dict:
+    """Credits burned per feature across every account (ops dashboard), plus
+    credits granted by reason in the same window."""
+    days = max(1, min(int(days), 365))
+    since = (datetime.now(timezone.utc) - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    burned: dict[str, int] = {}
+    granted: dict[str, int] = {}
+    turns = 0
+    active_accounts: set[str] = set()
+    pool = await get_pg_pool()
+    if pool is not None:
+        for row in await pool.fetch(
+            "SELECT account_id, ref_type, reason, delta, meta FROM credit_ledger WHERE created_at >= $1 AND (ref_type = 'turn_settle' OR delta > 0)", since,
+        ):
+            meta = row["meta"]
+            if isinstance(meta, str):
+                meta = json.loads(meta)
+            _fold_usage(row["account_id"], row["ref_type"], row["reason"], int(row["delta"]), meta or {}, burned, granted, active_accounts)
+            turns += int(row["ref_type"] == "turn_settle")
+    else:
+        for account_id, rows in _ledger.items():
+            for row in rows:
+                if row["created_at"] < since.isoformat():
+                    continue
+                if row["ref_type"] == "turn_settle" or row["delta"] > 0:
+                    _fold_usage(account_id, row["ref_type"], row["reason"], row["delta"], row["meta"] or {}, burned, granted, active_accounts)
+                    turns += int(row["ref_type"] == "turn_settle")
+    return {"days": days, "since": since.date().isoformat(), "turns": turns, "burned_by_kind": burned,
+            "burned_total": sum(burned.values()), "granted_by_reason": granted, "active_accounts": len(active_accounts)}
+
+
+def _fold_usage(account_id: str, ref_type: str, reason: str, delta: int, meta: dict, burned: dict, granted: dict, active: set) -> None:
+    if ref_type == "turn_settle":
+        kind = str(meta.get("kind") or "chat")
+        burned[kind] = burned.get(kind, 0) + int(meta.get("charged") or 0)
+        active.add(account_id)
+    elif delta > 0 and ref_type not in ("turn_refund", "turn_settle"):
+        key = reason.split(":", 1)[0]
+        granted[key] = granted.get(key, 0) + delta
+
+
 def reset() -> None:
     _ledger.clear()
     _refs.clear()

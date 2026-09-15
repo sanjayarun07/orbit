@@ -12,6 +12,24 @@
 <header><div class="brand">Orbit <span>Admin</span></div><a href="/ui/">← Back to chat</a></header>
 <main>
  <section class="hero"><div><h1>Provider <em>control plane</em></h1><p>Manage routing policy without exposing provider credentials.</p></div><div class="auth"><input id="token" type="password" placeholder="Admin API key" autocomplete="off"><button class="primary" id="connect">Connect</button></div></section>
+ <section class="panel" id="opsPanel">
+  <div class="panel-head"><h2>Accounts &amp; billing</h2><div class="lab-actions"><span class="pill" id="opsWindow">last 30 days</span><button id="opsRefresh">Refresh</button></div></div>
+  <div class="lab-body">
+   <div class="summary" id="opsMetrics" style="margin-bottom:6px"></div>
+   <div class="ops-grid">
+    <div>
+     <h3 class="ops-h">Credits burned by feature</h3><div id="opsBurn" class="ops-list"></div>
+     <h3 class="ops-h">Recent Stripe events</h3><div id="opsEvents" class="ops-list"></div>
+    </div>
+    <div>
+     <h3 class="ops-h">Find an account</h3>
+     <div class="route-form" style="padding:0 0 8px"><input id="opsQuery" placeholder="email or part of it"><button id="opsSearch">Search</button></div>
+     <div id="opsUsers" class="ops-list"></div>
+     <div id="opsUser" class="ops-user" hidden></div>
+    </div>
+   </div>
+  </div>
+ </section>
  <section class="summary"><div class="metric"><span>Registered tools</span><strong id="registered">—</strong></div><div class="metric"><span>Enabled</span><strong id="enabled">—</strong></div><div class="metric"><span>Healthy</span><strong id="healthy">—</strong></div><div class="metric"><span>Providers</span><strong id="providers">—</strong></div></section>
  <section class="panel"><div class="panel-head"><h2>Data providers and routing policy</h2><button id="refresh">Refresh</button></div><div class="table-wrap"><table><thead><tr><th>Provider / tool</th><th>Capabilities</th><th>Status</th><th>Enabled</th><th>Priority</th><th>RPM quota</th><th>Cost USD</th><th>Remaining</th><th>Actions</th></tr></thead><tbody id="rows"><tr><td colspan="9" class="empty">Enter the admin API key to load providers.</td></tr></tbody></table></div></section>
  <section class="panel"><div class="panel-head"><h2>Route preview</h2></div><div class="route-form"><input id="request" placeholder="e.g. Research Reliance Industries stock"><select id="capability"><option>equity_research</option><option>project_intelligence</option><option>vc_intelligence</option><option>people_intelligence</option><option>market_data</option><option>token_discovery</option><option>token_security</option><option>wallet_intelligence</option><option>defi_data</option><option>listing_events</option><option>finance_data</option><option>web_research</option><option>url_fetch</option></select><input id="chains" placeholder="Chains, comma separated"><button class="primary" id="preview">Preview route</button></div><div class="route-results" id="routeResults"></div></section>
@@ -33,6 +51,33 @@ async function reset(row){try{await api(`/admin/providers/${encodeURIComponent(r
 async function preview(){const out=$("#routeResults");try{const data=await api("/admin/routes/preview",{method:"POST",body:JSON.stringify({request:$("#request").value,capability:$("#capability").value,chains:$("#chains").value.split(",").map(v=>v.trim()).filter(Boolean)})});out.innerHTML=data.candidates.length?data.candidates.map((c,i)=>`<div class="route-card"><span><b>${i+1}. ${esc(c.name)}</b> · ${esc(c.provider)}</span><span>${c.quota_remaining} remaining · $${c.cost_usd_per_invocation}</span></div>`).join(""):'<div class="empty">No eligible provider. Check credentials, health, quotas, and capability coverage.</div>'}catch(e){out.innerHTML=`<div class="error">${esc(e.message)}</div>`}}
 async function testIntent(live=false){const out=$("#intentOutput");out.textContent="Classifying…";try{const data=await api("/admin/intents/preview",{method:"POST",body:JSON.stringify({request:$("#intentRequest").value,live})});out.textContent=JSON.stringify(data,null,2)}catch(e){out.textContent=e.message}}
 async function testProvider(live){const out=$("#providerOutput"),request=$("#providerRequest").value||$("#request").value,capability=$("#capability").value,chains=$("#chains").value.split(",").map(v=>v.trim()).filter(Boolean);out.textContent=live?"Calling provider…":"Ranking providers…";try{const data=await api("/admin/providers/test",{method:"POST",body:JSON.stringify({request,capability,chains,live})});out.textContent=JSON.stringify(data,null,2);if(live)await load()}catch(e){out.textContent=e.message}}
+// ---- Accounts & billing ops ----
+function money(v){return `$${Number(v||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`}
+async function loadOps(){const m=$("#opsMetrics");try{const d=await api("/admin/metrics/business?days=30");
+  m.innerHTML=[["MRR",money(d.mrr_usd)],["Users",d.users.total],["Paid",`${d.users.paid} · ${d.users.conversion_pct}%`],["Credits burned",d.credits.burned_total.toLocaleString()],["Active accounts",d.credits.active_accounts],["Failed payments",d.failed_payments],["Ratings",`👍 ${d.feedback.up} · 👎 ${d.feedback.down}`]].map(([k,v])=>`<div class="metric"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join("");
+  const burn=Object.entries(d.credits.burned_by_kind||{}).sort((a,b)=>b[1]-a[1]);$("#opsBurn").innerHTML=burn.length?burn.map(([k,v])=>`<div class="ops-row"><span>${esc(k.replace("_"," "))}</span><b>${v.toLocaleString()}</b></div>`).join("")+`<div class="ops-row muted"><span>plans: ${Object.entries(d.users.by_plan).map(([p,n])=>`${esc(p)} ${n}`).join(", ")||"—"}</span><span>${d.credits.turns} turns</span></div>`:'<div class="muted">No usage in the window.</div>';
+  const ev=d.stripe.recent_events||[];$("#opsEvents").innerHTML=ev.length?ev.map(e=>`<div class="ops-row"><span><code>${esc(e.id)}</code> ${esc(e.type)}</span><span class="muted">${esc((e.received_at||"").slice(0,16).replace("T"," "))} <button class="mini" data-replay="${esc(e.id)}" ${d.stripe.configured?"":"disabled"}>Replay</button></span></div>`).join(""):`<div class="muted">${d.stripe.configured?"No events yet.":"Stripe not configured."}</div>`;
+  $("#opsEvents").querySelectorAll("[data-replay]").forEach(b=>b.onclick=async()=>{b.disabled=true;try{const r=await api(`/admin/billing/events/${b.dataset.replay}/replay`,{method:"POST"});b.textContent=r.status||"replayed"}catch(e){b.textContent=e.message.slice(0,40)}});
+ }catch(e){m.innerHTML=`<div class="metric error">${esc(e.message)}</div>`}}
+async function searchUsers(){const out=$("#opsUsers");out.innerHTML='<div class="muted">Searching…</div>';try{const d=await api(`/admin/users?q=${encodeURIComponent($("#opsQuery").value.trim())}&limit=25`);
+  out.innerHTML=d.users.length?d.users.map(u=>`<div class="ops-row"><span><a href="#" data-user="${esc(u.email)}">${esc(u.email)}</a> <span class="pill">${esc(u.plan_id)}</span> ${u.team_owner_id?'<span class="pill">member</span>':""}</span><span>${u.balance.toLocaleString()} cr · <span class="muted">${esc((u.created_at||"").slice(0,10))}</span></span></div>`).join(""):'<div class="muted">No accounts match.</div>';
+  out.querySelectorAll("[data-user]").forEach(a=>a.onclick=e=>{e.preventDefault();openUser(a.dataset.user)});}catch(e){out.innerHTML=`<div class="error">${esc(e.message)}</div>`}}
+async function openUser(email){const box=$("#opsUser");box.hidden=false;box.innerHTML='<div class="muted">Loading…</div>';try{const d=await api(`/admin/users/${encodeURIComponent(email)}`);const u=d.user;
+  const plans=["free","pro","max"].map(p=>`<option value="${p}" ${u.plan_id===p?"selected":""}>${p}</option>`).join("");
+  box.innerHTML=`<div class="ops-userhead"><div><b>${esc(u.email)}</b> <span class="muted">${esc(u.display_name||"")}</span><div class="muted">joined ${esc((u.created_at||"").slice(0,10))} · ${d.conversations} conversations · ${d.wallets.length} wallets · ${d.sessions.length} devices${u.team_owner_id?" · team member":""}</div></div><div class="ops-bal"><span>Balance</span><strong>${d.credits.balance.toLocaleString()}</strong></div></div>
+   <div class="ops-actions"><label>Plan <select id="opsPlan">${plans}</select></label><button id="opsSetPlan">Set plan</button><label>Credits <input id="opsAmount" type="number" value="100" style="width:90px"></label><input id="opsReason" placeholder="reason (audit)" style="width:160px"><button id="opsGrant">Grant</button><button id="opsClaw">Claw back</button><button id="opsSignout">Sign out everywhere</button><span id="opsStatus" class="muted"></span></div>
+   <h3 class="ops-h">Usage · 30d</h3><div class="ops-row"><span>${Object.entries(d.usage.by_kind).map(([k,v])=>`${esc(k)} ${v}`).join(" · ")||"none"}</span><b>${d.usage.total} credits · ${d.usage.turns} turns</b></div>
+   <h3 class="ops-h">API keys</h3>${d.api_keys.length?d.api_keys.map(k=>`<div class="ops-row"><span>${esc(k.name)} <code>${esc(k.prefix)}…</code> <span class="muted">${(k.scopes||[]).join(", ")}</span>${k.revoked_at?' <span class="pill">revoked</span>':""}</span>${k.revoked_at?"":`<button class="mini" data-revoke="${esc(k.id)}">Revoke</button>`}</div>`).join(""):'<div class="muted">No keys.</div>'}
+   <h3 class="ops-h">Ledger</h3><div class="table-wrap"><table style="min-width:0"><thead><tr><th>When</th><th>Reason</th><th>Ref</th><th style="text-align:right">Δ</th></tr></thead><tbody>${d.credits.ledger.slice(0,40).map(r=>`<tr><td>${esc((r.created_at||"").slice(0,16).replace("T"," "))}</td><td>${esc(r.reason)}</td><td><code>${esc(r.ref_type)}:${esc(String(r.ref_id).slice(0,14))}</code></td><td style="text-align:right;color:${r.delta<0?"var(--bad)":"var(--good)"}">${r.delta>0?"+":""}${r.delta}</td></tr>`).join("")}</tbody></table></div>`;
+  const status=$("#opsStatus");const done=(t)=>{status.textContent=t;openUser(email);loadOps()};
+  $("#opsSetPlan").onclick=async()=>{try{await api(`/admin/users/${encodeURIComponent(email)}/plan`,{method:"PUT",body:JSON.stringify({plan_id:$("#opsPlan").value})});done("Plan updated")}catch(e){status.textContent=e.message}};
+  const grant=async(sign)=>{const amount=sign*Math.abs(Number($("#opsAmount").value)||0);const reason=$("#opsReason").value.trim()||"support";if(!amount)return;try{const r=await api(`/admin/users/${encodeURIComponent(email)}/credits`,{method:"POST",body:JSON.stringify({amount,reason})});done(r.applied?`Applied ${amount>0?"+":""}${amount}`:"Already applied")}catch(e){status.textContent=e.message}};
+  $("#opsGrant").onclick=()=>grant(1);$("#opsClaw").onclick=()=>grant(-1);
+  $("#opsSignout").onclick=async()=>{try{const r=await api(`/admin/users/${encodeURIComponent(email)}/sessions/revoke`,{method:"POST"});done(`Signed out ${r.revoked} device(s)`)}catch(e){status.textContent=e.message}};
+  box.querySelectorAll("[data-revoke]").forEach(b=>b.onclick=async()=>{try{await api(`/admin/users/${encodeURIComponent(email)}/api-keys/${b.dataset.revoke}/revoke`,{method:"POST"});done("Key revoked")}catch(e){status.textContent=e.message}});
+ }catch(e){box.innerHTML=`<div class="error">${esc(e.message)}</div>`}}
+$("#opsRefresh").onclick=loadOps;$("#opsSearch").onclick=searchUsers;$("#opsQuery").addEventListener("keydown",e=>{if(e.key==="Enter")searchUsers()});
+const _load=load;load=async function(){await _load();loadOps();searchUsers();};
 $("#connect").onclick=load;$("#refresh").onclick=load;$("#preview").onclick=preview;$("#testIntent").onclick=()=>testIntent(false);$("#liveIntent").onclick=()=>testIntent(true);$("#dryProvider").onclick=()=>testProvider(false);$("#liveProvider").onclick=()=>testProvider(true);if(saved)load();
 </script>
 </body></html>

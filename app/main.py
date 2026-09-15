@@ -1246,6 +1246,112 @@ async def leave_team(identity: Identity = Depends(require_user)):
     return {"left": True}
 
 
+# ---- Admin & ops: accounts, billing, business metrics ----
+
+async def _admin_user(email: str) -> dict:
+    user = await accounts.get_user_by_email(email)
+    if user is None:
+        raise HTTPException(404, "No account with that email")
+    return user
+
+
+@app.get("/admin/users")
+async def admin_list_users(request: Request, q: str = "", limit: int = 25):
+    _require_admin(request)
+    users = await accounts.search_users(q, limit)
+    out = []
+    for user in users:
+        out.append({
+            "id": user["id"], "email": user["email"], "display_name": user.get("display_name"), "plan_id": user.get("plan_id"),
+            "subscription_status": user.get("subscription_status"), "created_at": user.get("created_at"),
+            "team_owner_id": user.get("team_owner_id"), "balance": await credits.balance(credits.user_account_id(user["id"])),
+        })
+    return {"users": out}
+
+
+@app.get("/admin/users/{email}")
+async def admin_user_detail(email: str, request: Request):
+    """Everything support needs on one screen: plan, balance, ledger, usage,
+    keys, devices, team, and the account's recent feedback-worthy turns."""
+    _require_admin(request)
+    user = await _admin_user(email)
+    account_id = credits.user_account_id(user["id"])
+    return {
+        "user": {k: user.get(k) for k in ("id", "email", "display_name", "plan_id", "subscription_status", "stripe_customer_id",
+                                          "stripe_subscription_id", "team_owner_id", "created_at", "preferences")},
+        "plan": billing_plans.get_plan(user.get("plan_id")).public(),
+        "credits": {"balance": await credits.balance(account_id), "ledger": await credits.history(account_id, limit=100)},
+        "usage": await credits.usage(account_id, 30),
+        "api_keys": await api_keys.list_for_user(user["id"]),
+        "sessions": await accounts.list_user_sessions(user["id"]),
+        "wallets": await accounts.list_wallets(user["id"]),
+        "team": {"members": await accounts.list_team_members(user["id"]), "invites": await accounts.pending_invites_for(user["email"])},
+        "conversations": len(await accounts.list_chat_sessions(user["id"])),
+    }
+
+
+@app.post("/admin/users/{email}/api-keys/{key_id}/revoke")
+async def admin_revoke_key(email: str, key_id: str, request: Request):
+    _require_admin(request)
+    user = await _admin_user(email)
+    if not await api_keys.revoke(user["id"], key_id):
+        raise HTTPException(404, "API key not found or already revoked")
+    return {"revoked": True}
+
+
+@app.post("/admin/users/{email}/sessions/revoke")
+async def admin_revoke_sessions(email: str, request: Request):
+    """Sign the account out everywhere (compromised account, support request)."""
+    _require_admin(request)
+    user = await _admin_user(email)
+    return {"revoked": await accounts.revoke_user_sessions(user["id"])}
+
+
+@app.get("/admin/billing/events")
+async def admin_billing_events(request: Request, limit: int = 50):
+    _require_admin(request)
+    return {"events": await billing.list_events(limit), "configured": billing.configured()}
+
+
+@app.post("/admin/billing/events/{event_id}/replay")
+async def admin_replay_event(event_id: str, request: Request):
+    _require_admin(request)
+    if not re.fullmatch(r"evt_[A-Za-z0-9_]{6,64}", event_id):
+        raise HTTPException(400, "Not a Stripe event id")
+    try:
+        return await billing.replay_event(event_id)
+    except billing.BillingNotConfigured as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, _safe_detail(exc, "Stripe could not return that event")) from exc
+
+
+@app.get("/admin/metrics/business")
+async def admin_business_metrics(request: Request, days: int = 30):
+    """MRR, plan mix, conversion, credits burned per feature, failed payments,
+    sign-ups per day -- the numbers a founder checks every morning."""
+    _require_admin(request)
+    stats = await accounts.user_stats()
+    by_plan = stats["by_plan"]
+    paid = sum(n for plan_id, n in by_plan.items() if billing_plans.get_plan(plan_id).price_usd_month > 0)
+    mrr = sum(n * billing_plans.get_plan(plan_id).price_usd_month for plan_id, n in by_plan.items())
+    usage = await credits.usage_all(days)
+    failed = stats["by_subscription_status"].get("past_due", 0) + stats["by_subscription_status"].get("unpaid", 0)
+    return {
+        "days": days,
+        "users": {"total": stats["total"], "paid": paid, "free": stats["total"] - paid, "by_plan": by_plan,
+                  "team_members": stats["team_members"], "conversion_pct": round(100 * paid / stats["total"], 2) if stats["total"] else 0.0},
+        "mrr_usd": round(mrr, 2),
+        "subscriptions": stats["by_subscription_status"],
+        "failed_payments": failed,
+        "signups_by_day": stats["signups_by_day"],
+        "credits": usage,
+        "stripe": {"configured": billing.configured(), "recent_events": await billing.list_events(10)},
+        "feedback": {"up": snapshot().get("feedback_up", 0), "down": snapshot().get("feedback_down", 0), "none": snapshot().get("feedback_none", 0)},
+        "tools": {"rated": [row for row in tool_outcomes.snapshot() if row["feedback_up"] or row["feedback_down"]][:20]},
+    }
+
+
 @app.get("/billing/plans")
 async def billing_catalog():
     return {"plans": billing_plans.catalog(), "trial_credits": billing_plans.ANONYMOUS.trial_credits, **billing.public_config()}

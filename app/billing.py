@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from app import accounts, credits, notifications
@@ -197,6 +198,36 @@ async def create_portal(user: dict, base_url: str) -> str:
 # Webhooks
 # ----------------------------------------------------------------------------
 
+_recent_events: list[dict] = []
+
+
+def _api_retrieve_event(event_id: str) -> dict:
+    return json.loads(json.dumps(_stripe().Event.retrieve(event_id)))
+
+
+async def list_events(limit: int = 50) -> list[dict]:
+    pool = await get_pg_pool()
+    if pool is not None:
+        rows = await pool.fetch("SELECT id, type, received_at FROM stripe_events ORDER BY received_at DESC LIMIT $1", max(1, min(int(limit), 500)))
+        return [{"id": r["id"], "type": r["type"], "received_at": r["received_at"].isoformat()} for r in rows]
+    return list(reversed(_recent_events))[: max(1, min(int(limit), 500))]
+
+
+async def replay_event(event_id: str) -> dict:
+    """Fetch an event from Stripe and run its handler again. Safe because every
+    credit effect is keyed by the event id (a replay can't double-credit); it
+    exists for the case where a handler failed after the event was recorded."""
+    if not configured():
+        raise BillingNotConfigured("Billing is not configured")
+    event = _api_retrieve_event(event_id)
+    handler = _HANDLERS.get(event.get("type"))
+    if handler is None:
+        return {"event": event_id, "type": event.get("type"), "status": "ignored"}
+    obj = (event.get("data") or {}).get("object") or {}
+    result = await handler(event_id, obj)
+    return {"event": event_id, "type": event.get("type"), "replayed": True, **result}
+
+
 async def record_event(event_id: str, event_type: str) -> bool:
     """True the first time an event id is seen."""
     pool = await get_pg_pool()
@@ -209,6 +240,8 @@ async def record_event(event_id: str, event_type: str) -> bool:
     if event_id in _seen_events:
         return False
     _seen_events.add(event_id)
+    _recent_events.append({"id": event_id, "type": event_type, "received_at": datetime.now(timezone.utc).isoformat()})
+    del _recent_events[:-500]
     return True
 
 
@@ -393,3 +426,4 @@ def public_config() -> dict:
 
 def reset() -> None:
     _seen_events.clear()
+    _recent_events.clear()

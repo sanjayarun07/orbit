@@ -87,6 +87,46 @@ async def get_user_by_email(email: str) -> dict | None:
     return dict(_users[user_id]) if user_id else None
 
 
+async def search_users(query: str = "", limit: int = 25) -> list[dict]:
+    """Newest accounts first, optionally filtered by an email substring."""
+    query = (query or "").strip().lower()
+    limit = max(1, min(int(limit), 200))
+    pool = await get_pg_pool()
+    if pool is not None:
+        rows = await pool.fetch(
+            "SELECT * FROM users WHERE ($1 = '' OR email LIKE '%' || $1 || '%') ORDER BY created_at DESC LIMIT $2", query, limit,
+        )
+        return [_row_to_user(row) for row in rows]
+    users = [dict(u) for u in _users.values() if not query or query in u["email"]]
+    return sorted(users, key=lambda u: u.get("created_at") or "", reverse=True)[:limit]
+
+
+async def user_stats() -> dict:
+    """Counts by plan and subscription status, plus sign-ups per day (30d)."""
+    pool = await get_pg_pool()
+    if pool is not None:
+        by_plan = {r["plan_id"]: int(r["n"]) for r in await pool.fetch("SELECT plan_id, COUNT(*) AS n FROM users GROUP BY plan_id")}
+        by_status = {r["subscription_status"] or "none": int(r["n"]) for r in await pool.fetch("SELECT subscription_status, COUNT(*) AS n FROM users GROUP BY subscription_status")}
+        signups = {r["day"].isoformat(): int(r["n"]) for r in await pool.fetch(
+            "SELECT created_at::date AS day, COUNT(*) AS n FROM users WHERE created_at >= NOW() - INTERVAL '30 days' GROUP BY 1 ORDER BY 1")}
+        total = int(await pool.fetchval("SELECT COUNT(*) FROM users"))
+        members = int(await pool.fetchval("SELECT COUNT(*) FROM users WHERE team_owner_id IS NOT NULL"))
+    else:
+        by_plan: dict[str, int] = {}
+        by_status: dict[str, int] = {}
+        signups: dict[str, int] = {}
+        for u in _users.values():
+            by_plan[u.get("plan_id") or "free"] = by_plan.get(u.get("plan_id") or "free", 0) + 1
+            status = u.get("subscription_status") or "none"
+            by_status[status] = by_status.get(status, 0) + 1
+            day = (u.get("created_at") or "")[:10]
+            if day:
+                signups[day] = signups.get(day, 0) + 1
+        total = len(_users)
+        members = sum(1 for u in _users.values() if u.get("team_owner_id"))
+    return {"total": total, "by_plan": by_plan, "by_subscription_status": by_status, "signups_by_day": signups, "team_members": members}
+
+
 async def get_or_create_user(email: str) -> tuple[dict, bool]:
     """(user, created). New users start on the Free plan."""
     email = normalize_email(email)
