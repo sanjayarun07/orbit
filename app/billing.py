@@ -18,7 +18,7 @@ import json
 import logging
 from typing import Any
 
-from app import accounts, credits
+from app import accounts, credits, notifications
 from app.billing_plans import PACKS, PLANS, get_pack, get_plan
 from app.db import get_pg_pool
 from app.settings import settings
@@ -62,6 +62,11 @@ def _api_create_checkout(params: dict) -> dict:
 def _api_create_portal(customer_id: str, return_url: str) -> str:
     session = _stripe().billing_portal.Session.create(customer=customer_id, return_url=return_url)
     return session["url"]
+
+
+def _api_list_invoices(customer_id: str, limit: int = 12) -> list[dict]:
+    invoices = _stripe().Invoice.list(customer=customer_id, limit=limit)
+    return [json.loads(json.dumps(item)) for item in invoices.get("data", [])]
 
 
 def _api_construct_event(payload: bytes, signature: str) -> dict:
@@ -143,6 +148,8 @@ async def create_checkout(user: dict, kind: str, item_id: str, base_url: str) ->
             **common,
             "mode": "payment",
             "line_items": [{"price": price, "quantity": 1}],
+            # So pack purchases show up in the invoices list too.
+            "invoice_creation": {"enabled": True},
             # Propagates to the PaymentIntent and its Charge, so a later
             # charge.refunded event still tells us whose credits to claw back.
             "payment_intent_data": {"metadata": metadata},
@@ -152,6 +159,30 @@ async def create_checkout(user: dict, kind: str, item_id: str, base_url: str) ->
         raise ValueError("kind must be 'subscription' or 'pack'")
     session = _api_create_checkout(params)
     return {"url": session["url"], "session_id": session["id"]}
+
+
+async def list_invoices(user: dict) -> list[dict]:
+    """The customer's recent invoices (subscriptions and, via invoice_creation,
+    credit packs) with Stripe's hosted page and PDF links."""
+    if not configured():
+        raise BillingNotConfigured("Billing is not configured")
+    if not user.get("stripe_customer_id"):
+        return []
+    out = []
+    for invoice in _api_list_invoices(user["stripe_customer_id"]):
+        out.append({
+            "id": invoice.get("id"), "number": invoice.get("number"), "status": invoice.get("status"),
+            "amount_paid": invoice.get("amount_paid"), "amount_due": invoice.get("amount_due"), "currency": invoice.get("currency"),
+            "created": invoice.get("created"), "description": _invoice_description(invoice),
+            "hosted_invoice_url": invoice.get("hosted_invoice_url"), "invoice_pdf": invoice.get("invoice_pdf"),
+        })
+    return out
+
+
+def _invoice_description(invoice: dict) -> str:
+    lines = ((invoice.get("lines") or {}).get("data")) or []
+    names = [str(line.get("description") or "") for line in lines if line.get("description")]
+    return "; ".join(names)[:160] or "Orbit"
 
 
 async def create_portal(user: dict, base_url: str) -> str:
@@ -234,6 +265,8 @@ async def _on_checkout_completed(event_id: str, session: dict) -> dict:
             "stripe_event", event_id,
             {"payment_intent": session.get("payment_intent"), "amount_total": session.get("amount_total"), "currency": session.get("currency")},
         )
+        if applied:
+            await notifications.send_receipt(user, f"{amount:,} credits ({pack.name if pack else 'credit pack'})", session.get("amount_total"), session.get("currency"))
         return {"status": "credited" if applied else "duplicate", "credits": amount}
     if session.get("mode") == "subscription":
         plan_id = metadata.get("plan_id")

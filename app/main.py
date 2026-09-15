@@ -13,6 +13,7 @@ logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -45,15 +46,18 @@ from app.lifi import get_quote as get_lifi_quote, get_status as get_lifi_status
 from app.mcp_tools import close_mcp_gateway, discover_mcp_tools, get_mcp_registry
 from app.metrics import increment, snapshot
 from app.wash_trading import nansen_enrich, pipeline as wash_trading_pipeline, schema as wash_trading_schema
-from app import accounts, api_keys, billing, billing_plans, credits, mcp_server, tool_outcomes, x402_gate
+from app import accounts, api_keys, billing, billing_plans, credits, emailer, mcp_server, notifications, tool_outcomes, x402_gate
 from app.identity import Identity, current_identity, require_user, resolve_identity, service_identity
-from app.models import TRADING_CHAINS
+from app.models import TRADING_CHAINS, RiskCharterFields
 from app.models import (
     AdminCreditGrant,
     AdminPlanUpdate,
     AgentResponse,
     ApiKeyCreate,
     CheckoutRequest,
+    DeleteAccountRequest,
+    TeamAccept,
+    TeamInvite,
     ChatRequest,
     ConfirmRequest,
     EmailSigninStart,
@@ -664,8 +668,23 @@ async def execute_chat_turn(body: ChatRequest, identity: Identity | str) -> Agen
         raise
     if reserved:
         cost, kind = credits.turn_cost(response.intent, response.trajectory, response.team_report)
-        charged = await credits.settle(identity.account_id, turn_id, reserved, cost, kind)
-        response.credits = {"charged": charged, "kind": kind, "balance": await credits.balance(identity.account_id)}
+        charged = await credits.settle(
+            identity.account_id, turn_id, reserved, cost, kind, api_key_id=identity.api_key["id"] if identity.api_key else None,
+        )
+        balance = await credits.balance(identity.account_id)
+        response.credits = {"charged": charged, "kind": kind, "balance": balance}
+        if identity.signed_in:
+            try:
+                await notifications.maybe_low_credit_alert(identity.team_owner or identity.user, balance)
+            except Exception:
+                logger.warning("low-credit alert failed", exc_info=True)
+    if identity.signed_in:
+        # Conversations belong to the account: export, delete-all and account
+        # deletion need this mapping (session ids are otherwise client-chosen).
+        try:
+            await accounts.touch_chat_session(identity.user["id"], response.session_id)
+        except Exception:
+            logger.warning("chat session ownership update failed", exc_info=True)
     return response
 
 
@@ -746,6 +765,18 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         if body.team_mode is not None:
             session_context = {**session_context, "team_mode": body.team_mode}
         charter_fields = body.risk_charter_fields
+        # A signed-in user's saved risk charter is the default for every new
+        # conversation (the card in any conversation updates that default).
+        default_fields = ((identity.user or {}).get("preferences") or {}).get("risk_charter_fields") if identity.signed_in else None
+        if default_fields and current_revision == 0 and not session_context.get("risk_charter") and charter_fields is None:
+            try:
+                seeded = RiskCharterFields(**default_fields)
+                if not seeded.is_empty():
+                    session_context = {**session_context, "risk_charter": seeded.render(), "risk_charter_fields": seeded.model_dump()}
+            except (TypeError, ValueError):
+                logger.warning("ignoring malformed saved risk charter for user %s", identity.user["id"])
+        if charter_fields is not None and identity.signed_in and not charter_fields.is_empty():
+            await accounts.update_user(identity.user["id"], preferences={"risk_charter_fields": charter_fields.model_dump()})
         if charter_fields is not None:
             if charter_fields.is_empty():
                 raise HTTPException(400, "Choose at least one rule for the risk charter.")
@@ -921,6 +952,24 @@ async def _me_payload(identity: Identity) -> dict:
             "has_billing_account": bool(user.get("stripe_customer_id")),
             "subscription_status": user.get("subscription_status"),
         },
+        "notifications": notifications.preferences(user),
+        "team": await _team_payload(identity),
+    }
+
+
+async def _team_payload(identity: Identity) -> dict:
+    user = identity.user
+    owner = identity.team_owner
+    if owner is not None:
+        return {"role": "member", "owner": {"id": owner["id"], "email": owner["email"], "display_name": owner.get("display_name")},
+                "seats": identity.plan.seats, "members": [], "invites": []}
+    members = await accounts.list_team_members(user["id"]) if identity.plan.seats > 1 else []
+    return {
+        "role": "owner" if identity.plan.seats > 1 else None,
+        "owner": None,
+        "seats": identity.plan.seats,
+        "members": members,
+        "invites": await accounts.pending_invites_for(user["email"]),
     }
 
 
@@ -939,7 +988,9 @@ async def email_signin_start(body: EmailSigninStart, request: Request):
 @app.post("/auth/email/verify")
 async def email_signin_verify(body: EmailSigninVerify, response: Response, request: Request):
     try:
-        user, token, created = await accounts.sign_in_with_token(body.token)
+        user, token, created = await accounts.sign_in_with_token(
+            body.token, ip=_client_identity(request), user_agent=request.headers.get("user-agent"),
+        )
     except ValueError as exc:
         raise HTTPException(401, str(exc)) from exc
     _set_user_cookie(response, request, token)
@@ -1047,6 +1098,151 @@ async def admin_grant_credits(email: str, body: AdminCreditGrant, request: Reque
     reference = body.reference or str(uuid4())
     applied = await credits.append(account_id, body.amount, f"admin:{body.reason}", "admin", reference, {"by": "admin"})
     return {"email": user["email"], "applied": applied, "balance": await credits.balance(account_id), "reference": reference}
+
+
+@app.get("/me/usage")
+async def my_usage(days: int = 30, identity: Identity = Depends(require_user)):
+    """Credits spent per day and per feature (and per API key) for the account
+    that is billed -- the team owner's pool for a member."""
+    report = await credits.usage(identity.account_id, days)
+    keys = {k["id"]: k["name"] for k in await api_keys.list_for_user(identity.user["id"])}
+    report["by_api_key"] = [{"id": kid, "name": keys.get(kid, "revoked key"), "charged": total} for kid, total in report["by_api_key"].items()]
+    return report
+
+
+@app.get("/me/invoices")
+async def my_invoices(identity: Identity = Depends(require_user)):
+    try:
+        return {"invoices": await billing.list_invoices(identity.team_owner or identity.user)}
+    except billing.BillingNotConfigured:
+        return {"invoices": [], "configured": False}
+
+
+@app.get("/me/sessions")
+async def my_sessions(request: Request, identity: Identity = Depends(require_user)):
+    return {"sessions": await accounts.list_user_sessions(identity.user["id"], request.cookies.get(accounts.USER_COOKIE))}
+
+
+@app.post("/me/sessions/revoke-all")
+async def revoke_my_sessions(request: Request, identity: Identity = Depends(require_user)):
+    """Sign out everywhere except this browser."""
+    revoked = await accounts.revoke_user_sessions(identity.user["id"], keep_token=request.cookies.get(accounts.USER_COOKIE))
+    return {"revoked": revoked}
+
+
+@app.get("/me/export")
+async def export_my_data(identity: Identity = Depends(require_user)):
+    """Everything Orbit holds about the account, as one JSON document."""
+    user = identity.user
+    conversations = []
+    for session_id in await accounts.list_chat_sessions(user["id"]):
+        messages = await get_messages(session_id)
+        if messages:
+            conversations.append({"session_id": session_id, "messages": [
+                {k: m.get(k) for k in ("role", "content", "created_at", "intent")} for m in messages
+            ]})
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "user": {k: user.get(k) for k in ("id", "email", "display_name", "plan_id", "created_at", "preferences")},
+        "wallets": await accounts.list_wallets(user["id"]),
+        "api_keys": await api_keys.list_for_user(user["id"]),
+        "credits": {"balance": await credits.balance(identity.account_id), "ledger": await credits.history(identity.account_id, limit=1000)},
+        "conversations": conversations,
+    }
+
+
+@app.delete("/me/conversations")
+async def delete_my_conversations(identity: Identity = Depends(require_user)):
+    session_ids = await accounts.list_chat_sessions(identity.user["id"])
+    for session_id in session_ids:
+        await clear_history(session_id)
+    await accounts.forget_chat_sessions(identity.user["id"])
+    return {"deleted": len(session_ids)}
+
+
+@app.delete("/me")
+async def delete_my_account(body: DeleteAccountRequest, request: Request, response: Response, identity: Identity = Depends(require_user)):
+    """Delete the account: conversations, wallets, API keys, sessions and team
+    links go; the credit ledger stays as an anonymous financial record."""
+    user = identity.user
+    if identity.api_key is not None:
+        raise HTTPException(403, "Delete the account from a signed-in browser session")
+    if body.confirm_email.strip().lower() != user["email"]:
+        raise HTTPException(400, "Type your account email exactly to confirm deletion")
+    for session_id in await accounts.list_chat_sessions(user["id"]):
+        await clear_history(session_id)
+    for key in await api_keys.list_for_user(user["id"]):
+        await api_keys.revoke(user["id"], key["id"])
+    await accounts.revoke_user_sessions(user["id"])
+    await accounts.delete_user(user["id"])
+    await delete_auth_session(request.cookies.get(COOKIE_NAME))
+    response.delete_cookie(accounts.USER_COOKIE, path="/")
+    response.delete_cookie(COOKIE_NAME, path="/")
+    return {"deleted": True}
+
+
+# ---- Team members (plans with seats) ----
+
+def _require_team_owner(identity: Identity) -> None:
+    if identity.team_owner is not None:
+        raise HTTPException(403, "Only the team owner manages members")
+    if identity.plan.seats <= 1:
+        raise HTTPException(403, {"error": "upgrade_required", "message": f"Team members are included in the {billing_plans.MAX.name} plan."})
+
+
+@app.get("/me/team")
+async def my_team(identity: Identity = Depends(require_user)):
+    return await _team_payload(identity)
+
+
+@app.post("/me/team/invites", status_code=201)
+async def invite_team_member(body: TeamInvite, request: Request, identity: Identity = Depends(require_user)):
+    _require_team_owner(identity)
+    try:
+        email = accounts.normalize_email(body.email)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if email == identity.user["email"]:
+        raise HTTPException(400, "You are already the owner of this team")
+    members = await accounts.list_team_members(identity.user["id"])
+    if len([m for m in members if m["email"] != email]) + 1 >= identity.plan.seats:
+        raise HTTPException(400, f"All {identity.plan.seats} seats are in use (owner + {identity.plan.seats - 1} members)")
+    record = await accounts.invite_team_member(identity.user["id"], email, body.role)
+    owner_name = identity.user.get("display_name") or identity.user["email"]
+    link = f"{_public_base(request)}/ui/?team=1"
+    await emailer.send_email(
+        email, f"{owner_name} invited you to their {settings.product_name} team",
+        f"<p><strong>{owner_name}</strong> added you to their {settings.product_name} team ({identity.plan.name} plan, shared credits).</p>"
+        f"<p><a href=\"{link}\">Sign in with this email address to accept</a>.</p>",
+        text=f"{owner_name} invited you to their {settings.product_name} team. Sign in with this email at {link} to accept.",
+    )
+    return record
+
+
+@app.delete("/me/team/members/{email}")
+async def remove_team_member(email: str, identity: Identity = Depends(require_user)):
+    _require_team_owner(identity)
+    if not await accounts.remove_team_member(identity.user["id"], email):
+        raise HTTPException(404, "No such member")
+    return {"removed": True}
+
+
+@app.post("/me/team/accept")
+async def accept_team_invite(body: TeamAccept, identity: Identity = Depends(require_user)):
+    if identity.plan.seats > 1 and await accounts.list_team_members(identity.user["id"]):
+        raise HTTPException(400, "You own a team; remove your members before joining another")
+    user = await accounts.accept_team_invite(identity.user, body.owner_id)
+    if user is None:
+        raise HTTPException(404, "No pending invite from that team for your email")
+    return {"joined": True, "owner_id": body.owner_id}
+
+
+@app.post("/me/team/leave")
+async def leave_team(identity: Identity = Depends(require_user)):
+    if identity.team_owner is None:
+        raise HTTPException(400, "You are not a member of a team")
+    await accounts.leave_team(identity.user)
+    return {"left": True}
 
 
 @app.get("/billing/plans")

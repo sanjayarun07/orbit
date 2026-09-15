@@ -498,6 +498,16 @@ and trades all require sign-in; anonymous visitors can research on the trial.
 and the MCP server as the owning user with scopes `chat`, `data`, `mcp`; they
 never grant execution. Manage them under Profile → API keys.
 
+**Settings** (Profile → Settings) has six tabs — Account (email, linked
+wallets, signed-in devices, sign out everywhere, team invitations), Billing
+(plan, credits, 30-day usage chart by feature, invoices, Portal, buy credits),
+API keys (create / scope / revoke, usage per key), Preferences (display name,
+risk preference, saved risk charter that seeds every new conversation, default
+wallet, theme — stored on the account), Notifications (low-credit email with a
+threshold, receipts) and Data & privacy (JSON export, delete all conversations,
+delete account with typed confirmation). The Max plan adds **Members**: up to
+five seats sharing the owner's plan and credit pool, invited by email.
+
 **Payments** go through Stripe-hosted pages only — Orbit never sees a card or
 wallet. `POST /billing/checkout` opens Checkout for a plan (subscription mode)
 or a one-time **credit pack** (500 / 2,000 / 10,000 credits; payment mode),
@@ -519,6 +529,9 @@ UI shows the catalog read-only.
 | `PUT /me/preferences` | Display name, risk preference, default wallet, theme |
 | `GET/POST/DELETE /me/api-keys` | List, create (secret shown once), revoke |
 | `GET /billing/plans` | The plan catalog with entitlements |
+| `GET /me/usage`, `GET /me/invoices`, `GET /me/sessions`, `POST /me/sessions/revoke-all` | Credits by day/feature/key, Stripe invoices, signed-in devices, sign out everywhere |
+| `GET /me/export`, `DELETE /me/conversations`, `DELETE /me` | Data export (JSON), delete all conversations, delete the account (ledger kept anonymously) |
+| `GET /me/team`, `POST /me/team/invites`, `DELETE /me/team/members/{email}`, `POST /me/team/accept`, `POST /me/team/leave` | Team seats on Max: members share the owner's plan and credit pool |
 | `POST /billing/checkout`, `POST /billing/portal`, `POST /billing/webhook` | Stripe Checkout (plan or credit pack), Customer Portal, verified webhook intake |
 
 ## API surface

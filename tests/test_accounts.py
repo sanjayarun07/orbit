@@ -67,7 +67,7 @@ def test_turns_are_charged_by_what_they_did_and_unused_reservation_is_refunded(f
     expected = start - settings.credit_cost_chat_turn - settings.credit_cost_tool_turn - settings.credit_cost_team_turn
     assert client.get("/me/credits").json()["balance"] == expected
     ledger = client.get("/me/credits").json()["ledger"]
-    assert {row["reason"] for row in ledger} >= {"monthly_grant", "reserve", "settle_refund"}
+    assert {row["reason"] for row in ledger} >= {"monthly_grant", "reserve", "settle"}
 
 
 def test_failed_turn_costs_nothing(monkeypatch):

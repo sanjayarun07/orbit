@@ -14,9 +14,10 @@ Accounts are either a signed-in user (`user:<id>`) or an anonymous visitor
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from app.billing_plans import Plan, get_plan
@@ -68,7 +69,7 @@ async def append(account_id: str, delta: int, reason: str, ref_type: str, ref_id
             ON CONFLICT (account_id, ref_type, ref_id) DO NOTHING
             RETURNING id
             """,
-            str(uuid4()), account_id, int(delta), reason, ref_type, ref_id, __import__("json").dumps(meta or {}),
+            str(uuid4()), account_id, int(delta), reason, ref_type, ref_id, json.dumps(meta or {}),
         )
         return row is not None
     key = (account_id, ref_type, ref_id)
@@ -175,13 +176,62 @@ async def reserve(account_id: str, turn_id: str, amount: int | None = None) -> i
     return amount
 
 
-async def settle(account_id: str, turn_id: str, reserved: int, actual: int, kind: str) -> int:
-    """Refund the unused part of a reservation. Returns the charge that stuck."""
+async def settle(account_id: str, turn_id: str, reserved: int, actual: int, kind: str, api_key_id: str | None = None) -> int:
+    """Refund the unused part of a reservation and record what the turn cost
+    (one `turn_settle` row per turn, delta = refund, possibly 0 -- the usage
+    report is built from these). Returns the charge that stuck."""
     actual = max(0, min(actual, reserved))
     refund = reserved - actual
-    if refund > 0:
-        await append(account_id, refund, "settle_refund", "turn_refund", turn_id, {"kind": kind, "charged": actual})
+    meta = {"kind": kind, "charged": actual}
+    if api_key_id:
+        meta["api_key_id"] = api_key_id
+    await append(account_id, refund, "settle", "turn_settle", turn_id, meta)
     return actual
+
+
+async def usage(account_id: str, days: int = 30) -> dict:
+    """Credits spent per day and per feature over the last `days` days, from
+    the settle rows -- plus a per-API-key split for the keys tab."""
+    days = max(1, min(int(days), 365))
+    since = datetime.now(timezone.utc) - timedelta(days=days - 1)
+    since = since.replace(hour=0, minute=0, second=0, microsecond=0)
+    rows: list[tuple[str, dict]] = []
+    pool = await get_pg_pool()
+    if pool is not None:
+        fetched = await pool.fetch(
+            "SELECT created_at, meta FROM credit_ledger WHERE account_id = $1 AND ref_type = 'turn_settle' AND created_at >= $2",
+            account_id, since,
+        )
+        for row in fetched:
+            meta = row["meta"]
+            if isinstance(meta, str):
+                meta = json.loads(meta)
+            rows.append((row["created_at"].isoformat(), meta or {}))
+    else:
+        for row in _ledger.get(account_id, []):
+            if row["ref_type"] == "turn_settle" and row["created_at"] >= since.isoformat():
+                rows.append((row["created_at"], row["meta"] or {}))
+    by_day: dict[str, dict] = {}
+    for offset in range(days):
+        day = (since + timedelta(days=offset)).date().isoformat()
+        by_day[day] = {"date": day, "charged": 0, "turns": 0, "by_kind": {}}
+    by_kind: dict[str, int] = {}
+    by_key: dict[str, int] = {}
+    total = 0
+    for created_at, meta in rows:
+        day = created_at[:10]
+        charged = int(meta.get("charged") or 0)
+        kind = str(meta.get("kind") or "chat")
+        bucket = by_day.setdefault(day, {"date": day, "charged": 0, "turns": 0, "by_kind": {}})
+        bucket["charged"] += charged
+        bucket["turns"] += 1
+        bucket["by_kind"][kind] = bucket["by_kind"].get(kind, 0) + charged
+        by_kind[kind] = by_kind.get(kind, 0) + charged
+        if meta.get("api_key_id"):
+            by_key[meta["api_key_id"]] = by_key.get(meta["api_key_id"], 0) + charged
+        total += charged
+    return {"days": days, "since": since.date().isoformat(), "total": total, "turns": len(rows),
+            "by_day": list(by_day.values()), "by_kind": by_kind, "by_api_key": by_key}
 
 
 async def release(account_id: str, turn_id: str, reserved: int) -> None:

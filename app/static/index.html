@@ -360,6 +360,29 @@
   .key-create input { flex: 1; }
   .notice-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
   .signin-status { font-size: 12px; color: var(--subtle); min-height: 16px; margin-top: 8px; }
+  .settings-dialog .dialog { width: min(780px, 100%); max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
+  .settings-dialog .dialog-body { overflow-y: auto; flex: 1; }
+  .tabs { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+  .tab { background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--subtle); font: inherit; font-size: 12px; padding: 10px 10px; cursor: pointer; white-space: nowrap; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text-strong); border-bottom-color: var(--brand); }
+  .tab[hidden] { display: none; }
+  .tab-panel[hidden] { display: none; }
+  .settings-section { margin-top: 16px; }
+  .settings-section:first-child { margin-top: 0; }
+  .settings-section h3 { margin: 0 0 6px; font-size: 12px; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+  .stat { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+  .stat .label { font-size: 10px; color: var(--subtle); text-transform: uppercase; letter-spacing: .04em; }
+  .stat .value { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .usage-chart { width: 100%; height: 130px; display: block; margin-top: 8px; }
+  .usage-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--subtle); margin-top: 6px; }
+  .usage-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+  .row-list .key-row:last-child { border-bottom: 0; }
+  .charter-summary { border: 1px dashed var(--border); border-radius: 10px; padding: 10px 12px; font-size: 12px; display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+  .danger-zone { border: 1px solid var(--red-border); border-radius: 12px; padding: 12px 14px; margin-top: 14px; }
+  .danger-zone h3 { color: var(--red); }
+  .inline-note { font-size: 11px; color: var(--subtle); }
   .policy-chip.unset { border-style: dashed; border-color: var(--border); background: transparent; color: var(--subtle); }
   .policy-chip.unset:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
   .send { margin-left: auto; width: 32px; height: 32px; border: 0; border-radius: 9px; background: var(--send-bg); color: var(--send-fg); display: grid; place-items: center; cursor: pointer; }
@@ -584,37 +607,105 @@
   </div>
 </div>
 
-<div class="overlay" id="profileDialog" role="dialog" aria-modal="true" aria-labelledby="profileTitle">
+<div class="overlay settings-dialog" id="profileDialog" role="dialog" aria-modal="true" aria-labelledby="profileTitle">
   <div class="dialog">
-    <div class="dialog-head"><h2 id="profileTitle">Profile &amp; settings</h2><button class="close" data-close="profileDialog" aria-label="Close">×</button></div>
+    <div class="dialog-head"><h2 id="profileTitle">Settings</h2><button class="close" data-close="profileDialog" aria-label="Close">×</button></div>
+    <nav class="tabs" id="settingsTabs" aria-label="Settings sections">
+      <button class="tab active" type="button" data-tab="account">Account</button>
+      <button class="tab" type="button" data-tab="billing">Billing</button>
+      <button class="tab" type="button" data-tab="keys">API keys</button>
+      <button class="tab" type="button" data-tab="preferences">Preferences</button>
+      <button class="tab" type="button" data-tab="notifications">Notifications</button>
+      <button class="tab" type="button" data-tab="data">Data &amp; privacy</button>
+      <button class="tab" type="button" data-tab="members" id="membersTab" hidden>Members</button>
+    </nav>
     <div class="dialog-body">
-      <div class="account-panel" id="accountPanel">
-        <div class="account-row"><span id="accountEmail" class="muted">Not signed in</span><span class="plan-badge" id="accountPlan">Trial</span></div>
-        <div class="account-row"><span>Credits</span><b id="accountCredits">0</b></div>
-        <div class="account-row"><span>Linked wallets</span><span id="accountWallets" class="muted">none</span></div>
-        <div class="account-actions">
-          <button class="primary" id="signinBtn" type="button">Sign in with email</button>
-          <button class="secondary" id="plansBtn" type="button">Plans &amp; credits</button>
-          <button class="secondary" id="signoutBtn" type="button" hidden>Sign out</button>
+      <section class="tab-panel" data-panel="account">
+        <div class="account-panel" id="accountPanel">
+          <div class="account-row"><span id="accountEmail" class="muted">Not signed in</span><span class="plan-badge" id="accountPlan">Trial</span></div>
+          <div class="account-row"><span>Credits</span><b id="accountCredits">0</b></div>
+          <div class="account-row"><span>Linked wallets</span><span id="accountWallets" class="muted">none</span></div>
+          <div class="account-actions">
+            <button class="primary" id="signinBtn" type="button">Sign in with email</button>
+            <button class="secondary" id="plansBtn" type="button">Plans &amp; credits</button>
+            <button class="secondary" id="signoutBtn" type="button" hidden>Sign out</button>
+          </div>
+          <div class="field-help" id="accountHelp">Sign in to keep conversation history, connect wallets, review trades and get 100 free credits every month.</div>
         </div>
-        <div class="field-help" id="accountHelp">Sign in to keep conversation history, connect wallets, review trades and get 100 free credits every month.</div>
-      </div>
-      <div class="field"><label for="displayNameInput">Display name</label><input id="displayNameInput" placeholder="Web3 User" /></div>
-      <div class="field"><label for="riskProfileSelect">Risk preference</label><select id="riskProfileSelect"><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="aggressive">Aggressive</option></select></div>
-      <div class="field"><label for="defaultWalletInput">Default wallet address</label><input id="defaultWalletInput" placeholder="Optional public address" spellcheck="false" /></div>
-      <div class="field"><label for="themeSelect">Appearance</label><select id="themeSelect"><option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
-      <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:8px"><input id="prefAutoScroll" type="checkbox" checked /> Auto-scroll to the latest message</label>
-      <div class="keys-section" id="apiKeysSection" hidden>
-        <h3>API keys</h3>
-        <div class="field-help" id="apiKeysHelp">Use a key as <code>Authorization: Bearer …</code> on <code>/chat</code> and as the MCP bearer for Claude or ChatGPT. Keys never sign or move funds.</div>
-        <div id="apiKeysList"></div>
-        <div class="key-create"><input id="apiKeyName" placeholder="Key name (e.g. Claude Desktop)" maxlength="60" /><button class="secondary" id="createApiKeyBtn" type="button">Create key</button></div>
-        <div class="key-secret" id="apiKeySecret" hidden></div>
-      </div>
-      <div style="margin-top:14px"><a href="/ui/admin.html" style="color:var(--text);font-size:12px">Open provider admin dashboard →</a></div>
-      <div class="danger-link"><button class="secondary danger" id="deleteAllChatsBtn" type="button">Delete all conversations</button><div class="field-help">Removes every conversation stored for this browser from the server and from this device. Cannot be undone.</div></div>
+        <div class="settings-section" id="teamInvitesSection" hidden><h3>Team invitations</h3><div class="row-list" id="teamInvites"></div></div>
+        <div class="settings-section" id="sessionsSection" hidden>
+          <h3>Signed-in devices</h3>
+          <div class="row-list" id="sessionsList"><div class="field-help">Loading…</div></div>
+          <div class="account-actions" style="margin-top:8px"><button class="secondary" id="revokeSessionsBtn" type="button">Sign out everywhere else</button></div>
+        </div>
+      </section>
+
+      <section class="tab-panel" data-panel="billing" hidden>
+        <div class="stat-grid" id="billingStats"></div>
+        <div class="account-actions" style="margin-top:10px">
+          <button class="primary" id="buyCreditsBtn" type="button">Buy credits</button>
+          <button class="secondary" id="changePlanBtn" type="button">Change plan</button>
+          <button class="secondary" id="billingPortalBtn" type="button" hidden>Manage subscription &amp; invoices</button>
+        </div>
+        <div class="settings-section"><h3>Usage · last 30 days</h3><svg class="usage-chart" id="usageChart" viewBox="0 0 600 130" preserveAspectRatio="none" role="img" aria-label="Credits spent per day"></svg><div class="usage-legend" id="usageLegend"></div></div>
+        <div class="settings-section"><h3>Invoices</h3><div class="row-list" id="invoicesList"><div class="field-help">Loading…</div></div></div>
+      </section>
+
+      <section class="tab-panel" data-panel="keys" hidden>
+        <div class="keys-section" id="apiKeysSection" style="margin-top:0;border-top:0;padding-top:0">
+          <h3>API keys</h3>
+          <div class="field-help" id="apiKeysHelp">Use a key as <code>Authorization: Bearer …</code> on <code>/chat</code> and as the MCP bearer for Claude or ChatGPT. Keys never sign or move funds.</div>
+          <div id="apiKeysList"></div>
+          <div class="key-create"><input id="apiKeyName" placeholder="Key name (e.g. Claude Desktop)" maxlength="60" /><button class="secondary" id="createApiKeyBtn" type="button">Create key</button></div>
+          <div class="key-secret" id="apiKeySecret" hidden></div>
+        </div>
+        <div class="settings-section"><h3>Usage per key · last 30 days</h3><div class="row-list" id="apiKeyUsage"><div class="field-help">No key usage yet.</div></div></div>
+      </section>
+
+      <section class="tab-panel" data-panel="preferences" hidden>
+        <div class="field"><label for="displayNameInput">Display name</label><input id="displayNameInput" placeholder="Web3 User" /></div>
+        <div class="field"><label for="riskProfileSelect">Risk preference</label><select id="riskProfileSelect"><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="aggressive">Aggressive</option></select></div>
+        <div class="field"><label>Risk charter</label><div class="charter-summary"><span id="charterSummaryText">No risk charter set — trades run in advisory mode.</span><button class="secondary" id="charterEditBtn" type="button">Edit</button></div><div class="field-help">Saved to your account and applied to every new conversation.</div></div>
+        <div class="field"><label for="defaultWalletInput">Default wallet address</label><input id="defaultWalletInput" placeholder="Optional public address" spellcheck="false" /></div>
+        <div class="field"><label for="themeSelect">Appearance</label><select id="themeSelect"><option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
+        <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:8px"><input id="prefAutoScroll" type="checkbox" checked /> Auto-scroll to the latest message</label>
+        <div class="field-help" id="prefsStorageNote" style="margin-top:10px">Preferences are saved to your account when you're signed in, otherwise to this browser.</div>
+      </section>
+
+      <section class="tab-panel" data-panel="notifications" hidden>
+        <label style="font-size:12px;display:flex;align-items:center;gap:8px"><input id="notifLowCredit" type="checkbox" checked /> Email me when my credits run low</label>
+        <div class="field" style="margin-top:10px"><label for="notifThreshold">Low-credit threshold</label><input id="notifThreshold" type="number" min="0" max="100000" value="20" style="width:120px" /><div class="field-help">One email per month, the first time the balance reaches this number.</div></div>
+        <label style="font-size:12px;display:flex;align-items:center;gap:8px"><input id="notifReceipts" type="checkbox" checked /> Email receipts for purchases</label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:8px;margin-top:8px"><input id="notifUpdates" type="checkbox" /> Product updates</label>
+        <div class="field-help" style="margin-top:10px">Sign-in links and security notices are always sent.</div>
+      </section>
+
+      <section class="tab-panel" data-panel="data" hidden>
+        <div class="settings-section"><h3>Export</h3><div class="field-help">Download everything Orbit holds about you — profile, wallets, API keys (names only), credit ledger and conversations — as one JSON file.</div><div class="account-actions" style="margin-top:8px"><button class="secondary" id="exportDataBtn" type="button">Export my data</button></div></div>
+        <div class="settings-section"><h3>Conversations</h3><div class="danger-link" style="margin-top:0;padding-top:0;border-top:0"><button class="secondary danger" id="deleteAllChatsBtn" type="button">Delete all conversations</button><div class="field-help">Removes every conversation on your account from the server and from this device. Cannot be undone.</div></div></div>
+        <div class="danger-zone" id="deleteAccountZone" hidden>
+          <h3>Delete account</h3>
+          <div class="field-help">Deletes your profile, linked wallets, API keys, sessions, team links and conversations. The credit ledger is kept as an anonymous financial record. Type your email to confirm.</div>
+          <div class="key-create"><input id="deleteAccountEmail" placeholder="your@email" autocomplete="off" /><button class="secondary danger" id="deleteAccountBtn" type="button" disabled>Delete account</button></div>
+          <div class="inline-note" id="deleteAccountStatus"></div>
+        </div>
+        <div style="margin-top:14px"><a href="/ui/admin.html" style="color:var(--text);font-size:12px">Open provider admin dashboard →</a></div>
+      </section>
+
+      <section class="tab-panel" data-panel="members" hidden>
+        <div class="field-help" id="teamSummary"></div>
+        <div class="settings-section" id="teamOwnerTools" hidden>
+          <h3>Members</h3>
+          <div class="row-list" id="teamMembers"></div>
+          <div class="key-create"><input id="teamInviteEmail" type="email" placeholder="teammate@company.com" /><button class="secondary" id="teamInviteBtn" type="button">Invite</button></div>
+          <div class="inline-note" id="teamStatus"></div>
+        </div>
+        <div class="settings-section" id="teamMemberTools" hidden>
+          <div class="account-actions"><button class="secondary danger" id="teamLeaveBtn" type="button">Leave team</button></div>
+        </div>
+      </section>
     </div>
-    <div class="dialog-footer"><button class="secondary" data-close="profileDialog">Cancel</button><button class="primary" id="saveProfileBtn">Save changes</button></div>
+    <div class="dialog-footer"><button class="secondary" data-close="profileDialog">Close</button><button class="primary" id="saveProfileBtn">Save changes</button></div>
   </div>
 </div>
 
@@ -865,14 +956,15 @@ let deleteAllArmedUntil = 0;
 $("#deleteAllChatsBtn").addEventListener("click", async () => {
   const button = $("#deleteAllChatsBtn");
   const ids = chatRegistry.filter(chat => chat?.id && !chat.id.startsWith("draft-")).map(chat => chat.id);
-  if (!ids.length) { button.textContent = "No conversations to delete"; setTimeout(() => { button.textContent = "Delete all conversations"; }, 1500); return; }
+  if (!ids.length && !account?.authenticated) { button.textContent = "No conversations to delete"; setTimeout(() => { button.textContent = "Delete all conversations"; }, 1500); return; }
   if (Date.now() >= deleteAllArmedUntil) {
-    deleteAllArmedUntil = Date.now() + 5000; button.classList.add("confirm"); button.textContent = `Click again to delete ${ids.length} conversation${ids.length === 1 ? "" : "s"}`;
+    deleteAllArmedUntil = Date.now() + 5000; button.classList.add("confirm"); button.textContent = ids.length ? `Click again to delete ${ids.length} conversation${ids.length === 1 ? "" : "s"}` : "Click again to delete all conversations";
     setTimeout(() => { if (Date.now() >= deleteAllArmedUntil) { button.classList.remove("confirm"); button.textContent = "Delete all conversations"; } }, 5200);
     return;
   }
   deleteAllArmedUntil = 0; button.disabled = true; button.textContent = "Deleting…";
   await Promise.allSettled(ids.map(id => fetch(`/chat/history/${encodeURIComponent(id)}`, { method: "DELETE" })));
+  if (account?.authenticated) { try { await fetch("/me/conversations", { method: "DELETE" }); } catch {} }
   chatRegistry = []; saveChats(); startNewChat();
   button.disabled = false; button.classList.remove("confirm"); button.textContent = "Delete all conversations"; closeDialog("profileDialog");
 });
@@ -1260,9 +1352,9 @@ document.querySelectorAll("#relayDialog input").forEach(field=>field.addEventLis
 $("#connectPrivyBtn").addEventListener("click",connectPrivy);$("#connectCoinbaseBtn").addEventListener("click",connectCoinbase);$("#connectReownBtn").addEventListener("click",connectReown);$("#privySendCodeBtn").addEventListener("click",sendPrivyCode);$("#privyVerifyBtn").addEventListener("click",verifyPrivyCode);$("#connectPhantomBtn").addEventListener("click",connectPhantom);$("#connectMetaMaskBtn").addEventListener("click",connectMetaMask);$("#disconnectWalletBtn").addEventListener("click",disconnectWallet);
 $("#useAddressBtn").addEventListener("click",()=>{const address=walletInput.value.trim();if(address){setReadOnlyWallet(address);closeDialog("walletDialog");}});
 
-$("#profileBtn").addEventListener("click",()=>openDialog("profileDialog"));
+$("#profileBtn").addEventListener("click",()=>openSettings("account"));
 $("#saveProfileBtn").addEventListener("click",async()=>{profile={name:$("#displayNameInput").value.trim(),riskProfile:$("#riskProfileSelect").value,defaultWallet:$("#defaultWalletInput").value.trim()};writeStorage(PROFILE_KEY,profile);writeStorage(AUTO_SCROLL_KEY,$("#prefAutoScroll").checked);writeStorage(THEME_KEY,$("#themeSelect").value);initProfile();closeDialog("profileDialog");
-  if(account?.authenticated){try{await fetch("/me/preferences",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({display_name:profile.name,risk_profile:profile.riskProfile,default_wallet:profile.defaultWallet,theme:$("#themeSelect").value})});await loadAccount();}catch{}}});
+  if(account?.authenticated){try{await fetch("/me/preferences",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({display_name:profile.name,risk_profile:profile.riskProfile,default_wallet:profile.defaultWallet,theme:$("#themeSelect").value,auto_scroll:$("#prefAutoScroll").checked,low_credit_alert:$("#notifLowCredit").checked,low_credit_threshold:Math.max(0,Number($("#notifThreshold").value)||0),receipts:$("#notifReceipts").checked,product_updates:$("#notifUpdates").checked})});await loadAccount();}catch{}}});
 
 // ---------------------------------------------------------------------------
 // Account, credits, sign-in and API keys
@@ -1284,7 +1376,43 @@ function renderAccount(){
   const keys=$("#apiKeysSection");keys.hidden=!signedIn;
   if(signedIn){if(account.plan?.entitlements?.api_keys){$("#apiKeysHelp").textContent="Use a key as Authorization: Bearer … on /chat and as the MCP bearer for Claude or ChatGPT. Keys never sign or move funds.";$("#createApiKeyBtn").disabled=false;loadApiKeys();}else{$("#apiKeysHelp").textContent="API keys and MCP access for Claude / ChatGPT are included in Pro and Max.";$("#apiKeysList").innerHTML="";$("#createApiKeyBtn").disabled=true;}}
   $("#profileRisk").textContent=signedIn?`${account.plan?.name} · ${Number(account.credits?.balance??0).toLocaleString()} credits`:`Trial · ${Number(account?.credits?.balance??0)} credits left`;
+  const notif=account?.notifications||{};$("#notifLowCredit").checked=notif.low_credit_alert!==false;$("#notifThreshold").value=notif.low_credit_threshold??20;$("#notifReceipts").checked=notif.receipts!==false;$("#notifUpdates").checked=Boolean(notif.product_updates);
+  $("#sessionsSection").hidden=!signedIn;$("#deleteAccountZone").hidden=!signedIn;
+  const team=account?.team||{};const showMembers=signedIn&&(team.role==="owner"||team.role==="member");$("#membersTab").hidden=!showMembers;
+  const invites=signedIn?(team.invites||[]):[];$("#teamInvitesSection").hidden=!invites.length;
+  $("#teamInvites").innerHTML=invites.map(i=>`<div class="key-row"><span>${escapeHtml(i.owner_name||i.owner_email)} invited you to their team (${escapeHtml(i.role)})</span><button class="primary" type="button" data-accept="${escapeHtml(i.owner_id)}">Join</button></div>`).join("");
+  $("#teamInvites").querySelectorAll("[data-accept]").forEach(b=>b.addEventListener("click",async()=>{b.disabled=true;try{const res=await fetch("/me/team/accept",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({owner_id:b.dataset.accept})});if(!res.ok)throw new Error(normalizeError(await res.json(),res.status));await loadAccount();openSettings("members");}catch(error){b.disabled=false;b.textContent=error.message;}}));
+  const fields=signedIn?(user.preferences||{}).risk_charter_fields:null;$("#charterSummaryText").textContent=fields?summarizeCharter(fields):"No risk charter set — trades run in advisory mode.";
 }
+function summarizeCharter(f){const parts=[];if(f.max_trade_usd!=null)parts.push(`max $${Number(f.max_trade_usd).toLocaleString()} per trade`);if(f.max_slippage_bps!=null)parts.push(`max ${f.max_slippage_bps} bps slippage`);if(f.verified_only)parts.push("verified tokens only");if(f.max_price_impact_pct!=null)parts.push(`max ${f.max_price_impact_pct}% price impact`);if(Array.isArray(f.chains)&&f.chains.length)parts.push(`chains: ${f.chains.join(", ")}`);if(f.notes)parts.push(f.notes);return parts.join(" · ")||"Custom charter";}
+function openSettings(tab){openDialog("profileDialog");settingsTab(tab||"account");}
+function settingsTab(name){document.querySelectorAll("#settingsTabs .tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===name));document.querySelectorAll("#profileDialog .tab-panel").forEach(p=>{p.hidden=p.dataset.panel!==name;});loadSettingsTab(name);}
+async function loadSettingsTab(name){if(!account?.authenticated)return;if(name==="account")loadSessions();if(name==="billing"){renderBillingStats();loadUsage();loadInvoices();}if(name==="keys"){loadApiKeys();loadUsage();}if(name==="members")loadTeam();}
+document.querySelectorAll("#settingsTabs .tab").forEach(t=>t.addEventListener("click",()=>settingsTab(t.dataset.tab)));
+$("#charterEditBtn").addEventListener("click",()=>{closeDialog("profileDialog");openCharterDialog();});
+$("#buyCreditsBtn").addEventListener("click",openPlans);$("#changePlanBtn").addEventListener("click",openPlans);
+$("#billingPortalBtn").addEventListener("click",async()=>{try{const res=await fetch("/billing/portal",{method:"POST"});const d=await res.json();if(!res.ok)throw new Error(normalizeError(d,res.status));location.href=d.url;}catch(error){$("#invoicesList").insertAdjacentHTML("afterbegin",`<div class="field-help" style="color:var(--red)">${escapeHtml(error.message)}</div>`);}});
+function renderBillingStats(){const plan=account?.plan||{};const billing=account?.billing||{};$("#billingStats").innerHTML=`<div class="stat"><div class="label">Plan</div><div class="value">${escapeHtml(plan.name||"—")}</div><div class="inline-note">${plan.price_usd_month?`$${plan.price_usd_month}/mo · ${(plan.monthly_credits||0).toLocaleString()} credits/mo`:`${(plan.monthly_credits||0).toLocaleString()} credits/mo`}</div></div><div class="stat"><div class="label">Credits</div><div class="value">${Number(account?.credits?.balance??0).toLocaleString()}</div><div class="inline-note">${account?.team?.role==="member"?"shared team pool":"available now"}</div></div><div class="stat"><div class="label">Subscription</div><div class="value" style="font-size:14px">${escapeHtml(billing.subscription_status||(plan.price_usd_month?"—":"none"))}</div><div class="inline-note">${billing.configured?"billed by Stripe":"billing not configured"}</div></div>`;$("#billingPortalBtn").hidden=!(billing.configured&&billing.has_billing_account);}
+const USAGE_COLORS={chat:"#7c7cf0",tool_turn:"#4fb6a4",deep_dive:"#e0a542",trade:"#e06c6c",team_desk:"#b078d8"};
+async function loadUsage(){try{const data=await (await fetch("/me/usage?days=30")).json();renderUsageChart(data);renderKeyUsage(data);}catch{$("#usageLegend").textContent="Usage is unavailable right now.";}}
+function renderUsageChart(data){const svg=$("#usageChart");const days=data.by_day||[];const W=600,H=130,pad=4,bottom=18;const max=Math.max(1,...days.map(d=>d.charged));const bw=(W-pad*2)/Math.max(1,days.length);let out="";days.forEach((d,i)=>{let y=H-bottom;const x=pad+i*bw+1;for(const [kind,amount] of Object.entries(d.by_kind||{})){const h=(amount/max)*(H-bottom-6);y-=h;out+=`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1,bw-2).toFixed(1)}" height="${h.toFixed(1)}" fill="${USAGE_COLORS[kind]||"#999"}"><title>${d.date}: ${amount} (${kind})</title></rect>`;}if(i===days.length-1||(i%7===0&&i<days.length-3))out+=`<text x="${(x+bw/2).toFixed(1)}" y="${H-4}" font-size="9" text-anchor="middle" fill="currentColor" opacity=".6">${d.date.slice(5)}</text>`;});out+=`<line x1="${pad}" y1="${H-bottom+.5}" x2="${W-pad}" y2="${H-bottom+.5}" stroke="currentColor" opacity=".2"/>`;svg.innerHTML=out;
+  const kinds=Object.entries(data.by_kind||{});$("#usageLegend").innerHTML=(kinds.length?kinds.map(([k,v])=>`<span><i style="background:${USAGE_COLORS[k]||"#999"}"></i>${k.replace("_"," ")} · ${v}</span>`).join(""):"<span>No credits spent in the last 30 days.</span>")+`<span style="margin-left:auto"><b>${data.total||0}</b> credits · ${data.turns||0} turns</span>`;}
+function renderKeyUsage(data){const rows=data.by_api_key||[];$("#apiKeyUsage").innerHTML=rows.length?rows.map(r=>`<div class="key-row"><span>${escapeHtml(r.name)}</span><b>${r.charged} credits</b></div>`).join(""):'<div class="field-help">No key usage in the last 30 days.</div>';}
+async function loadInvoices(){const list=$("#invoicesList");try{const data=await (await fetch("/me/invoices")).json();const rows=data.invoices||[];list.innerHTML=rows.length?rows.map(inv=>`<div class="key-row"><span>${inv.created?new Date(inv.created*1000).toLocaleDateString():""} · ${escapeHtml(inv.description||"Orbit")} <code>${escapeHtml(inv.number||inv.id||"")}</code></span><span>${inv.amount_paid!=null?`$${(inv.amount_paid/100).toFixed(2)}`:""} <span class="muted">${escapeHtml(inv.status||"")}</span> ${inv.hosted_invoice_url?`<a href="${inv.hosted_invoice_url}" target="_blank" rel="noopener">view</a>`:""}</span></div>`).join(""):`<div class="field-help">${data.configured===false?"Invoices appear here once billing is configured.":"No invoices yet."}</div>`;}catch{list.innerHTML='<div class="field-help">Invoices are unavailable right now.</div>';}}
+async function loadSessions(){const list=$("#sessionsList");try{const data=await (await fetch("/me/sessions")).json();list.innerHTML=(data.sessions||[]).map(sess=>`<div class="key-row"><span>${escapeHtml(describeAgent(sess.user_agent))}${sess.current?' <span class="plan-badge">this device</span>':""}<br><span class="inline-note">${sess.ip?escapeHtml(sess.ip)+" · ":""}signed in ${sess.created_at?new Date(sess.created_at).toLocaleString():""}</span></span></div>`).join("")||'<div class="field-help">No active sessions.</div>';}catch{list.innerHTML="";}}
+function describeAgent(ua){ua=ua||"";const browser=/Edg\//.test(ua)?"Edge":/Chrome\//.test(ua)?"Chrome":/Safari\//.test(ua)&&!/Chrome/.test(ua)?"Safari":/Firefox\//.test(ua)?"Firefox":"Browser";const os=/iPhone|iPad/.test(ua)?"iOS":/Android/.test(ua)?"Android":/Mac OS X/.test(ua)?"macOS":/Windows/.test(ua)?"Windows":/Linux/.test(ua)?"Linux":"";return `${browser}${os?" on "+os:""}`;}
+$("#revokeSessionsBtn").addEventListener("click",async()=>{const b=$("#revokeSessionsBtn");b.disabled=true;try{const d=await (await fetch("/me/sessions/revoke-all",{method:"POST"})).json();b.textContent=`Signed out ${d.revoked} other device${d.revoked===1?"":"s"}`;loadSessions();}catch{b.textContent="Could not sign out other devices";}setTimeout(()=>{b.disabled=false;b.textContent="Sign out everywhere else";},2500);});
+$("#exportDataBtn").addEventListener("click",async()=>{const b=$("#exportDataBtn");b.disabled=true;b.textContent="Preparing…";try{const res=await fetch("/me/export");if(!res.ok)throw new Error(normalizeError(await res.json(),res.status));const blob=new Blob([JSON.stringify(await res.json(),null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`orbit-export-${new Date().toISOString().slice(0,10)}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),2000);b.textContent="Exported";}catch(error){b.textContent=error.message;}setTimeout(()=>{b.disabled=false;b.textContent="Export my data";},2500);});
+$("#deleteAccountEmail").addEventListener("input",()=>{$("#deleteAccountBtn").disabled=$("#deleteAccountEmail").value.trim().toLowerCase()!==(account?.user?.email||"").toLowerCase();});
+$("#deleteAccountBtn").addEventListener("click",async()=>{const b=$("#deleteAccountBtn");const status=$("#deleteAccountStatus");b.disabled=true;status.textContent="Deleting…";try{const res=await fetch("/me",{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirm_email:$("#deleteAccountEmail").value.trim()})});const d=await res.json();if(!res.ok)throw new Error(normalizeError(d,res.status));chatRegistry=[];saveChats();startNewChat();setWalletDisconnected();closeDialog("profileDialog");await loadAccount();}catch(error){status.textContent=error.message;b.disabled=false;}});
+async function loadTeam(){const team=account?.team||{};$("#teamOwnerTools").hidden=team.role!=="owner";$("#teamMemberTools").hidden=team.role!=="member";
+  if(team.role==="member"){$("#teamSummary").textContent=`You're a member of ${team.owner?.display_name||team.owner?.email||"a team"}'s team on the ${account.plan?.name} plan. Credits come from the shared pool.`;return;}
+  const members=team.members||[];$("#teamSummary").textContent=`${account.plan?.name} includes ${team.seats} seats: you plus up to ${team.seats-1} members who share your plan and credit pool.`;
+  $("#teamMembers").innerHTML=members.length?members.map(m=>`<div class="key-row"><span>${escapeHtml(m.email)} <span class="muted">· ${escapeHtml(m.role)} · ${escapeHtml(m.status)}</span></span><button class="secondary danger" type="button" data-remove="${escapeHtml(m.email)}">Remove</button></div>`).join(""):'<div class="field-help">No members yet.</div>';
+  $("#teamMembers").querySelectorAll("[data-remove]").forEach(b=>b.addEventListener("click",async()=>{b.disabled=true;await fetch(`/me/team/members/${encodeURIComponent(b.dataset.remove)}`,{method:"DELETE"});await loadAccount();loadTeam();}));}
+$("#teamInviteBtn").addEventListener("click",async()=>{const email=$("#teamInviteEmail").value.trim();const status=$("#teamStatus");if(!email){status.textContent="Enter an email address.";return;}$("#teamInviteBtn").disabled=true;try{const res=await fetch("/me/team/invites",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,role:"member"})});const d=await res.json();if(!res.ok)throw new Error(normalizeError(d,res.status));status.textContent=`Invited ${d.email}. They accept by signing in with that email.`;$("#teamInviteEmail").value="";await loadAccount();loadTeam();}catch(error){status.textContent=error.message;}finally{$("#teamInviteBtn").disabled=false;}});
+$("#teamLeaveBtn").addEventListener("click",async()=>{const b=$("#teamLeaveBtn");if(b.dataset.armed!=="1"){b.dataset.armed="1";b.textContent="Click again to leave";setTimeout(()=>{b.dataset.armed="";b.textContent="Leave team";},5000);return;}b.disabled=true;await fetch("/me/team/leave",{method:"POST"});await loadAccount();b.disabled=false;b.dataset.armed="";b.textContent="Leave team";settingsTab("account");});
+$("#teamInviteEmail").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#teamInviteBtn").click();}});
 function openSignin(reason){$("#signinIntro").textContent=reason||"We'll email you a one-time sign-in link. No password to remember.";$("#signinStatus").textContent="";openDialog("signinDialog");setTimeout(()=>$("#signinEmail").focus(),50);}
 async function startSignin(){const email=$("#signinEmail").value.trim();const status=$("#signinStatus");if(!email){status.textContent="Enter your email address.";return;}$("#signinSendBtn").disabled=true;status.textContent="Sending…";
   try{const res=await fetch("/auth/email/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});const data=await res.json();if(!res.ok)throw new Error(normalizeError(data,res.status));
@@ -1321,7 +1449,8 @@ $("#creditsChip").addEventListener("click",()=>{if(account&&!account.authenticat
 $("#signinSendBtn").addEventListener("click",startSignin);
 $("#signinEmail").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();startSignin();}});
 $("#createApiKeyBtn").addEventListener("click",createApiKey);
-(async()=>{const billingReturn=new URLSearchParams(location.search).get("billing");if(billingReturn){history.replaceState(null,"",location.pathname);setTimeout(()=>{if(billingReturn==="success"){loadAccount();openPlans();}},400);}
+(async()=>{const teamReturn=new URLSearchParams(location.search).get("team");if(teamReturn){history.replaceState(null,"",location.pathname);setTimeout(()=>{if(account?.authenticated)openSettings("account");else openSignin("Sign in with the invited email address to join the team.");},600);}
+  const billingReturn=new URLSearchParams(location.search).get("billing");if(billingReturn){history.replaceState(null,"",location.pathname);setTimeout(()=>{if(billingReturn==="success"){loadAccount();openPlans();}},400);}
   const token=new URLSearchParams(location.search).get("signin");if(token){history.replaceState(null,"",location.pathname);try{await verifySignin(token);}catch(error){await loadAccount();openSignin(error.message);}return;}await loadAccount();})();
 document.querySelectorAll("[data-close]").forEach(button=>button.addEventListener("click",()=>closeDialog(button.dataset.close)));
 document.querySelectorAll(".overlay").forEach(overlay=>overlay.addEventListener("click",event=>{if(event.target===overlay)closeDialog(overlay.id);}));

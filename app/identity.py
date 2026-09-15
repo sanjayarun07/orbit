@@ -27,6 +27,9 @@ class Identity:
     user: dict | None = None
     api_key: dict | None = None
     plan: Plan = field(default_factory=lambda: ANONYMOUS)
+    # When the user is a member of someone's team: the owner's user record.
+    # Credits and plan come from the owner; the member keeps their own profile.
+    team_owner: dict | None = None
 
     @property
     def signed_in(self) -> bool:
@@ -61,14 +64,24 @@ def client_ip(request: Request) -> str:
 
 
 async def _identity_for_user(user: dict, ip: str, api_key: dict | None = None) -> Identity:
-    plan = get_plan(user.get("plan_id"))
-    account_id = credits.user_account_id(user["id"])
+    billed = user
+    team_owner = None
+    if user.get("team_owner_id"):
+        owner = await accounts.get_user(user["team_owner_id"])
+        if owner is not None and get_plan(owner.get("plan_id")).seats > 1:
+            billed, team_owner = owner, owner
+        else:
+            # The team no longer exists or the owner's plan lost its seats.
+            await accounts.update_user(user["id"], team_owner_id=None)
+            user = {**user, "team_owner_id": None}
+    plan = get_plan(billed.get("plan_id"))
+    account_id = credits.user_account_id(billed["id"])
     # Paid plans get their allowance from Stripe's invoice.paid webhook; the
     # lazy monthly grant is for the Free tier and admin-set plans without a
     # subscription behind them.
-    if plan.price_usd_month <= 0 or not user.get("stripe_subscription_id"):
+    if plan.price_usd_month <= 0 or not billed.get("stripe_subscription_id"):
         await credits.ensure_monthly_grant(account_id, plan)
-    return Identity("api_key" if api_key else "user", account_id, ip, user=user, api_key=api_key, plan=plan)
+    return Identity("api_key" if api_key else "user", account_id, ip, user=user, api_key=api_key, plan=plan, team_owner=team_owner)
 
 
 async def resolve_identity(request: Request) -> Identity:

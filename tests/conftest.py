@@ -25,6 +25,11 @@ def _reset_account_stores(monkeypatch):
         return True, 0
 
     monkeypatch.setattr(main, "allow_auth_request", allow)
+    # Never send real email from the suite; the dev link stands in for it.
+    from app.settings import settings
+
+    monkeypatch.setattr(settings, "resend_api_key", None)
+    monkeypatch.setattr(settings, "dev_expose_magic_links", True)
     accounts.reset()
     credits.reset()
     api_keys.reset()

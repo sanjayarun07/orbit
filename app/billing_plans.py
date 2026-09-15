@@ -68,8 +68,8 @@ PRO = Plan(
     features=("2,000 credits / month", "Everything in Free", "API keys and MCP access for Claude / ChatGPT", "Trading desk (team mode)"),
 )
 MAX = Plan(
-    "max", "Max", 49.0, 7500, api_keys=True, mcp=True, chat_requests_per_minute=60,
-    features=("7,500 credits / month", "Everything in Pro", "Higher rate limits", "Priority support"),
+    "max", "Max", 49.0, 7500, api_keys=True, mcp=True, chat_requests_per_minute=60, seats=5,
+    features=("7,500 credits / month", "Everything in Pro", "Higher rate limits", "Team: up to 5 members share the credit pool", "Priority support"),
 )
 
 PLANS: dict[str, Plan] = {plan.id: plan for plan in (ANONYMOUS, FREE, PRO, MAX)}

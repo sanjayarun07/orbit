@@ -34,7 +34,9 @@ _users: dict[str, dict] = {}
 _users_by_email: dict[str, str] = {}
 _wallets: dict[tuple[str, str], tuple[str, str]] = {}  # (chain, address_lower) -> (user_id, address)
 _magic_tokens: dict[str, tuple[float, dict]] = {}
-_user_sessions: dict[str, tuple[float, str]] = {}
+_user_sessions: dict[str, tuple[float, dict]] = {}
+_chat_sessions: dict[str, dict[str, str]] = {}  # user_id -> {session_id: last_used}
+_team_members: dict[tuple[str, str], dict] = {}  # (owner_id, email) -> member record
 
 
 def _now() -> str:
@@ -57,6 +59,7 @@ def _row_to_user(row) -> dict:
         "stripe_customer_id": row["stripe_customer_id"],
         "stripe_subscription_id": row.get("stripe_subscription_id") if hasattr(row, "get") else row["stripe_subscription_id"],
         "subscription_status": row.get("subscription_status") if hasattr(row, "get") else row["subscription_status"],
+        "team_owner_id": str(row["team_owner_id"]) if (row.get("team_owner_id") if hasattr(row, "get") else row["team_owner_id"]) else None,
         "preferences": json.loads(row["preferences"]) if isinstance(row["preferences"], str) else (row["preferences"] or {}),
         "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else row["created_at"],
     }
@@ -98,6 +101,7 @@ async def get_or_create_user(email: str) -> tuple[dict, bool]:
         "stripe_customer_id": None,
         "stripe_subscription_id": None,
         "subscription_status": None,
+        "team_owner_id": None,
         "preferences": {},
         "created_at": _now(),
     }
@@ -132,7 +136,7 @@ async def get_user_by_stripe_customer(customer_id: str) -> dict | None:
 
 async def update_user(user_id: str, **fields) -> dict | None:
     """Update a whitelisted set of columns; preferences are merged, not replaced."""
-    allowed = {"display_name", "plan_id", "stripe_customer_id", "stripe_subscription_id", "subscription_status", "preferences"}
+    allowed = {"display_name", "plan_id", "stripe_customer_id", "stripe_subscription_id", "subscription_status", "preferences", "team_owner_id"}
     changes = {key: value for key, value in fields.items() if key in allowed}
     if not changes:
         return await get_user(user_id)
@@ -240,15 +244,38 @@ async def consume_magic_token(token: str) -> str:
 # User sessions (cookie)
 # ----------------------------------------------------------------------------
 
-async def create_user_session(user_id: str) -> str:
+def _session_record(user_id: str, ip: str | None, user_agent: str | None) -> dict:
+    return {"user_id": user_id, "created_at": _now(), "ip": ip, "user_agent": (user_agent or "")[:200]}
+
+
+async def create_user_session(user_id: str, ip: str | None = None, user_agent: str | None = None) -> str:
     token = secrets.token_urlsafe(32)
+    record = _session_record(user_id, ip, user_agent)
     redis = await get_redis()
     if redis is not None:
-        await redis.setex(f"user_session:{token}", USER_SESSION_TTL, user_id)
+        async with redis.pipeline(transaction=True) as pipe:
+            pipe.setex(f"user_session:{token}", USER_SESSION_TTL, json.dumps(record))
+            pipe.sadd(f"user_sessions_index:{user_id}", token)
+            pipe.expire(f"user_sessions_index:{user_id}", USER_SESSION_TTL)
+            await pipe.execute()
     else:
         _prune_memory()
-        _user_sessions[token] = (time.time() + USER_SESSION_TTL, user_id)
+        _user_sessions[token] = (time.time() + USER_SESSION_TTL, record)
     return token
+
+
+def _parse_session(raw) -> dict | None:
+    if raw is None:
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode()
+    if isinstance(raw, dict):
+        return raw
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else {"user_id": str(value)}
+    except (TypeError, ValueError):
+        return {"user_id": str(raw)}  # legacy: bare user id
 
 
 async def get_session_user(token: str | None) -> dict | None:
@@ -256,14 +283,34 @@ async def get_session_user(token: str | None) -> dict | None:
         return None
     redis = await get_redis()
     if redis is not None:
-        user_id = await redis.get(f"user_session:{token}")
-        if isinstance(user_id, bytes):
-            user_id = user_id.decode()
+        record = _parse_session(await redis.get(f"user_session:{token}"))
     else:
         _prune_memory()
         entry = _user_sessions.get(token)
-        user_id = entry[1] if entry else None
-    return await get_user(user_id) if user_id else None
+        record = entry[1] if entry else None
+    return await get_user(record["user_id"]) if record and record.get("user_id") else None
+
+
+async def list_user_sessions(user_id: str, current_token: str | None = None) -> list[dict]:
+    """Active sign-ins for the account (device summary, never the token)."""
+    out: list[dict] = []
+    redis = await get_redis()
+    if redis is not None:
+        tokens = [t.decode() if isinstance(t, bytes) else t for t in await redis.smembers(f"user_sessions_index:{user_id}")]
+        for token in tokens:
+            record = _parse_session(await redis.get(f"user_session:{token}"))
+            if record is None:
+                await redis.srem(f"user_sessions_index:{user_id}", token)
+                continue
+            out.append({**record, "current": token == current_token})
+    else:
+        _prune_memory()
+        for token, (_, record) in _user_sessions.items():
+            if record.get("user_id") == user_id:
+                out.append({**record, "current": token == current_token})
+    for item in out:
+        item.pop("user_id", None)
+    return sorted(out, key=lambda r: r.get("created_at") or "", reverse=True)
 
 
 async def delete_user_session(token: str | None) -> None:
@@ -271,17 +318,198 @@ async def delete_user_session(token: str | None) -> None:
         return
     redis = await get_redis()
     if redis is not None:
+        record = _parse_session(await redis.get(f"user_session:{token}"))
         await redis.delete(f"user_session:{token}")
+        if record and record.get("user_id"):
+            await redis.srem(f"user_sessions_index:{record['user_id']}", token)
     else:
         _user_sessions.pop(token, None)
 
 
-async def sign_in_with_token(token: str) -> tuple[dict, str, bool]:
+async def revoke_user_sessions(user_id: str, keep_token: str | None = None) -> int:
+    """Sign out everywhere (optionally keeping the current browser). Returns how many."""
+    revoked = 0
+    redis = await get_redis()
+    if redis is not None:
+        tokens = [t.decode() if isinstance(t, bytes) else t for t in await redis.smembers(f"user_sessions_index:{user_id}")]
+        for token in tokens:
+            if token == keep_token:
+                continue
+            await redis.delete(f"user_session:{token}")
+            await redis.srem(f"user_sessions_index:{user_id}", token)
+            revoked += 1
+    else:
+        for token in [t for t, (_, r) in _user_sessions.items() if r.get("user_id") == user_id and t != keep_token]:
+            _user_sessions.pop(token, None)
+            revoked += 1
+    return revoked
+
+
+async def sign_in_with_token(token: str, ip: str | None = None, user_agent: str | None = None) -> tuple[dict, str, bool]:
     """Magic link -> (user, session token, created)."""
     email = await consume_magic_token(token)
     user, created = await get_or_create_user(email)
-    session = await create_user_session(user["id"])
+    session = await create_user_session(user["id"], ip, user_agent)
     return user, session, created
+
+
+# ----------------------------------------------------------------------------
+# Conversations that belong to a user (export / delete-all / delete account)
+# ----------------------------------------------------------------------------
+
+async def touch_chat_session(user_id: str, session_id: str) -> None:
+    pool = await get_pg_pool()
+    if pool is not None:
+        await pool.execute(
+            """
+            INSERT INTO user_chat_sessions (user_id, session_id, last_used) VALUES ($1, $2, NOW())
+            ON CONFLICT (session_id) DO UPDATE SET user_id = EXCLUDED.user_id, last_used = NOW()
+            """,
+            user_id, session_id,
+        )
+        return
+    _chat_sessions.setdefault(user_id, {})[session_id] = _now()
+
+
+async def list_chat_sessions(user_id: str) -> list[str]:
+    pool = await get_pg_pool()
+    if pool is not None:
+        rows = await pool.fetch("SELECT session_id FROM user_chat_sessions WHERE user_id = $1 ORDER BY last_used DESC", user_id)
+        return [row["session_id"] for row in rows]
+    return sorted(_chat_sessions.get(user_id, {}), key=lambda sid: _chat_sessions[user_id][sid], reverse=True)
+
+
+async def forget_chat_sessions(user_id: str, session_ids: list[str] | None = None) -> None:
+    pool = await get_pg_pool()
+    if pool is not None:
+        if session_ids is None:
+            await pool.execute("DELETE FROM user_chat_sessions WHERE user_id = $1", user_id)
+        else:
+            await pool.execute("DELETE FROM user_chat_sessions WHERE user_id = $1 AND session_id = ANY($2::text[])", user_id, session_ids)
+        return
+    if session_ids is None:
+        _chat_sessions.pop(user_id, None)
+    else:
+        for sid in session_ids:
+            _chat_sessions.get(user_id, {}).pop(sid, None)
+
+
+async def delete_user(user_id: str) -> None:
+    """Remove the account row (wallets, keys and session mappings cascade in
+    Postgres); the credit ledger is kept as a financial record."""
+    pool = await get_pg_pool()
+    if pool is not None:
+        await pool.execute("DELETE FROM team_members WHERE owner_id = $1 OR user_id = $1", user_id)
+        await pool.execute("DELETE FROM users WHERE id = $1", user_id)
+        return
+    user = _users.pop(user_id, None)
+    if user:
+        _users_by_email.pop(user["email"], None)
+    for key in [k for k, (owner, _) in _wallets.items() if owner == user_id]:
+        _wallets.pop(key, None)
+    _chat_sessions.pop(user_id, None)
+    for key in [k for k, m in _team_members.items() if k[0] == user_id or m.get("user_id") == user_id]:
+        _team_members.pop(key, None)
+
+
+# ----------------------------------------------------------------------------
+# Team members (plans with seats > 1): members share the owner's plan and credits
+# ----------------------------------------------------------------------------
+
+def _member_public(record: dict) -> dict:
+    return {k: record.get(k) for k in ("email", "role", "status", "invited_at", "accepted_at", "user_id")}
+
+
+async def list_team_members(owner_id: str) -> list[dict]:
+    pool = await get_pg_pool()
+    if pool is not None:
+        rows = await pool.fetch("SELECT * FROM team_members WHERE owner_id = $1 ORDER BY invited_at", owner_id)
+        return [_member_public({**dict(r), "user_id": str(r["user_id"]) if r["user_id"] else None,
+                                "invited_at": r["invited_at"].isoformat(), "accepted_at": r["accepted_at"].isoformat() if r["accepted_at"] else None}) for r in rows]
+    return [_member_public(m) for (owner, _), m in _team_members.items() if owner == owner_id]
+
+
+async def invite_team_member(owner_id: str, email: str, role: str = "member") -> dict:
+    email = normalize_email(email)
+    role = role if role in ("member", "owner") else "member"
+    record = {"owner_id": owner_id, "email": email, "role": role, "status": "invited", "invited_at": _now(), "accepted_at": None, "user_id": None}
+    pool = await get_pg_pool()
+    if pool is not None:
+        await pool.execute(
+            """
+            INSERT INTO team_members (owner_id, email, role, status) VALUES ($1, $2, $3, 'invited')
+            ON CONFLICT (owner_id, email) DO UPDATE SET role = EXCLUDED.role
+            """,
+            owner_id, email, role,
+        )
+    else:
+        existing = _team_members.get((owner_id, email))
+        if existing:
+            existing["role"] = role
+            return _member_public(existing)
+        _team_members[(owner_id, email)] = record
+    return _member_public(record)
+
+
+async def remove_team_member(owner_id: str, email: str) -> bool:
+    email = normalize_email(email)
+    pool = await get_pg_pool()
+    if pool is not None:
+        row = await pool.fetchrow("DELETE FROM team_members WHERE owner_id = $1 AND email = $2 RETURNING user_id", owner_id, email)
+        if row is None:
+            return False
+        if row["user_id"]:
+            await update_user(str(row["user_id"]), team_owner_id=None)
+        return True
+    record = _team_members.pop((owner_id, email), None)
+    if record is None:
+        return False
+    if record.get("user_id"):
+        await update_user(record["user_id"], team_owner_id=None)
+    return True
+
+
+async def pending_invites_for(email: str) -> list[dict]:
+    email = normalize_email(email)
+    pool = await get_pg_pool()
+    if pool is not None:
+        rows = await pool.fetch(
+            "SELECT m.owner_id, m.role, u.email AS owner_email, u.display_name AS owner_name FROM team_members m JOIN users u ON u.id = m.owner_id "
+            "WHERE m.email = $1 AND m.status = 'invited'", email,
+        )
+        return [{"owner_id": str(r["owner_id"]), "owner_email": r["owner_email"], "owner_name": r["owner_name"], "role": r["role"]} for r in rows]
+    out = []
+    for (owner_id, member_email), record in _team_members.items():
+        if member_email == email and record["status"] == "invited":
+            owner = _users.get(owner_id) or {}
+            out.append({"owner_id": owner_id, "owner_email": owner.get("email"), "owner_name": owner.get("display_name"), "role": record["role"]})
+    return out
+
+
+async def accept_team_invite(user: dict, owner_id: str) -> dict | None:
+    """The signed-in user joins the owner's team (the invite must be for their email)."""
+    email = user["email"]
+    pool = await get_pg_pool()
+    if pool is not None:
+        row = await pool.fetchrow(
+            "UPDATE team_members SET status = 'active', accepted_at = NOW(), user_id = $3 WHERE owner_id = $1 AND email = $2 AND status = 'invited' RETURNING role",
+            owner_id, email, user["id"],
+        )
+        if row is None:
+            return None
+    else:
+        record = _team_members.get((owner_id, email))
+        if record is None or record["status"] != "invited":
+            return None
+        record.update({"status": "active", "accepted_at": _now(), "user_id": user["id"]})
+    return await update_user(user["id"], team_owner_id=owner_id)
+
+
+async def leave_team(user: dict) -> dict | None:
+    owner_id = user.get("team_owner_id")
+    if owner_id:
+        await remove_team_member(owner_id, user["email"])
+    return await update_user(user["id"], team_owner_id=None)
 
 
 def reset() -> None:
@@ -291,3 +519,5 @@ def reset() -> None:
     _wallets.clear()
     _magic_tokens.clear()
     _user_sessions.clear()
+    _chat_sessions.clear()
+    _team_members.clear()

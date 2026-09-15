@@ -87,7 +87,25 @@ class PreferencesUpdate(BaseModel):
     risk_profile: str | None = Field(default=None, max_length=32)
     default_wallet: str | None = Field(default=None, max_length=128)
     theme: str | None = Field(default=None, max_length=16)
+    auto_scroll: bool | None = None
+    # Notifications
     low_credit_alert: bool | None = None
+    low_credit_threshold: int | None = Field(default=None, ge=0, le=100_000)
+    receipts: bool | None = None
+    product_updates: bool | None = None
+
+
+class TeamInvite(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    role: Literal["member", "owner"] = "member"
+
+
+class TeamAccept(BaseModel):
+    owner_id: str = Field(max_length=64)
+
+
+class DeleteAccountRequest(BaseModel):
+    confirm_email: str = Field(min_length=3, max_length=254)
 
 
 class AdminPlanUpdate(BaseModel):

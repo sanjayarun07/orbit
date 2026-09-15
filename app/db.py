@@ -62,6 +62,23 @@ CREATE TABLE IF NOT EXISTS users (
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS team_owner_id UUID;
+CREATE TABLE IF NOT EXISTS user_chat_sessions (
+    session_id TEXT PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    last_used TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS user_chat_sessions_user ON user_chat_sessions (user_id, last_used DESC);
+CREATE TABLE IF NOT EXISTS team_members (
+    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'member',
+    status TEXT NOT NULL DEFAULT 'invited',
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    invited_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    accepted_at TIMESTAMPTZ,
+    PRIMARY KEY (owner_id, email)
+);
 CREATE TABLE IF NOT EXISTS stripe_events (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,
