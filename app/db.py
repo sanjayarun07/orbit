@@ -123,6 +123,18 @@ CREATE TABLE IF NOT EXISTS tool_outcomes (
     successes INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (tool_name, day)
 );
+ALTER TABLE tool_outcomes ADD COLUMN IF NOT EXISTS feedback_up INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tool_outcomes ADD COLUMN IF NOT EXISTS feedback_down INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS chat_feedback (
+    session_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    rating TEXT NOT NULL,
+    comment TEXT,
+    account_id TEXT,
+    tools TEXT[] NOT NULL DEFAULT '{}',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (session_id, revision)
+);
 """
 
 

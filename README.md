@@ -271,7 +271,10 @@ Two layers, then a learned term:
    Counts are stored per tool per day (14-day window) and folded into the score
    as a Beta-smoothed rate (prior 0.8, weight 5): a new tool sits at the prior
    with zero adjustment (provisional) and earns one only with evidence
-   (trusted). `GET /admin/tools/outcomes` shows the live numbers.
+   (trusted). Thumbs up / down on an answer feed the same counters: every
+   tool behind the rated turn moves by one rating worth `TOOL_FEEDBACK_WEIGHT`
+   (2) automatic outcomes, once per turn, reversible. `GET /admin/tools/outcomes`
+   shows the live numbers.
 
 MCP tools follow the same idea in their own registry: capabilities, chain
 coverage and risk are inferred from each discovered schema; only the best few

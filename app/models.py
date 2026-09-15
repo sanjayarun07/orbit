@@ -118,6 +118,13 @@ class AdminCreditGrant(BaseModel):
     reference: str | None = Field(default=None, max_length=120)
 
 
+class FeedbackRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=128)
+    session_revision: int = Field(ge=0)
+    rating: Literal["up", "down", "none"]
+    comment: str | None = Field(default=None, max_length=500)
+
+
 class CheckoutRequest(BaseModel):
     kind: Literal["subscription", "pack"]
     item_id: str = Field(max_length=32)

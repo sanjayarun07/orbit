@@ -1156,10 +1156,11 @@ function addUserMessage(text) {
   el.innerHTML = '<div class="message-body"><span class="msg-text"></span><span class="msg-time"></span></div>'; $(".msg-text",el).textContent = text; $(".msg-time",el).textContent = clockTime(); messagesEl.appendChild(el); autoFollow=true;scrollToBottom(true);
 }
 function clockTime(date=new Date()){return date.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});}
-function attachMessageActions(el, text){const body=$(".message-body",el);if(!body||$(".msg-actions",body))return;const row=document.createElement("div");row.className="msg-actions";
+function attachMessageActions(el, text, revision){const body=$(".message-body",el);if(!body||$(".msg-actions",body))return;const row=document.createElement("div");row.className="msg-actions";
   row.innerHTML='<button type="button" data-act="copy" title="Copy answer" aria-label="Copy answer"><svg class="icon" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg></button><button type="button" data-act="up" title="Good answer" aria-label="Good answer"><svg class="icon" viewBox="0 0 24 24"><path d="M7 10v11M3 11h4l3-8a2 2 0 0 1 2 2v4h5a2 2 0 0 1 2 2l-1.5 8a2 2 0 0 1-2 2H7"/></svg></button><button type="button" data-act="down" title="Poor answer" aria-label="Poor answer"><svg class="icon" viewBox="0 0 24 24"><path d="M17 14V3M21 13h-4l-3 8a2 2 0 0 1-2-2v-4H7a2 2 0 0 1-2-2l1.5-8a2 2 0 0 1 2-2H17"/></svg></button><time>'+clockTime()+'</time>';
   row.querySelector('[data-act="copy"]').addEventListener("click",b=>{const t=text||$(".answer",body)?.innerText||body.innerText;navigator.clipboard?.writeText(t);const btn=b.currentTarget;btn.classList.add("on");setTimeout(()=>btn.classList.remove("on"),1200);});
-  row.querySelectorAll('[data-act="up"],[data-act="down"]').forEach(b=>b.addEventListener("click",()=>{row.querySelectorAll('[data-act="up"],[data-act="down"]').forEach(o=>o.classList.remove("on"));b.classList.add("on");}));
+  row.querySelectorAll('[data-act="up"],[data-act="down"]').forEach(b=>b.addEventListener("click",async()=>{const wasOn=b.classList.contains("on");const rating=wasOn?"none":b.dataset.act;row.querySelectorAll('[data-act="up"],[data-act="down"]').forEach(o=>o.classList.remove("on"));if(!wasOn)b.classList.add("on");
+    if(sessionId&&revision!=null){try{const res=await fetch("/chat/feedback",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:sessionId,session_revision:Number(revision),rating})});if(!res.ok)throw new Error();b.title=rating==="none"?(b.dataset.act==="up"?"Good answer":"Poor answer"):"Thanks — this trains tool ranking";}catch{b.classList.remove("on");}}}));
   body.appendChild(row);}
 function addAgentMessage(text) {
   hideWelcome(); const el = document.createElement("article"); el.className = "message assistant";
@@ -1378,7 +1379,7 @@ function finishAgentMessage(el, data) {
   const body=$(".message-body",el); body.innerHTML='<div class="answer"></div>';
   if(data.error){el.classList.add("error");$(".answer",body).textContent=data.error;}
   else { const answerNode=$(".answer",body);answerNode.replaceWith(renderAnswerResult(data.answer || ""));if(data.intent)body.appendChild(renderRouteBadge(data.intent,data.capabilities));body.appendChild(renderExperience(data));if(data.cross_chain_swap)body.appendChild(renderRelayPlanCard(data.cross_chain_swap,Number(data.session_revision??-1))); const portfolio=renderMcpPortfolioCard(data.trajectory);if(portfolio)body.appendChild(portfolio);const activity=renderToolActivity(data.trajectory); if(activity)body.appendChild(activity); if(data.trade_plan)body.appendChild(renderPlanCard(data.trade_plan));const actions=data.quick_actions?.length?data.quick_actions:[];if(actions.length)body.appendChild(renderSuggestions(actions,data.trade_plan)); }
-  if(!data.error) attachMessageActions(el, data.answer);
+  if(!data.error) attachMessageActions(el, data.answer, data.session_revision);
   scrollToBottom();
 }
 function compactAddress(value){const text=String(value||"");return text.length>12?`${text.slice(0,5)}…${text.slice(-4)}`:text;}

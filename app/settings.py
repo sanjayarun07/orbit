@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     tool_outcome_prior_weight: float = 5.0
     tool_outcome_window_days: int = 14
     tool_outcome_refresh_seconds: int = 300
+    # One thumbs up/down on an answer counts as this many automatic outcomes
+    # for every tool that contributed to it (app/feedback.py).
+    tool_feedback_weight: float = 2.0
     # Per-capability tool-selection semantic fallback (app/routing/tool_semantic.py) --
     # a second chance for a description-bearing tool whose regex `matches`
     # gate returned False, not a replacement for the intent-classification

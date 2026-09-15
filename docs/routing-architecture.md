@@ -95,6 +95,15 @@ as real turns accumulate (trusted). A tool that keeps returning unusable data
 therefore ranks down on its own; nobody edits a matcher. `GET
 /admin/tools/outcomes` shows every tool's calls, rate and current adjustment.
 
+**User feedback is part of the same signal.** A thumbs up / down on an answer
+(`POST /chat/feedback`, app/feedback.py) is attached to one turn; the tools
+behind that turn are read from the stored conversation (never from the
+client) and each gets `feedback_up` / `feedback_down` incremented. In the
+rate, one rating counts as `TOOL_FEEDBACK_WEIGHT` (default 2) automatic
+outcomes -- a person saying "this was wrong" outweighs one clean-looking
+call. Ratings are one-per-turn: re-rating moves the counters by the
+difference and "none" retracts, so nothing double-counts.
+
 ## Module boundaries
 
 - `app/routing/contracts.py` defines stable route and draft types.

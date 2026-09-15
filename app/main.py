@@ -46,7 +46,7 @@ from app.lifi import get_quote as get_lifi_quote, get_status as get_lifi_status
 from app.mcp_tools import close_mcp_gateway, discover_mcp_tools, get_mcp_registry
 from app.metrics import increment, snapshot
 from app.wash_trading import nansen_enrich, pipeline as wash_trading_pipeline, schema as wash_trading_schema
-from app import accounts, api_keys, billing, billing_plans, credits, emailer, mcp_server, notifications, tool_outcomes, x402_gate
+from app import accounts, api_keys, billing, billing_plans, credits, emailer, feedback, mcp_server, notifications, tool_outcomes, x402_gate
 from app.identity import Identity, current_identity, require_user, resolve_identity, service_identity
 from app.models import TRADING_CHAINS, RiskCharterFields
 from app.models import (
@@ -56,6 +56,7 @@ from app.models import (
     ApiKeyCreate,
     CheckoutRequest,
     DeleteAccountRequest,
+    FeedbackRequest,
     TeamAccept,
     TeamInvite,
     ChatRequest,
@@ -1298,6 +1299,22 @@ async def billing_webhook(request: Request):
         raise HTTPException(500, "Webhook handling failed") from exc
     increment(f"stripe_{result.get('status', 'unknown')}")
     return {"received": True, **result}
+
+
+@app.post("/chat/feedback")
+async def chat_feedback(body: FeedbackRequest, request: Request):
+    """Rate one assistant turn. The tools behind that turn are read from the
+    stored conversation and their outcome counters move by the rating (or its
+    change), which feeds ProviderRouter's ranking -- see app/tool_outcomes.py."""
+    identity = await resolve_identity(request)
+    try:
+        result = await feedback.rate(body.session_id, body.session_revision, body.rating, body.comment, identity.account_id)
+    except feedback.TurnNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    increment(f"feedback_{body.rating}")
+    return result
 
 
 @app.get("/chat/risk-charter/limits")

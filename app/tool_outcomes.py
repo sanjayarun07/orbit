@@ -36,6 +36,10 @@ _SKIP = {"semantic_cache", "finish"}
 class _Counts:
     calls: int = 0
     successes: int = 0
+    # Explicit user ratings on answers the tool contributed to (thumbs up /
+    # down in the UI). Each counts as `tool_feedback_weight` virtual outcomes.
+    feedback_up: int = 0
+    feedback_down: int = 0
 
 
 _counts: dict[str, _Counts] = {}
@@ -76,9 +80,19 @@ def outcomes_from_turn(trajectory: object, validation: object) -> list[tuple[str
 
 
 def _rate(counts: _Counts) -> float:
+    """Smoothed success rate: automatic outcomes plus user feedback, where one
+    rating weighs `tool_feedback_weight` automatic outcomes (a person saying
+    "this was wrong" is stronger evidence than a clean-looking call)."""
     k = max(0.0, settings.tool_outcome_prior_weight)
+    w = max(0.0, settings.tool_feedback_weight)
     prior = settings.tool_outcome_prior_rate
-    return (counts.successes + k * prior) / (counts.calls + k) if (counts.calls + k) > 0 else prior
+    successes = counts.successes + w * counts.feedback_up
+    calls = counts.calls + w * (counts.feedback_up + counts.feedback_down)
+    return (successes + k * prior) / (calls + k) if (calls + k) > 0 else prior
+
+
+def _observed(counts: _Counts) -> float:
+    return counts.calls + max(0.0, settings.tool_feedback_weight) * (counts.feedback_up + counts.feedback_down)
 
 
 def adjustment(tool_name: str) -> float:
@@ -86,23 +100,71 @@ def adjustment(tool_name: str) -> float:
     for a tool with no evidence. Synchronous -- read by the router's ranker."""
     with _lock:
         counts = _counts.get(tool_name)
-    if counts is None or counts.calls == 0:
+    if counts is None or _observed(counts) == 0:
         return 0.0
     return settings.provider_outcome_weight * (_rate(counts) - settings.tool_outcome_prior_rate)
 
 
 def snapshot() -> list[dict]:
     with _lock:
-        items = [(name, _Counts(c.calls, c.successes)) for name, c in _counts.items()]
+        items = [(name, _Counts(c.calls, c.successes, c.feedback_up, c.feedback_down)) for name, c in _counts.items()]
     rows = []
     for name, counts in sorted(items, key=lambda item: item[0]):
+        observed = _observed(counts)
         rows.append({
             "tool": name, "calls": counts.calls, "successes": counts.successes,
+            "feedback_up": counts.feedback_up, "feedback_down": counts.feedback_down,
             "rate": round(_rate(counts), 3),
-            "adjustment": round(settings.provider_outcome_weight * (_rate(counts) - settings.tool_outcome_prior_rate), 3) if counts.calls else 0.0,
-            "trusted": counts.calls >= settings.tool_outcome_prior_weight,
+            "adjustment": round(settings.provider_outcome_weight * (_rate(counts) - settings.tool_outcome_prior_rate), 3) if observed else 0.0,
+            "trusted": observed >= settings.tool_outcome_prior_weight,
         })
     return rows
+
+
+def tools_in(trajectory: object) -> list[str]:
+    """Distinct rated-able tool names in a turn's trajectory (public or full)."""
+    if not isinstance(trajectory, dict):
+        return []
+    seen: list[str] = []
+    for name, _ in _tool_calls(trajectory):
+        if name not in _SKIP and name not in seen:
+            seen.append(name)
+    return seen
+
+
+async def record_feedback(tool_names: list[str], up_delta: int, down_delta: int) -> None:
+    """Apply a user rating (or its change/retraction) to every tool that
+    contributed to the rated answer. Deltas can be negative; counters never
+    go below zero. Persists to today's row when Postgres is configured."""
+    names = [name for name in tool_names if name not in _SKIP]
+    if not names or (up_delta == 0 and down_delta == 0):
+        return
+    with _lock:
+        for name in names:
+            counts = _counts.setdefault(name, _Counts())
+            counts.feedback_up = max(0, counts.feedback_up + up_delta)
+            counts.feedback_down = max(0, counts.feedback_down + down_delta)
+    try:
+        pool = await get_pg_pool()
+    except Exception:
+        pool = None
+    if pool is None:
+        return
+    try:
+        async with pool.acquire() as conn:
+            for name in names:
+                await conn.execute(
+                    """
+                    INSERT INTO tool_outcomes (tool_name, day, calls, successes, feedback_up, feedback_down)
+                    VALUES ($1, $2, 0, 0, GREATEST(0, $3), GREATEST(0, $4))
+                    ON CONFLICT (tool_name, day) DO UPDATE
+                    SET feedback_up = GREATEST(0, tool_outcomes.feedback_up + $3),
+                        feedback_down = GREATEST(0, tool_outcomes.feedback_down + $4)
+                    """,
+                    name, date.today(), int(up_delta), int(down_delta),
+                )
+    except Exception:
+        logger.warning("tool_outcomes: could not persist feedback", exc_info=True)
 
 
 async def record_turn(trajectory: object, validation: object) -> None:
@@ -148,14 +210,15 @@ async def refresh() -> None:
     try:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT tool_name, SUM(calls) AS calls, SUM(successes) AS successes FROM tool_outcomes "
+                "SELECT tool_name, SUM(calls) AS calls, SUM(successes) AS successes, "
+                "SUM(feedback_up) AS feedback_up, SUM(feedback_down) AS feedback_down FROM tool_outcomes "
                 "WHERE day >= CURRENT_DATE - $1::int GROUP BY tool_name",
                 int(settings.tool_outcome_window_days),
             )
     except Exception:
         logger.warning("tool_outcomes: refresh failed; keeping current rates", exc_info=True)
         return
-    fresh = {row["tool_name"]: _Counts(int(row["calls"]), int(row["successes"])) for row in rows}
+    fresh = {row["tool_name"]: _Counts(int(row["calls"]), int(row["successes"]), int(row["feedback_up"] or 0), int(row["feedback_down"] or 0)) for row in rows}
     with _lock:
         _counts.clear()
         _counts.update(fresh)
