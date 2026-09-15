@@ -387,6 +387,13 @@ async def compose_brief(task: dict) -> str:
                 lines += ["", f"Your wallet: **${float(total):,.2f}**" + (" · " + ", ".join(f"{h['symbol']} ${float(h['usd_value']):,.0f}" for h in top) if top else "")]
         except Exception:
             logger.debug("tasks: wallet snapshot unavailable for brief", exc_info=True)
+    try:
+        from app import event_calendar
+        todays = event_calendar.today_events(event_calendar.get_calendar(7))
+        if todays:
+            lines += ["", "**Today**: " + " · ".join(f"{e['title']}{' ' + e['time'] if e.get('time') else ''}" for e in todays)]
+    except Exception:
+        logger.debug("tasks: calendar unavailable for brief", exc_info=True)
     lines += ["", "Ask me about any of these — or say *why is X moving* for the full picture."]
     return "\n".join(lines)
 

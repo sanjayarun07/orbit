@@ -22,6 +22,7 @@ from app.perplexity_tools import (
     perplexity_web_search,
 )
 from app.agent import token_identity, token_safety_warnings, token_top_holders_rpc
+from app import social_sentiment
 from app.geckoterminal_tools import geckoterminal_pools, _network as _gt_network
 from app.provider_router import ProviderRouter, ProviderTool
 from app.rootdata_provider import ROOTDATA_PROVIDERS
@@ -261,6 +262,14 @@ def get_provider_router() -> ProviderRouter:
         chains=("solana", "base", "ethereum", "arbitrum", "bsc", "polygon", "avalanche", "sui", "robinhood", "hyperliquid"),
         cache_ttl_seconds=45, quota_per_minute=30, priority=10,
         description="Real trending or newly-created pools on a specific chain or launchpad (GeckoTerminal): price, volume, liquidity, pool age",
+    ))
+    router.register(ProviderTool(
+        "x_kol_sentiment", "social", ("market_sentiment",), social_sentiment.x_kol_sentiment,
+        enabled=lambda: bool(settings.lunarcrush_api_key or settings.x_bearer_token or settings.perplexity_api_key),
+        matches=social_sentiment.matches,
+        keywords=("kol", "twitter", "crypto twitter", "social", "saying", "buzz"),
+        chains=(), cache_ttl_seconds=900, priority=9,
+        description="Social read on a token: LunarCrush galaxy score / alt rank / sentiment / interactions with top creators and posts, or X API / web search over high-reach KOL posts",
     ))
     router.register(ProviderTool(
         # Keyless holders source for Solana; ranks below bitquery_token_top_holders

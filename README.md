@@ -527,6 +527,20 @@ autocompletes a token from the majors and Jupiter's verified registry.
 and volume, router-sourced market detail, and the reported reasons with
 sources (a stock gets the same via finance search).
 
+**Social and events.** "What is crypto twitter saying about BONK?" runs the
+`x_kol_sentiment` tool. With `LUNARCRUSH_API_KEY` it reports measured social
+data from LunarCrush (Galaxy Score, AltRank, sentiment, 24h interactions and
+contributors, top creators and posts across X, Reddit, YouTube, TikTok); with
+`X_BEARER_TOKEN` it searches X's API and scores stance by reach and
+engagement (reproducible, lexicon-based); otherwise Perplexity web search
+over recent X posts by high-reach accounts — stance, top posts with handles,
+narratives and risks. The card always says which path produced it. "What events could move
+the market this week?" (or `GET /calendar?days=7`) renders the dated calendar
+— Fed / CPI / jobs, mega-cap and crypto-adjacent earnings, ETF deadlines,
+upgrades and unlocks — with sources; entries without a real date inside the
+window are dropped. The calendar also feeds the "This week" home chip and
+the morning brief.
+
 **Tasks** run for signed-in users in the background (Settings → Tasks, or
 just type it): reminders ("remind me tomorrow at 9am to check SOL", one-off or
 recurring), price alerts ("alert me when SOL drops below $90", re-checked
@@ -563,6 +577,7 @@ UI shows the catalog read-only.
 | `GET /me/team`, `POST /me/team/invites`, `DELETE /me/team/members/{email}`, `POST /me/team/accept`, `POST /me/team/leave` | Team seats on Max: members share the owner's plan and credit pool |
 | `GET /home/highlights`, `GET /home/suggestions`, `GET /tokens/search` | Today's tiles, chip rows (My wallet when linked), `$TICKER` autocomplete |
 | `GET/POST /me/tasks`, `PATCH/DELETE /me/tasks/{id}`, `POST /me/tasks/{id}/run`, `GET /me/inbox`, `POST /me/inbox/read` | Reminders, price alerts, morning brief; the inbox they deliver to |
+| `GET /calendar` | Scheduled market-moving events for the next N days |
 | `POST /chat/feedback` | Rate a turn (up / down / none); the tools behind it move in outcome scoring |
 | `GET /admin/metrics/business`, `GET /admin/users`, `GET /admin/users/{email}` | MRR, plan mix, conversion, credits burned per feature, failed payments, sign-ups; account search and a full support view |
 | `PUT /admin/users/{email}/plan`, `POST /admin/users/{email}/credits`, `…/api-keys/{id}/revoke`, `…/sessions/revoke` | Support actions: plan override, grant / claw back credits with an audit reference, revoke a key, sign out everywhere |

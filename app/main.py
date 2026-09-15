@@ -46,7 +46,7 @@ from app.lifi import get_quote as get_lifi_quote, get_status as get_lifi_status
 from app.mcp_tools import close_mcp_gateway, discover_mcp_tools, get_mcp_registry
 from app.metrics import increment, snapshot
 from app.wash_trading import nansen_enrich, pipeline as wash_trading_pipeline, schema as wash_trading_schema
-from app import accounts, api_keys, billing, billing_plans, credits, emailer, feedback, home_highlights, mcp_server, notifications, tasks, tasks_nl, tool_outcomes, x402_gate
+from app import accounts, api_keys, billing, billing_plans, credits, emailer, event_calendar, feedback, home_highlights, mcp_server, notifications, tasks, tasks_nl, tool_outcomes, x402_gate
 from app.identity import Identity, current_identity, require_user, resolve_identity, service_identity
 from app.models import TRADING_CHAINS, RiskCharterFields
 from app.models import (
@@ -401,6 +401,13 @@ async def home_highlights_cards():
     """Today's crypto and stock-market highlights for the welcome tiles.
     Cached server-side; anonymous, since the welcome screen is."""
     return await asyncio.to_thread(home_highlights.get_highlights)
+
+
+@app.get("/calendar")
+async def market_calendar(days: int = 7):
+    """Scheduled market-moving events for the next `days` days (macro,
+    earnings, crypto catalysts, unlocks). Cached server-side; public."""
+    return await asyncio.to_thread(event_calendar.get_calendar, max(1, min(days, 30)))
 
 
 @app.get("/home/suggestions")

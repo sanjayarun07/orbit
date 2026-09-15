@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     task_worker_interval_seconds: int = 30
     task_alert_check_minutes: int = 5
     credit_cost_brief: int = 1
+    # X / KOL sentiment (app/social_sentiment.py): X API v2 when a bearer token is
+    # set, Perplexity web search over X posts otherwise. Event calendar cache.
+    x_bearer_token: str | None = None
+    # LunarCrush API v4 (https://lunarcrush.com/developers/api): measured social
+    # metrics (galaxy score, alt rank, sentiment, interactions, top creators/posts).
+    # Preferred over X API and Perplexity for the sentiment tool when set.
+    lunarcrush_api_key: str | None = None
+    social_sentiment_ttl_seconds: int = 900
+    event_calendar_ttl_seconds: int = 21600
     # Per-capability tool-selection semantic fallback (app/routing/tool_semantic.py) --
     # a second chance for a description-bearing tool whose regex `matches`
     # gate returned False, not a replacement for the intent-classification

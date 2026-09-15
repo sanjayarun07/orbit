@@ -1,3 +1,4 @@
+import json
 from app.nodes.state import AgentState, effective_request as _effective_request
 from app.nodes import runtime
 from app.tracing import trace
@@ -13,7 +14,7 @@ from app.jupiter import WRAPPED_SOL_MINT
 from app.capability_router import extract_chains
 from app.market_brief import crypto_market_brief
 from app.market_overview import crypto_market_overview
-from app import why_moving
+from app import event_calendar, why_moving
 from app.market_providers import TRENDING_TOKENS
 from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available
 from app.provider_registry import get_provider_router
@@ -1197,6 +1198,14 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
                 "observation_0": observation,
             },
         }
+    # "what events are coming this week?" -> the dated calendar card.
+    if event_calendar.TRIGGER.search(request) and not _TOKEN_ADDRESS.search(request):
+        days = 14 if re.search(r"\b(?:next|two)\s+weeks?|fortnight|month\b", request, re.I) else 7
+        data = await asyncio.to_thread(event_calendar.get_calendar, days)
+        return {"answer": event_calendar.render(data), "trajectory": {
+            "thought_0": "A market-events ask maps to the dated calendar card.", "tool_name_0": "market_event_calendar",
+            "tool_args_0": {"days": days}, "observation_0": json.dumps(data.get("events", [])[:20]),
+        }}
     # "why is SOL down?" -> the composed market + news card (crypto first, stock otherwise).
     moving = why_moving.match(request)
     if moving and not _TOKEN_ADDRESS.search(request):

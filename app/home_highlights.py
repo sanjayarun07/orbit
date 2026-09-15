@@ -197,8 +197,16 @@ def suggestions(wallet_holdings: list[str] | None = None) -> list[dict]:
     for extra in ("How's the crypto market today?", "Why is BTC moving today?"):
         if extra not in trending:
             trending.append(extra)
+    week_rows = ["What events could move the market this week?", "When is the next FOMC decision and what's expected?"]
+    try:
+        from app import event_calendar
+        for event in (event_calendar.get_calendar(7).get("events") or [])[:3]:
+            week_rows.insert(0, f"What does {event['title']} on {event['date']} mean for crypto and stocks?")
+    except Exception:
+        logger.debug("home highlights: calendar unavailable", exc_info=True)
     categories = [
         {"id": "trending", "label": "Trending", "rows": trending[:5]},
+        {"id": "week", "label": "This week", "rows": week_rows[:5]},
         {"id": "crypto", "label": "Crypto", "rows": CURATED["crypto"]},
         {"id": "stocks", "label": "Stocks", "rows": CURATED["stocks"]},
         {"id": "macro", "label": "Macro", "rows": CURATED["macro"]},
