@@ -23,12 +23,14 @@ _TOKEN_WORD = re.compile(r"\b(?:token|coin|contract|mint|memecoin|meme coin|erc-
 _PRONOUN = re.compile(r"^(?:it|that|this)(?:\s+one)?$", re.IGNORECASE)
 _TOKEN_FOLLOWUP = re.compile(
     r"\b(?:this|that|the)\s+(?:token|coin|contract)\b"
-    r"|\b(?:its|their)\s+(?:holders?|liquidity|volume|price|trades?|safety|risk)\b"
+    r"|\b(?:its|their)\s+(?:(?:top|largest|biggest|current|recent)\s+)?(?:holders?|liquidity|volume|price|trades?|safety|risk)\b"
     # Bare pronoun follow-ups ("how about that one?", "tell me more about it") --
     # verified live these previously resolved to nothing at all, unlike the
     # "this/that + noun" phrasing above, which was already handled.
     r"|\b(?:how|what)\s+about\s+(?:it|that|this)(?:\s+one)?\b"
-    r"|\b(?:tell\s+me\s+more\s+about|check|analyze)\s+(?:it|that|this)(?:\s+one)?\b",
+    r"|\b(?:tell\s+me\s+more\s+about|check|analyze)\s+(?:it|that|this)(?:\s+one)?\b"
+    # "is it safe?", "is that one legit?" -- a bare-pronoun safety follow-up.
+    r"|\bis\s+(?:it|that|this)(?:\s+one)?\s+(?:a\s+)?(?:safe|legit|rug|scam|honeypot)\b",
     re.IGNORECASE,
 )
 _WALLET_FOLLOWUP = re.compile(

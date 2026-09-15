@@ -81,6 +81,7 @@ class AgentRun:
     team_report: dict | None = None
     pending_token: dict | None = None
     pending_wallet_request: str | None = None
+    resolved_token: dict | None = None
 
     def __iter__(self):
         """Retain compatibility with callers unpacking the original three values."""
@@ -169,4 +170,5 @@ async def _run_agent_traced(
         team_report=final_state.get("team_report"),
         pending_token=final_state.get("pending_token"),
         pending_wallet_request=final_state.get("pending_wallet_request"),
+        resolved_token=final_state.get("resolved_token"),
     )

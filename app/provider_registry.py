@@ -21,7 +21,7 @@ from app.perplexity_tools import (
     perplexity_people_search,
     perplexity_web_search,
 )
-from app.agent import token_identity, token_safety_warnings
+from app.agent import token_identity, token_safety_warnings, token_top_holders_rpc
 from app.geckoterminal_tools import geckoterminal_pools, _network as _gt_network
 from app.provider_router import ProviderRouter, ProviderTool
 from app.rootdata_provider import ROOTDATA_PROVIDERS
@@ -76,6 +76,57 @@ def _fmt_pct(value: object) -> str | None:
         return f"{float(value):.2f}%"
     except (TypeError, ValueError):
         return None
+
+
+_HOLDERS_WORDS = re.compile(r"\b(?:top\s+)?holders?\b", re.IGNORECASE)
+
+
+def _fmt_amount(value: object) -> str:
+    """Whole-number commas for large token amounts, 6 significant digits below."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    return f"{number:,.0f}" if abs(number) >= 1000 else f"{number:,.6g}"
+
+
+def _solana_rpc_top_holders(request: str) -> str:
+    """Largest token accounts for a Solana mint from the RPC node itself --
+    the keyless holders answer that stays available when the paid providers
+    (Bitquery) are out of credits or rate-limited."""
+    match = _SOLANA_MINT.search(request)
+    if not match:
+        raise ValueError("A Solana mint address is required for a top-holders lookup")
+    mint = match.group(1)
+    data = token_top_holders_rpc(mint)
+    holders = data.get("holders") or []
+    if not holders:
+        raise RuntimeError(f"The RPC node returned no token accounts for {mint}")
+    lines = [
+        "# Largest token accounts — Solana RPC",
+        f"**Provider**: Solana RPC (`getTokenLargestAccounts`) · **Checked**: {_utc()} · **Mint**: `{mint}`",
+        "",
+    ]
+    supply = data.get("total_supply")
+    if supply:
+        lines.append(f"Total supply: **{_fmt_amount(supply)}** · Top 10 accounts hold **{data.get('top10_supply_pct')}%** of supply")
+        lines.append("")
+    lines += ["| # | Owner wallet | Token account | Amount | % of supply |", "|---:|---|---|---:|---:|"]
+    for index, holder in enumerate(holders[:20], start=1):
+        owner = holder.get("owner")
+        owner_cell = f"[{owner[:4]}…{owner[-4:]}](https://solscan.io/account/{owner})" if owner else "—"
+        account = holder.get("token_account") or ""
+        pct = holder.get("supply_pct")
+        lines.append(
+            f"| {index} | {owner_cell} | `{account[:4]}…{account[-4:]}` | {_fmt_amount(holder.get('amount', 0))} | "
+            f"{f'{pct:.2f}%' if pct is not None else '—'} |"
+        )
+    lines += [
+        "",
+        "Rows are token accounts, not entities: a liquidity pool, exchange, or program can own several, "
+        "and the owner wallet is the account's authority. Labels need an indexed provider (Bitquery/Nansen).",
+    ]
+    return "\n".join(lines)
 
 
 def _solana_token_security(request: str) -> str:
@@ -210,6 +261,15 @@ def get_provider_router() -> ProviderRouter:
         chains=("solana", "base", "ethereum", "arbitrum", "bsc", "polygon", "avalanche", "sui", "robinhood", "hyperliquid"),
         cache_ttl_seconds=45, quota_per_minute=30, priority=10,
         description="Real trending or newly-created pools on a specific chain or launchpad (GeckoTerminal): price, volume, liquidity, pool age",
+    ))
+    router.register(ProviderTool(
+        # Keyless holders source for Solana; ranks below bitquery_token_top_holders
+        # (priority 9, labelled owners) and takes over when that one is out.
+        "solana_rpc_token_top_holders", "solana_rpc", ("token_discovery", "token_security"), _solana_rpc_top_holders,
+        matches=lambda request: bool(_SOLANA_MINT.search(request)) and bool(_HOLDERS_WORDS.search(request)),
+        keywords=("holders", "top holders", "largest accounts", "concentration"),
+        chains=("solana",), cache_ttl_seconds=300, priority=7,
+        description="Largest 20 token accounts for a Solana mint with owner wallet and share of supply (Solana RPC getTokenLargestAccounts)",
     ))
     router.register(ProviderTool(
         "solana_token_security", "jupiter", ("token_security",), _solana_token_security,

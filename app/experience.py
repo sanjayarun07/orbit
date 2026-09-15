@@ -154,6 +154,27 @@ def build_context_capsules(
     return list(unique.values())[:4]
 
 
+def with_resolved_token(capsules: list[ContextCapsule], resolved: dict | None) -> list[ContextCapsule]:
+    """Add the token a research turn resolved by symbol as a high-confidence
+    capsule, unless the turn already produced a token capsule with an address.
+    Verified live: "price and liquidity of BONK on solana" answered from
+    Birdeye leaves no mint in the answer text, so the text-derived capsules were
+    empty and "who are its top holders?" had no subject next turn."""
+    if not resolved or not resolved.get("address"):
+        return capsules
+    if any(c.kind == "token" and c.address for c in capsules):
+        return capsules
+    capsule = ContextCapsule(
+        kind="token",
+        label=str(resolved.get("symbol") or "Token").upper(),
+        address=resolved["address"],
+        chain=resolved.get("chain"),
+        confidence=0.95,
+        source="token_resolver",
+    )
+    return [capsule, *[c for c in capsules if not (c.kind == "token" and not c.address)]][:4]
+
+
 def _tool_calls(trajectory: dict) -> list[tuple[str, object]]:
     """(tool_name, observation) per call, descending into nested trajectory
     dicts (the team desk nests as {"market_research": {...}})."""

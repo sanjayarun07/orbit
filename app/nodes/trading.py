@@ -1,6 +1,7 @@
 from app.nodes.state import AgentState, effective_request as _effective_request
 from app.nodes import runtime
 from app.tracing import trace
+import asyncio
 import logging
 import re
 from app.capability_router import extract_cross_chain_draft, is_trade_modifier
@@ -264,11 +265,13 @@ async def charter_risk_node(state: AgentState) -> dict:
     portfolio_context = "unknown"
     total_usd: float | None = None
     try:
-        snapshot = await build_portfolio_snapshot(state["wallet_address"])
+        # Bounded: a slow snapshot must degrade the "% of portfolio" rule to
+        # "unknown" (not a violation), never block or time out the quote.
+        snapshot = await asyncio.wait_for(build_portfolio_snapshot(state["wallet_address"]), timeout=settings.risk_snapshot_timeout_seconds)
         total = snapshot.get("total_usd_value")
         if total is not None:
             total_usd = float(total)
-            portfolio_context = f"Total wallet value: ${total_usd:.2f}"
+            portfolio_context = f"Total wallet value: ${total_usd:.2f}" + (" (partial snapshot)" if snapshot.get("partial") else "")
     except Exception:
         logger.warning("charter_risk: portfolio snapshot unavailable", exc_info=True)
 

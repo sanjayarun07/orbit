@@ -30,6 +30,10 @@ class AgentState(TypedDict, total=False):
     # A swap request parked because no wallet was connected; re-run verbatim
     # when the next turn is a "connected" acknowledgement (app/graph.run_agent).
     pending_wallet_request: str | None
+    # The token a research turn resolved by symbol ({symbol, address, chain}),
+    # so the session focus is set even when the answer never spells the mint
+    # out -- "who are its top holders?" next turn then has a subject.
+    resolved_token: dict | None
 
 
 def effective_request(state: AgentState) -> str:

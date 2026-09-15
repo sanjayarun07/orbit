@@ -798,9 +798,9 @@ $("#deleteChatBtn").addEventListener("click", () => {
   if (busy || !sessionId) return;
   const button = $("#deleteChatBtn");
   if (Date.now() < deleteArmedUntil) { deleteArmedUntil = 0; deleteChat(sessionId); return; }
-  deleteArmedUntil = Date.now() + 4000;
+  deleteArmedUntil = Date.now() + 8000;
   button.classList.add("confirm"); button.textContent = "Delete conversation?"; button.title = "Click again to delete";
-  setTimeout(() => { if (Date.now() >= deleteArmedUntil) syncDeleteButton(); }, 4200);
+  setTimeout(() => { if (Date.now() >= deleteArmedUntil) syncDeleteButton(); }, 8200);
 });
 let deleteAllArmedUntil = 0;
 $("#deleteAllChatsBtn").addEventListener("click", async () => {

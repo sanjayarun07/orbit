@@ -126,7 +126,7 @@ User message
 | API | FastAPI + uvicorn; static UI served from `app/static` (vanilla HTML/JS, esbuild-bundled wallet SDKs from `web/*.ts`) |
 | Agent graph | LangGraph state machine (`app/graph.py`, nodes in `app/nodes/`) |
 | Model programs | DSPy signatures/ReAct on any LiteLLM model (`MODEL`, default `openai/gpt-4.1-mini`); optional separate `INTENT_MODEL` for the routing classifier |
-| Data providers | `ProviderRouter` (`app/provider_router.py`) over 35 read-only tools in 14 capabilities; MCP registry (`app/mcp_tools.py`) for Nansen and any `mcp.json` server |
+| Data providers | `ProviderRouter` (`app/provider_router.py`) over 36 read-only tools in 14 capabilities; MCP registry (`app/mcp_tools.py`) for Nansen and any `mcp.json` server |
 | Execution | Jupiter (Solana quotes/plans), Relay (cross-chain and EVM), LI.FI (quote/status backup); wallet-side signing only |
 | State | Postgres (trade plans, Relay executions, tool outcomes) and Redis (sessions, per-session turn locks, caches); in-memory fallback for development |
 | Analytics | ClickHouse (provider events, per-turn budgets) and Langfuse tracing, both optional |
@@ -411,7 +411,7 @@ and can also run over stdio. Four families of tools:
   `orbit_trade_plan`, `orbit_execution_status`, `orbit_relay_status`,
   `orbit_capabilities`, `orbit_route_preview`, `orbit_health`.
 - **Data sources** — one `orbit_data_<tool>` per read-only provider tool
-  (35 today), each running through the router's quotas, circuit breakers,
+  (36 today), each running through the router's quotas, circuit breakers,
   cache, budget and outcome accounting with the request→tool matchers
   bypassed because the host chose the tool; plus `orbit_mcp_catalog` /
   `orbit_mcp_call` for tools Orbit discovers from its own MCP servers

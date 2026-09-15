@@ -34,6 +34,7 @@ from app.experience import (
     advance_session_context,
     build_context_capsules,
     build_evidence_summary,
+    with_resolved_token,
     build_gas_advisory,
     build_intent_lock,
     build_trade_readiness,
@@ -706,8 +707,11 @@ async def execute_chat_turn(body: ChatRequest, identity: str) -> AgentResponse:
         # shows the "Quick next actions" section when quick_actions is non-empty).
         suggestions: list[str] = []
         intent_lock = build_intent_lock(plan, run.cross_chain_swap, body.wallet_address)
-        context_capsules = build_context_capsules(
-            body.message, history, answer, plan, run.cross_chain_swap, body.wallet_address
+        context_capsules = with_resolved_token(
+            build_context_capsules(
+                body.message, history, answer, plan, run.cross_chain_swap, body.wallet_address
+            ),
+            run.resolved_token,
         )
         evidence = build_evidence_summary(trajectory)
         # Step-7 answer validation: provenance / freshness / grounding of the

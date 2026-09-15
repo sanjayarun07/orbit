@@ -72,6 +72,20 @@ class JupiterClient:
             raise ValueError(f"Mint {mint} was not found uniquely in Jupiter's token registry")
         return exact[0]
 
+    async def tokens_by_mints(self, mints: list[str]) -> dict[str, dict]:
+        """Registry entries for many mints in as few calls as possible: the
+        search endpoint accepts comma-separated mints (up to 100 per call).
+        Mints the registry does not return are simply absent from the result."""
+        found: dict[str, dict] = {}
+        unique = list(dict.fromkeys(normalize_mint(m) for m in mints if m))
+        for start in range(0, len(unique), 100):
+            chunk = unique[start:start + 100]
+            for item in await self.search_tokens(",".join(chunk)):
+                mint = item.get("id")
+                if mint in chunk and mint not in found:
+                    found[mint] = item
+        return found
+
     async def shield(self, mints: list[str]) -> dict:
         """Return Jupiter Ultra Shield warnings for exact mint addresses."""
         response = await self._get(f"{self.api_root}/ultra/v1/shield", {"mints": ",".join(mints)})

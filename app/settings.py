@@ -201,6 +201,14 @@ class Settings(BaseSettings):
     max_slippage_bps: int = 100
     max_price_impact_pct: float = 5.0
     plan_ttl_seconds: int = 120
+    # Portfolio snapshots are bounded so a wallet with thousands of token
+    # accounts cannot exhaust a chat turn: at most this many holdings are
+    # priced (largest balances first), within this many seconds; the rest is
+    # returned unpriced with partial=true. The risk node's own snapshot fetch
+    # has a shorter guard so a quote is never blocked on pricing.
+    portfolio_max_priced_holdings: int = 300
+    portfolio_snapshot_timeout_seconds: float = 25.0
+    risk_snapshot_timeout_seconds: float = 20.0
     memory_plan_max_entries: int = 1000
     memory_session_max_entries: int = 1000
 

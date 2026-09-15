@@ -699,15 +699,16 @@ def _nansen_wallet_tool_call(address: str, chain: str | None, request: str) -> t
     return None
 
 
-def direct_mcp_request(request: str) -> tuple[str, dict] | None:
+def direct_mcp_request(request: str, *, token_subject: bool = False) -> tuple[str, dict] | None:
     """Resolve common, unambiguous operations without a ReAct planning loop.
 
     Nansen is tried here, deterministically, before the generic capability
     router (GoldRush/Helius) or the ReAct research agent — see
-    _nansen_wallet_tool_call.
+    _nansen_wallet_tool_call. `token_subject` says the only address in the
+    request is a token the symbol resolver injected, so it is never a wallet.
     """
     lowered = request.lower()
-    detected = _detect_wallet_request(request)
+    detected = None if token_subject else _detect_wallet_request(request)
     if detected is not None:
         address, chain = detected
         resolved = _nansen_wallet_tool_call(address, chain, request)
@@ -772,10 +773,30 @@ _NAMED_TOKEN = re.compile(
     r"\bholders?\s+of\s+(?:the\s+)?\$?([A-Za-z][A-Za-z0-9]{1,9})\b"
     r"|\b(?:safety|security|liquidity|volume|price|trades?|chart|risk)\s+(?:of|for)\s+(?:the\s+)?\$?([A-Za-z][A-Za-z0-9]{1,9})\b"
     r"|\bis\s+\$?([A-Za-z][A-Za-z0-9]{1,9})\s+(?:a\s+)?(?:safe|rug|honeypot|scam|legit)\b"
+    # "if BONK is safe to ape into", "BONK is a scam?" -- the ticker precedes the
+    # copula; upper-case only so "it is safe" / "this is legit" never bind.
+    r"|\b\$?((?-i:[A-Z][A-Z0-9]{1,9}))\s+is\s+(?:a\s+)?(?:safe|rug|honeypot|scam|legit)\b"
     r"|\$([A-Za-z][A-Za-z0-9]{1,9})\b",
     re.IGNORECASE,
 )
 _NAMED_STOP = {"THE", "A", "AN", "MY", "THIS", "THAT", "IT", "SOME", "TOP", "NEW", "MINT", "SPL", "USD"}
+_SECURITY_ASK = re.compile(r"\b(?:safe|safety|security|rug|honeypot|scam|legit|audit)\b", re.IGNORECASE)
+
+
+def _resolved_token_record(original_request: str, resolution: "_TokenResolution") -> dict | None:
+    """{symbol, address, chain} for a resolution that rewrote the request, so
+    the turn can publish the subject to the session focus."""
+    if not resolution.chain:
+        return None
+    match = _TOKEN_ADDRESS.search(resolution.request)
+    if not match:
+        return None
+    tickers = _named_tickers(original_request)
+    return {
+        "symbol": tickers[-1] if tickers else None,
+        "address": match.group(1) or match.group(2),
+        "chain": resolution.chain,
+    }
 
 
 class _TokenResolution:
@@ -892,7 +913,12 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
     """
     if _TOKEN_ADDRESS.search(request):
         return _TokenResolution(request)
-    if not (capabilities & {"token_discovery", "token_security", "market_data"}):
+    # A named-ticker safety ask ("is BONK safe", "if BONK is safe to ape into")
+    # is a token-data question whatever the speech layer called it (the model
+    # tags it "advice" -> web caps); resolving the mint here is what lets the
+    # security dossier tool out-rank a web search downstream.
+    security_ask = bool(_SECURITY_ASK.search(request))
+    if not (capabilities & {"token_discovery", "token_security", "market_data"}) and not security_ask:
         return _TokenResolution(request)
     tickers = _named_tickers(request)
     if not tickers:
@@ -1131,11 +1157,23 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
             trajectory[f"tool_name_{index}"] = dimension.source
             trajectory[f"observation_{index}"] = dimension.detail
             index += 1
-    return {"answer": answer, "trajectory": trajectory}
+    return {
+        "answer": answer,
+        "trajectory": trajectory,
+        "resolved_token": {"symbol": symbol, "address": address, "chain": chain},
+    }
 
 
 @trace(name="research", as_type="agent")
 async def research_node(state: AgentState) -> dict:
+    sink: dict = {}
+    result = await _research_node(state, sink)
+    if sink.get("resolved_token") and not result.get("resolved_token"):
+        result = {**result, "resolved_token": sink["resolved_token"]}
+    return result
+
+
+async def _research_node(state: AgentState, sink: dict) -> dict:
     request = _effective_request(state)
     # A broad "how's the crypto market" ask -> the compact overview card, composed
     # from live sources we already use. Intercepted up front (before capability
@@ -1173,6 +1211,7 @@ async def research_node(state: AgentState) -> dict:
         # remember the candidates + original request so a one-word reply
         # ("Base") resolves it next turn (see resolve_pending_token).
         return {"answer": resolution.clarification, "pending_token": resolution.pending}
+    sink["resolved_token"] = _resolved_token_record(request, resolution)
     request = resolution.request
     if resolution.chain:
         # Thread the resolved chain to every downstream provider call so the
@@ -1188,7 +1227,11 @@ async def research_node(state: AgentState) -> dict:
     # _nansen_wallet_tool_call, since those already have their own
     # reasonable fallback chains and this refactor is scoped to the
     # Nansen-credit-exhaustion problem on the portfolio call specifically).
-    detected_wallet = _detect_wallet_request(request)
+    # A symbol the resolver just rewrote to an address is a token by
+    # construction; never re-read that address as a wallet ("check if BONK is
+    # safe" + injected mint used to become a wallet-portfolio lookup).
+    token_subject = bool(resolution.chain)
+    detected_wallet = None if token_subject else _detect_wallet_request(request)
     # A Hyperliquid-specific wallet ask goes straight to the focused positions
     # tool -- deterministically, bypassing the LLM ReAct fallback that otherwise
     # sometimes widened it to a Nansen portfolio. The tool returns a clear "no
@@ -1229,7 +1272,7 @@ async def research_node(state: AgentState) -> dict:
         address, chain = detected_wallet
         answer, trajectory = await _compose_wallet_portfolio(address, chain)
         return {"answer": answer, "trajectory": trajectory}
-    direct = direct_mcp_request(request)
+    direct = direct_mcp_request(request, token_subject=token_subject)
     failed_direct_tool: str | None = None
     if direct is not None:
         tool_name, arguments = direct
