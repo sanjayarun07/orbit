@@ -1,6 +1,7 @@
 """Deterministic crypto market brief backed by live quantitative sources."""
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import contextvars
 from datetime import datetime, timezone
 from threading import Condition
 import time
@@ -119,8 +120,12 @@ def _build_crypto_market_brief(query: str) -> str:
             f"volume and liquidity. Exclude generic news and crime stories.{scope} "
             f"Tailor the brief to this user request: {query}"
         )
+        # ThreadPoolExecutor.submit does not copy contextvars (asyncio.to_thread
+        # does), so run under the caller's context or the per-turn call budget
+        # is invisible to try_route and charge_and_check silently no-ops.
         narrative_future = executor.submit(
-            get_provider_router().try_route, narrative_request, "token_discovery", requested_chains
+            contextvars.copy_context().run,
+            get_provider_router().try_route, narrative_request, "token_discovery", requested_chains,
         )
         for future in as_completed(futures):
             try:

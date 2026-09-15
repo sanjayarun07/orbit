@@ -405,27 +405,34 @@ async def _call_lm(program, **kwargs):
     on the configured fallback model when the primary fails with a transient
     provider error (outage, rate limit, 5xx). A non-transient error -- bad request,
     auth, context length -- is identical on any model, so it surfaces immediately."""
+    async with _llm_slots:
+        increment("llm_calls")
+        try:
+            return await _run_guarded(program, _primary_lm, kwargs)
+        except Exception as exc:
+            if _fallback_lm is None or not _is_transient_lm_error(exc):
+                raise
+            increment("llm_primary_transient_failures")
+            logger.warning(
+                "LM primary '%s' failed transiently (%s); retrying on fallback '%s'",
+                settings.model, type(exc).__name__, settings.llm_fallback_model,
+            )
+            try:
+                result = await _run_guarded(program, _fallback_lm, kwargs)
+            except Exception:
+                increment("llm_fallback_failures")
+                raise
+            increment("llm_fallback_used")
+            return result
+
+
+async def _run_guarded(program, lm, kwargs):
+    # One guard scope per model attempt: the fallback run must not inherit the
+    # aborted primary run's seen-calls set, or its first legitimate call to the
+    # same (tool, args) is rejected as a repeat.
     token = start_guard()
     try:
-        async with _llm_slots:
-            increment("llm_calls")
-            try:
-                return await asyncio.to_thread(_run_program, program, _primary_lm, kwargs)
-            except Exception as exc:
-                if _fallback_lm is None or not _is_transient_lm_error(exc):
-                    raise
-                increment("llm_primary_transient_failures")
-                logger.warning(
-                    "LM primary '%s' failed transiently (%s); retrying on fallback '%s'",
-                    settings.model, type(exc).__name__, settings.llm_fallback_model,
-                )
-                try:
-                    result = await asyncio.to_thread(_run_program, program, _fallback_lm, kwargs)
-                except Exception:
-                    increment("llm_fallback_failures")
-                    raise
-                increment("llm_fallback_used")
-                return result
+        return await asyncio.to_thread(_run_program, program, lm, kwargs)
     finally:
         reset_guard(token)
 

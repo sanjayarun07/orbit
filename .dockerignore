@@ -1,0 +1,31 @@
+# Secrets and local state never enter the build context.
+.env
+.env.*
+!.env.example
+provider-overrides.json
+
+# Local toolchains and caches
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.git/
+.github/
+.githooks/
+.claude/
+.vscode/
+.DS_Store
+
+# Investigation snapshots, eval fixtures and docs are not runtime inputs.
+data/
+docs/
+evals/
+tests/
+scripts/
+*.md
+!README.md
+
+# Built bundles are produced in the image's node stage from web/*.ts.
+app/static/*.js

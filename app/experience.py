@@ -154,17 +154,26 @@ def build_context_capsules(
     return list(unique.values())[:4]
 
 
+def _tool_calls(trajectory: dict) -> list[tuple[str, object]]:
+    """(tool_name, observation) per call, descending into nested trajectory
+    dicts (the team desk nests as {"market_research": {...}})."""
+    calls: list[tuple[str, object]] = []
+    for key, value in trajectory.items():
+        if key.startswith("tool_name_") and isinstance(value, str):
+            index = key.rsplit("_", 1)[-1]
+            calls.append((value, trajectory.get(f"observation_{index}")))
+        elif isinstance(value, dict):
+            calls.extend(_tool_calls(value))
+    return calls
+
+
 def build_evidence_summary(trajectory: object) -> EvidenceSummary | None:
     if not isinstance(trajectory, dict):
         return None
     names: list[str] = []
     successes = failures = 0
     cached = False
-    for key, value in trajectory.items():
-        if not key.startswith("tool_name_") or not isinstance(value, str):
-            continue
-        index = key.rsplit("_", 1)[-1]
-        result = trajectory.get(f"observation_{index}")
+    for value, result in _tool_calls(trajectory):
         failed = isinstance(result, str) and ("failed:" in result.lower() or "error" in result[:120].lower())
         failures += int(failed)
         successes += int(not failed)

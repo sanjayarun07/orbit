@@ -46,6 +46,39 @@ Keep `LIVE_TRADING=false` while testing the chat and quote flow.
 `RELAY_API_KEY` is an optional server-side credential for production Relay rate
 limits. Leave it blank for anonymous local quotes and never expose it to browser code.
 
+### Docker
+
+The container build is self-contained: a Node stage bundles `web/*.ts`, a Python
+stage resolves the pinned dependencies, and the runtime image is a non-root
+`python:3.11-slim` that serves `app.main:app` behind a `/health` check. Runtime
+state that the app writes (`role_memory.json`, `provider-overrides.json`) lives in
+the `/app/data` volume; `.env` is never copied into the image.
+
+```bash
+cp .env.example .env            # set OPENAI_API_KEY and POSTGRES_PASSWORD at minimum
+docker compose up --build -d    # api + postgres + redis, memory fallback disabled
+curl -s localhost:8000/health
+docker compose logs -f api
+```
+
+`docker compose` forces `ALLOW_MEMORY_FALLBACK=false` and points the API at its
+own Postgres and Redis; the schema is created on first start. To run the image
+against managed services instead, pass `DATABASE_URL` and `REDIS_URL` yourself:
+
+```bash
+docker build -t orbit-api .
+docker run --rm -p 8000:8000 --env-file .env \
+  -e DATABASE_URL=... -e REDIS_URL=... -e FORWARDED_ALLOW_IPS=<proxy-ip> \
+  -v orbit-data:/app/data orbit-api
+```
+
+`UVICORN_WORKERS` defaults to 1 per container; scale with replicas rather than
+workers so the in-process semantic caches and the two reconciliation workers are
+not duplicated inside one instance. Set `FORWARDED_ALLOW_IPS` (uvicorn) and
+`TRUSTED_PROXY_HOSTS` (application rate limits) to the reverse proxy's address.
+Any command passed to the image replaces uvicorn, e.g.
+`docker run --rm orbit-api python -c "import app.main"`.
+
 The web UI is available at `http://localhost:8000/ui/`. Natural-language Solana-only
 buys and swaps use Jupiter. Any route involving another chain uses Relay, including
 same-chain EVM swaps. Complete Relay requests are quoted automatically and rendered as

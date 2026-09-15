@@ -1,0 +1,66 @@
+name: orbit
+
+services:
+  api:
+    build:
+      context: .
+    image: orbit-api:local
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://orbit:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/orbit
+      REDIS_URL: redis://redis:6379/0
+      ALLOW_MEMORY_FALLBACK: "false"
+      # Compose networks are private; the API only trusts the proxy in front of it.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-1}
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      - orbit-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: orbit
+      POSTGRES_DB: orbit
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orbit -d orbit"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  orbit-data:
+  postgres-data:
+  redis-data:

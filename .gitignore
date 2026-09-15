@@ -11,6 +11,11 @@ __pycache__/
 *.egg-info/
 .DS_Store
 
+# Investigation snapshots, API test captures and runtime state (role_memory.json,
+# dspy cache) stay local; only the optimizer examples/README are versioned.
+data/*
+!data/optimized_prompts/
+
 # scripts/optimize_signature.py's output -- a local artifact to inspect
 # manually, not something to commit (examples/README alongside it are kept).
 data/optimized_prompts/trade_simulation_compiled.json

@@ -1,0 +1,123 @@
+[
+  {"id": "holders-base-aero", "query": "Top holders for 0x940181a94A35A4569E4529A3CDfB74e38FD98631 on Base",
+   "expected_tools": ["goldrush_token_top_holders"], "forbidden_tools": ["dexscreener_pair_search", "jupiter", "relay"],
+   "expected_intent": "research", "router": true, "notes": "EVM holders -> goldrush, not the old dexscreener fall-through"},
+
+  {"id": "holders-arb-arb", "query": "Top holders for 0x912CE59144191C1204E64559FE8253a0e49E6548 on Arbitrum",
+   "expected_tools": ["goldrush_token_top_holders"], "forbidden_tools": ["dexscreener_pair_search"],
+   "expected_intent": "research", "router": true},
+
+  {"id": "holders-sol-mint", "query": "Top holders for DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 on Solana",
+   "expected_tools": ["bitquery_token_top_holders"], "forbidden_tools": ["goldrush_token_top_holders", "dexscreener_pair_search"],
+   "expected_intent": "research", "router": true, "notes": "Solana holders -> bitquery (Covalent rejects Solana)"},
+
+  {"id": "holders-bonk-symbol", "query": "top holders of BONK",
+   "expected_tools": ["bitquery_token_top_holders"], "forbidden_tools": ["dexscreener_pair_search", "jupiter"],
+   "expected_intent": "research", "router": false, "notes": "symbol -> verified-Solana canonical -> bitquery (needs research_node resolution)"},
+
+  {"id": "holders-pepe-ask", "query": "top holders of PEPE",
+   "expected_tools": [], "forbidden_tools": ["jupiter", "relay"], "expect_ask": true, "router": false,
+   "notes": "cross-chain ambiguous symbol -> ASK which chain, do not guess"},
+
+  {"id": "safety-sol-rug", "query": "is DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 a rug on solana",
+   "expected_tools": ["solana_token_security"], "forbidden_tools": ["dexscreener_pair_search", "jupiter"],
+   "expected_intent": "research", "router": true, "notes": "Solana safety -> Jupiter Shield dossier"},
+
+  {"id": "safety-evm-honeypot", "query": "Is 0x940181a94A35A4569E4529A3CDfB74e38FD98631 a honeypot on Base?",
+   "expected_tools": ["goplus_token_security", "honeypot_token_security"], "forbidden_tools": ["dexscreener_pair_search"],
+   "expected_intent": "research", "router": true, "notes": "EVM security -> GoPlus/Honeypot"},
+
+  {"id": "price-liq-base", "query": "Show price and liquidity for 0x940181a94A35A4569E4529A3CDfB74e38FD98631 on Base",
+   "expected_tools": ["birdeye_token_overview", "coingecko_token_by_contract", "dexscreener_pair_search"],
+   "forbidden_tools": ["jupiter", "relay"], "expected_intent": "research", "router": true},
+
+  {"id": "hyperliquid-funding", "query": "What is the funding rate and price for BTC on Hyperliquid?",
+   "expected_tools": ["goldrush_hyperliquid_market"], "forbidden_tools": ["perplexity_web_search", "openai_web_search"],
+   "expected_intent": "research", "router": true, "notes": "perp market data, no chain keywords -> the fixed routing"},
+
+  {"id": "gainers-sol", "query": "Top gainers on Solana today",
+   "expected_tools": ["coingecko_gainers_losers"], "forbidden_tools": ["jupiter"],
+   "expected_intent": "research", "router": true},
+
+  {"id": "trending-sol", "query": "trending tokens on solana",
+   "expected_tools": ["geckoterminal_pools", "dexscreener_boosted_tokens", "dexscreener_trending_metas"],
+   "forbidden_tools": ["bitquery_token_top_holders"], "expected_intent": "research", "router": true,
+   "notes": "discovery, must NOT be read as a ticker -> holders"},
+
+  {"id": "new-pairs-base", "query": "New token launches on Base today",
+   "expected_tools": ["geckoterminal_pools", "dexscreener_latest_profiles"], "forbidden_tools": [],
+   "expected_intent": "research", "router": true},
+
+  {"id": "tvl-sol", "query": "TVL on Solana",
+   "expected_tools": ["defillama_chain_tvl"], "forbidden_tools": ["defillama_protocols"],
+   "expected_intent": "research", "router": true},
+
+  {"id": "tvl-protocol", "query": "Aave TVL",
+   "expected_tools": ["defillama_protocols"], "forbidden_tools": [],
+   "expected_intent": "research", "router": true},
+
+  {"id": "sentiment", "query": "Crypto fear and greed index right now",
+   "expected_tools": ["market_sentiment_snapshot"], "forbidden_tools": [],
+   "expected_intent": "research", "router": true},
+
+  {"id": "listings", "query": "Latest Binance token listings",
+   "expected_tools": ["exchange_listing_announcements"], "forbidden_tools": [],
+   "expected_intent": "research", "router": true},
+
+  {"id": "wallet-balances-base", "query": "Show token balances for 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 on Base",
+   "expected_tools": ["goldrush_wallet_balances"], "forbidden_tools": ["jupiter", "relay"],
+   "expected_intent": "research", "router": true},
+
+  {"id": "wallet-txns-sol", "query": "Show recent transactions for GThUX1Atko4tqhN2NaiTazWSeFWMuiUvfFnyJyUghFMJ",
+   "expected_tools": ["helius_wallet_transactions"], "forbidden_tools": [],
+   "expected_intent": "research", "router": true, "notes": "Solana wallet -> Helius (top priority)"},
+
+  {"id": "hyperliquid-positions", "query": "Show hyperliquid perp positions for 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+   "expected_tools": ["goldrush_hyperliquid_positions"], "forbidden_tools": ["jupiter"],
+   "expected_intent": "research", "router": true},
+
+  {"id": "market-overview", "query": "crypto market overview",
+   "expected_tools": ["crypto_market_overview"], "forbidden_tools": ["perplexity_finance_search"],
+   "expected_intent": "research", "router": false, "notes": "research_node interceptor, chat-mode only"},
+
+  {"id": "market-how", "query": "hows the market today",
+   "expected_tools": ["crypto_market_overview"], "forbidden_tools": [],
+   "expected_intent": "research", "router": false},
+
+  {"id": "research-news", "query": "Latest news on the Fed rate decision",
+   "expected_tools": ["perplexity_web_search", "openai_web_search"], "forbidden_tools": ["jupiter"],
+   "expected_intent": "research", "router": true},
+
+  {"id": "trade-swap", "query": "Swap 1 SOL for USDC",
+   "expected_tools": [], "forbidden_tools": ["perplexity_web_search"], "expected_intent": "trade", "router": false,
+   "notes": "execution intent classified as trade (deterministic pipeline, not the research router)"},
+
+  {"id": "trade-bridge", "query": "Bridge 100 USDC from Base to Solana",
+   "expected_tools": [], "forbidden_tools": [], "expected_intent": "cross_chain_swap", "router": false},
+
+  {"id": "recent-trades-sol", "query": "Recent trades for mint DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 on Solana",
+   "expected_tools": ["bitquery_recent_dex_trades"], "forbidden_tools": ["jupiter"],
+   "expected_intent": "research", "router": true},
+
+  {"id": "deepdive-bonk", "query": "deep dive on BONK",
+   "expected_tools": ["token_deep_dive"], "forbidden_tools": ["jupiter", "relay", "perplexity_web_search"],
+   "expected_intent": "research", "router": false,
+   "notes": "structured 10-dimension token deep-dive lens (research_node intercept)"},
+
+  {"id": "adv-advice-not-exec", "query": "should I buy SOL right now?",
+   "expected_tools": [], "forbidden_tools": ["jupiter", "relay"], "router": false,
+   "notes": "ADVERSARIAL: a recommendation ask is answered as advice/portfolio, must NEVER route to execution"},
+
+  {"id": "adv-off-topic", "query": "What is the capital of France?",
+   "expected_tools": [], "forbidden_tools": ["jupiter", "relay", "solana_token_security", "bitquery_token_top_holders"],
+   "router": false, "notes": "ADVERSARIAL: off-topic -> no crypto tool fires"},
+
+  {"id": "adv-safety-word-no-mint", "query": "is it safe to keep my funds in a hot wallet?",
+   "expected_tools": [], "forbidden_tools": ["solana_token_security", "goplus_token_security", "jupiter"],
+   "router": false, "notes": "ADVERSARIAL: 'safe' with no mint/address must NOT trigger token-security"},
+
+  {"id": "adv-chain-named-usdc", "query": "liquidity of USDC on Arbitrum",
+   "expected_tools": ["birdeye_token_overview", "dexscreener_pair_search", "coingecko_token_by_contract"],
+   "forbidden_tools": ["jupiter", "relay"], "expected_intent": "research", "router": true,
+   "notes": "named chain honored; documents the DEX-Screener under-sampling limit for a quote token"}
+]

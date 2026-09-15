@@ -68,3 +68,13 @@ def test_connected_wallet_capsule_does_not_parse_an_article_id_as_wallet():
     reference = next(item for item in capsules if item.kind == "wallet")
     assert reference.address == wallet
     assert reference.chain == "solana"
+
+
+def test_evidence_summary_sees_nested_team_trajectory():
+    nested = {"market_research": {
+        "tool_name_0": "dexscreener_pair_search", "observation_0": "Liquidity $2M",
+        "tool_name_1": "geckoterminal_pools", "observation_1": "Liquidity $9M",
+    }}
+    evidence = build_evidence_summary(nested)
+    assert evidence and evidence.providers == ["dexscreener", "geckoterminal"]
+    assert evidence.successful_tools == 2 and evidence.confidence == "high"

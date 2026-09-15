@@ -1,0 +1,65 @@
+[
+  {
+    "request": "Sell 0.01 SOL for USDC",
+    "wallet_address": "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T",
+    "conversation_history": "",
+    "should_simulate": true,
+    "input_mint": "So11111111111111111111111111111111111111112",
+    "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "amount_atomic": 10000000
+  },
+  {
+    "request": "What would happen if I swapped 0.005 SOL to USDC?",
+    "wallet_address": "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T",
+    "conversation_history": "",
+    "should_simulate": true,
+    "input_mint": "So11111111111111111111111111111111111111112",
+    "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "amount_atomic": 5000000
+  },
+  {
+    "request": "Simulate buying BONK with 0.02 SOL",
+    "wallet_address": "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T",
+    "conversation_history": "",
+    "should_simulate": true,
+    "input_mint": "So11111111111111111111111111111111111111112",
+    "output_mint": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "amount_atomic": 20000000
+  },
+  {
+    "request": "How much SOL would I get for 5 USDC?",
+    "wallet_address": "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T",
+    "conversation_history": "",
+    "should_simulate": true,
+    "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "output_mint": "So11111111111111111111111111111111111111112",
+    "amount_atomic": 5000000
+  },
+  {
+    "request": "Sell it",
+    "wallet_address": "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T",
+    "conversation_history": "user: What is the price of BONK?\nassistant: BONK is trading now.\nResolved from canonical session context: token BONK with mint DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 on solana.",
+    "should_simulate": true,
+    "input_mint": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "output_mint": "So11111111111111111111111111111111111111112",
+    "amount_atomic": null
+  },
+  {
+    "request": "Should I sell my SOL right now?",
+    "wallet_address": "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T",
+    "conversation_history": "",
+    "should_simulate": false,
+    "input_mint": null,
+    "output_mint": null,
+    "amount_atomic": null
+  },
+  {
+    "request": "What's my wallet balance?",
+    "wallet_address": "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T",
+    "conversation_history": "",
+    "should_simulate": false,
+    "input_mint": null,
+    "output_mint": null,
+    "amount_atomic": null
+  }
+]
