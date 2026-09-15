@@ -254,6 +254,15 @@
   .composer textarea::placeholder { color: var(--subtle); }
   .composer-tools { display: flex; align-items: center; margin-top: 4px; }
   .composer-context { display: flex; align-items: center; gap: 6px; color: var(--subtle); font-size: 10px; }
+  .team-toggle { display: flex; align-items: center; gap: 7px; margin-left: 14px; font-size: 10px; color: var(--subtle); cursor: pointer; user-select: none; }
+  .team-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .team-track { position: relative; width: 26px; height: 14px; border-radius: 999px; background: var(--surface-hover); border: 1px solid var(--border); transition: background .15s; }
+  .team-track::after { content: ""; position: absolute; top: 1px; left: 1px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
+  .team-toggle input:checked + .team-track { background: var(--brand-strong); border-color: var(--brand-strong); }
+  .team-toggle input:checked + .team-track::after { transform: translateX(12px); background: white; }
+  .team-toggle input:focus-visible + .team-track { outline: 2px solid var(--brand); outline-offset: 2px; }
+  .team-toggle.on { color: var(--brand); }
+  .team-toggle.pending .team-label::after { content: " · applies to next message"; color: var(--subtle); }
   .send { margin-left: auto; width: 32px; height: 32px; border: 0; border-radius: 9px; background: white; color: #18181b; display: grid; place-items: center; cursor: pointer; }
   .send:hover { background: #e4e4e7; } .send:disabled { opacity: .3; cursor: default; }
   .disclaimer { max-width: var(--content-width); margin: 8px auto 0; text-align: center; color: #606069; font-size: 9.5px; }
@@ -401,6 +410,7 @@
         <textarea id="messageInput" rows="1" maxlength="2000" placeholder="Message Web3 Copilot"></textarea>
         <div class="composer-tools">
           <span class="composer-context"><svg class="icon" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg><span>Live web &amp; on-chain tools</span></span>
+          <label class="team-toggle" id="teamToggle" title="Team desk: a Coordinator fans each request out to Market Research, Execution and Risk. Slower and costs more per turn."><input id="teamMode" type="checkbox" role="switch" aria-label="Team desk mode" /><span class="team-track" aria-hidden="true"></span><span class="team-label">Team desk</span></label>
           <button class="send" id="sendBtn" type="submit" aria-label="Send"><svg class="icon" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7M12 19V5"/></svg></button>
         </div>
       </form>
@@ -486,6 +496,12 @@ const sendBtn = $("#sendBtn");
 const jumpLatestBtn = $("#jumpLatest");
 const walletInput = $("#walletAddress");
 const chatListEl = $("#chatList");
+const teamToggle = $("#teamMode");
+// The switch is sent only when the user flipped it since the last turn; the
+// server's answer is authoritative (a chat phrase can also change the mode).
+let teamModePending = null;
+function syncTeamMode(on){teamToggle.checked=Boolean(on);teamModePending=null;$("#teamToggle").classList.toggle("on",teamToggle.checked);$("#teamToggle").classList.remove("pending");}
+teamToggle.addEventListener("change",()=>{teamModePending=teamToggle.checked;$("#teamToggle").classList.toggle("on",teamToggle.checked);$("#teamToggle").classList.add("pending");});
 const PROFILE_KEY = "orbit_profile_v1";
 const CHAT_LIST_KEY = "orbit_chats_v1";
 const AUTO_SCROLL_KEY = "orbit_auto_scroll_v1";
@@ -627,7 +643,7 @@ async function deleteChat(id) {
 }
 function startNewChat() {
   if (busy) return;
-  chatTurnEpoch++;sessionId = null;sessionRevision=0; sessionStorage.removeItem("orbit_session_id"); messagesEl.innerHTML = welcomeMarkup; renderChatList(); autoFollow=true;conversationEl.scrollTop=0;closeSidebar();input.focus();
+  chatTurnEpoch++;sessionId = null;sessionRevision=0; sessionStorage.removeItem("orbit_session_id"); messagesEl.innerHTML = welcomeMarkup; renderChatList(); syncTeamMode(false); autoFollow=true;conversationEl.scrollTop=0;closeSidebar();input.focus();
 }
 const welcomeMarkup = messagesEl.innerHTML;
 
@@ -880,9 +896,9 @@ function retireQuickActions(){
 async function sendMessage(text,quickAction=null) {
   if (busy || !text.trim()) return;retireQuickActions();chatTurnEpoch++;retirePendingTradeCards();busy=true; sendBtn.disabled=true; addUserMessage(text); const typing=addTyping();
   const requestSession=sessionId || undefined;
-  try { const res=await fetch("/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:text,wallet_address:walletInput.value.trim() || null,session_id:requestSession,context_revision:requestSession?sessionRevision:null,quick_action:quickAction})}); const data=await res.json();
+  try { const res=await fetch("/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:text,wallet_address:walletInput.value.trim() || null,session_id:requestSession,context_revision:requestSession?sessionRevision:null,quick_action:quickAction,team_mode:teamModePending})}); const data=await res.json();
     if(!res.ok) finishAgentMessage(typing,{error:normalizeError(data,res.status)});
-    else { sessionId=data.session_id;sessionRevision=Number(data.session_revision||0); sessionStorage.setItem("orbit_session_id",sessionId); updateChat(sessionId,text); finishAgentMessage(typing,data); }
+    else { sessionId=data.session_id;sessionRevision=Number(data.session_revision||0); sessionStorage.setItem("orbit_session_id",sessionId); updateChat(sessionId,text); syncTeamMode(data.team_mode); finishAgentMessage(typing,data); }
   } catch(error){finishAgentMessage(typing,{error:`Could not reach the assistant: ${error.message}`});}
   finally {busy=false;sendBtn.disabled=false;input.focus();renderChatList();}
 }
@@ -957,7 +973,7 @@ async function executeRelayQuote(){
   catch(error){setRelayStatus(relayError(error),"error");button.disabled=false;button.textContent="Review & sign";}
 }
 
-async function hydrateHistory(){messagesEl.innerHTML="";if(!sessionId){sessionRevision=0;messagesEl.innerHTML=welcomeMarkup;return;}try{const res=await fetch(`/chat/history/${encodeURIComponent(sessionId)}`);if(!res.ok)throw new Error();const data=await res.json();sessionRevision=Number(data.context?.revision||0);if(!(data.messages||[]).length){chatRegistry=chatRegistry.filter(chat=>chat.id!==sessionId);saveChats();sessionId=null;sessionRevision=0;sessionStorage.removeItem("orbit_session_id");renderChatList();messagesEl.innerHTML=welcomeMarkup;return;}for(const msg of data.messages){if(msg.role==="user")addUserMessage(msg.content);else{const agentMessage=addAgentMessage(msg.content);if(msg.trajectory||msg.trade_plan||msg.quick_actions?.length||msg.suggestions?.length||msg.intent||msg.cross_chain_swap||msg.context_capsules?.length)finishAgentMessage(agentMessage,{answer:msg.content,trajectory:msg.trajectory,trade_plan:msg.trade_plan,quick_actions:msg.quick_actions,suggestions:msg.suggestions,session_revision:msg.session_revision,intent:msg.intent,capabilities:msg.capabilities,cross_chain_swap:msg.cross_chain_swap,context_capsules:msg.context_capsules,intent_lock:msg.intent_lock,evidence:msg.evidence,trade_readiness:msg.trade_readiness,gas_advisory:msg.gas_advisory});}}const groups=[...document.querySelectorAll(".quick-actions")];groups.slice(0,-1).forEach(group=>group.querySelectorAll(".followup-action").forEach(button=>{button.disabled=true;button.setAttribute("aria-disabled","true");}));scrollToBottom();}catch{sessionRevision=0;messagesEl.innerHTML=welcomeMarkup;}}
+async function hydrateHistory(){messagesEl.innerHTML="";if(!sessionId){sessionRevision=0;messagesEl.innerHTML=welcomeMarkup;return;}try{const res=await fetch(`/chat/history/${encodeURIComponent(sessionId)}`);if(!res.ok)throw new Error();const data=await res.json();sessionRevision=Number(data.context?.revision||0);syncTeamMode(data.context?.team_mode);if(!(data.messages||[]).length){chatRegistry=chatRegistry.filter(chat=>chat.id!==sessionId);saveChats();sessionId=null;sessionRevision=0;sessionStorage.removeItem("orbit_session_id");renderChatList();messagesEl.innerHTML=welcomeMarkup;return;}for(const msg of data.messages){if(msg.role==="user")addUserMessage(msg.content);else{const agentMessage=addAgentMessage(msg.content);if(msg.trajectory||msg.trade_plan||msg.quick_actions?.length||msg.suggestions?.length||msg.intent||msg.cross_chain_swap||msg.context_capsules?.length)finishAgentMessage(agentMessage,{answer:msg.content,trajectory:msg.trajectory,trade_plan:msg.trade_plan,quick_actions:msg.quick_actions,suggestions:msg.suggestions,session_revision:msg.session_revision,intent:msg.intent,capabilities:msg.capabilities,cross_chain_swap:msg.cross_chain_swap,context_capsules:msg.context_capsules,intent_lock:msg.intent_lock,evidence:msg.evidence,trade_readiness:msg.trade_readiness,gas_advisory:msg.gas_advisory});}}const groups=[...document.querySelectorAll(".quick-actions")];groups.slice(0,-1).forEach(group=>group.querySelectorAll(".followup-action").forEach(button=>{button.disabled=true;button.setAttribute("aria-disabled","true");}));scrollToBottom();}catch{sessionRevision=0;messagesEl.innerHTML=welcomeMarkup;}}
 
 function setReadOnlyWallet(address){walletInput.value=address;$("#walletButton").classList.add("connected");$("#walletLabel").textContent=shortAddress(address);}
 function setWalletConnected(address,label,addresses=[]){walletInput.value=address;walletInput.disabled=true;window.OrbitWalletContext={provider:activeProvider};$("#walletButton").classList.add("connected");$("#walletLabel").textContent=shortAddress(address);$("#connectedPanel").hidden=false;$("#connectedProvider").textContent=`Connected with ${label}`;$("#connectedAddress").textContent=addresses.length?addresses.join(" · "):address;$("#walletOptions").hidden=true;$("#disconnectWalletBtn").hidden=false;}

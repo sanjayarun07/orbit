@@ -75,3 +75,23 @@ def is_trade_modifier(request: str) -> bool:
         r"|(?<![\w.])(?:\d+(?:\.\d+)?|\.\d+)\s*(?:SOL|ETH|USDC|USDT|BNB|AVAX|POL)\b"
         r"|0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}", request, re.I,
     ))
+
+
+_WALLET_ACK_BARE = re.compile(r"^\W*(?:yes|yep|yeah|ok(?:ay)?|sure|done|ready|now)(?:[\s,.!-]+(?:yes|yep|yeah|ok(?:ay)?|sure|done|ready|now))*\W*$", re.IGNORECASE)
+_WALLET_ACK_MARKER = re.compile(r"\b(?:connected|done|ready|try\s+again|retry|go\s+ahead|proceed|continue)\b", re.IGNORECASE)
+_WALLET_ACK_NEGATION = re.compile(r"\b(?:not|no|isn'?t|can'?t|cannot|won'?t|unable|disconnected|fail\w*)\b", re.IGNORECASE)
+
+
+def is_wallet_connected_ack(request: str) -> bool:
+    """A short reply saying the wallet is now connected ("yes connected",
+    "wallet is connected now", "done", "try again"). Only meaningful when the
+    previous turn parked a swap for lack of a wallet, so the caller checks that
+    first; a bare "yes" counts because that turn asked for exactly this."""
+    text = request.strip()
+    if _WALLET_ACK_BARE.match(text):
+        return True
+    return (
+        len(text.split()) <= 4
+        and bool(_WALLET_ACK_MARKER.search(text))
+        and not _WALLET_ACK_NEGATION.search(text)
+    )

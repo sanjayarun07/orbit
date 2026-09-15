@@ -15,6 +15,11 @@ SIMULATE_TRADE = re.compile(
     r".{0,40}\b(?:sell(?:ing)?|sold|buy(?:ing)?|bought|swap(?:ping|ped)?|trad(?:e|ing|ed)|exchang(?:e|ing|ed)|convert(?:ing|ed)?)\b",
     re.I,
 )
+# "Should I buy X?" with no holding or amount is a recommendation question,
+# not a simulation of the user's position -- it must reach the speech layer
+# (advice -> research) instead of inventing a trade to quote.
+ADVICE_QUESTION = re.compile(r"\bshould\s+i\b", re.I)
+OWN_POSITION_OR_AMOUNT = re.compile(r"\b(?:my|mine|half|all|some|rest|everything)\b|\d", re.I)
 IMPERATIVE_MOVE = re.compile(r"^\s*(?:please\s+)?move\s+(?:all\s+|half\s+|my\s+|\.?\d)", re.I)
 TRADE_CANCEL = re.compile(r"^\s*(?:cancel|dismiss|discard|stop|forget)(?:\s+(?:it|this|the|my|pending|current))?(?:\s+(?:swap|trade|quote|order|transaction|route|plan))?\s*[.!]?\s*$|^\s*never\s*mind(?:\s+(?:the|this)\s+(?:swap|trade|quote|order))?\s*[.!]?\s*$", re.I)
 TRADE_CONFIRM = re.compile(r"^\s*(?:confirm|approve|proceed|go ahead|execute)(?:\s+with)?(?:\s+(?:this|the|my|pending|current))?(?:\s+(?:swap|trade|quote|order|transaction|route|plan))?(?:\s+[A-Za-z0-9_-]{6,128})?\s*[.!]?\s*$", re.I)

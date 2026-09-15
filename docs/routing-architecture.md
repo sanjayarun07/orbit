@@ -7,18 +7,43 @@ The synchronous rule function is pure. The graph now wraps it in a semantic
 layer that may call an embedding API or a DSPy speech classifier. Those calls
 are classification only and do not have transaction tools.
 
-## Semantic competition and abstention
+## Precedence: controls, anchored rules, then the model
 
-Closed controls and clear requests retain the fast path. A lexical execution
-match that competes with advice, questions, market data, negation, or conditional
-language is deferred. Unmatched requests also enter semantic resolution:
+`app/routing/resolver.py` decides in this order:
 
-1. Exact matches in the versioned labelled bank require no API call.
-2. Nearest-neighbour embeddings use the highest label similarity and the margin
-   over the competing label. Cosine similarity is not a calibrated probability.
-3. A close competition above the similarity threshold asks for clarification.
-   Low similarity or an unavailable embedding service uses structured DSPy
-   speech classification; low model confidence or invalid output clarifies.
+1. Controls and session continuations (confirm/cancel, quick actions, a
+   parameter fragment for an active trade) -- deterministic, never a model.
+2. Anchored rules. A rule that fired on a hard signal keeps deciding by itself:
+   an execution command with its fields (`trade` / `cross_chain_swap`), an
+   address or URL in the message, "my" ownership (balances, holdings, activity,
+   scenarios, trade simulation of the user's own position), a control verb, an
+   equity ticker. These are precise, free, and the execution paths must stay
+   deterministic.
+3. The speech model (`app/routing/model.py`) decides every other request --
+   everything a rule matched only by topic keywords (`market`, `defi`,
+   `token_research`, `current_information`, ...) and everything no rule matched.
+   The rule that fired, if any, survives only as a capability/chain hint when it
+   agrees with the model on the intent (`rules+model`); when they disagree the
+   model's reading of the act wins (`overrides:<reason>`). A rule can no longer
+   misread the act of a question ("explain what TVL means" is an explanation,
+   "should I buy X?" is advice, "what's my exposure" is portfolio).
+4. Fallbacks. An uncertain or abstaining model never decides: a strong rule
+   may, otherwise the turn asks for clarification -- the embedding tier is not
+   consulted as a second fuzzy opinion. An unavailable model falls back to the
+   embedding tier (nearest labelled example with similarity and margin gates),
+   then to clarification.
+
+The model can never grant execution beyond the rules: a model-proposed `quote`
+goes through `plan_execution_route` only with `explicit_action` on a crypto
+subject and only when the message carries none of the competing-speech signals
+(`if`, `when`, `?`, `should`, negation, ...) that already defer lexical
+execution matches. Classifier results are cached per normalised request text.
+
+Measured on `scripts/routing_eval/cases.json` (42 labelled cases, `--mode
+resolve`): rules-first 38/42 intent accuracy; model-first 42/42, with the model
+on the hot path for ~70% of cases at roughly 1.2 s p50 / 1.8 s p95 on
+`gpt-4.1-mini`. `INTENT_MODEL` can point the classifier at a different tier;
+`gpt-4.1-nano` measured 35/42 and no faster, so the default stays.
 
 The bank in `app/routing/examples.py` is an initial seed, not a trained or
 calibrated production classifier. Thresholds are configurable in `.env.example`.
@@ -43,7 +68,8 @@ outside classification, behind the existing explicit confirmation workflow.
 User message
   -> control detection
   -> entity extraction
-  -> prioritized intent rules
+  -> anchored intent rules (execution, address/URL, ownership, controls)
+  -> speech model for everything topical (rules kept as capability hints)
   -> typed execution draft
   -> session workflow reducer
   -> capability planner

@@ -969,3 +969,43 @@ def test_security_check_on_solana_address_infers_chain_without_asking(monkeypatc
     result = asyncio.run(research.research_node(state))
     assert "Which chain" not in result["answer"]
     assert ("solana",) in seen_chains
+
+
+SWAP_REQUEST = "swap 0.01 sol to usdc on base with 50bps slippage"
+
+
+def test_wallet_connected_ack_matches_short_confirmations_only():
+    from app.routing.controls import is_wallet_connected_ack
+
+    for text in ("yes connected", "connected", "Wallet is connected now", "done", "ok try again", "go ahead", "yes"):
+        assert is_wallet_connected_ack(text), text
+    for text in ("what is BONK", "connected wallets are risky, explain why", "swap 1 sol to usdc", "no"):
+        assert not is_wallet_connected_ack(text), text
+
+
+def test_swap_without_wallet_parks_the_request_for_the_next_turn():
+    from app.nodes.trading import cross_chain_swap_node, trade_planner_node
+
+    relay = asyncio.run(cross_chain_swap_node({"request": SWAP_REQUEST, "wallet_address": "", "chains": []}))
+    assert relay["pending_wallet_request"] == SWAP_REQUEST and "Connect wallet" in relay["answer"]
+    jupiter = asyncio.run(trade_planner_node({"request": "swap 1 sol to usdc", "wallet_address": ""}))
+    assert jupiter["pending_wallet_request"] == "swap 1 sol to usdc"
+
+
+def test_connected_ack_reruns_the_parked_swap_with_the_wallet(monkeypatch):
+    seen = []
+
+    async def capture(request, resolved, wallet, history, context, action):
+        seen.append((request, wallet))
+        return SimpleNamespace(answer="ok")
+
+    monkeypatch.setattr(graph, "_run_agent_traced", capture)
+    parked = {"pending_wallet_request": SWAP_REQUEST}
+    asyncio.run(graph.run_agent("yes connected", "So1anaWa11et", "", parked))
+    assert seen[-1] == (SWAP_REQUEST, "So1anaWa11et")
+    # An unrelated message after a parked swap is a fresh request, not a re-run.
+    asyncio.run(graph.run_agent("what is BONK", "So1anaWa11et", "", parked))
+    assert seen[-1][0] == "what is BONK"
+    # No parked swap: the acknowledgement is just a normal message.
+    asyncio.run(graph.run_agent("yes connected", "So1anaWa11et", "", {}))
+    assert seen[-1][0] == "yes connected"

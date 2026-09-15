@@ -632,6 +632,8 @@ async def chat(body: ChatRequest, request: Request):
             ), None)
         if active_plan_id and not is_trade_confirmation(body.message):
             await mark_plan_superseded(active_plan_id)
+        if body.team_mode is not None:
+            session_context = {**session_context, "team_mode": body.team_mode}
         run = await asyncio.wait_for(
             run_agent(
                 body.message,
@@ -676,6 +678,7 @@ async def chat(body: ChatRequest, request: Request):
         # turn asked which chain a symbol is on, otherwise cleared (the follow-up
         # consumes it before the graph runs -- see resolve_pending_token).
         next_context["pending_token"] = run.pending_token
+        next_context["pending_wallet_request"] = run.pending_wallet_request
         if next_context.get("active_workflow") and plan:
             next_context["active_workflow"]["plan_id"] = plan.plan_id
         old_workflow = WorkflowState.from_context(session_context.get("active_workflow"))
@@ -731,6 +734,7 @@ async def chat(body: ChatRequest, request: Request):
             risk_assessment=run.risk_assessment,
             team_report=run.team_report,
             validation=validation,
+            team_mode=bool(next_context.get("team_mode")),
         )
     except asyncio.TimeoutError as exc:
         increment("chat_timeouts")

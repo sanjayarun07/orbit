@@ -13,10 +13,15 @@ from app.trade_context import complete_swap_fields
 
 logger = logging.getLogger(__name__)
 
+_NO_WALLET_ANSWER = (
+    "I need a connected wallet to prepare a swap. Connect one with **Connect wallet** "
+    "(or enter a public address), then reply `connected` and I'll pick this swap right back up."
+)
+
 @trace(name="trade_planner", as_type="agent")
 async def trade_planner_node(state: AgentState) -> dict:
     if not state.get("wallet_address"):
-        return {"answer": "I need a wallet address to prepare a swap.", "trajectory": None}
+        return {"answer": _NO_WALLET_ANSWER, "trajectory": None, "pending_wallet_request": state["request"]}
     if state.get("execution_provider") is None and "chain" in state.get("missing_fields", []):
         draft = extract_cross_chain_draft(state["request"], tuple(state.get("chains", [])))
         output_token = draft.get("output_token")
@@ -89,7 +94,12 @@ async def cross_chain_swap_node(state: AgentState) -> dict:
         # would auto-prompt eth_requestAccounts as a side effect of loading
         # the quote, bypassing the app's own connect flow. Gate here instead,
         # before any draft or quote is prepared.
-        return {"answer": "I need a connected wallet to prepare a swap.", "trajectory": None, "cross_chain_swap": None}
+        return {
+            "answer": _NO_WALLET_ANSWER,
+            "trajectory": None,
+            "cross_chain_swap": None,
+            "pending_wallet_request": state["request"],
+        }
     chains = state.get("chains", [])
     values = extract_cross_chain_draft(state["request"], tuple(chains))
     required = ("source_chain", "destination_chain", "amount", "input_token", "output_token")

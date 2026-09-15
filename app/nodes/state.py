@@ -27,6 +27,9 @@ class AgentState(TypedDict, total=False):
     session_context: dict
     quick_action: dict | None
     pending_token: dict | None
+    # A swap request parked because no wallet was connected; re-run verbatim
+    # when the next turn is a "connected" acknowledgement (app/graph.run_agent).
+    pending_wallet_request: str | None
 
 
 def effective_request(state: AgentState) -> str:

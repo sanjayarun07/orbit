@@ -10,6 +10,9 @@ class ChatRequest(BaseModel):
     session_id: str | None = Field(default=None, min_length=1, max_length=128)
     context_revision: int | None = Field(default=None, ge=0)
     quick_action: "QuickAction | None" = None
+    # Explicit trading-desk switch from the UI; None leaves the session's
+    # current setting (or a chat phrase like "enable team mode") in charge.
+    team_mode: bool | None = None
 
 
 class QuickAction(BaseModel):
@@ -180,6 +183,7 @@ class AgentResponse(BaseModel):
     risk_assessment: RiskAssessment | None = None
     team_report: dict | None = None
     validation: AnswerValidation | None = None
+    team_mode: bool = False
 
 
 class IntentPreviewRequest(BaseModel):

@@ -56,13 +56,18 @@ def test_nearest_neighbour_resolves_read_only_label():
     assert result.understanding.explicit_action is False
 
 
-def test_low_margin_cannot_be_promoted_by_model(monkeypatch):
-    monkeypatch.setattr(routing, "embedding_router", lambda _: SimpleNamespace(classify=lambda _: SemanticMatch(None, "embedding", .9, .01, "low_margin")))
+def test_uncertain_model_cannot_be_promoted_by_embeddings(monkeypatch):
+    """The model decides first; when it abstains, the embedding tier is not a
+    second fuzzy opinion that can promote the ambiguous request."""
+    def forbidden_classify(_request):
+        pytest.fail("Embeddings must not promote an ambiguous model decision")
 
-    async def forbidden(*args, **kwargs):
-        pytest.fail("Model must not promote an ambiguous embedding decision")
+    monkeypatch.setattr(routing, "embedding_router", lambda _: SimpleNamespace(classify=forbidden_classify))
 
-    monkeypatch.setattr(runtime, "_call_lm", forbidden)
+    async def abstain(*args, **kwargs):
+        return SimpleNamespace(understanding=SpeechUnderstanding(speech_act="abstain", domain="crypto", explicit_action=False, confidence=0.4))
+
+    monkeypatch.setattr(runtime, "_call_lm", abstain)
     result = asyncio.run(graph.resolve_intent_node({"request": "Would you buy another coin?"}))
     assert result["intent"] == "general"
     assert result["clarification"]

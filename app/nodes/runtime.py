@@ -27,6 +27,15 @@ _fallback_lm = (
     if settings.llm_fallback_model
     else None
 )
+_intent_lm = (
+    dspy.LM(
+        settings.intent_model,
+        timeout=settings.llm_request_timeout_seconds,
+        num_retries=settings.llm_num_retries,
+    )
+    if settings.intent_model and settings.intent_model != settings.model
+    else None
+)
 dspy.configure(lm=_primary_lm)
 
 # Provider-side failures worth retrying on a DIFFERENT model (a transient outage
@@ -424,6 +433,22 @@ async def _call_lm(program, **kwargs):
                 raise
             increment("llm_fallback_used")
             return result
+
+
+async def _call_intent_lm(program, **kwargs):
+    """The routing classifier on its own (faster) model when one is configured;
+    otherwise identical to _call_lm, including its resilience and fallback."""
+    if _intent_lm is None:
+        return await _call_lm(program, **kwargs)
+    async with _llm_slots:
+        increment("llm_calls")
+        try:
+            return await _run_guarded(program, _intent_lm, kwargs)
+        except Exception as exc:
+            if not _is_transient_lm_error(exc):
+                raise
+            increment("llm_intent_transient_failures")
+            return await _run_guarded(program, _primary_lm, kwargs)
 
 
 async def _run_guarded(program, lm, kwargs):

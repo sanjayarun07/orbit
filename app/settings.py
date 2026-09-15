@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     intent_embedding_timeout_seconds: float = 8.0
     intent_embedding_cache_entries: int = 512
     intent_model_confidence_threshold: float = 0.90
+    # The speech model decides every keyword-topical request (app/routing/
+    # resolver.py), so its latency is on the hot path: point it at a faster
+    # tier than the answer model (e.g. "openai/gpt-4.1-nano"); empty = `model`.
+    intent_model: str | None = None
+    intent_classifier_cache_entries: int = 512
     # Per-capability tool-selection semantic fallback (app/routing/tool_semantic.py) --
     # a second chance for a description-bearing tool whose regex `matches`
     # gate returned False, not a replacement for the intent-classification

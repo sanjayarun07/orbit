@@ -92,7 +92,9 @@ def route_capabilities(request: str) -> CapabilityRoute | None:
     # shock stress test), and must catch past-tense phrasing ("sold") TRADE
     # doesn't match at all. Never reaches plan_execution_route -- this is a
     # dedicated read-only path (see app/plans.py's simulate_swap()).
-    if lx.SIMULATE_TRADE.search(request):
+    if lx.SIMULATE_TRADE.search(request) and not (
+        lx.ADVICE_QUESTION.search(request) and not lx.OWN_POSITION_OR_AMOUNT.search(request)
+    ):
         return _route("portfolio", ("trade_simulation", "portfolio"), chains, reason="trade_simulation")
     if lx.TRADE.search(request) or lx.IMPERATIVE_MOVE.search(request):
         if has_competing_speech(request):

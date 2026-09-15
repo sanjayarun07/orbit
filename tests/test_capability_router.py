@@ -660,3 +660,18 @@ def test_real_execution_commands_still_route_to_trade():
     route = route_capabilities("Sell half my SOL now")
     assert route.intent == "trade"
     assert route.mode == "quote"
+
+
+def test_should_i_buy_without_a_holding_is_advice_not_a_simulation():
+    """'Should I buy HYPE?' names no amount and no position of the user's, so
+    it is a recommendation question: it must not be turned into a trade
+    simulation that invents a sell of the user's SOL. The rules layer stays
+    out of the way (speech layer -> advice -> research). A 'should I' that
+    does reference a holding or amount remains a simulation."""
+    for request in ("should i buy HYPE token ?", "Should I buy HYPE?", "should I sell SOL"):
+        route = route_capabilities(request)
+        assert route is None or "trade_simulation" not in route.capabilities, request
+        assert route is None or route.intent != "portfolio", request
+    for request in ("Should I sell my SOL?", "should I buy 0.5 SOL of HYPE", "should I sell half"):
+        route = route_capabilities(request)
+        assert route is not None and "trade_simulation" in route.capabilities, request

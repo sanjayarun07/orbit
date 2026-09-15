@@ -220,3 +220,34 @@ def _coro(value):
     async def _c(*_a, **_k):
         return value
     return _c()
+
+
+def test_ui_switch_sets_team_mode_and_response_echoes_it(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import main
+    from app.graph import AgentRun
+
+    seen: list[dict] = []
+
+    async def fake_run(message, wallet, history, session_context, action):
+        seen.append(dict(session_context))
+        return AgentRun(answer="ok", trajectory=None, trade_plan=None, intent="general", capabilities=[])
+
+    monkeypatch.setattr(main, "run_agent", fake_run)
+    client = TestClient(main.app)
+
+    first = client.post("/chat", json={"message": "hello", "team_mode": True})
+    assert first.status_code == 200, first.text
+    assert first.json()["team_mode"] is True and seen[-1]["team_mode"] is True
+    sid, rev = first.json()["session_id"], first.json()["session_revision"]
+
+    # No switch change on the next turn: the session's setting carries over.
+    second = client.post("/chat", json={"message": "again", "session_id": sid, "context_revision": rev})
+    assert second.json()["team_mode"] is True and seen[-1]["team_mode"] is True
+
+    # Switching off wins over the persisted setting and is what history reports.
+    third = client.post("/chat", json={
+        "message": "bye", "session_id": sid, "context_revision": second.json()["session_revision"], "team_mode": False,
+    })
+    assert third.json()["team_mode"] is False and seen[-1]["team_mode"] is False
+    assert client.get(f"/chat/history/{sid}").json()["context"]["team_mode"] is False

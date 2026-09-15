@@ -4,6 +4,7 @@ from langgraph.graph import END, START, StateGraph
 from app.call_budget import current_budget, start_budget as start_call_budget, reset_budget as reset_call_budget
 from app.capability_router import WorkflowIntent
 from app.context_entities import resolve_contextual_request
+from app.routing.controls import is_wallet_connected_ack
 from app.models import CrossChainSwapDraft, RiskAssessment, TradePlan
 from app.provider_analytics import emit_turn_budget_event
 from app.settings import settings
@@ -79,6 +80,7 @@ class AgentRun:
     risk_assessment: RiskAssessment | None = None
     team_report: dict | None = None
     pending_token: dict | None = None
+    pending_wallet_request: str | None = None
 
     def __iter__(self):
         """Retain compatibility with callers unpacking the original three values."""
@@ -94,6 +96,11 @@ async def run_agent(
     session_context: dict | None = None,
     quick_action: dict | None = None,
 ) -> AgentRun:
+    parked = (session_context or {}).get("pending_wallet_request")
+    if parked and is_wallet_connected_ack(request):
+        # The previous turn refused a swap for lack of a wallet; "yes connected"
+        # means run that swap now, not a fresh (and meaningless) request.
+        request = parked
     resolved_request = resolve_contextual_request(request, history, session_context)
     return await _run_agent_traced(
         request, resolved_request, wallet_address, history, session_context or {}, quick_action
@@ -161,4 +168,5 @@ async def _run_agent_traced(
         risk_assessment=final_state.get("risk_assessment"),
         team_report=final_state.get("team_report"),
         pending_token=final_state.get("pending_token"),
+        pending_wallet_request=final_state.get("pending_wallet_request"),
     )
