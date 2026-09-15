@@ -13,6 +13,7 @@ from app.jupiter import WRAPPED_SOL_MINT
 from app.capability_router import extract_chains
 from app.market_brief import crypto_market_brief
 from app.market_overview import crypto_market_overview
+from app import why_moving
 from app.market_providers import TRENDING_TOKENS
 from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available
 from app.provider_registry import get_provider_router
@@ -1196,6 +1197,11 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
                 "observation_0": observation,
             },
         }
+    # "why is SOL down?" -> the composed market + news card (crypto first, stock otherwise).
+    moving = why_moving.match(request)
+    if moving and not _TOKEN_ADDRESS.search(request):
+        answer, trajectory = await why_moving.compose(*moving)
+        return {"answer": answer, "trajectory": {"thought_0": "A 'why is X moving' ask maps to the composed market + news card.", **trajectory} if trajectory else None}
     # A structured token due-diligence ask ("deep dive on X", "analyze X",
     # "thoughts on X") -> the multi-dimension analysis lens. Gated on a resolvable
     # token; a no-token analysis ask (or a bare single-metric lookup) falls through.

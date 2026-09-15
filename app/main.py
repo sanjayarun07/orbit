@@ -46,7 +46,7 @@ from app.lifi import get_quote as get_lifi_quote, get_status as get_lifi_status
 from app.mcp_tools import close_mcp_gateway, discover_mcp_tools, get_mcp_registry
 from app.metrics import increment, snapshot
 from app.wash_trading import nansen_enrich, pipeline as wash_trading_pipeline, schema as wash_trading_schema
-from app import accounts, api_keys, billing, billing_plans, credits, emailer, feedback, home_highlights, mcp_server, notifications, tool_outcomes, x402_gate
+from app import accounts, api_keys, billing, billing_plans, credits, emailer, feedback, home_highlights, mcp_server, notifications, tasks, tasks_nl, tool_outcomes, x402_gate
 from app.identity import Identity, current_identity, require_user, resolve_identity, service_identity
 from app.models import TRADING_CHAINS, RiskCharterFields
 from app.models import (
@@ -57,6 +57,9 @@ from app.models import (
     CheckoutRequest,
     DeleteAccountRequest,
     FeedbackRequest,
+    InboxRead,
+    TaskCreate,
+    TaskUpdate,
     TeamAccept,
     TeamInvite,
     ChatRequest,
@@ -100,6 +103,11 @@ from app.sessions import (
 )
 from app.suggestions import structured_quick_actions, suggested_actions
 from app.solana_rpc import rpc
+from app.jupiter import jupiter as _jupiter_client
+
+
+async def jupiter_search_tokens(query: str) -> list[dict]:
+    return await _jupiter_client.search_tokens(query)
 
 
 logger = logging.getLogger(__name__)
@@ -111,6 +119,7 @@ async def lifespan(_app: FastAPI):
     reconciliation = asyncio.create_task(reconciliation_worker())
     relay_reconciliation = asyncio.create_task(relay_tracking.worker())
     outcomes_refresh = asyncio.create_task(tool_outcomes.refresh_worker())
+    task_worker = asyncio.create_task(tasks.worker())
     try:
         async with mcp_server.mcp.session_manager.run():
             yield
@@ -118,7 +127,8 @@ async def lifespan(_app: FastAPI):
         reconciliation.cancel()
         relay_reconciliation.cancel()
         outcomes_refresh.cancel()
-        await asyncio.gather(reconciliation, relay_reconciliation, outcomes_refresh, discovery, return_exceptions=True)
+        task_worker.cancel()
+        await asyncio.gather(reconciliation, relay_reconciliation, outcomes_refresh, task_worker, discovery, return_exceptions=True)
         await asyncio.to_thread(close_mcp_gateway)
 
 
@@ -391,6 +401,54 @@ async def home_highlights_cards():
     """Today's crypto and stock-market highlights for the welcome tiles.
     Cached server-side; anonymous, since the welcome screen is."""
     return await asyncio.to_thread(home_highlights.get_highlights)
+
+
+@app.get("/home/suggestions")
+async def home_suggestions(request: Request):
+    """Category rows for the home chips. "My wallet" appears for a signed-in
+    user with a linked or default wallet, built from their largest holdings."""
+    identity = await resolve_identity(request)
+    holdings: list[str] = []
+    if identity.signed_in:
+        wallet = ((identity.user.get("preferences") or {}).get("default_wallet")) or next(
+            (w["address"] for w in await accounts.list_wallets(identity.user["id"]) if not w["address"].startswith("0x")), None,
+        )
+        if wallet and not str(wallet).startswith("0x"):
+            try:
+                snapshot = await asyncio.wait_for(build_portfolio_snapshot(wallet), timeout=8)
+                holdings = ["SOL"] + [h.get("symbol") for h in snapshot.get("holdings", []) if h.get("usd_value")]
+            except Exception:
+                holdings = ["SOL"]
+    return {"categories": await asyncio.to_thread(home_highlights.suggestions, holdings or None)}
+
+
+_TOKEN_MAJORS = [("BTC", "Bitcoin"), ("ETH", "Ethereum"), ("SOL", "Solana"), ("BNB", "BNB"), ("XRP", "XRP"), ("DOGE", "Dogecoin"), ("ADA", "Cardano"), ("AVAX", "Avalanche"), ("LINK", "Chainlink"), ("SUI", "Sui"), ("TON", "Toncoin")]
+
+
+@app.get("/tokens/search")
+async def token_search(q: str = ""):
+    """$TICKER autocomplete for the composer: majors plus Jupiter's verified
+    registry, verified first. Public and cheap; no keys involved."""
+    query = re.sub(r"[^A-Za-z0-9]", "", q or "")[:12].upper()
+    if len(query) < 1:
+        return {"tokens": []}
+    out = [{"symbol": s, "name": n, "mint": None, "verified": True, "chain": "multi"} for s, n in _TOKEN_MAJORS if s.startswith(query)]
+    try:
+        matches = await asyncio.wait_for(jupiter_search_tokens(query), timeout=4)
+    except Exception:
+        matches = []
+    seen = {t["symbol"] for t in out}
+    ranked = sorted(matches or [], key=lambda m: (0 if "verified" in (m.get("tags") or []) else 1, 0 if str(m.get("symbol") or "").upper().startswith(query) else 1, -(m.get("organicScore") or 0)))
+    for item in ranked:
+        symbol = str(item.get("symbol") or "").upper()
+        if not symbol or symbol in seen or not (symbol.startswith(query) or query in str(item.get("name") or "").upper()):
+            continue
+        seen.add(symbol)
+        out.append({"symbol": symbol, "name": item.get("name"), "mint": item.get("id"), "verified": "verified" in (item.get("tags") or []),
+                    "chain": "solana", "price": item.get("usdPrice")})
+        if len(out) >= 8:
+            break
+    return {"tokens": out[:8]}
 
 
 @app.get("/capabilities")
@@ -809,16 +867,27 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             # The canonical text is what the chat phrase path would have stored,
             # so the transcript, the chip and the Risk agent all see one rendering.
             body.message = f"set my risk charter: {charter_fields.render()}"
-        run = await asyncio.wait_for(
-            run_agent(
-                body.message,
-                body.wallet_address or "",
-                history,
-                session_context,
-                action,
-            ),
-            timeout=settings.chat_execution_timeout_seconds,
-        )
+        task_reply = None
+        if identity.signed_in and action is None and tasks_nl.is_task_control(body.message):
+            if body.tz_offset_min is not None and ((identity.user.get("preferences") or {}).get("tz_offset_min") != body.tz_offset_min):
+                identity.user = await accounts.update_user(identity.user["id"], preferences={"tz_offset_min": body.tz_offset_min}) or identity.user
+            tz = body.tz_offset_min if body.tz_offset_min is not None else int((identity.user.get("preferences") or {}).get("tz_offset_min") or 0)
+            task_reply = await tasks_nl.handle(body.message, identity.user, tz)
+        if task_reply is not None:
+            from app.graph import AgentRun
+            # No trajectory: a task control is a plain (1-credit) turn, not a tool turn.
+            run = AgentRun(answer=task_reply, trajectory=None, trade_plan=None, intent="general", capabilities=[])
+        else:
+            run = await asyncio.wait_for(
+                run_agent(
+                    body.message,
+                    body.wallet_address or "",
+                    history,
+                    session_context,
+                    action,
+                ),
+                timeout=settings.chat_execution_timeout_seconds,
+            )
         increment(f"intent_{run.intent}")
         answer, trajectory, plan = run
         client_trajectory = trajectory if settings.expose_tool_trajectory else public_activity(trajectory)
@@ -1371,6 +1440,61 @@ async def admin_business_metrics(request: Request, days: int = 30):
         "feedback": {"up": snapshot().get("feedback_up", 0), "down": snapshot().get("feedback_down", 0), "none": snapshot().get("feedback_none", 0)},
         "tools": {"rated": [row for row in tool_outcomes.snapshot() if row["feedback_up"] or row["feedback_down"]][:20]},
     }
+
+
+# ---- Tasks (reminders, alerts, briefs) and the inbox ----
+
+@app.get("/me/tasks")
+async def my_tasks(identity: Identity = Depends(require_user)):
+    items = await tasks.list_tasks(identity.user["id"])
+    return {"tasks": [tasks.public(t) for t in items], "limit": tasks.TASK_LIMITS.get(identity.plan.id, 3), "unread": await tasks.unread_count(identity.user["id"])}
+
+
+@app.post("/me/tasks", status_code=201)
+async def create_my_task(body: TaskCreate, identity: Identity = Depends(require_user)):
+    try:
+        task = await tasks.create_task(identity.user, body.kind, body.spec, body.schedule, body.channel, body.tz_offset_min, body.title)
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(400, str(exc) or "Invalid task") from exc
+    return tasks.public(task)
+
+
+@app.patch("/me/tasks/{task_id}")
+async def update_my_task(task_id: str, body: TaskUpdate, identity: Identity = Depends(require_user)):
+    fields = body.model_dump(exclude_none=True)
+    current = await tasks.get_task(task_id)
+    if current is None or current["user_id"] != identity.user["id"]:
+        raise HTTPException(404, "Task not found")
+    if fields.get("status") == "active" and current["status"] != "active":
+        fields["next_run_at"] = tasks.next_run(current["schedule"], current.get("tz_offset_min", 0))
+    task = await tasks.update_task(task_id, identity.user["id"], **fields)
+    return tasks.public(task)
+
+
+@app.delete("/me/tasks/{task_id}")
+async def delete_my_task(task_id: str, identity: Identity = Depends(require_user)):
+    if not await tasks.delete_task(task_id, identity.user["id"]):
+        raise HTTPException(404, "Task not found")
+    return {"deleted": True}
+
+
+@app.post("/me/tasks/{task_id}/run")
+async def run_my_task_now(task_id: str, identity: Identity = Depends(require_user)):
+    """Fire a task immediately (a test send for briefs and reminders)."""
+    current = await tasks.get_task(task_id)
+    if current is None or current["user_id"] != identity.user["id"]:
+        raise HTTPException(404, "Task not found")
+    return await tasks.run_task(current)
+
+
+@app.get("/me/inbox")
+async def my_inbox(identity: Identity = Depends(require_user)):
+    return {"items": await tasks.inbox(identity.user["id"]), "unread": await tasks.unread_count(identity.user["id"])}
+
+
+@app.post("/me/inbox/read")
+async def read_my_inbox(body: InboxRead, identity: Identity = Depends(require_user)):
+    return {"marked": await tasks.mark_read(identity.user["id"], body.ids), "unread": await tasks.unread_count(identity.user["id"])}
 
 
 @app.get("/billing/plans")

@@ -157,6 +157,60 @@ def build() -> dict:
     return {"as_of": datetime.now(timezone.utc).isoformat(), "source": source, "cards": cards[:4]}
 
 
+# ----------------------------------------------------------------------------
+# Suggestion rows behind the category chips (fill the composer, don't send)
+# ----------------------------------------------------------------------------
+
+CURATED = {
+    "crypto": [
+        "What are the trending narratives right now in crypto?",
+        "Which blue-chip crypto assets are still worth researching?",
+        "Trending tokens on Solana",
+        "Deep dive on JUP",
+        "Is BONK safe to ape into?",
+    ],
+    "stocks": [
+        "What's driving NVDA's recent move?",
+        "Which earnings this week could move the market?",
+        "How did US stocks close today and why?",
+        "What are the most anticipated IPOs in the next 6 months?",
+    ],
+    "macro": [
+        "How will the next Fed decision affect risk assets?",
+        "How do rising Treasury yields hit crypto and tech stocks?",
+        "What's the read on this week's CPI print for markets?",
+        "Is the dollar's move this week a risk-on or risk-off signal?",
+    ],
+}
+
+
+def suggestions(wallet_holdings: list[str] | None = None) -> list[dict]:
+    """Category rows for the home screen. Trending comes from today's
+    highlights; My wallet from the caller's top holdings when known."""
+    data = get_highlights()
+    trending = []
+    for card in data.get("cards", []):
+        if card.get("kind") in ("crypto", "stocks"):
+            trending.append(f"What does this mean for the market: {card['title']}?")
+        elif card.get("prompt"):
+            trending.append(card["prompt"])
+    for extra in ("How's the crypto market today?", "Why is BTC moving today?"):
+        if extra not in trending:
+            trending.append(extra)
+    categories = [
+        {"id": "trending", "label": "Trending", "rows": trending[:5]},
+        {"id": "crypto", "label": "Crypto", "rows": CURATED["crypto"]},
+        {"id": "stocks", "label": "Stocks", "rows": CURATED["stocks"]},
+        {"id": "macro", "label": "Macro", "rows": CURATED["macro"]},
+    ]
+    if wallet_holdings:
+        top = [h for h in wallet_holdings if h and h.upper() != "UNKNOWN"][:2]
+        rows = [f"Why is {sym} moving today?" for sym in top]
+        rows += ["Analyze my portfolio and concentration risk", "What if my portfolio drops 20%?", "Wallet health check"]
+        categories.append({"id": "wallet", "label": "My wallet", "rows": rows[:5]})
+    return categories
+
+
 def get_highlights(force: bool = False) -> dict:
     """Cached highlights; one build per TTL window, callers coalesce on the lock."""
     global _cached

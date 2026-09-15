@@ -84,6 +84,35 @@ CREATE TABLE IF NOT EXISTS stripe_events (
     type TEXT NOT NULL,
     received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE TABLE IF NOT EXISTS user_tasks (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    spec JSONB NOT NULL DEFAULT '{}'::jsonb,
+    schedule JSONB NOT NULL DEFAULT '{}'::jsonb,
+    channel TEXT NOT NULL DEFAULT 'inapp',
+    status TEXT NOT NULL DEFAULT 'active',
+    tz_offset_min INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    next_run_at TIMESTAMPTZ,
+    last_run_at TIMESTAMPTZ,
+    last_result TEXT,
+    fire_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS user_tasks_due ON user_tasks (next_run_at) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS user_tasks_user ON user_tasks (user_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS user_inbox (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'task',
+    task_id UUID,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    read_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS user_inbox_user ON user_inbox (user_id, created_at DESC);
 CREATE TABLE IF NOT EXISTS user_wallets (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     chain TEXT NOT NULL,

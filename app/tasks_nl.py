@@ -1,0 +1,199 @@
+"""Natural-language task controls in chat: "remind me tomorrow at 9am to
+check SOL", "alert me when SOL drops below $90", "send me a morning brief at
+8am", "show my tasks", "pause/delete task 2".
+
+Deterministic on purpose: a reminder is a commitment with a time in it, and
+the user should see exactly what was scheduled. Anything that doesn't match
+these shapes falls through to the normal turn.
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import datetime, timedelta, timezone
+
+from app import tasks
+
+_DAYS = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6,
+         "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+_TIME = r"(?P<h>\d{1,2})(?::(?P<m>\d{2}))?\s*(?P<ap>am|pm)?"
+_TIME_NC = r"\d{1,2}(?::\d{2})?\s*(?:am|pm)?"
+_REMIND = re.compile(r"^\s*(?:please\s+)?remind\s+me\s+(?P<rest>.+?)\s*$", re.I)
+_ALERT = re.compile(
+    r"^\s*(?:please\s+)?(?:alert|notify|tell|ping|warn)\s+me\s+(?:when|if|once)\s+\$?(?P<sym>[A-Za-z]{2,10})\s+"
+    r"(?:(?P<dir>drops?|falls?|goes|rises?|climbs?|breaks?|is|gets?|moves?|dips?|pumps?)\s+)?"
+    r"(?P<cmp>below|under|beneath|above|over|past|to|at)\s+\$?(?P<price>\d[\d,]*(?:\.\d+)?)\s*(?:usd|dollars|\$)?\s*(?P<repeat>every\s+time|each\s+time|repeatedly)?\s*[.!]?\s*$",
+    re.I,
+)
+_BRIEF = re.compile(r"^\s*(?:send|give|email)\s+me\s+(?:a\s+|the\s+)?(?:daily\s+|morning\s+)?(?:market\s+)?brief(?:ing)?(?:\s+(?:every\s+day|daily))?(?:\s+at\s+" + _TIME + r")?(?:\s+by\s+(?P<channel>email|mail))?\s*[.!]?\s*$", re.I)
+_LIST = re.compile(r"^\s*(?:show|list|what\s+are)\s+(?:me\s+)?(?:my\s+)?(?:tasks|reminders|alerts|scheduled\s+tasks)\??\s*$", re.I)
+_MUTATE = re.compile(r"^\s*(?P<verb>pause|resume|delete|remove|cancel|stop)\s+(?:my\s+)?(?:task|reminder|alert)\s*#?\s*(?P<n>\d+)\s*[.!]?\s*$", re.I)
+_MUTATE_ALL = re.compile(r"^\s*(?P<verb>pause|resume|delete|cancel|stop)\s+all\s+(?:my\s+)?(?:tasks|reminders|alerts)\s*[.!]?\s*$", re.I)
+
+
+def is_task_control(message: str) -> bool:
+    return any(p.match(message or "") for p in (_REMIND, _ALERT, _BRIEF, _LIST, _MUTATE, _MUTATE_ALL))
+
+
+def _clock(h: str | None, m: str | None, ap: str | None, default: tuple[int, int] = (9, 0)) -> tuple[int, int]:
+    if h is None:
+        return default
+    hour = int(h)
+    minute = int(m or 0)
+    if ap:
+        ap = ap.lower()
+        if ap == "pm" and hour < 12:
+            hour += 12
+        if ap == "am" and hour == 12:
+            hour = 0
+    return max(0, min(23, hour)), max(0, min(59, minute))
+
+
+def parse_reminder(rest: str, tz_offset_min: int, now: datetime | None = None) -> tuple[dict, str] | None:
+    """Returns (schedule, message) for the text after "remind me"."""
+    now = now or datetime.now(timezone.utc)
+    local_now = now + timedelta(minutes=tz_offset_min)
+    text = rest.strip().rstrip(".!")
+
+    # "in 20 minutes / 2 hours / 3 days to ..."
+    m = re.match(r"^in\s+(?P<n>\d+)\s*(?P<unit>min(?:ute)?s?|h(?:ou)?rs?|days?|weeks?)\s*(?:to\s+)?(?P<msg>.*)$", text, re.I)
+    if m:
+        n = int(m.group("n"))
+        unit = m.group("unit").lower()
+        delta = timedelta(minutes=n) if unit.startswith("m") else timedelta(hours=n) if unit.startswith("h") else timedelta(days=n) if unit.startswith("d") else timedelta(weeks=n)
+        return {"at": (now + delta).isoformat()}, (m.group("msg") or "").strip() or "Reminder"
+
+    # "every day at 8am to ..." / "daily at 8 ..." / "every monday at 9am to ..."
+    m = re.match(r"^(?:every\s+day|daily|each\s+day)(?:\s+at\s+" + _TIME + r")?\s*(?:to\s+)?(?P<msg>.*)$", text, re.I)
+    if m:
+        h, mi = _clock(m.group("h"), m.group("m"), m.group("ap"))
+        return {"daily": f"{h:02d}:{mi:02d}"}, (m.group("msg") or "").strip() or "Daily reminder"
+    m = re.match(r"^(?:every|each)\s+(?P<day>" + "|".join(_DAYS) + r")(?:\s+at\s+" + _TIME + r")?\s*(?:to\s+)?(?P<msg>.*)$", text, re.I)
+    if m:
+        h, mi = _clock(m.group("h"), m.group("m"), m.group("ap"))
+        return {"weekly": {"day": _DAYS[m.group("day").lower()], "time": f"{h:02d}:{mi:02d}"}}, (m.group("msg") or "").strip() or "Weekly reminder"
+
+    # "tomorrow at 9am to ..." / "on friday at 5pm to ..." / "at 5pm to ..." / "tonight" / "today at 3"
+    m = re.match(r"^(?:(?P<when>tomorrow|today|tonight|on\s+(?P<day>" + "|".join(_DAYS) + r")|(?:this|next)\s+(?P<day2>" + "|".join(_DAYS) + r"))\s*)?(?:at\s+" + _TIME + r")?\s*(?:to\s+)?(?P<msg>.+)$", text, re.I)
+    if m and (m.group("when") or m.group("h")):
+        when = (m.group("when") or "").lower()
+        h, mi = _clock(m.group("h"), m.group("m"), m.group("ap"), default=(20, 0) if when == "tonight" else (9, 0))
+        target = local_now.replace(hour=h, minute=mi, second=0, microsecond=0)
+        day = m.group("day") or m.group("day2")
+        if when == "tomorrow":
+            target += timedelta(days=1)
+        elif day:
+            delta = (_DAYS[day.lower()] - target.weekday()) % 7
+            if delta == 0 and (target <= local_now or when.startswith("next")):
+                delta = 7
+            target += timedelta(days=delta)
+        elif target <= local_now:
+            target += timedelta(days=1)
+        message = (m.group("msg") or "").strip()
+        # "remind me at 5pm" with the message before the time: "remind me to call bob at 5pm"
+        return {"at": (target - timedelta(minutes=tz_offset_min)).isoformat()}, message or "Reminder"
+
+    # message first, time last: "to call bob at 5pm" / "to rebalance tomorrow"
+    m = re.match(r"^(?:to\s+)?(?P<msg>.+?)\s+(?P<tail>(?:tomorrow|tonight|today|in\s+\d+\s*\w+|on\s+\w+|every\s+\w+|daily)(?:\s+at\s+" + _TIME_NC + r")?|at\s+" + _TIME_NC + r")\s*$", text, re.I)
+    if m:
+        parsed = parse_reminder(m.group("tail") + " to " + m.group("msg"), tz_offset_min, now)
+        if parsed:
+            return parsed
+    return None
+
+
+async def handle(message: str, user: dict, tz_offset_min: int = 0) -> str | None:
+    """Apply a task control for a signed-in user. Returns the reply, or None
+    when the message isn't a task control."""
+    if not is_task_control(message):
+        return None
+    text = message.strip()
+    if _LIST.match(text):
+        return await _render_list(user)
+    m = _MUTATE_ALL.match(text)
+    if m:
+        verb = m.group("verb").lower()
+        count = 0
+        for task in await tasks.list_tasks(user["id"], include_done=False):
+            if verb in ("delete", "cancel", "stop"):
+                count += int(await tasks.delete_task(task["id"], user["id"]))
+            else:
+                status = "paused" if verb == "pause" else "active"
+                if task["status"] != status:
+                    await tasks.update_task(task["id"], user["id"], status=status, **({"next_run_at": tasks.next_run(task["schedule"], task.get("tz_offset_min", 0))} if status == "active" else {}))
+                    count += 1
+        return f"Done — {count} task{'s' if count != 1 else ''} {'deleted' if verb in ('delete', 'cancel', 'stop') else verb + 'd'}."
+    m = _MUTATE.match(text)
+    if m:
+        items = await tasks.list_tasks(user["id"], include_done=False)
+        index = int(m.group("n")) - 1
+        if index < 0 or index >= len(items):
+            return f"I only see {len(items)} task{'s' if len(items) != 1 else ''}. Say *show my tasks* for the numbered list."
+        task = items[index]
+        verb = m.group("verb").lower()
+        if verb in ("delete", "remove", "cancel", "stop"):
+            await tasks.delete_task(task["id"], user["id"])
+            return f"Deleted task {index + 1}: **{task['title']}**."
+        status = "paused" if verb == "pause" else "active"
+        extra = {"next_run_at": tasks.next_run(task["schedule"], task.get("tz_offset_min", 0))} if status == "active" else {}
+        await tasks.update_task(task["id"], user["id"], status=status, **extra)
+        return f"Task {index + 1} **{task['title']}** is now {status}."
+    m = _BRIEF.match(text)
+    if m:
+        h, mi = _clock(m.group("h"), m.group("m"), m.group("ap"), default=(8, 0))
+        channel = "email" if m.group("channel") else "inapp"
+        task = await _create(user, "brief", {}, {"daily": f"{h:02d}:{mi:02d}"}, channel, tz_offset_min)
+        return task if isinstance(task, str) else f"Morning brief scheduled **daily at {h:02d}:{mi:02d}** ({'email + inbox' if channel == 'email' else 'inbox'}). First one: {_when(task)}. It costs 1 credit per delivery."
+    m = _ALERT.match(text)
+    if m:
+        cmp = m.group("cmp").lower()
+        op = "<" if cmp in ("below", "under", "beneath") or (cmp in ("to", "at") and (m.group("dir") or "").lower().startswith(("drop", "fall", "dip"))) else ">"
+        price = float(m.group("price").replace(",", ""))
+        symbol = m.group("sym").upper()
+        current = await tasks.price_for(symbol)
+        if current is None:
+            return f"I couldn't find a trustworthy price for **{symbol}** (majors and Jupiter-verified Solana tokens are supported), so no alert was set."
+        spec = {"symbol": symbol, "op": op, "price": price, "repeat": bool(m.group("repeat"))}
+        task = await _create(user, "price_alert", spec, {"every_minutes": 5}, "inapp", tz_offset_min)
+        if isinstance(task, str):
+            return task
+        return (f"Alert set: **{symbol} {op} ${price:,.4g}** (now ${current:,.4g}). I check every few minutes and drop a note in your inbox"
+                + (" each time it crosses." if spec["repeat"] else " the first time it crosses."))
+    m = _REMIND.match(text)
+    if m:
+        parsed = parse_reminder(m.group("rest"), tz_offset_min)
+        if not parsed:
+            return ("Tell me when and what — e.g. *remind me tomorrow at 9am to check SOL*, *remind me in 2 hours to rebalance*, "
+                    "or *remind me every Monday at 9am to review my portfolio*.")
+        schedule, msg = parsed
+        task = await _create(user, "reminder", {"message": msg}, schedule, "inapp", tz_offset_min, title=f"Reminder: {msg}")
+        if isinstance(task, str):
+            return task
+        return f"Reminder set — **{msg}** · {tasks.describe_schedule(schedule, tz_offset_min)}. Next: {_when(task)}."
+    return None
+
+
+async def _create(user, kind, spec, schedule, channel, tz, title=None):
+    try:
+        return await tasks.create_task(user, kind, spec, schedule, channel, tz, title)
+    except ValueError as exc:
+        return f"I couldn't schedule that: {exc}"
+
+
+def _when(task: dict) -> str:
+    at = tasks._parse_dt(task.get("next_run_at"))
+    if not at:
+        return "—"
+    local = at + timedelta(minutes=int(task.get("tz_offset_min") or 0))
+    return local.strftime("%a %d %b, %H:%M")
+
+
+async def _render_list(user: dict) -> str:
+    items = await tasks.list_tasks(user["id"], include_done=False)
+    if not items:
+        return "No tasks yet. Try *remind me tomorrow at 9am to check SOL*, *alert me when SOL drops below $90*, or *send me a morning brief at 8am*."
+    lines = ["**Your tasks**", ""]
+    for index, task in enumerate(items, start=1):
+        lines.append(f"{index}. **{task['title']}** · {tasks.describe_schedule(task['schedule'], task.get('tz_offset_min', 0))} · {task['status']} · next {_when(task)}")
+    lines += ["", "Say *pause task 2*, *delete task 1*, or open Settings → Tasks."]
+    return "\n".join(lines)

@@ -69,6 +69,8 @@ class ChatRequest(BaseModel):
     # Explicit trading-desk switch from the UI; None leaves the session's
     # current setting (or a chat phrase like "enable team mode") in charge.
     team_mode: bool | None = None
+    # Browser timezone (minutes east of UTC) so reminders read local times.
+    tz_offset_min: int | None = Field(default=None, ge=-840, le=840)
     # The risk-charter card. When present the message is rewritten to the
     # canonical "set my risk charter: ..." so history shows exactly what was set.
     risk_charter_fields: RiskCharterFields | None = None
@@ -123,6 +125,24 @@ class FeedbackRequest(BaseModel):
     session_revision: int = Field(ge=0)
     rating: Literal["up", "down", "none"]
     comment: str | None = Field(default=None, max_length=500)
+
+
+class TaskCreate(BaseModel):
+    kind: Literal["reminder", "price_alert", "brief"]
+    spec: dict = Field(default_factory=dict)
+    schedule: dict
+    channel: Literal["inapp", "email"] = "inapp"
+    tz_offset_min: int = Field(default=0, ge=-840, le=840)
+    title: str | None = Field(default=None, max_length=140)
+
+
+class TaskUpdate(BaseModel):
+    status: Literal["active", "paused"] | None = None
+    channel: Literal["inapp", "email"] | None = None
+
+
+class InboxRead(BaseModel):
+    ids: list[str] | None = None
 
 
 class CheckoutRequest(BaseModel):

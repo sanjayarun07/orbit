@@ -385,6 +385,14 @@
   .danger-zone { border: 1px solid var(--red-border); border-radius: 12px; padding: 12px 14px; margin-top: 14px; }
   .danger-zone h3 { color: var(--red); }
   .inline-note { font-size: 11px; color: var(--subtle); }
+  .inbox-badge[hidden] { display: none; }
+  .inbox-badge { position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--brand-grad); color: #04211e; font-size: 9px; font-weight: 700; display: grid; place-items: center; }
+  :root[data-theme="light"] .inbox-badge { color: #fff; }
+  .inbox-item { display: block; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); margin-bottom: 6px; font-size: 12px; }
+  .inbox-item.unread { border-color: var(--brand-border-strong); }
+  .inbox-item b { display: block; margin-bottom: 2px; }
+  .inbox-item .inline-note { display: block; margin-top: 4px; }
+  .inbox-item .body { white-space: pre-wrap; color: var(--text-2); }
   .policy-chip.unset { border-style: dashed; border-color: var(--border); background: transparent; color: var(--subtle); }
   .policy-chip.unset:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
   .send { margin-left: auto; width: 32px; height: 32px; border: 0; border-radius: 9px; background: var(--send-bg); color: var(--send-fg); display: grid; place-items: center; cursor: pointer; }
@@ -576,6 +584,23 @@
   .prompt-desc { display: block; margin-top: 4px; font-size: 11.5px; line-height: 1.45; color: var(--subtle); }
   .prompt-source { margin-top: auto; padding-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; color: var(--subtle); }
   .prompt-source .prompt-arrow { margin-top: 0; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 22px; width: 100%; }
+  .suggest-rows { width: 100%; }
+  .chip { border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; padding: 6px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .chip:hover { color: var(--text); border-color: var(--hover-border); }
+  .chip.active { color: var(--text-strong); border-color: var(--brand); background: var(--brand-soft); }
+  .suggest-rows { margin-top: 10px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); overflow: hidden; }
+  .suggest-row { width: 100%; text-align: left; border: 0; border-top: 1px solid var(--border); background: transparent; color: var(--text); font: inherit; font-size: 13.5px; padding: 12px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .suggest-row:first-child { border-top: 0; }
+  .suggest-row:hover { background: var(--surface-2); }
+  .suggest-row .icon { width: 14px; height: 14px; color: var(--subtle); flex: none; }
+  .mention-menu { position: absolute; left: 20px; bottom: calc(100% + 8px); width: min(360px, calc(100% - 40px)); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 14px 40px var(--shadow-2); z-index: 8; overflow: hidden; }
+  .mention-menu[hidden] { display: none; }
+  .mention-item { width: 100%; text-align: left; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 13px; padding: 9px 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
+  .mention-item.active, .mention-item:hover { background: var(--surface-2); }
+  .mention-item small { color: var(--subtle); font-size: 11px; }
+  .mention-item b { color: var(--brand); }
+  .composer { position: relative; }
   .mono-cap { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--subtle); margin: -14px 0 14px; }
   .prompt-card[data-kind="stocks"] .prompt-tile { background: rgba(47,107,255,.14); color: #6d9bff; }
   .prompt-arrow { margin-top: auto; width: 18px; height: 18px; color: var(--muted); }
@@ -689,6 +714,7 @@
         <button class="icon-button" id="deleteChatBtn" type="button" hidden aria-label="Delete this conversation" title="Delete this conversation"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
         <button class="icon-button" id="themeToggle" type="button" aria-label="Switch theme" title="Switch theme"><svg id="themeIconSun" class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg id="themeIconMoon" class="icon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg></button>
         <button class="wallet-button" id="walletButton"><i class="wallet-status"></i><span id="walletLabel">Connect wallet</span></button>
+        <button class="icon-button" id="inboxBtn" type="button" hidden aria-label="Inbox" title="Inbox" style="position:relative"><svg class="icon" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3V8Z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg><span class="inbox-badge" id="inboxBadgeTop" hidden>0</span></button>
         <button class="icon-button avatar-button" id="topAvatarBtn" type="button" aria-label="Account and settings" title="Account and settings"><span class="account-avatar" id="topAvatar">W</span><svg class="icon" viewBox="0 0 24 24" style="width:14px;height:14px"><path d="m6 9 6 6 6-6"/></svg></button>
       </div>
     </header>
@@ -707,6 +733,8 @@
             <button class="prompt-card" data-msg="Find the verified Jupiter token information and safety warnings for USDC mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v. Do not trade." data-tone="violet"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg></span><strong>Research a token and its safety</strong><span>Inspect token details, verification, and safety warnings</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
             <button class="prompt-card" data-action="relay" data-tone="amber"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h13l-3-3M20 17H7l3 3"/></svg></span><strong>Swap across chains with a reviewed quote</strong><span>Buy a token through Relay after reviewing route, fees, and output</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
           </div>
+          <div class="chips" id="homeChips" hidden></div>
+          <div class="suggest-rows" id="homeRows" hidden></div>
         </div>
       </div>
     </section>
@@ -715,7 +743,8 @@
 
     <div class="composer-shell">
       <form class="composer" id="composer">
-        <textarea id="messageInput" rows="1" maxlength="2000" placeholder="Message anything…"></textarea>
+        <div class="mention-menu" id="mentionMenu" hidden role="listbox"></div>
+        <textarea id="messageInput" rows="1" maxlength="2000" placeholder="Message anything… ($ to mention a token)"></textarea>
         <div class="composer-tools">
           <button class="composer-plus" id="composerPlus" type="button" aria-label="Connect a wallet" title="Connect a wallet"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
           <span class="composer-context"><svg class="icon" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg><span>Live tools</span></span>
@@ -803,6 +832,7 @@
       <button class="tab" type="button" data-tab="billing">Billing</button>
       <button class="tab" type="button" data-tab="keys">API keys</button>
       <button class="tab" type="button" data-tab="preferences">Preferences</button>
+      <button class="tab" type="button" data-tab="tasks">Tasks</button>
       <button class="tab" type="button" data-tab="notifications">Notifications</button>
       <button class="tab" type="button" data-tab="data">Data &amp; privacy</button>
       <button class="tab" type="button" data-tab="members" id="membersTab" hidden>Members</button>
@@ -858,6 +888,25 @@
         <div class="field"><label for="themeSelect">Appearance</label><select id="themeSelect"><option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
         <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:8px"><input id="prefAutoScroll" type="checkbox" checked /> Auto-scroll to the latest message</label>
         <div class="field-help" id="prefsStorageNote" style="margin-top:10px">Preferences are saved to your account when you're signed in, otherwise to this browser.</div>
+      </section>
+
+      <section class="tab-panel" data-panel="tasks" hidden>
+        <div class="field-help">Reminders, price alerts and a morning brief that run for you in the background. You can also just type: <i>remind me tomorrow at 9am to check SOL</i> · <i>alert me when SOL drops below $90</i> · <i>send me a morning brief at 8am</i>.</div>
+        <div class="settings-section"><h3>Inbox <span class="plan-badge" id="inboxBadge" hidden>0</span></h3><div class="row-list" id="inboxList"><div class="field-help">Nothing yet.</div></div><div class="account-actions" style="margin-top:8px"><button class="secondary" id="inboxReadAllBtn" type="button">Mark all read</button></div></div>
+        <div class="settings-section"><h3>Your tasks <span class="inline-note" id="tasksLimit"></span></h3><div class="row-list" id="tasksList"><div class="field-help">No tasks yet.</div></div></div>
+        <div class="settings-section">
+          <h3>New task</h3>
+          <div class="field"><label for="taskKind">Kind</label><select id="taskKind"><option value="reminder">Reminder</option><option value="price_alert">Price alert</option><option value="brief">Morning brief (1 credit per delivery)</option></select></div>
+          <div class="field" data-task-field="reminder"><label for="taskMessage">Remind me to</label><input id="taskMessage" placeholder="check SOL and rebalance" maxlength="140" /></div>
+          <div class="field" data-task-field="price_alert"><label>When</label><div class="key-create"><input id="taskSymbol" placeholder="SOL" style="width:90px" maxlength="10" /><select id="taskOp" style="width:auto"><option value="<">drops below</option><option value=">">rises above</option></select><input id="taskPrice" type="number" step="any" placeholder="90" style="width:120px" /></div><label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:8px;margin-top:6px"><input id="taskRepeat" type="checkbox" /> Keep alerting every time it crosses</label></div>
+          <div class="field" data-task-field="reminder"><label for="taskWhenKind">Schedule</label><select id="taskWhenKind"><option value="at">Once, at a date and time</option><option value="in">In a number of minutes</option><option value="daily">Every day at a time</option><option value="weekly">Every week on a day</option></select></div>
+          <div class="field" data-task-field="reminder" data-when="at"><label for="taskAt">Date and time</label><input id="taskAt" type="datetime-local" /></div>
+          <div class="field" data-task-field="reminder" data-when="in" hidden><label for="taskInMinutes">Minutes from now</label><input id="taskInMinutes" type="number" min="1" value="60" style="width:120px" /></div>
+          <div class="field" data-task-field="reminder brief" data-when="daily weekly"><label for="taskTime">Time</label><input id="taskTime" type="time" value="08:00" style="width:140px" /></div>
+          <div class="field" data-task-field="reminder" data-when="weekly" hidden><label for="taskWeekday">Day</label><select id="taskWeekday"><option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option></select></div>
+          <div class="field"><label for="taskChannel">Deliver to</label><select id="taskChannel"><option value="inapp">Inbox</option><option value="email">Inbox + email</option></select></div>
+          <div class="account-actions"><button class="primary" id="taskCreateBtn" type="button">Create task</button><span class="inline-note" id="taskStatus"></span></div>
+        </div>
       </section>
 
       <section class="tab-panel" data-panel="notifications" hidden>
@@ -1174,13 +1223,22 @@ async function loadHighlights(){try{const res=await fetch("/home/highlights");if
 function renderHighlights(){const grid=$("#welcome .prompts");const cap=$("#highlightsCaption");if(!grid||!highlights||!(highlights.cards||[]).length)return;
   grid.innerHTML=highlights.cards.map(c=>{const attrs=c.action?`data-action="${escapeHtml(c.action)}"`:`data-msg="${escapeHtml(c.prompt||c.title)}"`;return `<button class="prompt-card" ${attrs} data-tone="${escapeHtml(c.tone||"teal")}" data-kind="${escapeHtml(c.kind||"action")}"><span class="prompt-tile">${HIGHLIGHT_ICONS[c.kind]||HIGHLIGHT_ICONS.action}</span><strong>${escapeHtml(c.title)}</strong><span class="prompt-desc">${escapeHtml(c.summary||"")}</span><span class="prompt-source"><span>${escapeHtml(c.source||(c.kind==="action"?"Orbit":""))}</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></button>`;}).join("");
   if(cap){const when=highlights.as_of?new Date(highlights.as_of):null;cap.hidden=false;cap.textContent=highlights.source==="news"?`Today · crypto & stocks · as of ${when?when.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"now"}`:highlights.source==="market"?`Live market · as of ${when?when.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"now"}`:"";}}
+let homeSuggestions=null,activeChip="trending";
+async function loadSuggestions(){try{const res=await fetch("/home/suggestions");if(!res.ok)throw new Error();homeSuggestions=(await res.json()).categories||[];}catch{homeSuggestions=null;}renderHomeSuggestions();}
+function renderHomeSuggestions(){const chips=$("#homeChips"),rows=$("#homeRows");if(!chips||!rows||!homeSuggestions||!homeSuggestions.length)return;
+  if(!homeSuggestions.some(c=>c.id===activeChip))activeChip=homeSuggestions[0].id;
+  chips.hidden=false;chips.innerHTML=homeSuggestions.map(c=>`<button class="chip ${c.id===activeChip?"active":""}" type="button" data-chip="${escapeHtml(c.id)}">${escapeHtml(c.label)}</button>`).join("");
+  chips.querySelectorAll("[data-chip]").forEach(b=>b.addEventListener("click",()=>{activeChip=b.dataset.chip;renderHomeSuggestions();}));
+  const cat=homeSuggestions.find(c=>c.id===activeChip);rows.hidden=!cat||!cat.rows.length;
+  rows.innerHTML=(cat?.rows||[]).map(r=>`<button class="suggest-row" type="button" data-fill="${escapeHtml(r)}"><span>${escapeHtml(r)}</span><svg class="icon" viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8"/></svg></button>`).join("");
+  rows.querySelectorAll("[data-fill]").forEach(b=>b.addEventListener("click",()=>{input.value=b.dataset.fill;input.focus();input.dispatchEvent(new Event("input"));}));}
 function fillGreeting(){const h=new Date().getHours();const word=h<5?"Good night":h<12?"Good morning":h<17?"Good afternoon":h<22?"Good evening":"Good night";const w=$("#greetingWord"),n=$("#greetingName");if(w)w.textContent=word;
   const name=(typeof account!=="undefined"&&account?.user?.display_name)||(typeof profile!=="undefined"&&profile?.name)||(typeof account!=="undefined"&&account?.user?.email?.split("@")[0])||"there";if(n)n.textContent=name;
   const avatar=$("#topAvatar");if(avatar)avatar.textContent=(name==="there"?"W":name).trim()[0].toUpperCase();}
 function setNav(id){document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("active",b.id===id));}
 function startNewChat() {
   if (busy) return;
-  chatTurnEpoch++;sessionId = null;sessionRevision=0; sessionStorage.removeItem("orbit_session_id"); messagesEl.innerHTML = welcomeMarkup; fillGreeting(); renderHighlights(); setNav("navHome"); renderChatList(); syncTeamMode(false); syncPolicy(null,null); autoFollow=true;conversationEl.scrollTop=0;closeSidebar();input.focus();
+  chatTurnEpoch++;sessionId = null;sessionRevision=0; sessionStorage.removeItem("orbit_session_id"); messagesEl.innerHTML = welcomeMarkup; fillGreeting(); renderHighlights(); renderHomeSuggestions(); setNav("navHome"); renderChatList(); syncTeamMode(false); syncPolicy(null,null); autoFollow=true;conversationEl.scrollTop=0;closeSidebar();input.focus();
 }
 const welcomeMarkup = messagesEl.innerHTML;
 
@@ -1453,14 +1511,23 @@ async function chatFetch(url,init){
 async function sendMessage(text,quickAction=null,extra={}) {
   if (busy || !text.trim()) return;retireQuickActions();chatTurnEpoch++;retirePendingTradeCards();busy=true; sendBtn.disabled=true; addUserMessage(text); const typing=addTyping();
   const requestSession=sessionId || undefined;
-  try { const res=await chatFetch("/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:text,wallet_address:walletInput.value.trim() || null,session_id:requestSession,context_revision:requestSession?sessionRevision:null,quick_action:quickAction,team_mode:teamModePending,...extra})}); const data=await res.json();
+  try { const res=await chatFetch("/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:text,tz_offset_min:-new Date().getTimezoneOffset(),wallet_address:walletInput.value.trim() || null,session_id:requestSession,context_revision:requestSession?sessionRevision:null,quick_action:quickAction,team_mode:teamModePending,...extra})}); const data=await res.json();
     if(!res.ok){ finishAgentMessage(typing,{error:normalizeError(data,res.status)}); if(res.status===402||res.status===401) attachAccountNotice(typing,data?.detail,res.status); }
-    else { if(data.credits){account=account||{};account.credits={balance:data.credits.balance};renderCredits();} sessionId=data.session_id;sessionRevision=Number(data.session_revision||0); sessionStorage.setItem("orbit_session_id",sessionId); updateChat(sessionId,text); syncTeamMode(data.team_mode); syncPolicy(data.risk_charter,data.risk_charter_fields); finishAgentMessage(typing,data); }
+    else { if(data.credits){account=account||{};account.credits={balance:data.credits.balance};renderCredits();} if(account?.authenticated)refreshInboxBadge(); sessionId=data.session_id;sessionRevision=Number(data.session_revision||0); sessionStorage.setItem("orbit_session_id",sessionId); updateChat(sessionId,text); syncTeamMode(data.team_mode); syncPolicy(data.risk_charter,data.risk_charter_fields); finishAgentMessage(typing,data); }
   } catch(error){finishAgentMessage(typing,{error:`Could not reach the assistant: ${error.message}`});}
   finally {busy=false;sendBtn.disabled=false;input.focus();renderChatList();}
 }
 form.addEventListener("submit",event=>{event.preventDefault();const text=input.value.trim();if(!text)return;input.value="";input.style.height="auto";sendMessage(text);});
-input.addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();form.requestSubmit();}});
+// $TICKER mentions: type "$so" -> pick "$SOL" from Jupiter's verified registry + majors.
+const mentionMenu=$("#mentionMenu");let mentionItems=[],mentionIndex=0,mentionTimer=null,mentionRange=null;
+function closeMentions(){mentionMenu.hidden=true;mentionItems=[];mentionRange=null;}
+function mentionQuery(){const pos=input.selectionStart;const before=input.value.slice(0,pos);const m=before.match(/(?:^|\s)\$([A-Za-z0-9]{1,10})$/);if(!m)return null;return {q:m[1],start:pos-m[1].length-1,end:pos};}
+function renderMentions(){mentionMenu.innerHTML=mentionItems.map((t,i)=>`<button class="mention-item ${i===mentionIndex?"active":""}" type="button" data-i="${i}"><span><b>$${escapeHtml(t.symbol)}</b> ${escapeHtml(t.name||"")}</span><small>${t.verified?"verified":""} ${t.chain==="solana"?"Solana":""}${t.price?" · $"+Number(t.price).toLocaleString(undefined,{maximumSignificantDigits:4}):""}</small></button>`).join("");mentionMenu.hidden=!mentionItems.length;mentionMenu.querySelectorAll("[data-i]").forEach(b=>b.addEventListener("mousedown",e=>{e.preventDefault();pickMention(Number(b.dataset.i));}));}
+function pickMention(i){const t=mentionItems[i];if(!t||!mentionRange)return;const before=input.value.slice(0,mentionRange.start),after=input.value.slice(mentionRange.end);input.value=`${before}$${t.symbol} ${after}`;const pos=before.length+t.symbol.length+2;input.setSelectionRange(pos,pos);closeMentions();input.focus();input.dispatchEvent(new Event("input"));}
+input.addEventListener("input",()=>{const q=mentionQuery();if(!q){closeMentions();return;}mentionRange={start:q.start,end:q.end};clearTimeout(mentionTimer);mentionTimer=setTimeout(async()=>{try{const res=await fetch(`/tokens/search?q=${encodeURIComponent(q.q)}`);const d=await res.json();const still=mentionQuery();if(!still||still.q!==q.q)return;mentionItems=d.tokens||[];mentionIndex=0;renderMentions();}catch{closeMentions();}},220);});
+input.addEventListener("keydown",event=>{if(!mentionMenu.hidden&&mentionItems.length){if(event.key==="ArrowDown"){event.preventDefault();mentionIndex=(mentionIndex+1)%mentionItems.length;renderMentions();return;}if(event.key==="ArrowUp"){event.preventDefault();mentionIndex=(mentionIndex-1+mentionItems.length)%mentionItems.length;renderMentions();return;}if(event.key==="Enter"||event.key==="Tab"){event.preventDefault();pickMention(mentionIndex);return;}if(event.key==="Escape"){closeMentions();return;}}
+  if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();form.requestSubmit();}});
+input.addEventListener("blur",()=>setTimeout(closeMentions,150));
 input.addEventListener("input",()=>{const wasNearBottom=conversationEl.scrollHeight-conversationEl.scrollTop-conversationEl.clientHeight<80;input.style.height="auto";input.style.height=Math.min(input.scrollHeight,160)+"px";if(wasNearBottom)scrollToBottom(true);});
 input.addEventListener("focus",()=>setTimeout(()=>scrollToBottom(true),80));
 conversationEl.addEventListener("scroll",()=>{autoFollow=isNearLatest();updateJumpLatest();},{passive:true});
@@ -1571,7 +1638,7 @@ let account=null;
 async function loadAccount(){try{const res=await fetch("/me",{headers:{"X-Orbit-Device":deviceId}});account=await res.json();}catch{account=null;}renderAccount();}
 function renderCredits(){const chip=$("#creditsChip");if(!account){chip.hidden=true;return;}const balance=Number(account.credits?.balance??0);chip.hidden=false;$("#creditsCount").textContent=balance.toLocaleString();$("#creditsPlan").textContent=account.plan?.name||"Trial";chip.classList.toggle("low",balance<10);$("#accountCredits").textContent=balance.toLocaleString();$("#profileRisk").textContent=account.authenticated?`${account.plan?.name} · ${balance.toLocaleString()} credits`:`Trial · ${balance} credits left`;}
 function renderAccount(){
-  renderCredits();fillGreeting();loadHighlights();
+  renderCredits();fillGreeting();refreshInboxBadge();loadHighlights();loadSuggestions();
   const signedIn=Boolean(account?.authenticated);const user=account?.user||{};
   $("#accountEmail").textContent=signedIn?user.email:"Not signed in";$("#accountEmail").classList.toggle("muted",!signedIn);
   $("#accountPlan").textContent=account?.plan?.name||"Trial";
@@ -1593,7 +1660,7 @@ function renderAccount(){
 function summarizeCharter(f){const parts=[];if(f.max_trade_usd!=null)parts.push(`max $${Number(f.max_trade_usd).toLocaleString()} per trade`);if(f.max_slippage_bps!=null)parts.push(`max ${f.max_slippage_bps} bps slippage`);if(f.verified_only)parts.push("verified tokens only");if(f.max_price_impact_pct!=null)parts.push(`max ${f.max_price_impact_pct}% price impact`);if(Array.isArray(f.chains)&&f.chains.length)parts.push(`chains: ${f.chains.join(", ")}`);if(f.notes)parts.push(f.notes);return parts.join(" · ")||"Custom charter";}
 function openSettings(tab){openDialog("profileDialog");settingsTab(tab||"account");}
 function settingsTab(name){document.querySelectorAll("#settingsTabs .tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===name));document.querySelectorAll("#profileDialog .tab-panel").forEach(p=>{p.hidden=p.dataset.panel!==name;});loadSettingsTab(name);}
-async function loadSettingsTab(name){if(!account?.authenticated)return;if(name==="account")loadSessions();if(name==="billing"){renderBillingStats();loadUsage();loadInvoices();}if(name==="keys"){loadApiKeys();loadUsage();}if(name==="members")loadTeam();}
+async function loadSettingsTab(name){if(!account?.authenticated)return;if(name==="tasks"){loadInbox();loadTasks();}if(name==="account")loadSessions();if(name==="billing"){renderBillingStats();loadUsage();loadInvoices();}if(name==="keys"){loadApiKeys();loadUsage();}if(name==="members")loadTeam();}
 document.querySelectorAll("#settingsTabs .tab").forEach(t=>t.addEventListener("click",()=>settingsTab(t.dataset.tab)));
 $("#charterEditBtn").addEventListener("click",()=>{closeDialog("profileDialog");openCharterDialog();});
 $("#buyCreditsBtn").addEventListener("click",openPlans);$("#changePlanBtn").addEventListener("click",openPlans);
@@ -1607,6 +1674,30 @@ function renderKeyUsage(data){const rows=data.by_api_key||[];$("#apiKeyUsage").i
 async function loadInvoices(){const list=$("#invoicesList");try{const data=await (await fetch("/me/invoices")).json();const rows=data.invoices||[];list.innerHTML=rows.length?rows.map(inv=>`<div class="key-row"><span>${inv.created?new Date(inv.created*1000).toLocaleDateString():""} · ${escapeHtml(inv.description||"Orbit")} <code>${escapeHtml(inv.number||inv.id||"")}</code></span><span>${inv.amount_paid!=null?`$${(inv.amount_paid/100).toFixed(2)}`:""} <span class="muted">${escapeHtml(inv.status||"")}</span> ${inv.hosted_invoice_url?`<a href="${inv.hosted_invoice_url}" target="_blank" rel="noopener">view</a>`:""}</span></div>`).join(""):`<div class="field-help">${data.configured===false?"Invoices appear here once billing is configured.":"No invoices yet."}</div>`;}catch{list.innerHTML='<div class="field-help">Invoices are unavailable right now.</div>';}}
 async function loadSessions(){const list=$("#sessionsList");try{const data=await (await fetch("/me/sessions")).json();list.innerHTML=(data.sessions||[]).map(sess=>`<div class="key-row"><span>${escapeHtml(describeAgent(sess.user_agent))}${sess.current?' <span class="plan-badge">this device</span>':""}<br><span class="inline-note">${sess.ip?escapeHtml(sess.ip)+" · ":""}signed in ${sess.created_at?new Date(sess.created_at).toLocaleString():""}</span></span></div>`).join("")||'<div class="field-help">No active sessions.</div>';}catch{list.innerHTML="";}}
 function describeAgent(ua){ua=ua||"";const browser=/Edg\//.test(ua)?"Edge":/Chrome\//.test(ua)?"Chrome":/Safari\//.test(ua)&&!/Chrome/.test(ua)?"Safari":/Firefox\//.test(ua)?"Firefox":"Browser";const os=/iPhone|iPad/.test(ua)?"iOS":/Android/.test(ua)?"Android":/Mac OS X/.test(ua)?"macOS":/Windows/.test(ua)?"Windows":/Linux/.test(ua)?"Linux":"";return `${browser}${os?" on "+os:""}`;}
+// ---- Tasks & inbox ----
+const TZ=-new Date().getTimezoneOffset();
+function fmtLocal(iso){if(!iso)return "—";const d=new Date(iso);return d.toLocaleString([],{weekday:"short",day:"numeric",month:"short",hour:"numeric",minute:"2-digit"});}
+async function refreshInboxBadge(){if(!account?.authenticated){$("#inboxBtn").hidden=true;return;}try{const d=await (await fetch("/me/inbox")).json();const n=Number(d.unread||0);$("#inboxBtn").hidden=false;$("#inboxBadgeTop").hidden=!n;$("#inboxBadgeTop").textContent=n>99?"99+":String(n);$("#inboxBadge").hidden=!n;$("#inboxBadge").textContent=String(n);}catch{}}
+async function loadInbox(){const list=$("#inboxList");try{const d=await (await fetch("/me/inbox")).json();list.innerHTML=(d.items||[]).length?d.items.map(i=>`<div class="inbox-item ${i.read_at?"":"unread"}"><b>${escapeHtml(i.title)}</b><span class="body">${renderInline?escapeHtml(i.body):escapeHtml(i.body)}</span><span class="inline-note">${escapeHtml(fmtLocal(i.created_at))} · ${escapeHtml(i.kind)}</span></div>`).join(""):'<div class="field-help">Nothing yet — alerts, reminders and briefs land here.</div>';refreshInboxBadge();}catch{list.innerHTML='<div class="field-help">Inbox unavailable.</div>';}}
+$("#inboxReadAllBtn").addEventListener("click",async()=>{await fetch("/me/inbox/read",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});loadInbox();});
+$("#inboxBtn").addEventListener("click",()=>openSettings("tasks"));
+async function loadTasks(){const list=$("#tasksList");try{const d=await (await fetch("/me/tasks")).json();$("#tasksLimit").textContent=`· ${d.tasks.filter(t=>t.status==="active").length}/${d.limit} active`;
+  list.innerHTML=(d.tasks||[]).length?d.tasks.map((t,i)=>`<div class="key-row"><span><b>${i+1}. ${escapeHtml(t.title)}</b> <span class="muted">· ${escapeHtml(t.schedule_text)} · ${escapeHtml(t.status)}${t.channel==="email"?" · email":""}</span><br><span class="inline-note">next ${escapeHtml(fmtLocal(t.next_run_at))}${t.last_result?" · last: "+escapeHtml(t.last_result):""}${t.fire_count?" · fired "+t.fire_count+"×":""}</span></span><span style="display:flex;gap:4px;flex:none">${t.status!=="done"?`<button class="secondary" type="button" data-task-toggle="${t.id}" data-status="${t.status}">${t.status==="active"?"Pause":"Resume"}</button>`:""}${t.kind!=="price_alert"&&t.status!=="done"?`<button class="secondary" type="button" data-task-run="${t.id}" title="Send now">Run</button>`:""}<button class="secondary danger" type="button" data-task-del="${t.id}">Delete</button></span></div>`).join(""):'<div class="field-help">No tasks yet.</div>';
+  list.querySelectorAll("[data-task-toggle]").forEach(b=>b.addEventListener("click",async()=>{b.disabled=true;await fetch(`/me/tasks/${b.dataset.taskToggle}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:b.dataset.status==="active"?"paused":"active"})});loadTasks();}));
+  list.querySelectorAll("[data-task-run]").forEach(b=>b.addEventListener("click",async()=>{b.disabled=true;b.textContent="…";await fetch(`/me/tasks/${b.dataset.taskRun}/run`,{method:"POST"});loadTasks();loadInbox();}));
+  list.querySelectorAll("[data-task-del]").forEach(b=>b.addEventListener("click",async()=>{if(b.dataset.armed!=="1"){b.dataset.armed="1";b.textContent="Sure?";setTimeout(()=>{b.dataset.armed="";b.textContent="Delete";},4000);return;}await fetch(`/me/tasks/${b.dataset.taskDel}`,{method:"DELETE"});loadTasks();}));
+ }catch{list.innerHTML='<div class="field-help">Tasks unavailable.</div>';}}
+function syncTaskForm(){const kind=$("#taskKind").value;const when=$("#taskWhenKind").value;document.querySelectorAll("[data-task-field]").forEach(el=>{const kinds=el.dataset.taskField.split(" ");let show=kinds.includes(kind);if(show&&el.dataset.when){const whens=el.dataset.when.split(" ");show=kind==="brief"?whens.includes("daily"):whens.includes(when);}el.hidden=!show;});}
+$("#taskKind").addEventListener("change",syncTaskForm);$("#taskWhenKind").addEventListener("change",syncTaskForm);syncTaskForm();
+$("#taskCreateBtn").addEventListener("click",async()=>{const status=$("#taskStatus");const kind=$("#taskKind").value;let spec={},schedule={},title=null;
+  if(kind==="reminder"){const msg=$("#taskMessage").value.trim();if(!msg){status.textContent="Say what to remind you about.";return;}spec={message:msg};title=`Reminder: ${msg}`;const w=$("#taskWhenKind").value;
+    if(w==="at"){const v=$("#taskAt").value;if(!v){status.textContent="Pick a date and time.";return;}schedule={at:new Date(v).toISOString()};}else if(w==="in"){schedule={at:new Date(Date.now()+Math.max(1,Number($("#taskInMinutes").value)||60)*60000).toISOString()};}else if(w==="daily"){schedule={daily:$("#taskTime").value||"08:00"};}else{schedule={weekly:{day:Number($("#taskWeekday").value),time:$("#taskTime").value||"09:00"}};}}
+  else if(kind==="price_alert"){const sym=$("#taskSymbol").value.trim().toUpperCase().replace(/^\$/,"");const price=Number($("#taskPrice").value);if(!sym||!price){status.textContent="Symbol and price are required.";return;}spec={symbol:sym,op:$("#taskOp").value,price,repeat:$("#taskRepeat").checked};schedule={every_minutes:5};}
+  else{schedule={daily:$("#taskTime").value||"08:00"};}
+  $("#taskCreateBtn").disabled=true;status.textContent="Creating…";
+  try{const res=await fetch("/me/tasks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({kind,spec,schedule,channel:$("#taskChannel").value,tz_offset_min:TZ,title})});const d=await res.json();if(!res.ok)throw new Error(normalizeError(d,res.status));status.textContent=`Created · ${d.schedule_text}`;$("#taskMessage").value="";loadTasks();}
+  catch(error){status.textContent=error.message;}finally{$("#taskCreateBtn").disabled=false;}});
+setInterval(()=>{if(account?.authenticated)refreshInboxBadge();},60000);
 $("#revokeSessionsBtn").addEventListener("click",async()=>{const b=$("#revokeSessionsBtn");b.disabled=true;try{const d=await (await fetch("/me/sessions/revoke-all",{method:"POST"})).json();b.textContent=`Signed out ${d.revoked} other device${d.revoked===1?"":"s"}`;loadSessions();}catch{b.textContent="Could not sign out other devices";}setTimeout(()=>{b.disabled=false;b.textContent="Sign out everywhere else";},2500);});
 $("#exportDataBtn").addEventListener("click",async()=>{const b=$("#exportDataBtn");b.disabled=true;b.textContent="Preparing…";try{const res=await fetch("/me/export");if(!res.ok)throw new Error(normalizeError(await res.json(),res.status));const blob=new Blob([JSON.stringify(await res.json(),null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`orbit-export-${new Date().toISOString().slice(0,10)}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),2000);b.textContent="Exported";}catch(error){b.textContent=error.message;}setTimeout(()=>{b.disabled=false;b.textContent="Export my data";},2500);});
 $("#deleteAccountEmail").addEventListener("input",()=>{$("#deleteAccountBtn").disabled=$("#deleteAccountEmail").value.trim().toLowerCase()!==(account?.user?.email||"").toLowerCase();});

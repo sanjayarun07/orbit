@@ -518,6 +518,25 @@ ratings, recent Stripe events with replay, and an account finder that opens a
 support view — plan override, grant or claw back credits with a reason, API
 key revocation, sign out everywhere, 30-day usage and the ledger.
 
+**Home** opens on today's market: four tiles built from the latest crypto
+and US-stock headlines (Perplexity web search, refreshed every 30 minutes,
+keyless CoinGecko fallback), category chips — Trending · Crypto · Stocks ·
+Macro · My wallet — whose rows fill the composer, and `$` in the composer
+autocompletes a token from the majors and Jupiter's verified registry.
+"Why is SOL down today?" answers with a composed card: live price, 24h move
+and volume, router-sourced market detail, and the reported reasons with
+sources (a stock gets the same via finance search).
+
+**Tasks** run for signed-in users in the background (Settings → Tasks, or
+just type it): reminders ("remind me tomorrow at 9am to check SOL", one-off or
+recurring), price alerts ("alert me when SOL drops below $90", re-checked
+every 5 minutes, majors and Jupiter-verified tokens), and a daily morning
+brief (headlines, core quotes, your wallet total; 1 credit per delivery).
+Results land in the inbox (bell in the top bar) and optionally by email.
+Free 3 · Pro 25 · Max 100 active tasks. The worker is an in-process asyncio
+loop over the `user_tasks` table — no Temporal or queue to run; a
+multi-instance deployment would add row-level locking or move to one.
+
 **Payments** go through Stripe-hosted pages only — Orbit never sees a card or
 wallet. `POST /billing/checkout` opens Checkout for a plan (subscription mode)
 or a one-time **credit pack** (500 / 2,000 / 10,000 credits; payment mode),
@@ -542,6 +561,8 @@ UI shows the catalog read-only.
 | `GET /me/usage`, `GET /me/invoices`, `GET /me/sessions`, `POST /me/sessions/revoke-all` | Credits by day/feature/key, Stripe invoices, signed-in devices, sign out everywhere |
 | `GET /me/export`, `DELETE /me/conversations`, `DELETE /me` | Data export (JSON), delete all conversations, delete the account (ledger kept anonymously) |
 | `GET /me/team`, `POST /me/team/invites`, `DELETE /me/team/members/{email}`, `POST /me/team/accept`, `POST /me/team/leave` | Team seats on Max: members share the owner's plan and credit pool |
+| `GET /home/highlights`, `GET /home/suggestions`, `GET /tokens/search` | Today's tiles, chip rows (My wallet when linked), `$TICKER` autocomplete |
+| `GET/POST /me/tasks`, `PATCH/DELETE /me/tasks/{id}`, `POST /me/tasks/{id}/run`, `GET /me/inbox`, `POST /me/inbox/read` | Reminders, price alerts, morning brief; the inbox they deliver to |
 | `POST /chat/feedback` | Rate a turn (up / down / none); the tools behind it move in outcome scoring |
 | `GET /admin/metrics/business`, `GET /admin/users`, `GET /admin/users/{email}` | MRR, plan mix, conversion, credits burned per feature, failed payments, sign-ups; account search and a full support view |
 | `PUT /admin/users/{email}/plan`, `POST /admin/users/{email}/credits`, `…/api-keys/{id}/revoke`, `…/sessions/revoke` | Support actions: plan override, grant / claw back credits with an audit reference, revoke a key, sign out everywhere |
