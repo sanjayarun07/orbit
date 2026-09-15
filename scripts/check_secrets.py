@@ -13,6 +13,10 @@ PATTERNS = [
     re.compile(rb"sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{32,}"),
     re.compile(rb"pplx-[A-Za-z0-9]{20,}"),
     re.compile(rb"AKIA[A-Z0-9]{16}"),
+    re.compile(rb"\bre_[A-Za-z0-9_]{20,}"),  # Resend
+    re.compile(rb"\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}"),  # Stripe secret / restricted keys
+    re.compile(rb"\bwhsec_[A-Za-z0-9]{16,}"),  # Stripe webhook signing secret
+    re.compile(rb"\borb_live_[A-Za-z0-9_-]{20,}"),  # Orbit API keys
     re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
 ]
 

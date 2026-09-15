@@ -1,0 +1,101 @@
+"""Who is calling: a signed-in user (cookie), an API key (Bearer), or an
+anonymous visitor on the trial. One resolution used by /chat, the account
+endpoints, the sign-in gates and -- via a context variable set by the MCP
+admission middleware -- the MCP server's tool calls.
+"""
+
+from __future__ import annotations
+
+import ipaddress
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+
+from fastapi import HTTPException, Request
+
+from app import accounts, api_keys, credits
+from app.billing_plans import ANONYMOUS, Plan, get_plan
+from app.settings import settings
+
+DEVICE_HEADER = "x-orbit-device"
+
+
+@dataclass
+class Identity:
+    kind: str  # "user" | "api_key" | "anonymous" | "service"
+    account_id: str
+    ip: str
+    user: dict | None = None
+    api_key: dict | None = None
+    plan: Plan = field(default_factory=lambda: ANONYMOUS)
+
+    @property
+    def signed_in(self) -> bool:
+        return self.user is not None
+
+    @property
+    def rate_limit_key(self) -> str:
+        return self.account_id
+
+    def has_scope(self, scope: str) -> bool:
+        if self.api_key is None:
+            return True
+        return scope in (self.api_key.get("scopes") or [])
+
+
+# Set by the MCP admission middleware for the duration of an MCP request so the
+# server's tool handlers (which never see the HTTP request) know the caller.
+current_identity: ContextVar[Identity | None] = ContextVar("orbit_current_identity", default=None)
+
+
+def client_ip(request: Request) -> str:
+    """Trust forwarding headers only when the immediate peer is explicitly trusted."""
+    peer = request.client.host if request.client else "anonymous"
+    trusted = {item.strip() for item in settings.trusted_proxy_hosts.split(",") if item.strip()}
+    if peer in trusted:
+        forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+        try:
+            return str(ipaddress.ip_address(forwarded))
+        except ValueError:
+            pass
+    return peer
+
+
+async def _identity_for_user(user: dict, ip: str, api_key: dict | None = None) -> Identity:
+    plan = get_plan(user.get("plan_id"))
+    account_id = credits.user_account_id(user["id"])
+    await credits.ensure_monthly_grant(account_id, plan)
+    return Identity("api_key" if api_key else "user", account_id, ip, user=user, api_key=api_key, plan=plan)
+
+
+async def resolve_identity(request: Request) -> Identity:
+    ip = client_ip(request)
+    bearer = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if bearer.startswith(api_keys.KEY_PREFIX):
+        record = await api_keys.authenticate(bearer)
+        if record is None:
+            raise HTTPException(401, "Invalid or revoked API key")
+        user = await accounts.get_user(record["user_id"])
+        if user is None:
+            raise HTTPException(401, "API key belongs to a deleted account")
+        if not get_plan(user.get("plan_id")).api_keys:
+            raise HTTPException(403, "API keys are available on Pro and Max plans")
+        return await _identity_for_user(user, ip, api_key=record)
+    user = await accounts.get_session_user(request.cookies.get(accounts.USER_COOKIE))
+    if user is not None:
+        return await _identity_for_user(user, ip)
+    account_id = credits.anonymous_account_id(ip, request.headers.get(DEVICE_HEADER))
+    await credits.ensure_trial_grant(account_id, ANONYMOUS)
+    return Identity("anonymous", account_id, ip, plan=ANONYMOUS)
+
+
+async def require_user(request: Request) -> Identity:
+    """FastAPI dependency for endpoints that need a signed-in account."""
+    identity = await resolve_identity(request)
+    if not identity.signed_in:
+        raise HTTPException(401, {"error": "sign_in_required", "message": "Sign in with your email to use this."})
+    return identity
+
+
+def service_identity(name: str) -> Identity:
+    """An internal caller (tests, workers) with no credit accounting."""
+    return Identity("service", f"service:{name}", "internal", plan=get_plan("max"))

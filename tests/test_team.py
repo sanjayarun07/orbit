@@ -250,4 +250,6 @@ def test_ui_switch_sets_team_mode_and_response_echoes_it(monkeypatch):
         "message": "bye", "session_id": sid, "context_revision": second.json()["session_revision"], "team_mode": False,
     })
     assert third.json()["team_mode"] is False and seen[-1]["team_mode"] is False
+    from tests.conftest import sign_in
+    sign_in(client)
     assert client.get(f"/chat/history/{sid}").json()["context"]["team_mode"] is False

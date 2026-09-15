@@ -17,7 +17,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from fastapi.responses import JSONResponse
 from app.limits import allow_auth_request
@@ -45,12 +45,19 @@ from app.lifi import get_quote as get_lifi_quote, get_status as get_lifi_status
 from app.mcp_tools import close_mcp_gateway, discover_mcp_tools, get_mcp_registry
 from app.metrics import increment, snapshot
 from app.wash_trading import nansen_enrich, pipeline as wash_trading_pipeline, schema as wash_trading_schema
-from app import mcp_server, tool_outcomes, x402_gate
+from app import accounts, api_keys, billing_plans, credits, mcp_server, tool_outcomes, x402_gate
+from app.identity import Identity, current_identity, require_user, resolve_identity, service_identity
 from app.models import TRADING_CHAINS
 from app.models import (
+    AdminCreditGrant,
+    AdminPlanUpdate,
     AgentResponse,
+    ApiKeyCreate,
     ChatRequest,
     ConfirmRequest,
+    EmailSigninStart,
+    EmailSigninVerify,
+    PreferencesUpdate,
     IntentPreviewRequest,
     LifiQuoteRequest,
     ProviderPolicyUpdate,
@@ -133,10 +140,24 @@ app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
 async def mcp_admission(request: Request, call_next):
     # The MCP endpoint is the one surface an outside agent host drives directly;
     # a configured key gates it (the chat UI never needs it).
-    if request.url.path.startswith("/mcp") and settings.mcp_api_key:
+    if request.url.path.startswith("/mcp"):
         supplied = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
-        if not supplied or not hmac.compare_digest(supplied, settings.mcp_api_key):
-            return JSONResponse({"error": "MCP requires a valid Authorization: Bearer key"}, status_code=401)
+        if supplied.startswith(api_keys.KEY_PREFIX):
+            # A user's own key: the tool calls run as that user (credits, plan).
+            try:
+                identity = await resolve_identity(request)
+            except HTTPException as exc:
+                return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+            if not identity.plan.mcp or not identity.has_scope("mcp"):
+                return JSONResponse({"error": "This API key or plan does not allow MCP access"}, status_code=403)
+            token = current_identity.set(identity)
+            try:
+                return await call_next(request)
+            finally:
+                current_identity.reset(token)
+        if settings.mcp_api_key:
+            if not supplied or not hmac.compare_digest(supplied, settings.mcp_api_key):
+                return JSONResponse({"error": "MCP requires a valid Authorization: Bearer key"}, status_code=401)
     return await call_next(request)
 
 
@@ -160,10 +181,11 @@ async def coinbase_auth_challenge(body: WalletAuthChallengeRequest, request: Req
 
 @app.post("/auth/coinbase/verify")
 async def coinbase_auth_verify(
-    body: WalletAuthVerifyRequest, response: Response, request: Request
+    body: WalletAuthVerifyRequest, response: Response, request: Request, identity: Identity = Depends(require_user)
 ):
     try:
         token, session = await verify_challenge(body.address, body.nonce, body.signature)
+        await accounts.link_wallet(identity.user["id"], "evm", session["address"])
     except (ValueError, TypeError) as exc:
         raise HTTPException(401, _safe_detail(exc, "Wallet authentication failed")) from exc
     response.set_cookie(
@@ -327,6 +349,12 @@ async def public_config():
             "lifi_backup": settings.lifi_enabled,
         },
         "x402": x402_gate.public_config(),
+        "accounts": {
+            "enabled": True,
+            "product_name": settings.product_name,
+            "trial_credits": billing_plans.ANONYMOUS.trial_credits,
+            "email_configured": bool(settings.resend_api_key),
+        },
         "execution_policy": {
             "live_trading": settings.live_trading,
             "max_trade_usd": settings.max_trade_usd,
@@ -562,7 +590,7 @@ async def get_wash_trading_wallet(run_id: str, wallet: str, request: Request):
 
 
 @app.get("/portfolio/{wallet_address}")
-async def portfolio(wallet_address: str):
+async def portfolio(wallet_address: str, identity: Identity = Depends(require_user)):
     try:
         return await build_portfolio_snapshot(wallet_address)
     except ValueError as exc:
@@ -574,7 +602,7 @@ async def portfolio(wallet_address: str):
 
 
 @app.get("/wallet-health/{wallet_address}")
-async def wallet_health_report(wallet_address: str):
+async def wallet_health_report(wallet_address: str, identity: Identity = Depends(require_user)):
     try:
         return wallet_health(await build_portfolio_snapshot(wallet_address))
     except ValueError as exc:
@@ -584,7 +612,7 @@ async def wallet_health_report(wallet_address: str):
 
 
 @app.post("/portfolio/{wallet_address}/scenario")
-async def portfolio_scenario_report(wallet_address: str, body: PortfolioScenarioRequest):
+async def portfolio_scenario_report(wallet_address: str, body: PortfolioScenarioRequest, identity: Identity = Depends(require_user)):
     try:
         snapshot = await build_portfolio_snapshot(wallet_address)
         return portfolio_scenario(snapshot, body.change_pct, body.symbol)
@@ -596,14 +624,52 @@ async def portfolio_scenario_report(wallet_address: str, body: PortfolioScenario
 
 @app.post("/chat", response_model=AgentResponse)
 async def chat(body: ChatRequest, request: Request):
-    return await execute_chat_turn(body, _client_identity(request))
+    return await execute_chat_turn(body, await resolve_identity(request))
 
 
-async def execute_chat_turn(body: ChatRequest, identity: str) -> AgentResponse:
+async def execute_chat_turn(body: ChatRequest, identity: Identity | str) -> AgentResponse:
     """One chat turn with the same admission, per-session locking, budgets and
-    persistence as POST /chat. Also the entry point for the MCP server."""
+    persistence as POST /chat. Also the entry point for the MCP server.
+
+    `identity` decides rate limits, sign-in gates and credits: a signed-in user
+    or API key is charged from its ledger, an anonymous visitor from the trial,
+    and a service caller (a plain string, e.g. the MCP server without a user
+    key) is never charged."""
+    if isinstance(identity, str):
+        identity = current_identity.get() or service_identity(identity)
     session_id = body.session_id or str(uuid4())
-    allowed, retry_after = await allow_chat_request(identity)
+    if body.wallet_address and not identity.signed_in and identity.kind != "service":
+        raise HTTPException(401, {"error": "sign_in_required", "message": "Sign in with your email to use a wallet, trade, or keep history."})
+    if identity.api_key is not None and not identity.has_scope("chat"):
+        raise HTTPException(403, "This API key does not have the chat scope")
+    turn_id = str(uuid4())
+    reserved = 0
+    if identity.kind != "service":
+        try:
+            reserved = await credits.reserve(identity.account_id, turn_id)
+        except credits.InsufficientCredits as exc:
+            increment("chat_insufficient_credits")
+            raise HTTPException(402, {
+                "error": "insufficient_credits", "balance": exc.balance, "required": exc.required,
+                "plan": identity.plan.id, "signed_in": identity.signed_in,
+                "message": ("You've used your trial credits. Sign in to get 100 free credits every month."
+                            if not identity.signed_in else "You're out of credits for this month. Upgrade or buy a credit pack."),
+            })
+    try:
+        response = await _execute_chat_turn(body, identity, session_id)
+    except BaseException:
+        if reserved:
+            await credits.release(identity.account_id, turn_id, reserved)
+        raise
+    if reserved:
+        cost, kind = credits.turn_cost(response.intent, response.trajectory, response.team_report)
+        charged = await credits.settle(identity.account_id, turn_id, reserved, cost, kind)
+        response.credits = {"charged": charged, "kind": kind, "balance": await credits.balance(identity.account_id)}
+    return response
+
+
+async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: str) -> AgentResponse:
+    allowed, retry_after = await allow_chat_request(identity.rate_limit_key)
     if not allowed:
         increment("chat_rate_limited")
         raise HTTPException(
@@ -823,6 +889,165 @@ async def execute_chat_turn(body: ChatRequest, identity: str) -> AgentResponse:
         release_chat_slot()
 
 
+# ----------------------------------------------------------------------------
+# Accounts, credits, API keys
+# ----------------------------------------------------------------------------
+
+def _set_user_cookie(response: Response, request: Request, token: str) -> None:
+    response.set_cookie(
+        accounts.USER_COOKIE, token, max_age=accounts.USER_SESSION_TTL, httponly=True,
+        secure=request.url.scheme == "https", samesite="lax", path="/",
+    )
+
+
+async def _me_payload(identity: Identity) -> dict:
+    balance = await credits.balance(identity.account_id)
+    if not identity.signed_in:
+        return {"authenticated": False, "plan": identity.plan.public(), "credits": {"balance": balance}}
+    user = identity.user
+    return {
+        "authenticated": True,
+        "user": {
+            "id": user["id"], "email": user["email"], "display_name": user.get("display_name"),
+            "created_at": user.get("created_at"), "preferences": user.get("preferences") or {},
+        },
+        "plan": identity.plan.public(),
+        "credits": {"balance": balance},
+        "wallets": await accounts.list_wallets(user["id"]),
+        "api_key": {"id": identity.api_key["id"], "name": identity.api_key["name"]} if identity.api_key else None,
+    }
+
+
+@app.post("/auth/email/start")
+async def email_signin_start(body: EmailSigninStart, request: Request):
+    """Email a one-time sign-in link. Always answers the same way so an address
+    can't be probed; the dev link is only present without an email provider."""
+    base = settings.public_base_url or f"{request.url.scheme}://{request.headers.get('host', request.url.netloc)}"
+    try:
+        result = await accounts.start_email_signin(body.email, base)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return result
+
+
+@app.post("/auth/email/verify")
+async def email_signin_verify(body: EmailSigninVerify, response: Response, request: Request):
+    try:
+        user, token, created = await accounts.sign_in_with_token(body.token)
+    except ValueError as exc:
+        raise HTTPException(401, str(exc)) from exc
+    _set_user_cookie(response, request, token)
+    identity = await resolve_identity_for_user(user, request)
+    return {**await _me_payload(identity), "created": created}
+
+
+async def resolve_identity_for_user(user: dict, request: Request) -> Identity:
+    from app.identity import _identity_for_user, client_ip
+    return await _identity_for_user(user, client_ip(request))
+
+
+@app.post("/auth/signout")
+async def signout(request: Request, response: Response):
+    await accounts.delete_user_session(request.cookies.get(accounts.USER_COOKIE))
+    await delete_auth_session(request.cookies.get(COOKIE_NAME))
+    response.delete_cookie(accounts.USER_COOKIE, path="/")
+    response.delete_cookie(COOKIE_NAME, path="/")
+    return {"authenticated": False}
+
+
+@app.get("/me")
+async def me(request: Request):
+    return await _me_payload(await resolve_identity(request))
+
+
+@app.get("/me/credits")
+async def my_credits(identity: Identity = Depends(require_user)):
+    return {
+        "balance": await credits.balance(identity.account_id),
+        "plan": identity.plan.public(),
+        "ledger": await credits.history(identity.account_id),
+        "costs": {
+            "chat": settings.credit_cost_chat_turn, "tool_turn": settings.credit_cost_tool_turn,
+            "deep_dive": settings.credit_cost_deep_dive, "trade": settings.credit_cost_trade_turn,
+            "team_desk": settings.credit_cost_team_turn,
+        },
+    }
+
+
+@app.put("/me/preferences")
+async def update_preferences(body: PreferencesUpdate, identity: Identity = Depends(require_user)):
+    fields: dict = {}
+    if body.display_name is not None:
+        fields["display_name"] = body.display_name.strip()[:60] or None
+    prefs = body.model_dump(exclude_none=True, exclude={"display_name"})
+    if prefs:
+        fields["preferences"] = prefs
+    user = await accounts.update_user(identity.user["id"], **fields)
+    identity.user = user
+    return await _me_payload(identity)
+
+
+@app.get("/me/api-keys")
+async def list_api_keys(identity: Identity = Depends(require_user)):
+    return {"keys": await api_keys.list_for_user(identity.user["id"]), "allowed": identity.plan.api_keys}
+
+
+@app.post("/me/api-keys", status_code=201)
+async def create_api_key(body: ApiKeyCreate, identity: Identity = Depends(require_user)):
+    if not identity.plan.api_keys:
+        raise HTTPException(403, {"error": "upgrade_required", "message": "API keys are available on Pro and Max plans."})
+    if identity.api_key is not None:
+        raise HTTPException(403, "Keys can only be managed from a signed-in browser session")
+    try:
+        record, secret = await api_keys.create(identity.user["id"], body.name, body.scopes)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"key": record, "secret": secret}
+
+
+@app.delete("/me/api-keys/{key_id}")
+async def revoke_api_key(key_id: str, identity: Identity = Depends(require_user)):
+    if identity.api_key is not None:
+        raise HTTPException(403, "Keys can only be managed from a signed-in browser session")
+    if not await api_keys.revoke(identity.user["id"], key_id):
+        raise HTTPException(404, "API key not found")
+    return {"revoked": True}
+
+
+@app.put("/admin/users/{email}/plan")
+async def admin_set_plan(email: str, body: AdminPlanUpdate, request: Request):
+    """Back-office plan override (support, comps, and the way a plan is set
+    before Stripe webhooks exist). The monthly allowance for the new plan is
+    granted on the user's next request."""
+    _require_admin(request)
+    if body.plan_id not in billing_plans.PLANS or body.plan_id == "anonymous":
+        raise HTTPException(400, f"Unknown plan {body.plan_id!r}")
+    user = await accounts.get_user_by_email(email)
+    if user is None:
+        raise HTTPException(404, "No account with that email")
+    user = await accounts.update_user(user["id"], plan_id=body.plan_id)
+    return {"email": user["email"], "plan_id": user["plan_id"]}
+
+
+@app.post("/admin/users/{email}/credits")
+async def admin_grant_credits(email: str, body: AdminCreditGrant, request: Request):
+    """Grant (positive) or claw back (negative) credits with an audit reason.
+    `reference` makes the grant idempotent -- repeating it changes nothing."""
+    _require_admin(request)
+    user = await accounts.get_user_by_email(email)
+    if user is None:
+        raise HTTPException(404, "No account with that email")
+    account_id = credits.user_account_id(user["id"])
+    reference = body.reference or str(uuid4())
+    applied = await credits.append(account_id, body.amount, f"admin:{body.reason}", "admin", reference, {"by": "admin"})
+    return {"email": user["email"], "applied": applied, "balance": await credits.balance(account_id), "reference": reference}
+
+
+@app.get("/billing/plans")
+async def billing_catalog():
+    return {"plans": billing_plans.catalog(), "trial_credits": billing_plans.ANONYMOUS.trial_credits}
+
+
 @app.get("/chat/risk-charter/limits")
 async def risk_charter_limits():
     """The built-in caps a charter can only tighten, and the chains it may name."""
@@ -835,7 +1060,7 @@ async def risk_charter_limits():
 
 
 @app.get("/chat/history/{session_id}")
-async def chat_history(session_id: str):
+async def chat_history(session_id: str, identity: Identity = Depends(require_user)):
     messages = await get_messages(session_id)
     if not settings.expose_tool_trajectory:
         messages = [dict(item, trajectory=public_activity(item.get("trajectory"))) for item in messages]
@@ -846,7 +1071,7 @@ async def chat_history(session_id: str):
 
 
 @app.delete("/chat/history/{session_id}")
-async def clear_chat_history(session_id: str):
+async def clear_chat_history(session_id: str, identity: Identity = Depends(require_user)):
     try:
         lease = await acquire_session_turn(session_id)
     except asyncio.TimeoutError as exc:

@@ -341,6 +341,25 @@
   .pay-chip[hidden] { display: none; }
   .pay-chip .icon { width: 11px; height: 11px; }
   .pay-chip.ready { color: var(--green); }
+  .credits-chip { border: 1px solid var(--border); background: transparent; border-radius: 999px; padding: 3px 9px; cursor: pointer; color: var(--subtle); font: inherit; font-size: 10px; }
+  .credits-chip:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
+  .credits-chip.low { color: var(--red); border-color: var(--red); }
+  .credits-chip b { font-weight: 600; color: var(--text); }
+  .account-panel { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 14px; display: grid; gap: 8px; }
+  .account-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
+  .account-row .muted { color: var(--subtle); }
+  .plan-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-size: 11px; font-weight: 600; }
+  .account-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .keys-section { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
+  .keys-section h3 { margin: 0 0 6px; font-size: 12px; }
+  .key-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; padding: 6px 0; border-bottom: 1px dashed var(--border); }
+  .key-row code { font-size: 11px; color: var(--subtle); }
+  .key-secret { margin-top: 8px; padding: 10px; border-radius: 10px; background: var(--brand-soft); font-size: 12px; word-break: break-all; }
+  .key-secret code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .key-create { display: flex; gap: 8px; margin-top: 8px; }
+  .key-create input { flex: 1; }
+  .notice-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .signin-status { font-size: 12px; color: var(--subtle); min-height: 16px; margin-top: 8px; }
   .policy-chip.unset { border-style: dashed; border-color: var(--border); background: transparent; color: var(--subtle); }
   .policy-chip.unset:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
   .send { margin-left: auto; width: 32px; height: 32px; border: 0; border-radius: 9px; background: var(--send-bg); color: var(--send-fg); display: grid; place-items: center; cursor: pointer; }
@@ -491,6 +510,7 @@
           <span class="composer-context"><svg class="icon" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg><span>Live web &amp; on-chain tools</span></span>
           <label class="team-toggle" id="teamToggle" title="Team desk: a Coordinator fans each request out to Market Research, Execution and Risk. Slower and costs more per turn."><input id="teamMode" type="checkbox" role="switch" aria-label="Team desk mode" /><span class="team-track" aria-hidden="true"></span><span class="team-label">Team desk</span></label>
           <span class="pay-chip" id="payChip" hidden title=""><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 14h3"/></svg><span id="payChipText"></span></span>
+          <button class="pay-chip credits-chip" id="creditsChip" type="button" hidden title="Your credit balance. Each turn costs 1-5 credits depending on what it does."><b id="creditsCount">0</b>&nbsp;credits · <span id="creditsPlan">Trial</span></button>
           <button class="policy-chip" id="policyChip" type="button" hidden title=""><svg class="icon" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5l-8-3Z"/></svg><b>Risk charter</b><span id="policyText"></span></button>
           <button class="send" id="sendBtn" type="submit" aria-label="Send"><svg class="icon" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7M12 19V5"/></svg></button>
         </div>
@@ -526,6 +546,26 @@
   </div>
 </div>
 
+<div class="overlay" id="signinDialog" role="dialog" aria-modal="true" aria-labelledby="signinTitle">
+  <div class="dialog">
+    <div class="dialog-head"><h2 id="signinTitle">Sign in</h2><button class="close" data-close="signinDialog" aria-label="Close">×</button></div>
+    <div class="dialog-body">
+      <div class="field-help" id="signinIntro">We'll email you a one-time sign-in link. No password to remember.</div>
+      <div class="field" style="margin-top:10px"><label for="signinEmail">Email address</label><input id="signinEmail" type="email" autocomplete="email" placeholder="you@example.com" /></div>
+      <div class="signin-status" id="signinStatus"></div>
+    </div>
+    <div class="dialog-footer"><button class="secondary" data-close="signinDialog">Cancel</button><button class="primary" id="signinSendBtn" type="button">Send sign-in link</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="plansDialog" role="dialog" aria-modal="true" aria-labelledby="plansTitle">
+  <div class="dialog">
+    <div class="dialog-head"><h2 id="plansTitle">Plans &amp; credits</h2><button class="close" data-close="plansDialog" aria-label="Close">×</button></div>
+    <div class="dialog-body" id="plansBody"></div>
+    <div class="dialog-footer"><button class="secondary" data-close="plansDialog">Close</button></div>
+  </div>
+</div>
+
 <div class="overlay charter-dialog" id="charterDialog" role="dialog" aria-modal="true" aria-labelledby="charterTitle">
   <div class="dialog">
     <div class="dialog-head"><h2 id="charterTitle">Risk charter</h2><button class="close" data-close="charterDialog" aria-label="Close">×</button></div>
@@ -548,11 +588,29 @@
   <div class="dialog">
     <div class="dialog-head"><h2 id="profileTitle">Profile &amp; settings</h2><button class="close" data-close="profileDialog" aria-label="Close">×</button></div>
     <div class="dialog-body">
+      <div class="account-panel" id="accountPanel">
+        <div class="account-row"><span id="accountEmail" class="muted">Not signed in</span><span class="plan-badge" id="accountPlan">Trial</span></div>
+        <div class="account-row"><span>Credits</span><b id="accountCredits">0</b></div>
+        <div class="account-row"><span>Linked wallets</span><span id="accountWallets" class="muted">none</span></div>
+        <div class="account-actions">
+          <button class="primary" id="signinBtn" type="button">Sign in with email</button>
+          <button class="secondary" id="plansBtn" type="button">Plans &amp; credits</button>
+          <button class="secondary" id="signoutBtn" type="button" hidden>Sign out</button>
+        </div>
+        <div class="field-help" id="accountHelp">Sign in to keep conversation history, connect wallets, review trades and get 100 free credits every month.</div>
+      </div>
       <div class="field"><label for="displayNameInput">Display name</label><input id="displayNameInput" placeholder="Web3 User" /></div>
       <div class="field"><label for="riskProfileSelect">Risk preference</label><select id="riskProfileSelect"><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="aggressive">Aggressive</option></select></div>
       <div class="field"><label for="defaultWalletInput">Default wallet address</label><input id="defaultWalletInput" placeholder="Optional public address" spellcheck="false" /></div>
       <div class="field"><label for="themeSelect">Appearance</label><select id="themeSelect"><option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
       <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:8px"><input id="prefAutoScroll" type="checkbox" checked /> Auto-scroll to the latest message</label>
+      <div class="keys-section" id="apiKeysSection" hidden>
+        <h3>API keys</h3>
+        <div class="field-help" id="apiKeysHelp">Use a key as <code>Authorization: Bearer …</code> on <code>/chat</code> and as the MCP bearer for Claude or ChatGPT. Keys never sign or move funds.</div>
+        <div id="apiKeysList"></div>
+        <div class="key-create"><input id="apiKeyName" placeholder="Key name (e.g. Claude Desktop)" maxlength="60" /><button class="secondary" id="createApiKeyBtn" type="button">Create key</button></div>
+        <div class="key-secret" id="apiKeySecret" hidden></div>
+      </div>
       <div style="margin-top:14px"><a href="/ui/admin.html" style="color:var(--text);font-size:12px">Open provider admin dashboard →</a></div>
       <div class="danger-link"><button class="secondary danger" id="deleteAllChatsBtn" type="button">Delete all conversations</button><div class="field-help">Removes every conversation stored for this browser from the server and from this device. Cannot be undone.</div></div>
     </div>
@@ -711,6 +769,7 @@ function shortAddress(value) { return value && value.length > 12 ? `${value.slic
 function normalizeError(data, status) {
   if (typeof data?.detail === "string") return data.detail;
   if (Array.isArray(data?.detail)) return data.detail.map(item => item?.msg || JSON.stringify(item)).join("; ");
+  if (data?.detail && typeof data.detail === "object" && data.detail.message) return data.detail.message;
   return `Request failed (${status})`;
 }
 function isNearLatest() { return conversationEl.scrollHeight-conversationEl.scrollTop-conversationEl.clientHeight<96; }
@@ -1088,6 +1147,7 @@ let x402Config=null;
 async function loadX402Config(){try{const cfg=await (await fetch("/config/public")).json();x402Config=cfg.x402||null;}catch{x402Config=null;}syncPayChip();}
 async function syncPayChip(){const chip=$("#payChip");if(!x402Config?.enabled){chip.hidden=true;return;}chip.hidden=false;const ready=await (window.OrbitX402?.hasEvmWallet?.()??Promise.resolve(false));chip.classList.toggle("ready",ready);$("#payChipText").textContent=`${x402Config.price}/message · ${ready?"pays from your wallet":"connect an EVM wallet to pay"}`;chip.title=`This Orbit charges ${x402Config.price} per message via x402 (USDC on ${x402Config.network}). ${ready?"Each message is paid from your connected wallet.":"Connect Coinbase Wallet, Privy or WalletConnect to pay."}`;}
 async function chatFetch(url,init){
+  init={...init,headers:{...(init?.headers||{}),"X-Orbit-Device":deviceId}};
   if(!x402Config?.enabled)return fetch(url,init);
   if(!window.OrbitX402)throw new Error("Payments are required here but the payment module did not load. Reload the page.");
   return window.OrbitX402.fetchWithPayment(x402Config.network,url,init);
@@ -1096,8 +1156,8 @@ async function sendMessage(text,quickAction=null,extra={}) {
   if (busy || !text.trim()) return;retireQuickActions();chatTurnEpoch++;retirePendingTradeCards();busy=true; sendBtn.disabled=true; addUserMessage(text); const typing=addTyping();
   const requestSession=sessionId || undefined;
   try { const res=await chatFetch("/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:text,wallet_address:walletInput.value.trim() || null,session_id:requestSession,context_revision:requestSession?sessionRevision:null,quick_action:quickAction,team_mode:teamModePending,...extra})}); const data=await res.json();
-    if(!res.ok) finishAgentMessage(typing,{error:normalizeError(data,res.status)});
-    else { sessionId=data.session_id;sessionRevision=Number(data.session_revision||0); sessionStorage.setItem("orbit_session_id",sessionId); updateChat(sessionId,text); syncTeamMode(data.team_mode); syncPolicy(data.risk_charter,data.risk_charter_fields); finishAgentMessage(typing,data); }
+    if(!res.ok){ finishAgentMessage(typing,{error:normalizeError(data,res.status)}); if(res.status===402||res.status===401) attachAccountNotice(typing,data?.detail,res.status); }
+    else { if(data.credits){account=account||{};account.credits={balance:data.credits.balance};renderCredits();} sessionId=data.session_id;sessionRevision=Number(data.session_revision||0); sessionStorage.setItem("orbit_session_id",sessionId); updateChat(sessionId,text); syncTeamMode(data.team_mode); syncPolicy(data.risk_charter,data.risk_charter_fields); finishAgentMessage(typing,data); }
   } catch(error){finishAgentMessage(typing,{error:`Could not reach the assistant: ${error.message}`});}
   finally {busy=false;sendBtn.disabled=false;input.focus();renderChatList();}
 }
@@ -1191,7 +1251,7 @@ async function verifyPrivyCode(){const button=$("#privyVerifyBtn");button.disabl
 async function connectPhantom(){const provider=getPhantomProvider();if(!provider){$("#connectedProvider").textContent="Phantom was not found";window.open("https://phantom.app/","_blank","noopener");return;}try{const response=await provider.connect();activeProvider="phantom";setWalletConnected(response.publicKey.toString(),"Phantom");closeDialog("walletDialog");}catch(error){console.error(error);}}
 async function connectMetaMask(){const btn=$("#connectMetaMaskBtn");btn.disabled=true;try{const{createSolanaClient}=await import("https://esm.sh/@metamask/connect-solana@2");const client=await createSolanaClient({dapp:{name:"Orbit",url:location.origin},api:{supportedNetworks:{mainnet:`${location.origin}/rpc/solana`}}});const wallet=client.getWallet();const{accounts}=await wallet.features["standard:connect"].connect();if(!accounts?.length)throw new Error("No account returned");metamaskWallet=client;metamaskAccount=accounts[0];window.OrbitSolanaWallet={address:accounts[0].address,signAndSendTransaction:signAndSendMetaMaskSolanaTransaction};activeProvider="metamask";setWalletConnected(accounts[0].address,"MetaMask");closeDialog("walletDialog");}catch(error){$("#walletLabel").textContent="Connection failed";console.error(error);}finally{btn.disabled=false;}}
 async function disconnectWallet(){try{if(activeProvider==="privy")await window.OrbitPrivy.logout();else if(activeProvider==="coinbase")await window.OrbitCoinbase.disconnect();else if(activeProvider==="reown")await window.OrbitReown.disconnect();else if(activeProvider==="phantom")await getPhantomProvider()?.disconnect();else if(activeProvider==="metamask")await metamaskWallet?.disconnect();}catch{}setWalletDisconnected();}
-$("#walletButton").addEventListener("click",()=>openDialog("walletDialog"));
+$("#walletButton").addEventListener("click",()=>{if(account&&!account.authenticated){openSignin("Sign in to connect a wallet, review trades and keep your history.");return;}openDialog("walletDialog");});
 $("#relayQuoteBtn").addEventListener("click",requestRelayQuote);
 $("#relayExecuteBtn").addEventListener("click",executeRelayQuote);
 $("#relayFromChain").addEventListener("change",()=>setRelayNativeToken("#relayFromToken","#relayFromChain"));
@@ -1201,7 +1261,56 @@ $("#connectPrivyBtn").addEventListener("click",connectPrivy);$("#connectCoinbase
 $("#useAddressBtn").addEventListener("click",()=>{const address=walletInput.value.trim();if(address){setReadOnlyWallet(address);closeDialog("walletDialog");}});
 
 $("#profileBtn").addEventListener("click",()=>openDialog("profileDialog"));
-$("#saveProfileBtn").addEventListener("click",()=>{profile={name:$("#displayNameInput").value.trim(),riskProfile:$("#riskProfileSelect").value,defaultWallet:$("#defaultWalletInput").value.trim()};writeStorage(PROFILE_KEY,profile);writeStorage(AUTO_SCROLL_KEY,$("#prefAutoScroll").checked);writeStorage(THEME_KEY,$("#themeSelect").value);initProfile();closeDialog("profileDialog");});
+$("#saveProfileBtn").addEventListener("click",async()=>{profile={name:$("#displayNameInput").value.trim(),riskProfile:$("#riskProfileSelect").value,defaultWallet:$("#defaultWalletInput").value.trim()};writeStorage(PROFILE_KEY,profile);writeStorage(AUTO_SCROLL_KEY,$("#prefAutoScroll").checked);writeStorage(THEME_KEY,$("#themeSelect").value);initProfile();closeDialog("profileDialog");
+  if(account?.authenticated){try{await fetch("/me/preferences",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({display_name:profile.name,risk_profile:profile.riskProfile,default_wallet:profile.defaultWallet,theme:$("#themeSelect").value})});await loadAccount();}catch{}}});
+
+// ---------------------------------------------------------------------------
+// Account, credits, sign-in and API keys
+// ---------------------------------------------------------------------------
+const DEVICE_KEY="orbit_device_v1";
+let deviceId=readStorage(DEVICE_KEY,null);if(!deviceId){deviceId=(crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random()}`);writeStorage(DEVICE_KEY,deviceId);}
+let account=null;
+async function loadAccount(){try{const res=await fetch("/me",{headers:{"X-Orbit-Device":deviceId}});account=await res.json();}catch{account=null;}renderAccount();}
+function renderCredits(){const chip=$("#creditsChip");if(!account){chip.hidden=true;return;}const balance=Number(account.credits?.balance??0);chip.hidden=false;$("#creditsCount").textContent=balance.toLocaleString();$("#creditsPlan").textContent=account.plan?.name||"Trial";chip.classList.toggle("low",balance<10);$("#accountCredits").textContent=balance.toLocaleString();$("#profileRisk").textContent=account.authenticated?`${account.plan?.name} · ${balance.toLocaleString()} credits`:`Trial · ${balance} credits left`;}
+function renderAccount(){
+  renderCredits();
+  const signedIn=Boolean(account?.authenticated);const user=account?.user||{};
+  $("#accountEmail").textContent=signedIn?user.email:"Not signed in";$("#accountEmail").classList.toggle("muted",!signedIn);
+  $("#accountPlan").textContent=account?.plan?.name||"Trial";
+  $("#accountWallets").textContent=signedIn&&account.wallets?.length?account.wallets.map(w=>`${w.address.slice(0,6)}…${w.address.slice(-4)}`).join(", "):"none";
+  $("#signinBtn").hidden=signedIn;$("#signoutBtn").hidden=!signedIn;
+  $("#accountHelp").textContent=signedIn?`${account.plan?.monthly_credits?.toLocaleString()||0} credits are added every month on the ${account.plan?.name} plan.`:"Sign in to keep conversation history, connect wallets, review trades and get 100 free credits every month.";
+  if(signedIn){const prefs=user.preferences||{};profile={name:user.display_name||profile.name||"",riskProfile:prefs.risk_profile||profile.riskProfile||"balanced",defaultWallet:prefs.default_wallet??profile.defaultWallet??""};writeStorage(PROFILE_KEY,profile);initProfile();$("#profileName").textContent=profile.name||user.email;}
+  const keys=$("#apiKeysSection");keys.hidden=!signedIn;
+  if(signedIn){if(account.plan?.entitlements?.api_keys){$("#apiKeysHelp").textContent="Use a key as Authorization: Bearer … on /chat and as the MCP bearer for Claude or ChatGPT. Keys never sign or move funds.";$("#createApiKeyBtn").disabled=false;loadApiKeys();}else{$("#apiKeysHelp").textContent="API keys and MCP access for Claude / ChatGPT are included in Pro and Max.";$("#apiKeysList").innerHTML="";$("#createApiKeyBtn").disabled=true;}}
+  $("#profileRisk").textContent=signedIn?`${account.plan?.name} · ${Number(account.credits?.balance??0).toLocaleString()} credits`:`Trial · ${Number(account?.credits?.balance??0)} credits left`;
+}
+function openSignin(reason){$("#signinIntro").textContent=reason||"We'll email you a one-time sign-in link. No password to remember.";$("#signinStatus").textContent="";openDialog("signinDialog");setTimeout(()=>$("#signinEmail").focus(),50);}
+async function startSignin(){const email=$("#signinEmail").value.trim();const status=$("#signinStatus");if(!email){status.textContent="Enter your email address.";return;}$("#signinSendBtn").disabled=true;status.textContent="Sending…";
+  try{const res=await fetch("/auth/email/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});const data=await res.json();if(!res.ok)throw new Error(normalizeError(data,res.status));
+    if(data.dev_link){status.textContent="Development mode: signing you in…";const token=data.dev_link.split("signin=")[1];await verifySignin(token);}
+    else status.textContent=`Check ${data.email} for your sign-in link. It expires in 15 minutes.`;
+  }catch(error){status.textContent=error.message;}finally{$("#signinSendBtn").disabled=false;}}
+async function verifySignin(token){const res=await fetch("/auth/email/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})});const data=await res.json();if(!res.ok)throw new Error(normalizeError(data,res.status));account=data;renderAccount();closeDialog("signinDialog");hydrateHistory();}
+async function signOut(){try{await fetch("/auth/signout",{method:"POST"});}catch{}setWalletDisconnected();await loadAccount();closeDialog("profileDialog");}
+function attachAccountNotice(el,detail,status){const body=$(".message-body",el);if(!body)return;const box=document.createElement("div");box.className="notice-actions";
+  if(!detail||typeof detail!=="object"||detail.signed_in===false||detail.error==="sign_in_required"){const b=document.createElement("button");b.className="primary";b.type="button";b.textContent="Sign in with email";b.addEventListener("click",()=>openSignin(status===402?"You've used your trial credits. Sign in to get 100 free credits every month.":"Sign in to continue."));box.appendChild(b);}
+  else{const b=document.createElement("button");b.className="primary";b.type="button";b.textContent="Plans & credits";b.addEventListener("click",openPlans);box.appendChild(b);}
+  body.appendChild(box);}
+async function openPlans(){openDialog("plansDialog");const body=$("#plansBody");body.innerHTML='<div class="field-help">Loading…</div>';try{const data=await (await fetch("/billing/plans")).json();const current=account?.plan?.id;body.innerHTML=data.plans.map(p=>`<div class="account-panel"><div class="account-row"><b>${escapeHtml(p.name)}</b><span class="plan-badge">${p.price_usd_month?`$${p.price_usd_month}/mo`:"Free"}</span></div><div class="account-row"><span>${p.monthly_credits.toLocaleString()} credits / month</span>${current===p.id?'<span class="muted">Current plan</span>':(p.purchasable?`<button class="secondary" type="button" data-plan="${p.id}">Choose</button>`:'<span class="muted">Coming soon</span>')}</div><div class="field-help">${p.features.map(escapeHtml).join(" · ")}</div></div>`).join("")+'<div class="field-help">Card and USDC checkout arrive with the billing update; credit packs for top-ups too.</div>';}catch{body.innerHTML='<div class="field-help">Plans are unavailable right now.</div>';}}
+async function loadApiKeys(){const list=$("#apiKeysList");try{const data=await (await fetch("/me/api-keys")).json();list.innerHTML=(data.keys||[]).filter(k=>!k.revoked_at).map(k=>`<div class="key-row"><span>${escapeHtml(k.name)} <code>${escapeHtml(k.prefix)}…</code> <code>${(k.scopes||[]).join(", ")}</code></span><button class="secondary danger" type="button" data-revoke="${k.id}">Revoke</button></div>`).join("")||'<div class="field-help">No keys yet.</div>';
+  list.querySelectorAll("[data-revoke]").forEach(b=>b.addEventListener("click",async()=>{await fetch(`/me/api-keys/${b.dataset.revoke}`,{method:"DELETE"});loadApiKeys();}));}catch{list.innerHTML="";}}
+async function createApiKey(){const name=$("#apiKeyName").value.trim()||"API key";const secretBox=$("#apiKeySecret");try{const res=await fetch("/me/api-keys",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});const data=await res.json();if(!res.ok)throw new Error(normalizeError(data,res.status));
+  secretBox.hidden=false;secretBox.innerHTML=`Copy this key now — it is shown once.<br><code id="apiKeySecretValue"></code> <button class="secondary" type="button" id="copyKeyBtn">Copy</button>`;$("#apiKeySecretValue").textContent=data.secret;$("#copyKeyBtn").addEventListener("click",()=>{navigator.clipboard?.writeText(data.secret);$("#copyKeyBtn").textContent="Copied";});$("#apiKeyName").value="";loadApiKeys();}
+  catch(error){secretBox.hidden=false;secretBox.textContent=error.message;}}
+$("#signinBtn").addEventListener("click",()=>openSignin());
+$("#signoutBtn").addEventListener("click",signOut);
+$("#plansBtn").addEventListener("click",openPlans);
+$("#creditsChip").addEventListener("click",()=>{if(account&&!account.authenticated)openSignin();else openPlans();});
+$("#signinSendBtn").addEventListener("click",startSignin);
+$("#signinEmail").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();startSignin();}});
+$("#createApiKeyBtn").addEventListener("click",createApiKey);
+(async()=>{const token=new URLSearchParams(location.search).get("signin");if(token){history.replaceState(null,"",location.pathname);try{await verifySignin(token);}catch(error){await loadAccount();openSignin(error.message);}return;}await loadAccount();})();
 document.querySelectorAll("[data-close]").forEach(button=>button.addEventListener("click",()=>closeDialog(button.dataset.close)));
 document.querySelectorAll(".overlay").forEach(overlay=>overlay.addEventListener("click",event=>{if(event.target===overlay)closeDialog(overlay.id);}));
 document.addEventListener("keydown",event=>{if(event.key==="Escape"){document.querySelectorAll(".overlay.open").forEach(dialog=>dialog.classList.remove("open"));closeSidebar();}});

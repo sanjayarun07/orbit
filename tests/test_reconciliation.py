@@ -157,6 +157,8 @@ def test_chat_plan_wallet_submission_and_reconciliation(reviewed, monkeypatch):
     monkeypatch.setattr(main, "run_agent", agent)
     monkeypatch.setattr(execution, "rpc", send)
     client = TestClient(main.app)
+    from tests.conftest import sign_in
+    sign_in(client)  # a wallet-bound turn needs a signed-in account
     response = client.post("/chat", json={"message":"swap 0.01 SOL to USDC on Solana with 50bps", "wallet_address":plan.wallet_address})
     assert response.status_code == 200
     assert response.json()["trade_plan"]["plan_id"] == plan.plan_id

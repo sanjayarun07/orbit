@@ -74,6 +74,37 @@ class ChatRequest(BaseModel):
     risk_charter_fields: RiskCharterFields | None = None
 
 
+class EmailSigninStart(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+
+
+class EmailSigninVerify(BaseModel):
+    token: str = Field(min_length=8, max_length=128)
+
+
+class PreferencesUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=60)
+    risk_profile: str | None = Field(default=None, max_length=32)
+    default_wallet: str | None = Field(default=None, max_length=128)
+    theme: str | None = Field(default=None, max_length=16)
+    low_credit_alert: bool | None = None
+
+
+class AdminPlanUpdate(BaseModel):
+    plan_id: str = Field(max_length=32)
+
+
+class AdminCreditGrant(BaseModel):
+    amount: int = Field(ge=-1_000_000, le=1_000_000)
+    reason: str = Field(min_length=2, max_length=120)
+    reference: str | None = Field(default=None, max_length=120)
+
+
+class ApiKeyCreate(BaseModel):
+    name: str = Field(default="API key", max_length=60)
+    scopes: list[str] | None = None
+
+
 class QuickAction(BaseModel):
     """Typed follow-up command; the label is never used as authoritative state."""
 
@@ -225,6 +256,8 @@ class AnswerValidation(BaseModel):
 
 class AgentResponse(BaseModel):
     answer: str
+    # What this turn cost the caller's credit balance (absent for service callers).
+    credits: dict | None = None
     trade_plan: TradePlan | None = None
     trajectory: dict | None = None
     session_id: str

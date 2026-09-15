@@ -31,6 +31,8 @@ def test_coinbase_challenge_is_one_time_and_creates_session(monkeypatch):
 def test_coinbase_login_sets_httponly_session_cookie():
     account = Account.create()
     client = TestClient(app)
+    from tests.conftest import sign_in
+    sign_in(client)  # wallets are linked to a signed-in account
     challenge = client.post("/auth/coinbase/challenge", json={"address": account.address}).json()
     signature = Account.sign_message(encode_defunct(text=challenge["message"]), account.key).signature.hex()
     verified = client.post(
@@ -41,6 +43,7 @@ def test_coinbase_login_sets_httponly_session_cookie():
     assert verified.json()["authenticated"] is True
     assert "HttpOnly" in verified.headers["set-cookie"]
     assert client.get("/auth/session").json()["address"] == account.address
+    assert client.get("/me").json()["wallets"][0]["address"] == account.address
     assert client.post("/auth/logout").json() == {"authenticated": False}
 
 

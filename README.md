@@ -471,6 +471,44 @@ The groups that matter most:
 Credentialed providers stay visible but unavailable in the admin catalog until
 their keys exist; keys are never returned by any API or rendered in the UI.
 
+## Accounts, credits and API keys
+
+Orbit is metered in **credits**. Every finished chat turn is charged by what
+it did — a plain answer costs 1, a turn that ran data tools 2, a trade
+preparation 3, a token deep-dive or trading-desk turn 5 (all configurable via
+`CREDIT_COST_*`). The charge is reserved before the turn and settled after
+it, so a failed turn costs nothing. Every change to a balance is a row in an
+append-only ledger keyed by `(account, ref_type, ref_id)`, which is what makes
+grants idempotent: a redelivered payment webhook or a monthly allowance
+applied twice inserts nothing.
+
+| Tier | Price | Credits | Includes |
+|---|---|---|---|
+| Trial (anonymous) | — | 10, once, per device/IP | Research and market data only |
+| Free | $0 | 100 / month | History, wallet connection, trade review, risk charter |
+| Pro | $19 / month | 2,000 / month | API keys, MCP access for Claude / ChatGPT, trading desk |
+| Max | $49 / month | 7,500 / month | Higher rate limits, priority support |
+
+**Sign-in** is an emailed one-time link (Resend; without `RESEND_API_KEY` in
+development the link is returned to the UI and used automatically). Wallets
+are linked to the signed-in account — history, portfolios, wallet connection
+and trades all require sign-in; anonymous visitors can research on the trial.
+
+**API keys** (`orb_live_…`, shown once, SHA-256 stored) authenticate `/chat`
+and the MCP server as the owning user with scopes `chat`, `data`, `mcp`; they
+never grant execution. Manage them under Profile → API keys. Stripe Checkout
+(cards and USDC), credit packs and the Customer Portal are the next billing
+step; the plan catalog already carries the Stripe price ids.
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /auth/email/start`, `POST /auth/email/verify` | Magic-link sign-in; sets the `orbit_user` cookie |
+| `GET /me`, `POST /auth/signout` | Current account, plan, credits, linked wallets |
+| `GET /me/credits` | Balance, per-turn costs and the recent ledger |
+| `PUT /me/preferences` | Display name, risk preference, default wallet, theme |
+| `GET/POST/DELETE /me/api-keys` | List, create (secret shown once), revoke |
+| `GET /billing/plans` | The plan catalog with entitlements |
+
 ## API surface
 
 | Endpoint | Purpose |

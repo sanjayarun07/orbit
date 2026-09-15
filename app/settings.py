@@ -294,5 +294,26 @@ class Settings(BaseSettings):
     # rather than creating isolated per-worker sessions and trade plans.
     allow_memory_fallback: bool = True
 
+    # --- Accounts, credits and billing (app/accounts.py, app/credits.py) ---
+    product_name: str = "Orbit"
+    # Resend transactional email (magic links, receipts). Unset -> no email is
+    # sent; with dev_expose_magic_links the sign-in link is returned to the UI
+    # instead, which is how local development signs in.
+    resend_api_key: str | None = None
+    email_from: str = "Orbit <no-reply@example.com>"
+    magic_link_ttl_minutes: int = 15
+    dev_expose_magic_links: bool = True
+    # Credits per finished chat turn, by what the turn did (see credits.turn_cost).
+    credit_cost_chat_turn: int = 1
+    credit_cost_tool_turn: int = 2
+    credit_cost_deep_dive: int = 5
+    credit_cost_trade_turn: int = 3
+    credit_cost_team_turn: int = 5
+    # Stripe (Phase 2). Test-mode keys only in development.
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    stripe_price_pro: str | None = None
+    stripe_price_max: str | None = None
+
 
 settings = Settings()

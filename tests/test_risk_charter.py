@@ -176,6 +176,8 @@ def test_chat_response_and_history_carry_the_persisted_risk_charter(monkeypatch)
 
     monkeypatch.setattr(main, "run_agent", fake_run)
     client = TestClient(main.app)
+    from tests.conftest import sign_in
+    sign_in(client)
     first = client.post("/chat", json={"message": "set my risk charter: only verified tokens, max $10 per trade"})
     assert first.status_code == 200, first.text
     assert first.json()["risk_charter"] == "only verified tokens, max $10 per trade"
@@ -278,6 +280,8 @@ def test_card_saves_through_chat_and_free_text_replaces_fields(monkeypatch):
     monkeypatch.setattr(main, "run_agent", fake_run)
     monkeypatch.setattr(settings, "max_trade_usd", 25.0)
     client = TestClient(main.app)
+    from tests.conftest import sign_in
+    sign_in(client)
     assert client.get("/chat/risk-charter/limits").json()["max_trade_usd"] == 25.0
 
     saved = client.post("/chat", json={"message": "set my risk charter", "risk_charter_fields": {"max_trade_usd": 10, "verified_only": True}})

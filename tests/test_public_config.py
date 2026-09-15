@@ -122,7 +122,10 @@ def test_relay_how_it_works_chat_does_not_request_trade_fields(monkeypatch):
     assert payload["suggestions"] == []
     assert payload["quick_actions"] == []
     assert payload["session_revision"] == 1
-    history = TestClient(app).get("/chat/history/relay-explanation-test").json()
+    from tests.conftest import sign_in
+    history_client = TestClient(app)
+    sign_in(history_client)
+    history = history_client.get("/chat/history/relay-explanation-test").json()
     assert history["context"]["revision"] == 1
     assert history["context"]["last_intent"] == "general"
 

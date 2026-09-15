@@ -51,6 +51,47 @@ CREATE TABLE IF NOT EXISTS relay_executions (
 ALTER TABLE relay_executions ADD COLUMN IF NOT EXISTS session_id TEXT;
 ALTER TABLE relay_executions ADD COLUMN IF NOT EXISTS revision BIGINT;
 CREATE UNIQUE INDEX IF NOT EXISTS relay_execution_turn ON relay_executions (session_id, revision) WHERE session_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    display_name TEXT,
+    plan_id TEXT NOT NULL DEFAULT 'free',
+    stripe_customer_id TEXT UNIQUE,
+    preferences JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS user_wallets (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    chain TEXT NOT NULL,
+    address TEXT NOT NULL,
+    linked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (chain, address)
+);
+CREATE INDEX IF NOT EXISTS user_wallets_user ON user_wallets (user_id);
+CREATE TABLE IF NOT EXISTS credit_ledger (
+    id UUID PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    delta INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    ref_type TEXT NOT NULL,
+    ref_id TEXT NOT NULL,
+    meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (account_id, ref_type, ref_id)
+);
+CREATE INDEX IF NOT EXISTS credit_ledger_account ON credit_ledger (account_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS api_keys (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    prefix TEXT NOT NULL,
+    key_hash TEXT UNIQUE NOT NULL,
+    scopes TEXT[] NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS api_keys_user ON api_keys (user_id);
 CREATE TABLE IF NOT EXISTS tool_outcomes (
     tool_name TEXT NOT NULL,
     day DATE NOT NULL,
