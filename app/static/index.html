@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="color-scheme" content="dark light" />
 <title>Orbit — Web3 Copilot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap">
 <script>(function(){try{var p=JSON.parse(localStorage.getItem("orbit_theme_v1")||'"system"');var t=p==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):p;document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t;}catch(e){}})();</script>
 <style>
   :root {
@@ -475,20 +477,176 @@
     .composer-context::after { content: "Live tools"; font-size: 10px; }
     .activity-summary .count { display: none; }
   }
+
+  /* ==========================================================================
+     Visual system v2: floating cards on a deep navy ground, teal→blue accent,
+     serif greeting. Tokens are re-pointed here (later wins) so every component
+     above inherits the new palette; layout rules below reshape the shell.
+     ========================================================================== */
+  :root {
+    --bg: #050b14; --sidebar: #0a1220; --card-main: #0a1220; --surface: #0f1a2b; --surface-2: #142033; --surface-hover: #182742;
+    --border: rgba(148,178,214,.12); --text: #e6eef8; --muted: #9db0c6; --subtle: #6d8199; --text-strong: #f5f9ff; --text-2: #dbe6f3; --text-3: #c5d3e3;
+    --brand: #1fd1bf; --brand-2: #2f6bff; --brand-strong: #17b8a8; --brand-hover: #1fd1bf; --brand-soft: rgba(31,209,191,.12); --brand-soft-strong: rgba(31,209,191,.22);
+    --brand-border: rgba(31,209,191,.28); --brand-border-strong: rgba(31,209,191,.5); --brand-ring: rgba(31,209,191,.12);
+    --link: #7fe3d8; --brand-text: #8fe8dd; --brand-text-2: #b9f2ec; --on-brand: #04211e;
+    --brand-grad: linear-gradient(135deg,#1fd1bf 0%,#2f6bff 100%);
+    --card: #0d1727; --card-2: #0a1220; --code-bg: #060d18; --code-text: #c5d3e3;
+    --overlay-fill: rgba(5,11,20,.45); --overlay-fill-2: rgba(5,11,20,.4); --overlay-fill-3: rgba(5,11,20,.42); --overlay-fill-4: rgba(5,11,20,.5); --overlay-backdrop: rgba(2,6,12,.62);
+    --topbar-bg: transparent; --composer-shell-from: rgba(10,18,32,0); --composer-bg: #0f1a2b; --composer-border: rgba(148,178,214,.14); --jump-bg: #142033;
+    --faint-line: rgba(148,178,214,.07); --faint-line-2: rgba(148,178,214,0); --hover-fill: rgba(148,178,214,.05); --hover-border: rgba(148,178,214,.24); --dash-line: rgba(157,176,198,.3);
+    --send-bg: var(--brand-grad); --send-fg: #04211e; --send-hover: var(--brand-grad); --scroll-thumb: #22344f; --disclaimer: #4f637b;
+    --shadow-1: rgba(0,0,0,.35); --shadow-2: rgba(0,0,0,.4); --shadow-3: rgba(0,0,0,.55);
+    --source-card-bg: rgba(10,18,32,.72); --source-card-hover: #142033; --portfolio-grad-a: #12203a; --portfolio-grad-b: #0d1727; --avatar-grad-a: #1fd1bf; --avatar-grad-b: #2f6bff;
+    --shell-radius: 24px; --serif: "Instrument Serif", Georgia, "Times New Roman", serif;
+  }
+  :root[data-theme="light"] {
+    --bg: #edf1f8; --sidebar: #f7f9fd; --card-main: #f9fbff; --surface: #ffffff; --surface-2: #eef3fb; --surface-hover: #e4ebf7;
+    --border: rgba(31,58,105,.1); --text: #16223a; --muted: #55657f; --subtle: #7b899f; --text-strong: #0c1426; --text-2: #26334d; --text-3: #3a4a66;
+    --brand: #2f6bff; --brand-2: #1fd1bf; --brand-strong: #2f6bff; --brand-hover: #245ae6; --brand-soft: rgba(47,107,255,.1); --brand-soft-strong: rgba(47,107,255,.18);
+    --brand-border: rgba(47,107,255,.28); --brand-border-strong: rgba(47,107,255,.5); --brand-ring: rgba(47,107,255,.12);
+    --link: #245ae6; --brand-text: #245ae6; --brand-text-2: #1b48c2; --on-brand: #ffffff;
+    --brand-grad: linear-gradient(135deg,#3b82ff 0%,#2f6bff 100%);
+    --card: #ffffff; --card-2: #f3f6fc; --code-bg: #f0f4fa; --code-text: #26334d;
+    --overlay-fill: rgba(31,58,105,.03); --overlay-fill-2: rgba(31,58,105,.03); --overlay-fill-3: rgba(31,58,105,.035); --overlay-fill-4: rgba(31,58,105,.04); --overlay-backdrop: rgba(22,34,58,.35);
+    --topbar-bg: transparent; --composer-shell-from: rgba(249,251,255,0); --composer-bg: #ffffff; --composer-border: rgba(31,58,105,.12); --jump-bg: #ffffff;
+    --faint-line: rgba(31,58,105,.08); --faint-line-2: rgba(31,58,105,0); --hover-fill: rgba(31,58,105,.04); --hover-border: rgba(31,58,105,.2); --dash-line: rgba(85,101,127,.35);
+    --send-bg: var(--brand-grad); --send-fg: #ffffff; --send-hover: var(--brand-grad); --scroll-thumb: #c9d3e4; --disclaimer: #8b98ad;
+    --shadow-1: rgba(22,34,58,.08); --shadow-2: rgba(22,34,58,.1); --shadow-3: rgba(22,34,58,.16);
+    --source-card-bg: rgba(255,255,255,.85); --source-card-hover: #ffffff; --portfolio-grad-a: #ffffff; --portfolio-grad-b: #f0f4fb; --avatar-grad-a: #3b82ff; --avatar-grad-b: #1fd1bf;
+  }
+  body { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .app { gap: 14px; padding: 14px; background: var(--bg); grid-template-columns: 272px minmax(0, 1fr); }
+  .sidebar { border: 1px solid var(--border); border-radius: var(--shell-radius); background: var(--sidebar); padding: 18px 14px 14px; box-shadow: 0 20px 60px var(--shadow-1); }
+  .side-brand { height: 44px; padding: 0 6px; margin-bottom: 14px; font-size: 15px; }
+  .mark { width: 34px; height: 34px; border-radius: 50%; background: var(--brand-grad); box-shadow: 0 8px 24px rgba(31,209,191,.25); color: #04211e; }
+  :root[data-theme="light"] .mark { color: #fff; }
+  .new-chat { height: 46px; border: 0; border-radius: 999px; background: var(--brand-grad); color: #04211e; font-weight: 600; font-size: 14px; padding: 0 18px; justify-content: space-between; box-shadow: 0 10px 28px rgba(31,209,191,.22); }
+  :root[data-theme="light"] .new-chat { color: #fff; box-shadow: 0 10px 28px rgba(47,107,255,.25); }
+  .new-chat:hover { background: var(--brand-grad); filter: brightness(1.06); }
+  .new-chat .icon { order: 2; width: 18px; height: 18px; }
+  .side-nav { display: grid; gap: 4px; margin-top: 18px; }
+  .nav-item { display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 14px; border: 1px solid transparent; border-radius: 12px; background: transparent; color: var(--text-2); font-size: 14px; font-weight: 500; cursor: pointer; text-align: left; }
+  .nav-item:hover { background: var(--surface); }
+  .nav-item.active { background: var(--surface); border-color: var(--border); color: var(--text-strong); }
+  .nav-item .icon { width: 18px; height: 18px; color: var(--muted); }
+  .history-heading { margin: 22px 12px 8px; text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 500; color: var(--subtle); }
+  .chat-item { padding: 10px 34px 10px 40px; border-radius: 12px; border: 1px solid transparent; }
+  .chat-item::before { content: ""; position: absolute; left: 13px; top: 12px; width: 16px; height: 16px; background: currentColor; opacity: .75; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a8 8 0 0 1-8 8H8l-5 3 1.5-4.5A8 8 0 1 1 21 12Z'/%3E%3C/svg%3E") center/contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a8 8 0 0 1-8 8H8l-5 3 1.5-4.5A8 8 0 1 1 21 12Z'/%3E%3C/svg%3E") center/contain no-repeat; }
+  .chat-item.active::before { color: var(--brand); opacity: 1; }
+  .chat-item:hover, .chat-item.active { background: var(--surface); border-color: var(--border); }
+  .chat-item-title { font-size: 13.5px; }
+  .sidebar-footer { border-top: 0; padding-top: 10px; }
+  .account-button { border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 10px 12px; }
+  .account-button:hover { background: var(--surface-hover); }
+  .account-avatar { width: 36px; height: 36px; color: #04211e; }
+  :root[data-theme="light"] .account-avatar { color: #fff; }
+  .account-name { font-weight: 600; }
+  .account-tier { color: var(--brand); }
+  .main { border: 1px solid var(--border); border-radius: var(--shell-radius); background: var(--card-main); box-shadow: 0 20px 60px var(--shadow-1); }
+  .main::before, .main::after, .deco { position: absolute; pointer-events: none; z-index: 0; }
+  .main::before { content: ""; right: 0; top: 0; width: min(38vw, 340px); height: min(38vw, 340px); border-radius: 0 var(--shell-radius) 0 100%; background: linear-gradient(200deg, var(--brand-soft-strong), transparent 70%); opacity: .9; }
+  .main::after { content: ""; right: 8%; top: 12%; width: clamp(60px, 7vw, 104px); height: clamp(60px, 7vw, 104px); border-radius: 50%; background: var(--brand-grad); opacity: .85; box-shadow: 0 20px 60px rgba(31,209,191,.25); }
+  .deco { right: 24px; top: 0; bottom: 40%; width: 110px; background-image: radial-gradient(circle, var(--border) 1.2px, transparent 1.6px); background-size: 14px 14px; opacity: .8; mask-image: linear-gradient(180deg, transparent 20%, #000 45%, #000 80%, transparent); -webkit-mask-image: linear-gradient(180deg, transparent 20%, #000 45%, #000 80%, transparent); }
+  .topbar, .conversation, .composer-shell, .jump-latest { position: relative; z-index: 1; }
+  .main:not(:has(#welcome))::after { display: none; }
+  .topbar { border-bottom: 0; height: 64px; padding: 0 22px; }
+  .model-label { font-weight: 600; }
+  .top-actions { gap: 10px; }
+  .icon-button, .wallet-button { border-radius: 50%; }
+  .icon-button { width: 38px; height: 38px; background: var(--surface); }
+  .wallet-button { border-radius: 999px; height: 38px; }
+  .avatar-button { width: auto; height: 38px; padding: 0 8px 0 3px; border-radius: 999px; gap: 6px; grid-auto-flow: column; }
+  .avatar-button .account-avatar { width: 30px; height: 30px; font-size: 12px; }
+  .topbar .icon-button.confirm { border-radius: 999px; }
+  .welcome { align-items: flex-start; text-align: left; min-height: 0; padding: 6vh 0 30px; }
+  .welcome-mark { display: none; }
+  .welcome h1 { font-family: var(--serif); font-weight: 400; font-size: clamp(34px, 5vw, 52px); letter-spacing: -.01em; line-height: 1.05; }
+  .welcome h1 em { font-style: normal; color: var(--brand); }
+  .welcome p { margin: 10px 0 26px; font-size: 15px; }
+  .prompts { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .prompt-card { min-height: 168px; display: flex; flex-direction: column; border-radius: 18px; padding: 16px; background: var(--surface); border-color: var(--border); transition: transform .15s, border-color .15s; }
+  .prompt-card:hover { transform: translateY(-2px); border-color: var(--brand-border-strong); background: var(--surface-2); }
+  .prompt-tile { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; margin-bottom: 16px; background: var(--brand-soft); color: var(--brand); }
+  .prompt-tile .icon { width: 20px; height: 20px; }
+  .prompt-card[data-tone="blue"] .prompt-tile { background: rgba(47,107,255,.14); color: #6d9bff; }
+  .prompt-card[data-tone="violet"] .prompt-tile { background: rgba(155,135,245,.16); color: #b8a8ff; }
+  .prompt-card[data-tone="amber"] .prompt-tile { background: rgba(251,191,36,.14); color: #fbbf24; }
+  .prompt-card strong { font-size: 14px; line-height: 1.4; margin-bottom: 4px; }
+  .prompt-card > span:not(.prompt-tile) { display: none; }
+  .prompt-arrow { margin-top: auto; width: 18px; height: 18px; color: var(--muted); }
+  .message { padding: 12px 0; }
+  .message.user .message-body { position: relative; background: var(--surface-2); border: 1px solid var(--border); border-radius: 16px; padding: 12px 16px; display: flex; align-items: baseline; gap: 14px; }
+  .message.user .msg-time { flex: none; font-size: 11px; color: var(--subtle); }
+  .message.assistant { grid-template-columns: 40px minmax(0, 1fr); gap: 14px; }
+  .message.assistant .message-body { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 16px 18px; }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--brand-grad); color: #04211e; box-shadow: 0 8px 22px rgba(31,209,191,.22); }
+  :root[data-theme="light"] .avatar { color: #fff; }
+  .avatar .icon { width: 18px; height: 18px; }
+  .msg-actions { display: flex; align-items: center; gap: 4px; margin-top: 12px; color: var(--subtle); font-size: 11px; }
+  .msg-actions button { width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--subtle); display: grid; place-items: center; cursor: pointer; }
+  .msg-actions button:hover { background: var(--surface-2); color: var(--text); }
+  .msg-actions button.on { color: var(--brand); }
+  .msg-actions .icon { width: 15px; height: 15px; }
+  .msg-actions time { margin-left: auto; }
+  .composer-shell { padding: 10px 24px max(18px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, transparent, var(--card-main) 40%); border-top: 0; }
+  .composer { border-radius: 24px; padding: 14px 14px 12px 20px; box-shadow: 0 18px 50px var(--shadow-2); }
+  .composer textarea { font-size: 15px; min-height: 36px; }
+  .composer-tools { margin-top: 10px; gap: 8px; flex-wrap: wrap; }
+  .composer-plus { width: 38px; height: 38px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface-2); display: grid; place-items: center; color: var(--muted); cursor: pointer; flex: none; }
+  .composer-plus:hover { color: var(--text); border-color: var(--hover-border); }
+  .composer-context, .team-toggle, .policy-chip, .pay-chip, .credits-chip { margin-left: 0; height: 32px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: transparent; font-size: 12px; color: var(--muted); }
+  .composer-context .icon { width: 13px; height: 13px; }
+  .policy-chip { max-width: 40%; }
+  .policy-chip.unset { border-style: solid; }
+  .credits-chip { color: var(--muted); }
+  .send { width: 42px; height: 42px; border-radius: 50%; background: var(--brand-grad); color: var(--send-fg); box-shadow: 0 10px 26px rgba(31,209,191,.3); }
+  :root[data-theme="light"] .send { box-shadow: 0 10px 26px rgba(47,107,255,.3); }
+  .send:hover { filter: brightness(1.06); }
+  .disclaimer { color: var(--disclaimer); }
+  .primary { background: var(--brand-grad); color: #04211e; border: 0; }
+  :root[data-theme="light"] .primary { color: #fff; }
+  .primary:hover { background: var(--brand-grad); filter: brightness(1.06); }
+  .dialog { border-radius: 22px; }
+  .field input, .field select, .charter-grid textarea { border-radius: 12px; }
+  .explore-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .explore-group h3 { margin: 14px 0 6px; font-size: 12px; color: var(--subtle); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+  .explore-group h3:first-child { margin-top: 0; }
+  .explore-item { width: 100%; text-align: left; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 10px 12px; font-size: 13px; color: var(--text); cursor: pointer; }
+  .explore-item:hover { border-color: var(--brand-border-strong); background: var(--surface-2); }
+  .explore-item small { display: block; color: var(--subtle); font-size: 11px; margin-top: 3px; }
+  @media (max-width: 1100px) { .prompts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .prompt-card { min-height: 130px; } .main::after { display: none; } }
+  @media (max-width: 720px) {
+    .app { padding: 0; gap: 0; }
+    .main { border-radius: 0; border: 0; }
+    .sidebar { border-radius: 0 var(--shell-radius) var(--shell-radius) 0; }
+    .prompts { grid-template-columns: 1fr 1fr; }
+    .prompt-card:nth-child(n+3) { display: flex; }
+    .prompt-card { min-height: 120px; }
+    .welcome { padding-top: 4vh; }
+    .welcome h1 { font-size: 34px; }
+    .main::before, .deco { display: none; }
+    .explore-grid { grid-template-columns: 1fr; }
+    .composer { border-radius: 20px; }
+  }
 </style>
-</head>
+</head
 <body>
 <div class="app">
   <aside class="sidebar" id="sidebar">
     <div class="side-brand"><span class="mark"><svg class="icon" viewBox="0 0 24 24"><path d="M5 15.5 9.5 11l3 3L19 7.5"/><path d="M19 12v7H5V5h8"/></svg></span>Orbit</div>
-    <button class="new-chat" id="newChatBtn"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New chat</button>
-    <div class="history-heading">Recent</div>
+    <button class="new-chat" id="newChatBtn"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New Chat</button>
+    <nav class="side-nav" aria-label="Primary">
+      <button class="nav-item active" id="navHome" type="button"><svg class="icon" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9Z"/></svg>Home</button>
+      <button class="nav-item" id="navExplore" type="button"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15 9-2 6-4 2 2-6 4-2Z"/></svg>Explore</button>
+      <button class="nav-item" id="navLibrary" type="button"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M8 6V4h8v2"/></svg>Library</button>
+    </nav>
+    <div class="history-heading">Chats</div>
     <div class="history" id="chatList"></div>
     <div class="sidebar-footer">
       <button class="account-button" id="profileBtn">
         <span class="account-avatar" id="profileAvatar">A</span>
         <span class="account-copy"><span class="account-name" id="profileName">Web3 User</span><span class="account-tier" id="profileRisk">Balanced risk</span></span>
-        <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+        <svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
       </button>
     </div>
   </aside>
@@ -505,20 +663,22 @@
         <button class="icon-button" id="deleteChatBtn" type="button" hidden aria-label="Delete this conversation" title="Delete this conversation"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
         <button class="icon-button" id="themeToggle" type="button" aria-label="Switch theme" title="Switch theme"><svg id="themeIconSun" class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg id="themeIconMoon" class="icon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg></button>
         <button class="wallet-button" id="walletButton"><i class="wallet-status"></i><span id="walletLabel">Connect wallet</span></button>
+        <button class="icon-button avatar-button" id="topAvatarBtn" type="button" aria-label="Account and settings" title="Account and settings"><span class="account-avatar" id="topAvatar">W</span><svg class="icon" viewBox="0 0 24 24" style="width:14px;height:14px"><path d="m6 9 6 6 6-6"/></svg></button>
       </div>
     </header>
+    <div class="deco" aria-hidden="true"></div>
 
     <section class="conversation" id="conversation">
       <div class="thread" id="messages">
         <div class="welcome" id="welcome">
-          <div class="welcome-mark"><svg class="icon" viewBox="0 0 24 24"><path d="M5 15.5 9.5 11l3 3L19 7.5"/><path d="M19 12v7H5V5h8"/></svg></div>
-          <h1>How can I help with Web3?</h1>
-          <p>Research tokens, inspect on-chain activity, understand your portfolio, and prepare safe swaps from one focused workspace.</p>
+          <div class="welcome-mark"></div>
+          <h1><span id="greetingWord">Good morning</span>, <em id="greetingName">there</em></h1>
+          <p>How can I help you with Web3 today?</p>
           <div class="prompts">
-            <button class="prompt-card" data-action="portfolio"><strong>Analyze my portfolio</strong><span>Review holdings, allocation, and concentration risk</span></button>
-            <button class="prompt-card" data-msg="Check my SOL balance and list my SPL token balances. Do not prepare any trade."><strong>Check wallet balances</strong><span>Read SOL and SPL balances from your connected wallet</span></button>
-            <button class="prompt-card" data-msg="Find the verified Jupiter token information and safety warnings for USDC mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v. Do not trade."><strong>Research a token</strong><span>Inspect token details, verification, and safety warnings</span></button>
-            <button class="prompt-card" data-action="relay"><strong>Swap across chains</strong><span>Buy a token through Relay after reviewing route, fees, and output</span></button>
+            <button class="prompt-card" data-action="portfolio" data-tone="teal"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/></svg></span><strong>Analyze my portfolio and concentration risk</strong><span>Review holdings, allocation, and concentration risk</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+            <button class="prompt-card" data-msg="Check my SOL balance and list my SPL token balances. Do not prepare any trade." data-tone="blue"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2"/></svg></span><strong>Check my wallet balances</strong><span>Read SOL and SPL balances from your connected wallet</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+            <button class="prompt-card" data-msg="Find the verified Jupiter token information and safety warnings for USDC mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v. Do not trade." data-tone="violet"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg></span><strong>Research a token and its safety</strong><span>Inspect token details, verification, and safety warnings</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+            <button class="prompt-card" data-action="relay" data-tone="amber"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h13l-3-3M20 17H7l3 3"/></svg></span><strong>Swap across chains with a reviewed quote</strong><span>Buy a token through Relay after reviewing route, fees, and output</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
           </div>
         </div>
       </div>
@@ -528,9 +688,10 @@
 
     <div class="composer-shell">
       <form class="composer" id="composer">
-        <textarea id="messageInput" rows="1" maxlength="2000" placeholder="Message Web3 Copilot"></textarea>
+        <textarea id="messageInput" rows="1" maxlength="2000" placeholder="Message anything…"></textarea>
         <div class="composer-tools">
-          <span class="composer-context"><svg class="icon" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg><span>Live web &amp; on-chain tools</span></span>
+          <button class="composer-plus" id="composerPlus" type="button" aria-label="Connect a wallet" title="Connect a wallet"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+          <span class="composer-context"><svg class="icon" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg><span>Live tools</span></span>
           <label class="team-toggle" id="teamToggle" title="Team desk: a Coordinator fans each request out to Market Research, Execution and Risk. Slower and costs more per turn."><input id="teamMode" type="checkbox" role="switch" aria-label="Team desk mode" /><span class="team-track" aria-hidden="true"></span><span class="team-label">Team desk</span></label>
           <span class="pay-chip" id="payChip" hidden title=""><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 14h3"/></svg><span id="payChipText"></span></span>
           <button class="pay-chip credits-chip" id="creditsChip" type="button" hidden title="Your credit balance. Each turn costs 1-5 credits depending on what it does."><b id="creditsCount">0</b>&nbsp;credits · <span id="creditsPlan">Trial</span></button>
@@ -980,23 +1141,33 @@ async function deleteChat(id) {
   chatRegistry = chatRegistry.filter(chat => chat.id !== id); saveChats();
   if (sessionId === id) startNewChat(); else renderChatList();
 }
+function fillGreeting(){const h=new Date().getHours();const word=h<5?"Good night":h<12?"Good morning":h<17?"Good afternoon":h<22?"Good evening":"Good night";const w=$("#greetingWord"),n=$("#greetingName");if(w)w.textContent=word;
+  const name=(typeof account!=="undefined"&&account?.user?.display_name)||(typeof profile!=="undefined"&&profile?.name)||(typeof account!=="undefined"&&account?.user?.email?.split("@")[0])||"there";if(n)n.textContent=name;
+  const avatar=$("#topAvatar");if(avatar)avatar.textContent=(name==="there"?"W":name).trim()[0].toUpperCase();}
+function setNav(id){document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("active",b.id===id));}
 function startNewChat() {
   if (busy) return;
-  chatTurnEpoch++;sessionId = null;sessionRevision=0; sessionStorage.removeItem("orbit_session_id"); messagesEl.innerHTML = welcomeMarkup; renderChatList(); syncTeamMode(false); syncPolicy(null,null); autoFollow=true;conversationEl.scrollTop=0;closeSidebar();input.focus();
+  chatTurnEpoch++;sessionId = null;sessionRevision=0; sessionStorage.removeItem("orbit_session_id"); messagesEl.innerHTML = welcomeMarkup; fillGreeting(); setNav("navHome"); renderChatList(); syncTeamMode(false); syncPolicy(null,null); autoFollow=true;conversationEl.scrollTop=0;closeSidebar();input.focus();
 }
 const welcomeMarkup = messagesEl.innerHTML;
 
 function addUserMessage(text) {
   hideWelcome(); const el = document.createElement("article"); el.className = "message user";
-  el.innerHTML = '<div class="message-body"></div>'; $(".message-body",el).textContent = text; messagesEl.appendChild(el); autoFollow=true;scrollToBottom(true);
+  el.innerHTML = '<div class="message-body"><span class="msg-text"></span><span class="msg-time"></span></div>'; $(".msg-text",el).textContent = text; $(".msg-time",el).textContent = clockTime(); messagesEl.appendChild(el); autoFollow=true;scrollToBottom(true);
 }
+function clockTime(date=new Date()){return date.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});}
+function attachMessageActions(el, text){const body=$(".message-body",el);if(!body||$(".msg-actions",body))return;const row=document.createElement("div");row.className="msg-actions";
+  row.innerHTML='<button type="button" data-act="copy" title="Copy answer" aria-label="Copy answer"><svg class="icon" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg></button><button type="button" data-act="up" title="Good answer" aria-label="Good answer"><svg class="icon" viewBox="0 0 24 24"><path d="M7 10v11M3 11h4l3-8a2 2 0 0 1 2 2v4h5a2 2 0 0 1 2 2l-1.5 8a2 2 0 0 1-2 2H7"/></svg></button><button type="button" data-act="down" title="Poor answer" aria-label="Poor answer"><svg class="icon" viewBox="0 0 24 24"><path d="M17 14V3M21 13h-4l-3 8a2 2 0 0 1-2-2v-4H7a2 2 0 0 1-2-2l1.5-8a2 2 0 0 1 2-2H17"/></svg></button><time>'+clockTime()+'</time>';
+  row.querySelector('[data-act="copy"]').addEventListener("click",b=>{const t=text||$(".answer",body)?.innerText||body.innerText;navigator.clipboard?.writeText(t);const btn=b.currentTarget;btn.classList.add("on");setTimeout(()=>btn.classList.remove("on"),1200);});
+  row.querySelectorAll('[data-act="up"],[data-act="down"]').forEach(b=>b.addEventListener("click",()=>{row.querySelectorAll('[data-act="up"],[data-act="down"]').forEach(o=>o.classList.remove("on"));b.classList.add("on");}));
+  body.appendChild(row);}
 function addAgentMessage(text) {
   hideWelcome(); const el = document.createElement("article"); el.className = "message assistant";
-  el.innerHTML = '<div class="avatar">O</div><div class="message-body"><div class="answer"></div></div>'; $(".answer",el).innerHTML = renderInline(text); messagesEl.appendChild(el); scrollToBottom(); return el;
+  el.innerHTML = '<div class="avatar"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/><path d="M18 16l.8 2.2L21 19l-2.2.8L18 22l-.8-2.2L15 19l2.2-.8L18 16Z"/></svg></div><div class="message-body"><div class="answer"></div></div>'; $(".answer",el).innerHTML = renderInline(text); messagesEl.appendChild(el); scrollToBottom(); return el;
 }
 function addTyping() {
   hideWelcome(); const el = document.createElement("article"); el.className = "message assistant";
-  el.innerHTML = '<div class="avatar">O</div><div class="message-body"><div class="typing"><i></i><i></i><i></i></div></div>'; messagesEl.appendChild(el); autoFollow=true;scrollToBottom(true); return el;
+  el.innerHTML = '<div class="avatar"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/><path d="M18 16l.8 2.2L21 19l-2.2.8L18 22l-.8-2.2L15 19l2.2-.8L18 16Z"/></svg></div><div class="message-body"><div class="typing"><i></i><i></i><i></i></div></div>'; messagesEl.appendChild(el); autoFollow=true;scrollToBottom(true); return el;
 }
 function parseMaybeJson(value) { if (typeof value !== "string") return value; try { return JSON.parse(value); } catch { return value; } }
 function pretty(value) { const parsed = parseMaybeJson(value); return typeof parsed === "string" ? parsed : JSON.stringify(parsed, null, 2); }
@@ -1207,6 +1378,7 @@ function finishAgentMessage(el, data) {
   const body=$(".message-body",el); body.innerHTML='<div class="answer"></div>';
   if(data.error){el.classList.add("error");$(".answer",body).textContent=data.error;}
   else { const answerNode=$(".answer",body);answerNode.replaceWith(renderAnswerResult(data.answer || ""));if(data.intent)body.appendChild(renderRouteBadge(data.intent,data.capabilities));body.appendChild(renderExperience(data));if(data.cross_chain_swap)body.appendChild(renderRelayPlanCard(data.cross_chain_swap,Number(data.session_revision??-1))); const portfolio=renderMcpPortfolioCard(data.trajectory);if(portfolio)body.appendChild(portfolio);const activity=renderToolActivity(data.trajectory); if(activity)body.appendChild(activity); if(data.trade_plan)body.appendChild(renderPlanCard(data.trade_plan));const actions=data.quick_actions?.length?data.quick_actions:[];if(actions.length)body.appendChild(renderSuggestions(actions,data.trade_plan)); }
+  if(!data.error) attachMessageActions(el, data.answer);
   scrollToBottom();
 }
 function compactAddress(value){const text=String(value||"");return text.length>12?`${text.slice(0,5)}…${text.slice(-4)}`:text;}
@@ -1365,7 +1537,7 @@ let account=null;
 async function loadAccount(){try{const res=await fetch("/me",{headers:{"X-Orbit-Device":deviceId}});account=await res.json();}catch{account=null;}renderAccount();}
 function renderCredits(){const chip=$("#creditsChip");if(!account){chip.hidden=true;return;}const balance=Number(account.credits?.balance??0);chip.hidden=false;$("#creditsCount").textContent=balance.toLocaleString();$("#creditsPlan").textContent=account.plan?.name||"Trial";chip.classList.toggle("low",balance<10);$("#accountCredits").textContent=balance.toLocaleString();$("#profileRisk").textContent=account.authenticated?`${account.plan?.name} · ${balance.toLocaleString()} credits`:`Trial · ${balance} credits left`;}
 function renderAccount(){
-  renderCredits();
+  renderCredits();fillGreeting();
   const signedIn=Boolean(account?.authenticated);const user=account?.user||{};
   $("#accountEmail").textContent=signedIn?user.email:"Not signed in";$("#accountEmail").classList.toggle("muted",!signedIn);
   $("#accountPlan").textContent=account?.plan?.name||"Trial";
@@ -1455,7 +1627,21 @@ $("#createApiKeyBtn").addEventListener("click",createApiKey);
 document.querySelectorAll("[data-close]").forEach(button=>button.addEventListener("click",()=>closeDialog(button.dataset.close)));
 document.querySelectorAll(".overlay").forEach(overlay=>overlay.addEventListener("click",event=>{if(event.target===overlay)closeDialog(overlay.id);}));
 document.addEventListener("keydown",event=>{if(event.key==="Escape"){document.querySelectorAll(".overlay.open").forEach(dialog=>dialog.classList.remove("open"));closeSidebar();}});
-$("#newChatBtn").addEventListener("click",startNewChat);$("#mobileMenu").addEventListener("click",()=>setSidebar(!$("#sidebar").classList.contains("open")));$("#sidebarBackdrop").addEventListener("click",closeSidebar);
+$("#newChatBtn").addEventListener("click",startNewChat);
+$("#navHome").addEventListener("click",startNewChat);
+$("#navLibrary").addEventListener("click",()=>{setNav("navLibrary");if(window.matchMedia("(max-width:720px)").matches)setSidebar(true);const first=$("#chatList .chat-item");if(first)first.focus();});
+$("#navExplore").addEventListener("click",()=>{setNav("navExplore");openExplore();});
+$("#topAvatarBtn").addEventListener("click",()=>openSettings("account"));
+$("#composerPlus").addEventListener("click",()=>{if(account&&!account.authenticated){openSignin("Sign in to connect a wallet, review trades and keep your history.");return;}openDialog("walletDialog");});
+const EXPLORE_PROMPTS=[["Market",[["How's the crypto market today?","Overview card: BTC/ETH/SOL, sentiment, movers, trending"],["Trending tokens on Solana","Live pools and launches with volume and liquidity"],["Top gainers on Base in the last 24h","Ranked movers per chain"]]],
+ ["Research",[["Deep dive on JUP","10-dimension due diligence with confidence and flip variable"],["Is BONK safe to ape into?","Jupiter identity + Shield safety dossier"],["Who are the top holders of PEPE?","Holder concentration, chain-correct"],["Latest news on Ethereum ETFs","Web research with sources"]]],
+ ["Wallets",[["Analyze my portfolio","Holdings, allocation and concentration risk"],["What if my portfolio drops 20%?","Deterministic price-shock scenario"],["Wallet health check","Balances, pricing gaps, gas readiness"]]],
+ ["Trading",[["What would happen if I sold 0.05 SOL for USDC?","Read-only simulation with a live Jupiter quote"],["Swap 0.01 SOL to USDC on Solana with 50 bps slippage","Quote → review → confirm from your wallet"],["Set my risk charter","Rules the Risk agent enforces before any quote"]]]];
+function openExplore(){let dlg=$("#exploreDialog");if(!dlg){dlg=document.createElement("div");dlg.className="overlay";dlg.id="exploreDialog";dlg.setAttribute("role","dialog");dlg.setAttribute("aria-modal","true");dlg.innerHTML='<div class="dialog" style="width:min(720px,100%)"><div class="dialog-head"><h2>Explore</h2><button class="close" data-close="exploreDialog" aria-label="Close">×</button></div><div class="dialog-body" id="exploreBody"></div></div>';document.body.appendChild(dlg);dlg.querySelector("[data-close]").addEventListener("click",()=>closeDialog("exploreDialog"));dlg.addEventListener("click",e=>{if(e.target===dlg)closeDialog("exploreDialog");});
+    $("#exploreBody").innerHTML=EXPLORE_PROMPTS.map(([group,items])=>`<div class="explore-group"><h3>${escapeHtml(group)}</h3><div class="explore-grid">${items.map(([q,d])=>`<button class="explore-item" type="button" data-q="${escapeHtml(q)}">${escapeHtml(q)}<small>${escapeHtml(d)}</small></button>`).join("")}</div></div>`).join("");
+    $("#exploreBody").querySelectorAll("[data-q]").forEach(b=>b.addEventListener("click",()=>{closeDialog("exploreDialog");if(b.dataset.q==="Set my risk charter"){openCharterDialog();return;}input.value=b.dataset.q;input.focus();form.requestSubmit();}));}
+  openDialog("exploreDialog");}
+fillGreeting();$("#mobileMenu").addEventListener("click",()=>setSidebar(!$("#sidebar").classList.contains("open")));$("#sidebarBackdrop").addEventListener("click",closeSidebar);
 
 async function checkHealth(){try{const res=await fetch("/health");$("#healthDot").classList.toggle("online",res.ok);}catch{$("#healthDot").classList.remove("online");}}
 syncViewportLayout();initProfile();renderChatList();hydrateHistory();checkHealth();setInterval(checkHealth,15000);
