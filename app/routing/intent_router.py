@@ -60,6 +60,17 @@ def plan_execution_route(request: str, chains: tuple[str, ...]) -> CapabilityRou
     )
 
 
+def _knowledge_ask(request: str) -> bool:
+    """A 'what is / how does / who competes with' ask naming a protocol in the
+    knowledge registry. Deterministic evidence, so it anchors like an address."""
+    try:
+        from app.knowledge import tool as knowledge_tool
+
+        return knowledge_tool.matches(request)
+    except Exception:
+        return False
+
+
 def route_capabilities(request: str) -> CapabilityRoute | None:
     """Resolve high-confidence chat requests without an extra model call."""
     chains = extract_chains(request)
@@ -114,6 +125,8 @@ def route_capabilities(request: str) -> CapabilityRoute | None:
     if lx.OWN_WALLET.search(request) and not lx.ADDRESS.search(request):
         return _route("portfolio", ("portfolio", "wallet_intelligence"), chains, reason="own_wallet")
 
+    if _knowledge_ask(request):
+        return _route("research", ("knowledge", "web_research"), chains, reason="knowledge_base")
     if lx.ADDRESS.search(request) and lx.TOKEN.search(request) and not lx.WALLET_OWNER.search(request):
         capabilities = ["token_discovery", "token_security"]
         if lx.MARKET.search(request):

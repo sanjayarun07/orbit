@@ -453,6 +453,7 @@ def wallet_portfolio_answer(wallet: str, observation: str, chain: str | None = N
 
 
 _DIRECT_CAPABILITY_ORDER = (
+    "knowledge",
     "url_fetch",
     "project_intelligence",
     "vc_intelligence",
@@ -476,6 +477,7 @@ _DIRECT_CAPABILITY_ORDER = (
 # intentionally excluded: those are the generic fallbacks the classifier
 # already owns, and a tool matcher must never quietly pull a request into them.
 _BACKSTOP_CAPABILITIES = frozenset({
+    "knowledge",
     "market_data", "token_discovery", "token_security",
     "market_sentiment", "defi_data", "listing_events", "wallet_intelligence",
 })
@@ -1167,6 +1169,21 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
 
 
 @trace(name="research", as_type="agent")
+async def _synthesize_knowledge(request: str, passages: str, history: str) -> str:
+    try:
+        result = await runtime._call_lm(runtime.knowledge_synthesizer, request=request, conversation_history=history or "", passages=passages)
+        answer = (getattr(result, "answer", "") or "").strip()
+    except Exception:
+        logger.warning("knowledge synthesis failed; returning passages", exc_info=True)
+        answer = ""
+    if not answer:
+        return passages
+    sources = passages.split("## Sources", 1)[1].strip() if "## Sources" in passages else ""
+    if sources and "## Sources" not in answer:
+        answer += "\n\n## Sources\n" + sources
+    return answer
+
+
 async def research_node(state: AgentState) -> dict:
     sink: dict = {}
     result = await _research_node(state, sink)
@@ -1405,8 +1422,12 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
             chains,
         )
         if result is not None:
+            answer = result.output
+            if result.tool == "knowledge_base_search":
+                # Retrieval context, not an answer: synthesize over the passages with citations.
+                answer = await _synthesize_knowledge(request, result.output, state.get("history", ""))
             return {
-                "answer": result.output,
+                "answer": answer,
                 "trajectory": _provider_trajectory(result, request, "/".join(eligible_capabilities)),
             }
         # None means no configured provider across the eligible capabilities

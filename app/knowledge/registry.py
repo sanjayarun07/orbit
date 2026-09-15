@@ -1,0 +1,135 @@
+"""Protocol registry bootstrapped from DefiLlama's /protocols endpoint (free,
+no key). The registry is the backbone: every document, chunk and edge hangs
+off a protocol id, and each protocol becomes an entity with its chains,
+category and token as first edges of the graph.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from datetime import datetime, timezone
+
+import httpx
+
+from app.knowledge.entities import category_id, chain_id, protocol_id, seed_chain_entities, slugify
+from app.knowledge.models import Entity, Protocol, Relationship
+
+logger = logging.getLogger(__name__)
+
+DEFILLAMA_PROTOCOLS = "https://api.llama.fi/protocols"
+_SKIP_CATEGORIES = {"CEX", "Chain"}
+
+
+def _fetch_protocols() -> list[dict]:
+    with httpx.Client(timeout=30, headers={"User-Agent": "Dopamint-Knowledge/0.1"}) as client:
+        resp = client.get(DEFILLAMA_PROTOCOLS)
+        resp.raise_for_status()
+        data = resp.json()
+    return data if isinstance(data, list) else []
+
+
+def protocol_from_llama(item: dict) -> Protocol | None:
+    slug = str(item.get("slug") or slugify(item.get("name") or ""))
+    if not slug or (item.get("category") in _SKIP_CATEGORIES):
+        return None
+    name = str(item.get("name") or slug)
+    aliases = {name, slug.replace("-", " ")}
+    if item.get("symbol") and item["symbol"] != "-":
+        aliases.add(str(item["symbol"]))
+    for extra in (item.get("parentProtocol") or "", item.get("module") or ""):
+        if extra and isinstance(extra, str) and 2 < len(extra) < 40:
+            aliases.add(extra.replace("parent#", "").replace("-", " "))
+    github = None
+    for repo in item.get("github") or []:
+        if isinstance(repo, str) and repo:
+            github = repo.split("/")[0]
+            break
+    website = item.get("url")
+    return Protocol(
+        id=protocol_id(slug), slug=slug, name=name, symbol=(item.get("symbol") if item.get("symbol") not in (None, "-") else None),
+        category=item.get("category"), description=(item.get("description") or None), website=website,
+        docs_url=None, github_org=github, governance_url=None, defillama_slug=slug, coingecko_id=item.get("gecko_id"),
+        twitter_handle=item.get("twitter"), chains=[slugify(c) for c in (item.get("chains") or [])],
+        contracts=[{"chain": slugify(chain), "address": address, "label": "token"} for chain, address in _token_addresses(item)],
+        aliases=sorted(a for a in aliases if a and a.lower() != name.lower()), tvl_usd=float(item.get("tvl") or 0) or None,
+        last_updated=datetime.now(timezone.utc),
+    )
+
+
+def _token_addresses(item: dict) -> list[tuple[str, str]]:
+    address = item.get("address")
+    if not address or not isinstance(address, str) or address in ("-", "0x0000000000000000000000000000000000000000"):
+        return []
+    if ":" in address:
+        chain, addr = address.split(":", 1)
+        return [(chain, addr)]
+    return [("ethereum", address)]
+
+
+def entities_for(protocol: Protocol) -> tuple[list[Entity], list[Relationship]]:
+    """The protocol entity plus its chains, category and token, and the edges
+    that connect them. Structured sources first: these are high-confidence."""
+    now = datetime.now(timezone.utc)
+    entities = [Entity(
+        id=protocol.id, entity_type="protocol", canonical_name=protocol.name, symbol=protocol.symbol, aliases=protocol.aliases,
+        metadata={"defillama_slug": protocol.defillama_slug, "coingecko_id": protocol.coingecko_id, "category": protocol.category, "website": protocol.website, "github_org": protocol.github_org},
+    )]
+    relationships = []
+    for chain in protocol.chains:
+        entities.append(Entity(id=chain_id(chain), entity_type="chain", canonical_name=chain.replace("-", " ").title(), aliases=[]))
+        relationships.append(Relationship(protocol.id, "DEPLOYED_ON", chain_id(chain), confidence=0.98, valid_from=None, observed_at=now, metadata={"source": "defillama"}))
+    if protocol.category:
+        entities.append(Entity(id=category_id(protocol.category), entity_type="category", canonical_name=protocol.category, aliases=[]))
+        relationships.append(Relationship(protocol.id, "IN_CATEGORY", category_id(protocol.category), confidence=0.98, observed_at=now, metadata={"source": "defillama"}))
+    for contract in protocol.contracts:
+        if contract.get("label") == "token" and contract.get("address"):
+            # Canonical name is "<Protocol> token", never the bare ticker: a ticker
+            # must only ever resolve through the low-confidence rungs of the ladder.
+            token = Entity(id=f"token:{contract['chain']}:{contract['address'].lower() if contract['address'].startswith('0x') else contract['address']}", entity_type="token",
+                           canonical_name=f"{protocol.name} token", symbol=protocol.symbol, chain=contract["chain"], address=contract["address"],
+                           aliases=[], metadata={"coingecko_id": protocol.coingecko_id})
+            entities.append(token)
+            relationships.append(Relationship(token.id, "TOKEN_OF", protocol.id, confidence=0.98, observed_at=now, metadata={"source": "defillama"}))
+    return entities, relationships
+
+
+async def bootstrap(limit: int = 50, items: list[dict] | None = None) -> dict:
+    """Top-`limit` protocols by TVL into the registry, with their entities and
+    first-degree edges. Returns counts."""
+    from app.knowledge.store import get_store
+
+    store = await get_store()
+    raw = items if items is not None else _fetch_protocols()
+    raw = sorted((i for i in raw if isinstance(i, dict)), key=lambda i: -(float(i.get("tvl") or 0)))
+    written = entities_written = relationships_written = 0
+    for chain in seed_chain_entities():
+        await store.upsert_entity(chain)
+    for item in raw:
+        if written >= limit:
+            break
+        protocol = protocol_from_llama(item)
+        if protocol is None:
+            continue
+        await store.upsert_protocol(protocol)
+        entities, relationships = entities_for(protocol)
+        for entity in entities:
+            await store.upsert_entity(entity)
+            entities_written += 1
+        for rel in relationships:
+            relationships_written += int(await store.upsert_relationship(rel))
+        written += 1
+    logger.info("knowledge: registry bootstrapped with %d protocols", written)
+    return {"protocols": written, "entities": entities_written, "relationships": relationships_written}
+
+
+def guess_docs_url(protocol: Protocol) -> str | None:
+    """Docs live at predictable places for most protocols; the crawler
+    verifies the guess (a 404 is skipped, not indexed)."""
+    if protocol.docs_url:
+        return protocol.docs_url
+    site = (protocol.website or "").rstrip("/")
+    if not site:
+        return None
+    host = re.sub(r"^https?://(www\.)?", "", site)
+    return f"https://docs.{host}"

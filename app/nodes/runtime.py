@@ -138,6 +138,21 @@ class ResearchAnswer(dspy.Signature):
     answer: str = dspy.OutputField(desc="Concise grounded response including risks")
 
 
+class KnowledgeAnswer(dspy.Signature):
+    """Answer a protocol / concept question strictly from numbered knowledge-base
+    passages. Cite every factual claim as [n]. If the passages don't cover part
+    of the question, say exactly what is missing instead of filling it in.
+    Prefer the passage that matches the protocol version the user named; when
+    passages describe different versions (e.g. v3 vs v4), say which is which.
+    Write for a trader: concrete parameters, mechanics, and what they imply.
+    No investment advice."""
+
+    request: str = dspy.InputField()
+    conversation_history: str = dspy.InputField(desc="Prior turns, oldest first; empty if none")
+    passages: str = dspy.InputField(desc="Numbered passages [n] with protocol, document and heading")
+    answer: str = dspy.OutputField(desc="Cited answer in Markdown; ends with a Sources list of the [n] used")
+
+
 class EquityResearchAnswer(dspy.Signature):
     """Synthesize a professional equity brief strictly from supplied Perplexity evidence.
 
@@ -389,6 +404,7 @@ class RoleReflection(dspy.Signature):
 
 general_agent = dspy.Predict(GeneralAnswer)
 equity_research_synthesizer = dspy.Predict(EquityResearchAnswer)
+knowledge_synthesizer = dspy.Predict(KnowledgeAnswer)
 risk_agent = dspy.Predict(RiskAssessment)
 market_research_agent = dspy.Predict(MarketResearch)
 team_coordinator = dspy.Predict(TeamSynthesis)

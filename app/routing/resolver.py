@@ -41,7 +41,7 @@ from .trade_parser import extract_cross_chain_draft
 # intents (trade / cross_chain_swap, any reason except semantic_required) are
 # anchored by construction and handled separately in _is_anchored.
 _ANCHORED_REASONS = frozenset({
-    "conceptual", "trade_cancel", "trade_confirm", "risk_charter", "team_mode", "equity",
+    "knowledge_base", "conceptual", "trade_cancel", "trade_confirm", "risk_charter", "team_mode", "equity",
     "trade_simulation", "own_token_balance", "own_token_holdings", "own_wallet_activity",
     "wallet_health", "portfolio_scenario", "token_address", "wallet_address", "url",
 })

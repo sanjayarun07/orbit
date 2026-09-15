@@ -23,6 +23,7 @@ from app.perplexity_tools import (
 )
 from app.agent import token_identity, token_safety_warnings, token_top_holders_rpc
 from app import social_sentiment
+from app.knowledge import tool as knowledge_tool
 from app.geckoterminal_tools import geckoterminal_pools, _network as _gt_network
 from app.provider_router import ProviderRouter, ProviderTool
 from app.rootdata_provider import ROOTDATA_PROVIDERS
@@ -262,6 +263,13 @@ def get_provider_router() -> ProviderRouter:
         chains=("solana", "base", "ethereum", "arbitrum", "bsc", "polygon", "avalanche", "sui", "robinhood", "hyperliquid"),
         cache_ttl_seconds=45, quota_per_minute=30, priority=10,
         description="Real trending or newly-created pools on a specific chain or launchpad (GeckoTerminal): price, volume, liquidity, pool age",
+    ))
+    router.register(ProviderTool(
+        "knowledge_base_search", "knowledge", ("knowledge",), knowledge_tool.knowledge_base_search,
+        matches=knowledge_tool.matches,
+        keywords=("what is", "explain", "how does", "docs", "governance", "liquidation", "tokenomics", "competitors"),
+        chains=(), cache_ttl_seconds=300, priority=8,
+        description="Dopamint knowledge base: protocol docs, GitHub and governance passages with citations for 'what is / how does / who competes with' questions",
     ))
     router.register(ProviderTool(
         "x_kol_sentiment", "social", ("market_sentiment",), social_sentiment.x_kol_sentiment,

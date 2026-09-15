@@ -47,6 +47,8 @@ from app.mcp_tools import close_mcp_gateway, discover_mcp_tools, get_mcp_registr
 from app.metrics import increment, snapshot
 from app.wash_trading import nansen_enrich, pipeline as wash_trading_pipeline, schema as wash_trading_schema
 from app import accounts, api_keys, billing, billing_plans, credits, emailer, event_calendar, feedback, home_highlights, mcp_server, notifications, tasks, tasks_nl, tool_outcomes, x402_gate
+from app.knowledge import ingest as kb_ingest, registry as kb_registry, retrieval as kb_retrieval
+from app.knowledge import store as kb_store, tool as kb_tool
 from app.identity import Identity, current_identity, require_user, resolve_identity, service_identity
 from app.models import TRADING_CHAINS, RiskCharterFields
 from app.models import (
@@ -113,6 +115,17 @@ async def jupiter_search_tokens(query: str) -> list[dict]:
 logger = logging.getLogger(__name__)
 
 
+async def _warm_knowledge() -> None:
+    """Keep the resolver snapshot the router reads warm (it is I/O-free by
+    design, so it has to be refreshed here on the main loop)."""
+    while True:
+        try:
+            await kb_tool.resolver(force=True)
+        except Exception:
+            logger.warning("knowledge: resolver refresh failed", exc_info=True)
+        await asyncio.sleep(120)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     discovery = asyncio.create_task(asyncio.to_thread(discover_mcp_tools))
@@ -120,6 +133,9 @@ async def lifespan(_app: FastAPI):
     relay_reconciliation = asyncio.create_task(relay_tracking.worker())
     outcomes_refresh = asyncio.create_task(tool_outcomes.refresh_worker())
     task_worker = asyncio.create_task(tasks.worker())
+    kb_tool.set_loop(asyncio.get_running_loop())
+    kb_warm = asyncio.create_task(_warm_knowledge())
+    kb_worker = asyncio.create_task(kb_ingest.worker())
     try:
         async with mcp_server.mcp.session_manager.run():
             yield
@@ -128,7 +144,10 @@ async def lifespan(_app: FastAPI):
         relay_reconciliation.cancel()
         outcomes_refresh.cancel()
         task_worker.cancel()
-        await asyncio.gather(reconciliation, relay_reconciliation, outcomes_refresh, task_worker, discovery, return_exceptions=True)
+        kb_worker.cancel()
+        kb_warm.cancel()
+        kb_tool.set_loop(None)
+        await asyncio.gather(reconciliation, relay_reconciliation, outcomes_refresh, task_worker, kb_worker, kb_warm, discovery, return_exceptions=True)
         await asyncio.to_thread(close_mcp_gateway)
 
 
@@ -1502,6 +1521,72 @@ async def my_inbox(identity: Identity = Depends(require_user)):
 @app.post("/me/inbox/read")
 async def read_my_inbox(body: InboxRead, identity: Identity = Depends(require_user)):
     return {"marked": await tasks.mark_read(identity.user["id"], body.ids), "unread": await tasks.unread_count(identity.user["id"])}
+
+
+# ---- Knowledge service ----
+
+@app.get("/knowledge/search")
+async def knowledge_search(q: str, limit: int = 6):
+    """Hybrid retrieval over the knowledge base: passages with citations."""
+    if not q.strip():
+        raise HTTPException(400, "q is required")
+    hits, plan = await kb_retrieval.search(q, limit=max(1, min(limit, 20)), resolver=await kb_tool.resolver())
+    context, citations = kb_retrieval.build_context(hits)
+    return {
+        "query": q,
+        "entities": [{"id": r.entity.id, "name": r.entity.canonical_name, "type": r.entity.entity_type, "confidence": r.confidence, "method": r.method} for r in plan.entities],
+        "graph_expanded": plan.graph_expanded,
+        "hits": [{"score": round(h.score, 4), "sources": h.sources, "protocol": h.protocol_name, "title": h.document_title, "url": h.document_url, "heading": h.chunk.heading, "content": h.chunk.content[:600]} for h in hits],
+        "citations": citations,
+    }
+
+
+@app.get("/knowledge/status")
+async def knowledge_status():
+    store = await kb_store.get_store()
+    return {**await store.stats(), "ingestion": kb_ingest.status(), "embedder": kb_tool.get_embedder_name()}
+
+
+@app.get("/admin/knowledge/protocols")
+async def admin_knowledge_protocols(request: Request, limit: int = 100):
+    """The registry as ingested: slugs (what the ingest endpoint takes), TVL, sources."""
+    _require_admin(request)
+    store = await kb_store.get_store()
+    out = []
+    for p in await store.list_protocols(limit=max(1, min(limit, 500))):
+        out.append({"id": p.id, "slug": p.slug, "name": p.name, "symbol": p.symbol, "category": p.category, "tvl_usd": p.tvl_usd, "chains": p.chains,
+                    "docs_url": kb_registry.guess_docs_url(p), "github_org": p.github_org, "defillama_slug": p.defillama_slug})
+    return {"protocols": out}
+
+
+@app.post("/admin/knowledge/bootstrap")
+async def admin_knowledge_bootstrap(request: Request, limit: int = 50):
+    """Fill the protocol registry from DefiLlama (top N by TVL) with entities and edges."""
+    _require_admin(request)
+    result = await kb_registry.bootstrap(limit=max(1, min(limit, 500)))
+    await kb_tool.resolver(force=True)
+    return result
+
+
+@app.post("/admin/knowledge/ingest/{protocol_slug}")
+async def admin_knowledge_ingest(protocol_slug: str, request: Request):
+    """Run every applicable connector for one protocol now."""
+    _require_admin(request)
+    try:
+        results = await kb_ingest.run_protocol(f"protocol:{protocol_slug}")
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    await kb_tool.resolver(force=True)
+    return {"results": [r.__dict__ for r in results]}
+
+
+@app.post("/admin/knowledge/tick")
+async def admin_knowledge_tick(request: Request, limit: int = 5):
+    """One ingestion pass over due (protocol, source) pairs."""
+    _require_admin(request)
+    results = await kb_ingest.tick(limit=max(1, min(limit, 50)))
+    await kb_tool.resolver(force=True)
+    return {"results": [r.__dict__ for r in results]}
 
 
 @app.get("/billing/plans")

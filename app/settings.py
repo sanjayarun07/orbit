@@ -71,6 +71,16 @@ class Settings(BaseSettings):
     # metrics (galaxy score, alt rank, sentiment, interactions, top creators/posts).
     # Preferred over X API and Perplexity for the sentiment tool when set.
     lunarcrush_api_key: str | None = None
+    # --- Knowledge service (app/knowledge) ---
+    knowledge_embedding_provider: str = "openai"      # openai | hashing
+    knowledge_embedding_model: str = "text-embedding-3-small"
+    knowledge_embedding_dim: int = 1024               # matches the schema; Qwen-1024 compatible
+    knowledge_registry_limit: int = 50                # protocols to bootstrap / keep fresh
+    knowledge_docs_page_budget: int = 40              # pages per protocol docs site
+    knowledge_ingest_enabled: bool = False            # background worker; run manually via admin first
+    knowledge_ingest_interval_seconds: int = 300
+    knowledge_ingest_batch: int = 5
+    github_token: str | None = None
     social_sentiment_ttl_seconds: int = 900
     event_calendar_ttl_seconds: int = 21600
     # Per-capability tool-selection semantic fallback (app/routing/tool_semantic.py) --
