@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     # tier than the answer model (e.g. "openai/gpt-4.1-nano"); empty = `model`.
     intent_model: str | None = None
     intent_classifier_cache_entries: int = 512
+    # Outcome-scored tools (app/tool_outcomes.py): a smoothed grounded-success
+    # rate per tool, learned from real turns, adds weight*(rate - prior) to
+    # ProviderRouter._score. An unobserved tool sits at the prior (0 adjustment).
+    provider_outcome_weight: float = 3.0
+    tool_outcome_prior_rate: float = 0.8
+    tool_outcome_prior_weight: float = 5.0
+    tool_outcome_window_days: int = 14
+    tool_outcome_refresh_seconds: int = 300
     # Per-capability tool-selection semantic fallback (app/routing/tool_semantic.py) --
     # a second chance for a description-bearing tool whose regex `matches`
     # gate returned False, not a replacement for the intent-classification

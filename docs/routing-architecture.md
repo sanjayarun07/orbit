@@ -77,6 +77,24 @@ User message
   -> quote / policy / approval
 ```
 
+## Outcome-scored tools
+
+The router's health term only sees whether a provider call *errored*.
+`app/tool_outcomes.py` closes the other half of the loop: after every chat
+turn, each tool that ran is credited a success when its result was usable
+(the call did not fail and the answer validator did not find the answer
+ungrounded in the retrieved data) and a miss otherwise. Counts are kept per
+tool per day in Postgres (`tool_outcomes`, 14-day window, refreshed every
+5 minutes) with an in-process fallback, and `ProviderRouter._score` adds
+`PROVIDER_OUTCOME_WEIGHT * (rate - TOOL_OUTCOME_PRIOR_RATE)`.
+
+The rate is Beta-smoothed with a prior of `TOOL_OUTCOME_PRIOR_RATE` worth
+`TOOL_OUTCOME_PRIOR_WEIGHT` observations, so a tool with no evidence sits
+exactly at the prior and earns no adjustment (provisional), and only moves
+as real turns accumulate (trusted). A tool that keeps returning unusable data
+therefore ranks down on its own; nobody edits a matcher. `GET
+/admin/tools/outcomes` shows every tool's calls, rate and current adjustment.
+
 ## Module boundaries
 
 - `app/routing/contracts.py` defines stable route and draft types.

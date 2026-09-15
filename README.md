@@ -1,320 +1,441 @@
-# DSPy Solana ReAct POC
+# Orbit — Web3 Copilot
 
-A minimal Minara-style Solana assistant. DSPy ReAct can inspect balances and reason
-with read-only tools. It can propose a Jupiter swap, but signing is isolated behind
-a deterministic, expiring confirmation endpoint.
+Orbit is a multi-chain Web3 copilot: it researches tokens, wallets, protocols and
+markets with live on-chain and market evidence, prepares Solana and cross-chain
+swaps as reviewable quotes, and enforces the user's own risk rules before any
+trade reaches a confirmation card. Every answer is grounded in named provider
+data with freshness and provenance checks; nothing is ever signed server-side —
+a swap executes only in the user's wallet, after an explicit confirm.
+
+It runs as a FastAPI service with a LangGraph agent graph, DSPy programs on any
+LiteLLM-compatible model, a multi-provider data router, and MCP integrations,
+with Postgres and Redis for durable state. It ships as a container with CI-built
+images and a one-command production deploy.
+
+## What it does
+
+**Research with evidence.** Token deep-dives across ten due-diligence dimensions,
+a crypto market overview card, trending pools and new pairs per chain, top
+holders, token security dossiers (Jupiter Shield, GoPlus, Honeypot.is), DeFi
+TVL and yields, listing events, Web3 project/VC/people search, and live web
+research. Symbols resolve chain-agnostically and Orbit asks when a ticker is
+ambiguous across chains instead of guessing.
+
+**Wallet intelligence.** Balances, holdings, activity and health diagnostics for
+Solana and EVM wallets; portfolio scenarios ("what if SOL drops 20%") and
+read-only trade simulations ("what would I get for half my SOL") against real
+quotes. Sign in with Phantom, MetaMask, Coinbase Wallet, WalletConnect (Reown),
+or Privy embedded wallets, or paste a public address for read-only use.
+
+**Trading, gated.** Natural-language swaps are quoted through Jupiter (Solana)
+and Relay (cross-chain and EVM), verified against token registries, simulated,
+and rendered as a review card. A per-trade cap, slippage cap and price-impact
+cap are enforced on every quote. Users add their own **risk charter** through a
+card in the UI — max per trade, max % of portfolio per position, max slippage,
+verified-only tokens, allowed chains — and those rules are checked exactly on
+the real quote before a card is shown; a violation blocks the trade with the
+precise reason.
+
+**Team desk.** A switch in the composer routes requests through a multi-agent
+trading desk: a Coordinator fans each request to Market Research, Execution and
+Risk specialists and returns one synthesized answer and card.
+
+**Self-improving analysis.** A role-memory loop stores deep-dive decisions,
+reflects on realized price outcomes without outcome bias, and recalls
+asset-scoped lessons into the next analysis. Tool rankings learn from what
+answers could actually use (see *Outcome-scored tools*).
 
 ## Safety model
 
-- The LLM never receives a private key.
-- The signing function is not registered as a DSPy tool.
-- The agent cannot execute trades by choosing a tool.
-- Quotes expire after 120 seconds by default.
-- Confirmation text must match the exact plan ID.
-- Live execution is disabled by default.
-- Tickers are not silently converted into mint addresses.
-- Both mint addresses are verified against Jupiter's token registry.
-- Jupiter Shield warnings are returned with the plan.
-- USD notional and quote price-impact limits are enforced before confirmation.
-- The unsigned swap transaction must simulate successfully before a plan is returned.
+- The model never receives a private key, and no signing function is a tool.
+- Quotes expire (120 s by default); confirmation must name the exact plan ID and
+  is performed in the user's wallet. Server-side signing (`LIVE_TRADING`) is off
+  by default and independent of the chat path.
+- Tickers are never silently converted to addresses; both sides of a swap are
+  verified against Jupiter's registry or Relay's chain data.
+- USD notional, slippage and price-impact caps are enforced before confirmation;
+  the unsigned transaction must simulate successfully.
+- The user's risk charter can only make trades stricter, never looser; a
+  charter violation supersedes the plan so its confirm token is inert.
+- Financial-execution tools are excluded from research agents; a conditional or
+  questioning phrasing ("if SOL drops…", "should I…") can never become a quote.
+- Advice-shaped questions are answered as research with an explicit
+  not-financial-advice framing.
 
-This is a POC, not a production custody system. Use a newly created, low-value wallet.
-For production, replace the environment-held key with Turnkey, Privy, Fireblocks, or
-another policy-controlled signer and persist plans/audit events in PostgreSQL.
+## Architecture
 
-## Run
+```text
+User message
+  -> controls & session continuations        (deterministic)
+  -> anchored rules                           (execution commands, addresses/URLs, "my" ownership)
+  -> speech model for everything topical      (rules kept as capability hints)
+  -> LangGraph nodes: general | research | portfolio | trade | cross-chain | team
+       -> ProviderRouter (capability -> ranked provider tools, quotas, circuit breakers, cache)
+       -> MCP registry (Nansen and any server in mcp.json)
+  -> answer validator (provenance, freshness, grounding, cross-source consistency)
+  -> outcome recording (which tools' results the answer could use)
+```
+
+- **Routing is model-first.** A small DSPy classifier decides the speech act
+  (research, advice, explain, portfolio, policy, quote) for every topical
+  request; hand-written rules decide only what a hard signal anchors. On the
+  labelled routing set this moved intent accuracy from 90.5% to 100% at ~1.1 s
+  p50. Details in `docs/routing-architecture.md`.
+- **Providers sit behind one router.** Capabilities (`market_data`,
+  `token_discovery`, `token_security`, `wallet_intelligence`, `defi_data`,
+  `finance_data`, `web_research`, …) map to ranked tools from DexScreener,
+  GeckoTerminal, Birdeye, Mobula, Bitquery, CoinGecko, CoinMarketCap, GoPlus,
+  Honeypot.is, DeFiLlama, Dune, Helius, GoldRush, RootData, Perplexity, OpenAI
+  web search, and Nansen (MCP). Ranking weighs priority, keyword fit, chain fit,
+  reliability, latency, cost and learned outcomes; per-tool quotas, circuit
+  breakers, a conservative semantic cache and request coalescing sit underneath.
+- **Every answer is validated.** Step 7 of the pipeline checks provenance,
+  freshness, grounding of figures in retrieved data, and consistency of the
+  same metric across providers; results ride along on the response and never
+  rewrite the answer.
+- **Outcome-scored tools.** After each turn, every tool that ran is credited
+  when its result was usable (clean call, grounded answer) and debited
+  otherwise. A Beta-smoothed success rate per tool feeds the ranking, so tools
+  that keep returning unusable data rank down on their own. Unobserved tools
+  sit at the prior and earn an adjustment only with evidence.
+- **Per-turn budgets and guards.** A call/cost budget bounds external calls per
+  turn; a repeat-call guard stops a stuck tool loop; LLM calls have explicit
+  timeouts, retries and a cross-provider fallback model.
+- **Durable, serialized sessions.** Turns are serialized per session; message,
+  response artifacts and a canonical context snapshot (revision, wallet, focus
+  entity, active workflow, risk charter, team mode) commit together.
+
+## Technical architecture
+
+### Stack
+
+| Layer | Technology |
+|---|---|
+| API | FastAPI + uvicorn; static UI served from `app/static` (vanilla HTML/JS, esbuild-bundled wallet SDKs from `web/*.ts`) |
+| Agent graph | LangGraph state machine (`app/graph.py`, nodes in `app/nodes/`) |
+| Model programs | DSPy signatures/ReAct on any LiteLLM model (`MODEL`, default `openai/gpt-4.1-mini`); optional separate `INTENT_MODEL` for the routing classifier |
+| Data providers | `ProviderRouter` (`app/provider_router.py`) over 35 read-only tools in 14 capabilities; MCP registry (`app/mcp_tools.py`) for Nansen and any `mcp.json` server |
+| Execution | Jupiter (Solana quotes/plans), Relay (cross-chain and EVM), LI.FI (quote/status backup); wallet-side signing only |
+| State | Postgres (trade plans, Relay executions, tool outcomes) and Redis (sessions, per-session turn locks, caches); in-memory fallback for development |
+| Analytics | ClickHouse (provider events, per-turn budgets) and Langfuse tracing, both optional |
+| Delivery | 3-stage Docker image, compose stack, CI (tests → image build → `/health` smoke test → GHCR publish), Caddy TLS overlay |
+
+### A user query, end to end
+
+`POST /chat` runs one turn (`app/main.py`):
+
+1. **Admission.** Per-client chat rate limit, global concurrency slot with a
+   queue timeout, then a per-session turn lease so two tabs cannot mutate the
+   same chat at once. The client's `context_revision` must match the stored
+   snapshot or the request fails with 409 instead of being reinterpreted.
+2. **Typed inputs.** A quick action is authorized only if it matches, byte for
+   byte, an action the server persisted on the latest response. The team-desk
+   switch and the risk-charter card are typed fields; a charter is validated
+   against the built-in caps and rewritten into one canonical
+   `set my risk charter: …` message so transcript, chip and Risk agent share
+   one rendering.
+3. **Contextual resolution.** A swap that was refused for a missing wallet is
+   parked for one turn and re-run when the next message acknowledges the
+   connection ("yes connected"). A pending token disambiguation ("which chain?")
+   is consumed by a one-word reply. Otherwise the follow-up is bound to the
+   session's focused entity only when its name matches the canonical focus —
+   never inferred from unrelated history.
+4. **Routing** (below) picks an intent and capabilities.
+5. **The graph runs** under a per-turn call/cost budget (`MAX_EXTERNAL_CALLS_PER_TURN`,
+   `MAX_PAID_DATA_COST_USD_PER_TURN`) and a repeat-call guard that stops a
+   stuck tool loop from retrying an identical failing call.
+6. **Answer validation.** Provenance (are sources cited), freshness (as-of
+   timestamps on time-sensitive answers), grounding (do the figures in the
+   answer trace to retrieved data), and consistency (the same metric across
+   providers for the same contract). Advisory: attached to the response, never
+   rewrites the answer.
+7. **Outcome recording.** Every tool that ran is credited or debited for the
+   router's learned ranking.
+8. **Commit.** The next context snapshot (revision, wallet, focus entity, last
+   intent/capabilities, active workflow, risk charter and fields, team mode,
+   one-turn pending state) is advanced and committed with the message pair in
+   one transaction. The response carries intent, capabilities, evidence
+   summary, validation, risk assessment, trade readiness, gas advisory, the
+   team mode and the charter, so the UI never has to guess state.
+
+### Routing precedence
+
+`app/routing/resolver.py` decides, in order:
+
+1. **Controls and continuations** — confirm/cancel, risk-charter and team-mode
+   commands, quick actions, parameter fragments for an active trade. Deterministic.
+2. **Anchored rules** — a rule keeps deciding by itself only when a hard signal
+   anchors it: an execution command with its fields (`trade`, `cross_chain_swap`),
+   an address or URL in the message, "my" ownership (balances, holdings,
+   activity, health, price-shock scenarios, simulations of the user's own
+   position), a control verb, an equity ticker. These are precise and free.
+3. **The speech model** decides everything else — every request a rule matched
+   only by topic keywords, and everything no rule matched. A DSPy classifier
+   (`SpeechResolution`) labels the act — `research`, `advice`, `explain`,
+   `portfolio`, `policy`, `quote`, `abstain` — with a domain and confidence. The
+   rule that fired survives only as a capability hint when it agrees on intent;
+   otherwise the model's reading of the act wins. Results are cached per
+   request text.
+4. **Fallbacks** — an uncertain or abstaining model defers to a strong rule or
+   asks a clarifying question (the embedding tier is never a second fuzzy
+   opinion); an unavailable model falls back to nearest-labelled-example
+   embeddings, then asks.
+
+The model can never grant execution: a model-proposed `quote` reaches
+`plan_execution_route` only with `explicit_action` on a crypto subject and only
+when the message carries none of the competing-speech signals (`if`, `when`,
+`?`, `should`, negation…). Intent → node: `general`, `research`, `portfolio`,
+`trade` (Jupiter), `cross_chain_swap` (Relay), or `team` when the desk is on.
+
+Measured on `scripts/routing_eval/cases.json` (49 labelled cases including 15
+long-tail phrasings and policy questions): rules-first 90.5% intent accuracy,
+model-first 100%, ~1.1 s p50 / 1.8 s p95 with the model on the hot path for
+about 70% of turns. When a prompt misroutes, the fix is a new labelled case and
+a sharper classifier example — not a regex.
+
+### Graph nodes
+
+- **general** — controls (confirm/cancel, charter set/show/clear, team on/off),
+  the policy summary (built from settings and the session, never the model),
+  execution explanations, and a lightweight LM reply for conversation.
+- **research** — deterministic intercepts run first when they fit: the crypto
+  market overview card, the ten-dimension token deep-dive, Hyperliquid
+  positions, the market brief. Otherwise `ProviderRouter.try_route_across`
+  ranks tools across every eligible capability and calls the best; if no
+  provider answers, a DSPy ReAct agent runs with only the router-chosen tools
+  plus web search. Ambiguous symbols trigger a chain question rather than a guess.
+- **portfolio** — wallet snapshot (GoldRush/Bitquery balances, Hyperliquid
+  positions, optional Nansen DeFi enrichment), holdings and activity, health
+  diagnostics, price-shock scenarios, and read-only trade simulations against
+  real Jupiter quotes.
+- **trade** — parse → resolve both tokens against Jupiter's registry → quote →
+  deterministic caps (notional, slippage, price impact) → simulate the unsigned
+  transaction → persist an expiring plan → **charter risk** (structured rules
+  checked exactly; free-text notes interpreted by the Risk agent) → review card.
+- **cross_chain_swap** — extract a typed draft from the current message only,
+  resolve tokens against Relay chain data, quote, review card; the browser
+  wallet signs and the backend independently tracks Relay's status API.
+- **team** — a Coordinator fans the request to Market Research, Execution and
+  Risk specialists (reusing the nodes above) and synthesizes one answer; the
+  Risk specialist fetches two or more providers so the consistency check fires.
+
+### Tool selection policy
+
+Two layers, then a learned term:
+
+1. **Capabilities.** Routing yields the capabilities a request needs
+   (`market_data`, `token_discovery`, `token_security`, `wallet_intelligence`,
+   `defi_data`, `finance_data`, `web_research`, `url_fetch`,
+   `people_intelligence`, `project_intelligence`, `vc_intelligence`,
+   `equity_research`, `market_sentiment`, `listing_events`). A reachability
+   backstop makes a tool eligible whenever its own matcher fires, even if the
+   classifier did not name its capability — so vocabulary drift between the two
+   layers can never hide a tool.
+2. **Ranking across the union.** `try_route_across` ranks every candidate from
+   every eligible capability by one capability-independent score:
+
+   ```text
+   score = priority + 8
+         + 2.0 × keyword hits
+         + chain fit (+2 match, −5 conflict)
+         + reliability × PROVIDER_HEALTH_WEIGHT
+         + PROVIDER_OUTCOME_WEIGHT × (learned success rate − prior)
+         − 2.0 × consecutive failures
+         − latency penalty (EWMA, capped)
+         − cost × PROVIDER_COST_WEIGHT
+         − breadth penalty for very long requests
+   ```
+
+   A tool's regex matcher is a hard gate; a description-bearing tool that fails
+   it gets one semantic second chance (embedding similarity ≥ 0.45, calibrated
+   against real requests), but a real regex match always outranks a semantic
+   fallback. Each tool has a rolling per-minute quota and a circuit breaker
+   (opens after repeated failures, cools down); identical concurrent requests
+   coalesce; equivalent recent requests are served from a conservative semantic
+   cache. Credentialed tools are visible but ineligible until their keys exist.
+   Admins can disable tools and override priority, quota and cost at runtime.
+3. **Outcome-scored tools.** After every turn, a tool is credited when its call
+   succeeded and the answer's grounding check did not warn, debited otherwise.
+   Counts are stored per tool per day (14-day window) and folded into the score
+   as a Beta-smoothed rate (prior 0.8, weight 5): a new tool sits at the prior
+   with zero adjustment (provisional) and earns one only with evidence
+   (trusted). `GET /admin/tools/outcomes` shows the live numbers.
+
+MCP tools follow the same idea in their own registry: capabilities, chain
+coverage and risk are inferred from each discovered schema; only the best few
+matching tools (`MAX_MCP_TOOLS_PER_REQUEST`) are exposed per request;
+financial-execution tools are excluded from research agents.
+
+### Cross-cutting guards
+
+- **Call budget** — a per-turn ContextVar counts every paid provider, MCP and
+  embedding call and stops at the call or cost ceiling; it propagates through
+  thread pools explicitly so no path can escape it.
+- **Repeat guard** — one scope per model attempt; an exact repeat of a failed
+  `(tool, args)` raises immediately with a corrective observation.
+- **LLM resilience** — explicit per-request timeout, litellm retries, and a
+  one-shot cross-provider fallback model on transient failures, applied at the
+  single `_call_lm` choke point.
+- **Execution invariants** — Solana-only routes use Jupiter, anything else
+  Relay; a symbol-only request stays in `collect` mode and asks for the chain;
+  the current message is authoritative and a new trade verb never inherits an
+  older quote; research or portfolio turns clear natural-language trade
+  collection; an already-created card stays addressable only by its plan ID.
+
+### Memory
+
+- **Session context** — the canonical snapshot described above, stored apart
+  from display history and used by routing before any prose.
+- **Role memory** — deep-dive decisions are stored with their evidence; a
+  bias-free reflection compares them to the realized price outcome after a
+  window and produces one process correction, recalled into the next analysis
+  of the same asset. Safety rules always override a learned lesson.
+
+### Observability and evaluation
+
+- `/health` — counters for provider calls, failures, quota skips, cache hits,
+  coalesced calls, rate limits, queue timeouts, validation warnings, LLM
+  fallbacks and estimated spend. `/capabilities` — catalog, configuration,
+  quota, reliability and latency per tool.
+- ClickHouse receives provider events and per-turn budget events through a
+  bounded background queue; Langfuse receives traces.
+- `scripts/routing_eval/harness.py` — `router` mode (deterministic layer, free),
+  `resolve` mode (the decision layer with the real classifier: intent accuracy,
+  which tier decided, latency), `chat` mode (end to end through a running
+  server: tool reached, forbidden-tool rate, ask accuracy, intent accuracy).
+- The test suite covers routing invariants, execution safety, the charter,
+  validation, budgets and guards, the desk, Docker-facing API paths and the
+  UI-facing contracts (476 tests).
+
+### Milestones
+
+Multi-chain token resolution that asks on ambiguity · Jupiter-verified token
+security dossiers · ten-dimension token deep-dive with anti-hallucination rules
+and role-memory reflection · crypto market overview card · GeckoTerminal
+trending/new pools per chain · cross-capability tool ranking with a reachability
+backstop · semantic tool fallback calibrated on real requests · per-turn call
+budget, repeat guard and LLM-hop resilience · answer validator with cross-source
+consistency · risk charter with a hard veto, now a structured card checked
+exactly on the quote · multi-agent trading desk · team-desk and charter controls
+in the UI · swap-after-connect and pronoun/focus resolution · model-first
+routing measured on a labelled set · outcome-scored tool ranking · production
+container, CI image pipeline and one-command TLS deploy.
+
+### Known limitations
+
+- The routing classifier adds ~1.1 s p50 to topical turns; a faster tier
+  (`INTENT_MODEL`) was evaluated and rejected for accuracy, so the answer model
+  is used.
+- The risk charter gates Jupiter (Solana) plans; Relay drafts produce no plan
+  object today, so they are not charter-checked.
+- A portfolio snapshot for an extremely large wallet can exceed the turn
+  timeout.
+- Chain vocabulary is finite: tokens native to chains outside the resolver's
+  list (for example HYPE on Hyperliquid) resolve to same-symbol tokens on
+  supported chains instead.
+
+## Run locally
 
 ```bash
-cp .env.example .env
-# Add the model provider key and optionally a Jupiter API key.
-python --version  # must be Python 3.10-3.13
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip setuptools wheel
+cp .env.example .env            # at minimum OPENAI_API_KEY; provider keys as you have them
+python -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
-npm install
-npm run build:web
+npm install && npm run build:web
 uvicorn app.main:app --reload --port 8000
 ```
 
-If an earlier broad dependency resolution was interrupted, remove only this project's
-`.venv`, recreate it, and run the commands above. The dependencies are pinned so pip
-does not backtrack through dozens of releases.
+UI: `http://localhost:8000/ui/`. Admin control plane: `/ui/admin.html` (set
+`ADMIN_API_KEY`). Without `DATABASE_URL`/`REDIS_URL` the service falls back to
+in-memory state for development.
 
-Keep `LIVE_TRADING=false` while testing the chat and quote flow.
+Tests: `pytest -q`. Routing evaluation: `python scripts/routing_eval/harness.py
+--mode resolve` (decision layer, in-process) or `--mode chat` (end to end against
+a running server); extend `scripts/routing_eval/cases.json` from real
+misroutes rather than adding rules.
 
-`RELAY_API_KEY` is an optional server-side credential for production Relay rate
-limits. Leave it blank for anonymous local quotes and never expose it to browser code.
+## Docker
 
-### Docker
-
-The container build is self-contained: a Node stage bundles `web/*.ts`, a Python
-stage resolves the pinned dependencies, and the runtime image is a non-root
-`python:3.11-slim` that serves `app.main:app` behind a `/health` check. Runtime
-state that the app writes (`role_memory.json`, `provider-overrides.json`) lives in
-the `/app/data` volume; `.env` is never copied into the image.
+The image is built in three stages (Node bundles `web/*.ts`, Python resolves the
+pinned dependencies, a non-root `python:3.11-slim` runtime serves `app.main:app`
+with a `/health` check). Runtime state lives in the `/app/data` volume; `.env`
+never enters the image.
 
 ```bash
-cp .env.example .env            # set OPENAI_API_KEY and POSTGRES_PASSWORD at minimum
 docker compose up --build -d    # api + postgres + redis, memory fallback disabled
 curl -s localhost:8000/health
-docker compose logs -f api
 ```
 
-`docker compose` forces `ALLOW_MEMORY_FALLBACK=false` and points the API at its
-own Postgres and Redis; the schema is created on first start. To run the image
-against managed services instead, pass `DATABASE_URL` and `REDIS_URL` yourself:
+### Production
 
-```bash
-docker build -t orbit-api .
-docker run --rm -p 8000:8000 --env-file .env \
-  -e DATABASE_URL=... -e REDIS_URL=... -e FORWARDED_ALLOW_IPS=<proxy-ip> \
-  -v orbit-data:/app/data orbit-api
-```
-
-For a server, `docker-compose.prod.yml` swaps the local build for the CI-built
-image (`ghcr.io/sanjayarun07/orbit:main`, or `ORBIT_IMAGE_TAG=sha-<commit>` to
-roll back) and puts Caddy in front with automatic TLS. Set `ORBIT_DOMAIN` in
-`.env`, point its DNS at the host, then:
+`docker-compose.prod.yml` runs the CI-built image (`ghcr.io/sanjayarun07/orbit:main`,
+or `ORBIT_IMAGE_TAG=sha-<commit>` to roll back) behind Caddy with automatic TLS.
+Set `POSTGRES_PASSWORD`, `ADMIN_API_KEY` and `ORBIT_DOMAIN` in `.env`, point the
+domain at the host, then:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
-Only Caddy is exposed (80/443); the API, Postgres and Redis stay on the compose
-network. Update with `pull` + `up -d api` (in-flight requests drain).
+Only Caddy is exposed (80/443). Update with `pull` + `up -d api`; in-flight
+requests drain. Keep `UVICORN_WORKERS=1` per container and scale with replicas.
+CI builds and smoke-tests the image on every push and publishes it from `main`.
+Release gates, credential rotation and reconciliation guidance are in
+`docs/production-operations.md`.
 
-`UVICORN_WORKERS` defaults to 1 per container; scale with replicas rather than
-workers so the in-process semantic caches and the two reconciliation workers are
-not duplicated inside one instance. Set `FORWARDED_ALLOW_IPS` (uvicorn) and
-`TRUSTED_PROXY_HOSTS` (application rate limits) to the reverse proxy's address.
-Any command passed to the image replaces uvicorn, e.g.
-`docker run --rm orbit-api python -c "import app.main"`.
+## Configuration
 
-The web UI is available at `http://localhost:8000/ui/`. Natural-language Solana-only
-buys and swaps use Jupiter. Any route involving another chain uses Relay, including
-same-chain EVM swaps. Complete Relay requests are quoted automatically and rendered as
-the same compact review/approval flow as Jupiter; incomplete requests stay conversational
-and ask only for missing details. The browser bundle is generated from `web/relay.ts`;
-rerun `npm run build:web` after changing the wallet or Relay frontend. Ambiguous meme-coin
-symbols require an exact contract or mint, and signing always requires a separate confirm
-click.
+Everything is environment-driven; `.env.example` documents every variable.
+The groups that matter most:
 
-### Privy embedded wallets
+| Group | Variables |
+|---|---|
+| Model | `MODEL`, `OPENAI_API_KEY`, `LLM_FALLBACK_MODEL`, `INTENT_MODEL` |
+| Trading caps | `MAX_TRADE_USD`, `MAX_SLIPPAGE_BPS`, `MAX_PRICE_IMPACT_PCT`, `PLAN_TTL_SECONDS`, `LIVE_TRADING` |
+| Providers | `PERPLEXITY_API_KEY`, `BIRDEYE_API_KEY`, `MOBULA_API_KEY`, `BITQUERY_API_KEY`, `GOLDRUSH_API_KEY`, `HELIUS_API_KEY`, `NANSEN_API_KEY`, `ROOTDATA_API_KEY`, `DUNE_API_KEY`, … |
+| Wallets | `PRIVY_APP_ID`, `PRIVY_CLIENT_ID`, `REOWN_PROJECT_ID`, `EVM_AUTH_RPC_URLS`, `SOLANA_RPC_URL` |
+| Budgets | `MAX_EXTERNAL_CALLS_PER_TURN`, `MAX_PAID_DATA_COST_USD_PER_TURN`, `PROVIDER_*` quotas and weights, `PROVIDER_OUTCOME_WEIGHT` |
+| State & ops | `DATABASE_URL`, `REDIS_URL`, `ALLOW_MEMORY_FALLBACK`, `ADMIN_API_KEY`, `TRUSTED_PROXY_HOSTS`, `FORWARDED_ALLOW_IPS`, `CLICKHOUSE_*`, `LANGFUSE_*` |
 
-Set `PRIVY_APP_ID` and `PRIVY_CLIENT_ID` to enable email-code onboarding through
-Privy's vanilla browser SDK. A successful login creates or restores both an Ethereum
-and Solana embedded wallet; Relay automatically uses the address and provider matching
-the selected source chain. Phantom, MetaMask, and read-only addresses remain available.
+Credentialed providers stay visible but unavailable in the admin catalog until
+their keys exist; keys are never returned by any API or rendered in the UI.
 
-Only the public app/client identifiers are returned by `/config/public`. Privy app
-secrets and authorization-key private keys must never be placed in browser settings.
-Delegated signing is intentionally disabled: V1 transactions remain user-initiated,
-use fresh quotes, and require the explicit **Confirm swap** action. Add backend signing
-only after configuring Privy signer policies, secure key custody, spend/chain/token
-limits, simulation, and auditable approval thresholds.
+## API surface
 
-Set `REOWN_PROJECT_ID` to add Reown AppKit/WalletConnect as an external EVM-wallet
-fallback. The project ID is a public browser identifier, but the metadata origin must
-match the domain configured in Reown. Reown supplies the EIP-1193 provider to the same
-Relay approval flow; it does not add an independent execution path.
+| Endpoint | Purpose |
+|---|---|
+| `POST /chat` | One turn: message, optional wallet, session, team-mode switch, risk-charter fields |
+| `GET /chat/history/{session_id}` | Display messages plus the canonical context snapshot |
+| `GET /chat/risk-charter/limits` | Built-in caps and chains the charter card may use |
+| `POST /trade-plans/{plan_id}/confirm` | Confirm a quoted plan (wallet-signed; server signing only with `LIVE_TRADING`) |
+| `GET /wallet-health/{wallet}`, `GET /portfolio/{wallet}/scenario` | Deterministic wallet diagnostics and price-shock simulation |
+| `GET /executions/solana/{signature}` | Track a submitted Solana transaction |
+| `GET /capabilities`, `GET /health` | Provider catalog and health; aggregate counters incl. estimated spend |
+| `GET /admin/providers`, `PUT /admin/providers/{tool}` | Enable/disable tools, override priority, quota, cost |
+| `GET /admin/tools/outcomes` | Learned per-tool success rates and ranking adjustments |
+| `POST /admin/intents/preview` | Routing lab: intent, capabilities, chain evidence for a request |
 
-Set `PERPLEXITY_API_KEY` to route live web, URL, public professional, and financial
-queries through Perplexity Agent API. Obvious requests are mapped directly to one
-hosted tool, cached, and coalesced to avoid an extra planning-model call. Per-tool
-costs are configurable and exposed through `/capabilities`; estimated spend is
-reported in `/health` as micro-USD counters. Perplexity sandbox is deliberately not
-registered. When the key is absent, general live search continues to use OpenAI's
-hosted web search, while MCP and on-chain routes are unchanged.
+Chat responses carry the selected intent and capabilities, context capsules, an
+evidence summary, validation results, risk assessment, trade readiness and gas
+guidance, and — when enabled — an **Agent activity** trace of the tools called.
 
-## Example
+## Operating notes
 
-```bash
-curl -s http://localhost:8000/chat \
-  -H 'content-type: application/json' \
-  -d '{
-    "message":"Check my balance and prepare a swap of 0.01 SOL into the token mint <MINT>, using at most 1% slippage",
-    "wallet_address":"<WALLET>"
-  }'
-```
+- Scrape `/health` per replica; provider events and per-turn budgets stream to
+  ClickHouse when `CLICKHOUSE_HOST` is set, and traces to Langfuse when its keys
+  are set.
+- The two reconciliation workers (Jupiter submissions, Relay executions) restart
+  with the app, never sign and never rebroadcast; pin them to one replica at
+  larger scale.
+- Do not expose `/rpc/solana` without an upstream gateway; per-client request,
+  body and batch limits still apply.
+- Rotate any credential that was ever pasted, logged or committed;
+  `scripts/check_secrets.py` runs as a pre-commit hook and in CI.
 
-If a plan is returned, inspect the input/output mints, atomic quantities, expected
-output, price impact, route and fees. Execution requires the exact returned text:
+## Documentation
 
-```bash
-curl -s http://localhost:8000/trade-plans/<PLAN_ID>/confirm \
-  -H 'content-type: application/json' \
-  -d '{"confirmation_text":"CONFIRM <PLAN_ID>"}'
-```
-
-The confirmation endpoint will still refuse to sign unless `LIVE_TRADING=true`, the
-private key exists and its public key matches the wallet used for the quote.
-
-## Next POC increments
-
-1. Persist plans, trajectories and audit events in PostgreSQL.
-2. Add exact pre/post token balance deltas to the simulation response.
-3. Replace environment-key signing with a policy-controlled signer.
-4. Add take-profit/stop-loss monitoring as deterministic jobs, not free-running LLM loops.
-5. Build a labelled evaluation set and optimize only after baseline metrics exist.
-
-## Production scaling
-
-The application is stateless across HTTP workers when Redis and PostgreSQL are
-configured. MCP servers are discovered once per worker, connections are reused,
-identical concurrent calls are coalesced, and successful results are cached in
-Redis. Only MCP tools relevant to the current request are exposed to the research
-agent; common wallet-portfolio lookups bypass the planning loop entirely. Tool
-observations and conversation context are bounded before reaching the model.
-
-For production, set `ALLOW_MEMORY_FALLBACK=false`, provide shared `REDIS_URL` and
-`DATABASE_URL` values, keep `LIVE_TRADING=false` until the signing policy is ready,
-and run multiple workers behind a load balancer. Set `TRUSTED_PROXY_HOSTS` to the
-exact immediate proxy IPs if forwarded client addresses should drive rate limits.
-Do not expose `/rpc/solana` without an upstream gateway/WAF; the application also
-enforces per-client request, body, and batch limits. Start with:
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
-```
-
-Tune worker count and the `MAX_CONCURRENT_*` settings to the model, Nansen, RPC,
-and Jupiter quotas—not just CPU capacity. `/health` exposes aggregate counters for
-provider calls, MCP cache hits/misses, coalesced calls, errors, rate limits, and
-queue timeouts. In a multi-worker deployment, scrape each worker and aggregate in
-your monitoring system.
-
-MCP configuration can interpolate only variables named in `MCP_ENV_ALLOWLIST`.
-Set `EXPOSE_TOOL_TRAJECTORY=false` when tool activity cards are not required for
-authenticated users. Rotate credentials immediately if an `.env` file is ever
-shared, logged, or copied outside the deployment secret store.
-
-Adding another MCP only requires another entry in `mcp.json`. Its tools are
-discovered and become eligible for request-time shortlisting automatically. For a
-high-volume, unambiguous operation, add a deterministic adapter in
-`direct_mcp_request`; everything else continues through the generic research agent.
-
-## Intent and capability routing
-
-Every chat is resolved to a workflow intent (`general`, `research`, `portfolio`,
-`trade`, or `cross_chain_swap`) plus provider-independent capabilities such as
-`market_data`, `wallet_intelligence`, `token_security`, and `token_discovery`.
-High-confidence requests use deterministic rules; ambiguous conversational
-follow-ups use the small DSPy classifier with chat history.
-
-Each chat also has a canonical context snapshot stored separately from display
-history. The snapshot contains a monotonic revision, connected wallet, focused
-token/wallet entity, last intent/capabilities, and active trade workflow. Routing
-uses this state before prose history, so a provider result or URL cannot silently
-replace the active entity. Cancellation clears the active workflow, while a new
-incomplete trade replaces the previous route with a `collecting_details` workflow.
-
-Quick-action buttons carry a typed action payload (intent, capabilities, entity,
-chain, wallet scope, and context revision). The server verifies the complete payload
-against the actions persisted on the latest assistant response; the browser cannot
-invent capabilities or execution intent. Stale actions and stale tab revisions fail
-with HTTP 409 instead of being reinterpreted as free text.
-
-Turns are serialized per session with a Redis distributed lock (or a local lock in
-development). The user message, assistant response, response artifacts, and next
-context snapshot are committed in one Redis transaction. `GET
-/chat/history/{session_id}` returns both display messages and the canonical context.
-History restoration preserves typed actions and enables them only on the newest
-response. Older sessions are migrated lazily by reconstructing state using the same
-focus-selection rule as the live reducer.
-
-The original user utterance and the server-resolved contextual prompt are separate
-graph fields. Deterministic routing evaluates the original request first; resolved
-entities are used only where a follow-up genuinely needs them. Explicit research or
-portfolio requests close natural-language trade collection, while already-created
-quote cards remain reviewable through their immutable plan IDs.
-
-The MCP registry infers capabilities, chain coverage, and risk from every newly
-discovered tool. It ranks only the best matching schemas using semantic overlap,
-capability/chain fit, observed latency, and reliability. Financial-execution tools
-are excluded from research agents. `/capabilities` exposes safe catalog and health
-metadata, while chat responses include the selected intent and capabilities for UI
-observability.
-
-## Multi-provider routing
-
-Read-only API providers sit behind `ProviderRouter`, below the capability planner and
-above vendor adapters. The agent requests `market_data`, `token_discovery`,
-`token_security`, `wallet_intelligence`, `defi_data`, `listing_events`,
-`finance_data`, `web_research`, `url_fetch`, or `people_intelligence`; it does not
-need to select a vendor. Candidate tools are filtered by capability, chain,
-configuration, risk and request shape, then ranked using provider priority, recent
-reliability, latency and configured invocation cost.
-
-The router enforces a rolling per-tool quota, opens a short circuit after repeated
-failures, reuses equivalent fresh requests through a conservative semantic cache,
-coalesces concurrent identical requests, and falls through to the next eligible
-provider. `DexScreenerProvider` supplies public DEX market and token-discovery data.
-`BirdeyeProvider` supplies chain-specific token overviews, `MobulaProvider` supplies
-enriched token details and security metrics, and `BitqueryProvider` supplies recent
-parameterized on-chain DEX trades. The latter three activate only when their API keys
-are configured. Perplexity supplies web, URL, people and finance retrieval; OpenAI
-hosted web search is the configured general fallback. Nansen and future MCP servers
-continue through the dynamically discovered MCP registry, which applies its own
-connection pooling, shortlisting, health ranking, caching and request coalescing.
-
-CoinGecko and CoinMarketCap provide normalized contract identity and market metadata.
-GoPlus and Honeypot.is provide EVM token-risk and sellability fallbacks. DeFiLlama
-provides chain TVL, Helius provides Solana wallet activity, and GoldRush provides EVM
-wallet transaction history. Listing/delisting requests use a constrained Perplexity
-search that prefers official Binance, Bybit, and OKX announcement pages. Credentialed
-adapters remain visible but unavailable in the admin catalog until their keys exist.
-
-Set `ROOTDATA_API_KEY` to enable structured Web3 project, VC and people search through
-RootData's `id_map` API. Project, VC and people maps are cached independently for 12
-hours by default (`ROOTDATA_MAP_CACHE_TTL_SECONDS`) and searches are ranked locally,
-which avoids paying RootData's 20-credit map cost for every chat query. The API key is
-server-only and is never included in tool arguments, activity traces or public config.
-
-Tool calling traces are enabled by default with `EXPOSE_TOOL_TRAJECTORY=true`. Each
-applicable chat response displays an expanded **Agent activity** section containing
-the selected tool/provider, safe input arguments, completion status, returned evidence
-and source cards. General conversation without a tool call intentionally has no trace.
-
-Relay remains the primary non-Solana execution router and Jupiter remains the Solana
-router. `/execution/lifi/quote` and `/execution/lifi/status/{tx_hash}` expose LI.FI as
-a quote/status-only backup; the server never signs or submits a LI.FI transaction.
-Coinbase Wallet is available as a first-class self-custody EVM connection through the
-official Coinbase Wallet SDK, supporting Smart Wallet/passkey, extension and mobile
-connection experiences. Its EIP-1193 provider is passed directly to Relay for EVM
-quote execution. Login uses a five-minute, single-use signed challenge followed by a
-seven-day HttpOnly, SameSite session cookie; no wallet key or reusable signature is
-stored by Orbit.
-When `CLICKHOUSE_HOST` is configured, provider success/latency events are written by a
-bounded background queue so analytics outages do not block chat requests.
-
-`/capabilities` reports configuration, cost, quota remaining, health, reliability and
-latency for API providers alongside discovered MCP tools. `/health` exposes provider
-calls, failures, quota skips, cache hits, coalesced calls and estimated cost counters.
-Provider settings are environment-driven so deployment quotas and contract prices
-can be updated without code changes.
-
-US and Indian stock-market, ticker, company-share, earnings and equity-research
-requests resolve to the dedicated `equity_research` capability. Only Perplexity
-finance and Perplexity web-search tools provide that capability; OpenAI and crypto
-market providers are deliberately ineligible. If Perplexity is unconfigured,
-unhealthy or fully quota-exhausted, the assistant reports that condition instead of
-silently switching equity research to another vendor.
-
-The provider control plane is available at `http://localhost:8000/ui/admin.html`.
-Set `ADMIN_API_KEY`, enter it in the dashboard, and use the table to enable or disable
-tools and override priority, requests-per-minute quota, or invocation cost. Changes
-are written atomically to `PROVIDER_OVERRIDES_PATH`. The route-preview panel shows
-the currently eligible provider order for a capability and sample request. API keys
-are never returned by the admin APIs or rendered in the provider table.
-
-The admin page also includes an intent-classification lab and a provider sandbox.
-Intent tests are deterministic dry runs and consume no provider/model quota. Provider
-tests default to ranking-only dry runs; the separately labelled live mode invokes only
-read-only tools and may consume provider quota. Chat responses carry compact context
-capsules, evidence freshness, a canonical intent-lock fingerprint, trade-readiness
-checks, and destination-gas guidance. `/wallet-health/{wallet}` and
-`/portfolio/{wallet}/scenario` expose deterministic Solana wallet diagnostics and
-price-shock simulations, while `/executions/solana/{signature}` tracks submitted
-Solana transactions without requiring another model call.
+- `docs/routing-architecture.md` — precedence, the speech model, execution
+  invariants, outcome-scored tools.
+- `docs/production-operations.md` — release gates, credential rotation,
+  repository protections.
+- `scripts/routing_eval/` — the labelled routing set and harness.

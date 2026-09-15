@@ -51,6 +51,13 @@ CREATE TABLE IF NOT EXISTS relay_executions (
 ALTER TABLE relay_executions ADD COLUMN IF NOT EXISTS session_id TEXT;
 ALTER TABLE relay_executions ADD COLUMN IF NOT EXISTS revision BIGINT;
 CREATE UNIQUE INDEX IF NOT EXISTS relay_execution_turn ON relay_executions (session_id, revision) WHERE session_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS tool_outcomes (
+    tool_name TEXT NOT NULL,
+    day DATE NOT NULL,
+    calls INTEGER NOT NULL DEFAULT 0,
+    successes INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (tool_name, day)
+);
 """
 
 

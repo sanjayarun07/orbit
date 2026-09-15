@@ -12,6 +12,7 @@ from typing import Callable
 
 import httpx
 
+from app import tool_outcomes
 from app.call_budget import charge_and_check
 from app.metrics import increment
 from app.provider_analytics import emit_provider_event
@@ -241,6 +242,7 @@ class ProviderRouter:
             + keyword_hits * 2.0
             + chain_fit
             + health.reliability * settings.provider_health_weight
+            + tool_outcomes.adjustment(tool.name)
             - health.consecutive_failures * 2.0
             - latency_penalty
             - cost_penalty

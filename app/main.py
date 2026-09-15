@@ -44,6 +44,7 @@ from app.lifi import get_quote as get_lifi_quote, get_status as get_lifi_status
 from app.mcp_tools import close_mcp_gateway, discover_mcp_tools, get_mcp_registry
 from app.metrics import increment, snapshot
 from app.wash_trading import nansen_enrich, pipeline as wash_trading_pipeline, schema as wash_trading_schema
+from app import tool_outcomes
 from app.models import TRADING_CHAINS
 from app.models import (
     AgentResponse,
@@ -95,12 +96,14 @@ async def lifespan(_app: FastAPI):
     discovery = asyncio.create_task(asyncio.to_thread(discover_mcp_tools))
     reconciliation = asyncio.create_task(reconciliation_worker())
     relay_reconciliation = asyncio.create_task(relay_tracking.worker())
+    outcomes_refresh = asyncio.create_task(tool_outcomes.refresh_worker())
     try:
         yield
     finally:
         reconciliation.cancel()
         relay_reconciliation.cancel()
-        await asyncio.gather(reconciliation, relay_reconciliation, discovery, return_exceptions=True)
+        outcomes_refresh.cancel()
+        await asyncio.gather(reconciliation, relay_reconciliation, outcomes_refresh, discovery, return_exceptions=True)
         await asyncio.to_thread(close_mcp_gateway)
 
 
@@ -336,6 +339,19 @@ def _require_admin(request: Request) -> None:
 async def admin_providers(request: Request):
     _require_admin(request)
     return {"tools": get_provider_router().catalog(), "overrides": get_provider_router().overrides()}
+
+
+@app.get("/admin/tools/outcomes")
+async def admin_tool_outcomes(request: Request):
+    """Per-tool grounded-success rates and the ranking adjustment each earns."""
+    _require_admin(request)
+    return {
+        "window_days": settings.tool_outcome_window_days,
+        "prior_rate": settings.tool_outcome_prior_rate,
+        "prior_weight": settings.tool_outcome_prior_weight,
+        "weight": settings.provider_outcome_weight,
+        "tools": tool_outcomes.snapshot(),
+    }
 
 
 @app.put("/admin/providers/{tool_name}")
@@ -674,6 +690,12 @@ async def chat(body: ChatRequest, request: Request):
         validation = validate_answer(body.message, answer, trajectory, run.intent)
         if validation is not None and validation.status == "warn":
             increment("answer_validation_warn")
+        # Close the loop: credit or debit every tool that ran, so the router's
+        # ranking learns from what the answer could actually use.
+        try:
+            await tool_outcomes.record_turn(trajectory, validation)
+        except Exception:
+            logger.warning("tool outcome recording failed", exc_info=True)
         trade_readiness = build_trade_readiness(plan)
         gas_advisory = build_gas_advisory(run.cross_chain_swap)
         next_context = advance_session_context(
