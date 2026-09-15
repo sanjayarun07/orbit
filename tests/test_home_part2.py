@@ -90,9 +90,24 @@ def test_why_moving_card_for_a_token_and_a_stock(monkeypatch):
 
 
 def test_research_node_intercepts_why_moving(monkeypatch):
-    async def fake_compose(sym, direction):
+    seen = []
+
+    async def fake_compose(sym, direction, prefer_stock=False):
+        seen.append((sym, prefer_stock))
         return f"# Why is {sym} {direction}?\ncard", {"tool_name_0": "market_data", "observation_0": "x"}
 
     monkeypatch.setattr(research_mod.why_moving, "compose", fake_compose)
     out = asyncio.run(research_mod.research_node({"request": "why is BONK down today", "capabilities": ["web_research"], "chains": [], "history": "", "session_context": {}}))
     assert out["answer"].startswith("# Why is BONK down?") and out["trajectory"]["tool_name_0"] == "market_data"
+    asyncio.run(research_mod.research_node({"request": "why is NVDA stock up?", "capabilities": ["web_research"], "chains": [], "history": "", "session_context": {}}))
+    asyncio.run(research_mod.research_node({"request": "why is NVDA up?", "capabilities": ["equity_research"], "chains": [], "history": "", "session_context": {}}))
+    assert seen == [("BONK", False), ("NVDA", True), ("NVDA", True)]
+
+
+def test_namesake_memecoins_do_not_count_as_the_token(monkeypatch):
+    async def fake_search(query):
+        return [{"symbol": "NVDA", "name": "NVIDIA", "id": "fake", "tags": ["verified"], "usdPrice": 0.00016, "organicScore": 3, "stats24h": {"buyVolume": 120, "sellVolume": 136}}]
+
+    monkeypatch.setattr(why_moving.jupiter, "search_tokens", fake_search)
+    assert asyncio.run(why_moving._crypto_identity("NVDA")) is None
+    assert why_moving.prefers_stock("why is NVDA stock up") and not why_moving.prefers_stock("why is SOL down")

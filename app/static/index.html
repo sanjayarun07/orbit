@@ -580,7 +580,7 @@
   .prompt-card[data-tone="violet"] .prompt-tile { background: rgba(155,135,245,.16); color: #b8a8ff; }
   .prompt-card[data-tone="amber"] .prompt-tile { background: rgba(251,191,36,.14); color: #fbbf24; }
   .prompt-card strong { font-size: 14px; line-height: 1.4; margin-bottom: 4px; }
-  .prompt-card > span:not(.prompt-tile):not(.prompt-desc) { display: none; }
+  .prompt-card > span:not(.prompt-tile):not(.prompt-desc):not(.prompt-source) { display: none; }
   .prompt-desc { display: block; margin-top: 4px; font-size: 11.5px; line-height: 1.45; color: var(--subtle); }
   .prompt-source { margin-top: auto; padding-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; color: var(--subtle); }
   .prompt-source .prompt-arrow { margin-top: 0; }
@@ -1101,7 +1101,7 @@ function normalizeError(data, status) {
   return `Request failed (${status})`;
 }
 function isNearLatest() { return conversationEl.scrollHeight-conversationEl.scrollTop-conversationEl.clientHeight<96; }
-function updateJumpLatest() { jumpLatestBtn.hidden=isNearLatest(); }
+function updateJumpLatest() {if($("#welcome")){jumpLatestBtn.hidden=true;return;} jumpLatestBtn.hidden=isNearLatest(); }
 let scrollFrame = null;
 function scrollToBottom(force = false) {
   if (!force && (!$("#prefAutoScroll").checked || !autoFollow)) { updateJumpLatest(); return; }

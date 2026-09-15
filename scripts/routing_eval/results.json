@@ -1,174 +1,377 @@
 {
- "router": {
-  "mode": "router",
+ "resolve": {
+  "mode": "resolve",
   "metrics": {
-   "cases": 20,
-   "abstain": 0,
-   "top1": 0.95,
-   "recall_at_k": 0.8999999999999998,
-   "mrr": 0.95,
-   "forbidden_at_1": 0.0
+   "cases": 45,
+   "intent_accuracy": 1.0,
+   "methods": {
+    "rules": 15,
+    "rules+model": 15,
+    "speech_model": 15
+   },
+   "p50_ms": 948.4582920558751,
+   "p95_ms": 1233.263166155666
   },
   "rows": [
    [
     "holders-base-aero",
     "OK",
-    "goldrush_token_top_holders",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules",
+    "1"
    ],
    [
     "holders-arb-arb",
     "OK",
-    "goldrush_token_top_holders",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules",
+    "0"
    ],
    [
     "holders-sol-mint",
     "OK",
-    "bitquery_token_top_holders",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules",
+    "0"
+   ],
+   [
+    "holders-bonk-symbol",
+    "OK",
+    "research",
+    "research",
+    "rules+model",
+    "1672"
    ],
    [
     "safety-sol-rug",
     "OK",
-    "solana_token_security",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules",
+    "0"
    ],
    [
     "safety-evm-honeypot",
     "OK",
-    "goplus_token_security",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules",
+    "0"
    ],
    [
     "price-liq-base",
     "OK",
-    "birdeye_token_overview",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules",
+    "0"
    ],
    [
     "hyperliquid-funding",
     "OK",
-    "goldrush_hyperliquid_market",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules+model",
+    "1228"
    ],
    [
     "gainers-sol",
     "OK",
-    "coingecko_gainers_losers",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules+model",
+    "1244"
    ],
    [
     "trending-sol",
     "OK",
-    "geckoterminal_pools",
-    "0.67",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules+model",
+    "948"
    ],
    [
     "new-pairs-base",
     "OK",
-    "geckoterminal_pools",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules+model",
+    "1176"
    ],
    [
     "tvl-sol",
     "OK",
-    "defillama_chain_tvl",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules+model",
+    "962"
    ],
    [
     "tvl-protocol",
     "OK",
-    "defillama_protocols",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules+model",
+    "936"
    ],
    [
     "sentiment",
     "OK",
-    "market_sentiment_snapshot",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules+model",
+    "1207"
    ],
    [
     "listings",
     "OK",
-    "exchange_listing_announcements",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules+model",
+    "1233"
    ],
    [
     "wallet-balances-base",
     "OK",
-    "goldrush_wallet_balances",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules",
+    "1"
    ],
    [
     "wallet-txns-sol",
-    "MISS",
-    "-",
-    "0.00",
-    "0.00",
-    ""
+    "OK",
+    "research",
+    "research",
+    "rules",
+    "1"
    ],
    [
     "hyperliquid-positions",
     "OK",
-    "goldrush_hyperliquid_positions",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules",
+    "1"
+   ],
+   [
+    "market-overview",
+    "OK",
+    "research",
+    "research",
+    "rules+model",
+    "974"
+   ],
+   [
+    "market-how",
+    "OK",
+    "research",
+    "research",
+    "rules+model",
+    "932"
    ],
    [
     "research-news",
     "OK",
-    "perplexity_web_search",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules+model",
+    "1198"
+   ],
+   [
+    "trade-swap",
+    "OK",
+    "trade",
+    "trade",
+    "rules",
+    "1"
+   ],
+   [
+    "trade-bridge",
+    "OK",
+    "cross_chain_swap",
+    "cross_chain_swap",
+    "rules",
+    "1"
    ],
    [
     "recent-trades-sol",
     "OK",
-    "bitquery_recent_dex_trades",
-    "1.00",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules",
+    "1"
+   ],
+   [
+    "deepdive-bonk",
+    "OK",
+    "research",
+    "research",
+    "speech_model",
+    "955"
    ],
    [
     "adv-chain-named-usdc",
     "OK",
-    "dexscreener_pair_search",
-    "0.33",
-    "1.00",
-    ""
+    "research",
+    "research",
+    "rules+model",
+    "949"
+   ],
+   [
+    "advice-should-i-buy-hype",
+    "OK",
+    "research",
+    "research",
+    "speech_model",
+    "1070"
+   ],
+   [
+    "lt-explain-tvl",
+    "OK",
+    "general",
+    "general",
+    "speech_model",
+    "1053"
+   ],
+   [
+    "lt-explain-perps",
+    "OK",
+    "general",
+    "general",
+    "speech_model",
+    "980"
+   ],
+   [
+    "lt-advice-hold-sol",
+    "OK",
+    "research",
+    "research",
+    "speech_model",
+    "1214"
+   ],
+   [
+    "lt-advice-thoughts-hype",
+    "OK",
+    "research",
+    "research",
+    "speech_model",
+    "917"
+   ],
+   [
+    "lt-advice-sell-all",
+    "OK",
+    "portfolio",
+    "portfolio",
+    "rules",
+    "1"
+   ],
+   [
+    "lt-safety-casual",
+    "OK",
+    "research",
+    "research",
+    "speech_model",
+    "907"
+   ],
+   [
+    "lt-portfolio-exposure",
+    "OK",
+    "portfolio",
+    "portfolio",
+    "speech_model",
+    "880"
+   ],
+   [
+    "lt-portfolio-howmuch",
+    "OK",
+    "portfolio",
+    "portfolio",
+    "rules",
+    "1"
+   ],
+   [
+    "lt-news-solana",
+    "OK",
+    "research",
+    "research",
+    "rules+model",
+    "958"
+   ],
+   [
+    "lt-compare",
+    "OK",
+    "research",
+    "research",
+    "speech_model",
+    "1089"
+   ],
+   [
+    "lt-bridge-cost-question",
+    "OK",
+    "research",
+    "research",
+    "speech_model",
+    "979"
+   ],
+   [
+    "lt-negated-buy",
+    "OK",
+    "research",
+    "research",
+    "speech_model",
+    "946"
+   ],
+   [
+    "lt-conditional-order",
+    "OK",
+    "general",
+    "general",
+    "speech_model",
+    "950"
+   ],
+   [
+    "lt-why-dump",
+    "OK",
+    "research",
+    "research",
+    "rules+model",
+    "1024"
+   ],
+   [
+    "lt-imperative-swap",
+    "OK",
+    "trade",
+    "trade",
+    "rules",
+    "1"
+   ],
+   [
+    "policy-wallet",
+    "OK",
+    "general",
+    "general",
+    "speech_model",
+    "878"
+   ],
+   [
+    "policy-max-spend",
+    "OK",
+    "general",
+    "general",
+    "speech_model",
+    "1020"
+   ],
+   [
+    "policy-limits",
+    "OK",
+    "general",
+    "general",
+    "speech_model",
+    "976"
    ]
   ]
  }

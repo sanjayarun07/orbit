@@ -1209,7 +1209,8 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     # "why is SOL down?" -> the composed market + news card (crypto first, stock otherwise).
     moving = why_moving.match(request)
     if moving and not _TOKEN_ADDRESS.search(request):
-        answer, trajectory = await why_moving.compose(*moving)
+        prefer_stock = why_moving.prefers_stock(request) or "equity_research" in set(state.get("capabilities", []))
+        answer, trajectory = await why_moving.compose(*moving, prefer_stock=prefer_stock)
         return {"answer": answer, "trajectory": {"thought_0": "A 'why is X moving' ask maps to the composed market + news card.", **trajectory} if trajectory else None}
     # A structured token due-diligence ask ("deep dive on X", "analyze X",
     # "thoughts on X") -> the multi-dimension analysis lens. Gated on a resolvable

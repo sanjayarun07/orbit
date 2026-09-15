@@ -32,6 +32,14 @@ _MAJORS = {"BTC": ("bitcoin", "Bitcoin"), "ETH": ("ethereum", "Ethereum"), "SOL"
 _STOP = {"THE", "IT", "THIS", "THAT", "MARKET", "CRYPTO", "EVERYTHING"}
 
 
+_STOCK_WORDS = re.compile(r"\b(?:stock|shares?|equity|equities|nasdaq|nyse|ticker)\b", re.I)
+# A Jupiter match must look like a real market, not a namesake memecoin: verified
+# AND either meaningful 24h volume or a decent organic score (verified live: a
+# $256-volume "NVIDIA" token is in the verified list).
+_MIN_VOLUME_USD = 25_000
+_MIN_ORGANIC = 40
+
+
 def match(request: str) -> tuple[str, str] | None:
     m = PATTERN.match(request or "")
     if not m:
@@ -40,6 +48,10 @@ def match(request: str) -> tuple[str, str] | None:
     if sym in _STOP:
         return None
     return sym, m.group("dir").lower()
+
+
+def prefers_stock(request: str) -> bool:
+    return bool(_STOCK_WORDS.search(request or ""))
 
 
 async def _crypto_identity(sym: str) -> dict | None:
@@ -60,8 +72,11 @@ async def _crypto_identity(sym: str) -> dict | None:
     for item in matches or []:
         if str(item.get("symbol") or "").upper() == sym and "verified" in (item.get("tags") or []):
             stats = item.get("stats24h") or {}
+            volume = (stats.get("buyVolume") or 0) + (stats.get("sellVolume") or 0)
+            if volume < _MIN_VOLUME_USD and (item.get("organicScore") or 0) < _MIN_ORGANIC:
+                continue  # a namesake with no market is not "the token"
             return {"name": item.get("name") or sym, "symbol": sym, "mint": item.get("id"), "price": item.get("usdPrice"),
-                    "change_24h": stats.get("priceChange"), "volume_24h": (stats.get("buyVolume") or 0) + (stats.get("sellVolume") or 0) or None}
+                    "change_24h": stats.get("priceChange"), "volume_24h": volume or None}
     return None
 
 
@@ -107,11 +122,12 @@ def _trim(markdown: str, limit: int = 1800) -> str:
     return text if len(text) <= limit else text[:limit].rsplit("\n", 1)[0] + "\n…"
 
 
-async def compose(sym: str, direction: str) -> tuple[str, dict]:
-    """(answer markdown, trajectory). Crypto first; a stock when the symbol
-    isn't a known token."""
+async def compose(sym: str, direction: str, prefer_stock: bool = False) -> tuple[str, dict]:
+    """(answer markdown, trajectory). Crypto first unless the ask says stock /
+    shares (or routing already classed it as equity); a stock when the symbol
+    isn't a real token."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    identity = await _crypto_identity(sym)
+    identity = None if prefer_stock else await _crypto_identity(sym)
     trajectory: dict = {}
     index = 0
     if identity:
@@ -146,13 +162,18 @@ async def compose(sym: str, direction: str) -> tuple[str, dict]:
     if not perplexity_tools.perplexity_available():
         return (f"I couldn't identify **{sym}** as a verified crypto token, and no news source is configured to check it as a stock. "
                 f"Try the token's mint or contract address, or ask *deep dive on {sym}*."), trajectory
+    question = f"Why is {sym} stock {direction if direction not in ('moving', 'red', 'green') else 'moving'} today? Give the price, the day's move in percent, and the reported reasons with sources."
+    answer, tool = None, "perplexity_finance_search"
     try:
-        answer = await asyncio.to_thread(
-            perplexity_tools.perplexity_finance_search,
-            f"Why is {sym} stock {direction if direction not in ('moving', 'red', 'green') else 'moving'} today? Give the price, the day's move in percent, and the reported reasons with sources.",
-        )
-    except Exception as exc:
-        return f"I couldn't check {sym} right now ({exc}).", trajectory
-    trajectory["tool_name_0"] = "perplexity_finance_search"
+        answer = await asyncio.to_thread(perplexity_tools.perplexity_finance_search, question)
+    except Exception:
+        logger.debug("why_moving: finance search failed for %s; trying web search", sym, exc_info=True)
+    if not answer:
+        tool = "perplexity_web_search"
+        try:
+            answer = await asyncio.to_thread(perplexity_tools.perplexity_web_search, question)
+        except Exception as exc:
+            return f"I couldn't check {sym} right now ({exc}).", trajectory
+    trajectory["tool_name_0"] = tool
     trajectory["observation_0"] = answer
     return f"# Why is {sym} {direction}?\n**As of** {now} · stock (web sources)\n\n{_trim(answer, 2600)}\n\n*Reported news, not advice.*", trajectory

@@ -17,23 +17,56 @@ import argparse
 import json
 import sys
 import time
+import http.cookiejar
+import os
 import urllib.error
 import urllib.request
+
+# Signed-in session for the whole sweep: accounts gate history, wallets and
+# tasks, and credits are metered per turn. The cookie jar keeps the session.
+_JAR = http.cookiejar.CookieJar()
+_OPENER = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_JAR))
+SWEEP_EMAIL = "sweep@example.com"
 
 READ_ONLY_SOL_WALLET = "5CEbueQnq1Ym2uSSx2xXds3jQAqT1BDnkA59RZobSPAG"  # public, funded; quotes only
 EVM_WALLET = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
 
 
-def _post(base, path, body, timeout=170):
-    req = urllib.request.Request(base + path, data=json.dumps(body).encode(), headers={"content-type": "application/json"})
+def _request(base, method, path, body=None, timeout=170, headers=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(base + path, data=data, method=method, headers={"content-type": "application/json", "x-orbit-device": "e2e-sweep", **(headers or {})})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with _OPENER.open(req, timeout=timeout) as r:
             return r.status, json.load(r)
     except urllib.error.HTTPError as e:
         try:
             return e.code, json.load(e)
         except Exception:
             return e.code, {"detail": str(e)}
+
+
+def _post(base, path, body, timeout=170):
+    return _request(base, "POST", path, body, timeout)
+
+
+def sign_in(base: str) -> dict:
+    """Magic-link sign-in (dev link) and, when ADMIN_API_KEY is in the env,
+    a Max plan + credits so the sweep never runs dry."""
+    status, started = _post(base, "/auth/email/start", {"email": SWEEP_EMAIL}, timeout=30)
+    if status != 200 or "dev_link" not in started:
+        raise SystemExit(f"sign-in unavailable ({status}): set DEV_EXPOSE_MAGIC_LINKS=true and leave RESEND unset for the sweep")
+    token = started["dev_link"].rsplit("signin=", 1)[1]
+    status, me = _post(base, "/auth/email/verify", {"token": token}, timeout=30)
+    if status != 200:
+        raise SystemExit(f"sign-in failed: {me}")
+    admin_key = os.environ.get("ADMIN_API_KEY")
+    if admin_key:
+        headers = {"authorization": f"Bearer {admin_key}"}
+        _request(base, "PUT", f"/admin/users/{SWEEP_EMAIL}/plan", {"plan_id": "max"}, 30, headers)
+        _request(base, "POST", f"/admin/users/{SWEEP_EMAIL}/credits", {"amount": 500, "reason": "e2e sweep", "reference": f"sweep-{int(time.time())}"}, 30, headers)
+    status, me = _request(base, "GET", "/me", None, 30)
+    print(f"signed in as {me.get('user', {}).get('email')} · plan {me.get('plan', {}).get('id')} · {me.get('credits', {}).get('balance')} credits")
+    return me
 
 
 def _tools(d):
@@ -46,6 +79,15 @@ def _tools(d):
 
 def S(name, steps, group):
     return {"name": name, "steps": steps, "group": group}
+
+
+def API(method, path, body=None, check=None, expect_status=200):
+    """A non-chat step: call an endpoint and check its JSON."""
+    return {"api": (method, path, body), "check": check or (lambda st, d, t, c: []), "expect_status": expect_status}
+
+
+def _has_key(*keys):
+    return lambda st, d, t, c: [f"missing {k}" for k in keys if k not in d]
 
 
 def _intent(*ok):
@@ -143,6 +185,41 @@ SCENARIOS = [
             any("holders" in name for name in t) or any(k in (d.get("answer") or "").lower() for k in ("largest token accounts", "top holders", "% of supply"))
         ) else [f"no holders tool or holders answer in {t}"])),
     ], "context"),
+    S("home: news tiles, chips, $ticker search", [
+        API("GET", "/home/highlights", check=lambda st, d, t, c: [] if len(d.get("cards", [])) == 4 and d.get("source") in ("news", "market", "static") else [f"cards={len(d.get('cards', []))} source={d.get('source')}"]),
+        API("GET", "/home/suggestions", check=lambda st, d, t, c: [] if {x["id"] for x in d.get("categories", [])} >= {"trending", "week", "crypto", "stocks", "macro"} else [f"categories={[x['id'] for x in d.get('categories', [])]}"]),
+        API("GET", "/tokens/search?q=sol", check=lambda st, d, t, c: [] if d.get("tokens") and d["tokens"][0]["symbol"] == "SOL" else [f"tokens={d.get('tokens')}"]),
+        API("GET", "/calendar?days=7", check=lambda st, d, t, c: [] if isinstance(d.get("events"), list) else ["no events list"]),
+    ], "home"),
+    S("why is X moving (crypto + stock)", [
+        dict(message="why is SOL down today?", check=_all(_intent("research"), _tools_any("market_data", "perplexity_web_search"), _contains("Why is Solana"))),
+        dict(message="why is NVDA stock up?", check=_all(_intent("research"), _contains("Why is NVDA"))),
+    ], "research"),
+    S("market event calendar card", [dict(message="what events could move the market this week?", check=_all(_intent("research"), _tools_any("market_event_calendar"), _contains("Market events")))], "research"),
+    S("social sentiment tool", [dict(message="what is crypto twitter saying about BONK", check=_all(_intent("research"), _tools_any("x_kol_sentiment"), _contains("sentiment")))], "research"),
+    S("tasks from chat: remind, alert, list, delete", [
+        dict(message="remind me in 3 hours to check SOL", extra={"tz_offset_min": 330}, check=_all(_intent("general"), _contains("Reminder set", "check SOL"))),
+        dict(message="alert me when SOL drops below $10", check=_all(_intent("general"), _contains("Alert set", "SOL < $10"))),
+        dict(message="show my tasks", check=_all(_intent("general"), _contains("Your tasks", "Reminder: check SOL", "SOL < $10"))),
+        API("GET", "/me/tasks", check=lambda st, d, t, c: (c.__setitem__("task_id", d["tasks"][0]["id"]) or []) if len(d.get("tasks", [])) >= 2 else [f"tasks={len(d.get('tasks', []))}"]),
+        dict(message="delete all my tasks", check=_all(_intent("general"), _contains("deleted"))),
+        API("GET", "/me/tasks", check=lambda st, d, t, c: [] if not [x for x in d.get("tasks", []) if x["status"] != "done"] else ["tasks not deleted"]),
+    ], "tasks"),
+    S("morning brief: run now lands in the inbox", [
+        API("POST", "/me/tasks", {"kind": "brief", "schedule": {"daily": "08:00"}, "tz_offset_min": 330}, check=lambda st, d, t, c: (c.__setitem__("brief_id", d.get("id")) or []) if d.get("id") else ["no task id"], expect_status=201),
+        API("POST", lambda c: f"/me/tasks/{c['brief_id']}/run", check=lambda st, d, t, c: [] if d.get("fired") else [f"brief did not fire: {d}"]),
+        API("GET", "/me/inbox", check=lambda st, d, t, c: [] if d.get("items") and "Morning brief" in d["items"][0]["title"] else [f"inbox={d}"]),
+        API("POST", "/me/inbox/read", {}, check=lambda st, d, t, c: [] if d.get("unread") == 0 else [f"unread={d.get('unread')}"]),
+        API("DELETE", lambda c: f"/me/tasks/{c['brief_id']}", check=lambda st, d, t, c: [] if d.get("deleted") else ["not deleted"]),
+    ], "tasks"),
+    S("account surface: me, usage, sessions, keys", [
+        API("GET", "/me", check=lambda st, d, t, c: [] if d.get("authenticated") and d.get("plan") else ["not signed in"]),
+        API("GET", "/me/usage?days=7", check=_has_key("by_day", "by_kind", "total")),
+        API("GET", "/me/sessions", check=lambda st, d, t, c: [] if d.get("sessions") else ["no sessions"]),
+        API("GET", "/me/api-keys", check=_has_key("keys", "allowed")),
+        API("GET", "/me/credits", check=_has_key("balance", "ledger", "costs")),
+        API("GET", "/billing/plans", check=lambda st, d, t, c: [] if [p["id"] for p in d.get("plans", [])] == ["free", "pro", "max"] else ["plans wrong"]),
+    ], "account"),
     S("stale revision is rejected, not reinterpreted", [
         dict(message="hello", check=_intent("general")),
         dict(message="hello again", revision_offset=-1, expect_status=409, check=lambda st, d, t, c: []),
@@ -151,6 +228,7 @@ SCENARIOS = [
 
 
 def run(base: str) -> dict:
+    sign_in(base)
     rows = []
     for sc in SCENARIOS:
         ctx: dict = {}
@@ -158,6 +236,17 @@ def run(base: str) -> dict:
         problems: list[str] = []
         t0 = time.perf_counter()
         for i, step in enumerate(sc["steps"]):
+            if "api" in step:
+                method, path, body = step["api"]
+                path = path(ctx) if callable(path) else path
+                status, data = _request(base, method, path, body, 60)
+                data = data if isinstance(data, dict) else {}
+                expected = step.get("expect_status", 200)
+                if status != expected:
+                    problems.append(f"step {i+1} ({method} {path}): HTTP {status} != {expected} {str(data)[:120]}")
+                    continue
+                problems += [f"step {i+1} ({method} {path}): {p}" for p in step["check"](status, data, [], ctx)]
+                continue
             message = step["message"](ctx) if callable(step["message"]) else step["message"]
             body = {"message": message, **(step.get("extra") or {})}
             if step.get("wallet"):
@@ -181,11 +270,10 @@ def run(base: str) -> dict:
     # history deletion on the last session
     if rows and rows[-1]["session_id"]:
         sid = rows[-1]["session_id"]
-        req = urllib.request.Request(f"{base}/chat/history/{sid}", method="DELETE")
-        with urllib.request.urlopen(req, timeout=30) as r:
-            deleted = r.status == 200
-        with urllib.request.urlopen(f"{base}/chat/history/{sid}", timeout=30) as r:
-            empty = not json.load(r)["messages"]
+        status, _ = _request(base, "DELETE", f"/chat/history/{sid}", None, 30)
+        deleted = status == 200
+        status, hist = _request(base, "GET", f"/chat/history/{sid}", None, 30)
+        empty = status == 200 and not hist.get("messages")
         ok = deleted and empty
         rows.append({"scenario": "delete conversation history", "group": "history", "ok": ok, "problems": [] if ok else ["history not deleted"], "ms": 0, "session_id": sid})
         print(f"{'OK  ' if ok else 'MISS'} {'history':9} {'delete conversation history':52}")
