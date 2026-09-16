@@ -1544,7 +1544,7 @@ async def knowledge_search(q: str, limit: int = 6):
 @app.get("/knowledge/status")
 async def knowledge_status():
     store = await kb_store.get_store()
-    return {**await store.stats(), "ingestion": kb_ingest.status(), "embedder": kb_tool.get_embedder_name()}
+    return {**await store.stats(), "ingestion": kb_ingest.status(), "embedder": kb_tool.get_embedder_name(), "reranker": kb_retrieval.get_reranker().name}
 
 
 @app.get("/admin/knowledge/protocols")
@@ -1555,8 +1555,64 @@ async def admin_knowledge_protocols(request: Request, limit: int = 100):
     out = []
     for p in await store.list_protocols(limit=max(1, min(limit, 500))):
         out.append({"id": p.id, "slug": p.slug, "name": p.name, "symbol": p.symbol, "category": p.category, "tvl_usd": p.tvl_usd, "chains": p.chains,
-                    "docs_url": kb_registry.guess_docs_url(p), "github_org": p.github_org, "defillama_slug": p.defillama_slug})
+                    "docs_url": kb_registry.guess_docs_url(p), "github_org": p.github_org, "governance_url": p.governance_url, "forum_url": p.forum_url, "defillama_slug": p.defillama_slug})
     return {"protocols": out}
+
+
+@app.get("/admin/knowledge/overview")
+async def admin_knowledge_overview(request: Request):
+    """Everything the knowledge dashboard shows: totals, per-protocol coverage
+    by source, source health, recent ingestion runs, retrieval config."""
+    _require_admin(request)
+    store = await kb_store.get_store()
+    coverage = await store.coverage()
+    runs = await store.recent_runs(limit=60)
+    stats = await store.stats()
+    with_docs = sum(1 for c in coverage if c["chunks"] >= 10)
+    failing = [{"protocol_id": c["id"], "source": s["source"], "error": s.get("error")} for c in coverage for s in c["sources"] if s.get("error")]
+    return {
+        "totals": {**stats, "protocols_with_docs": with_docs, "failing_sources": len(failing)},
+        "config": {"embedder": kb_tool.get_embedder_name(), "reranker": kb_retrieval.get_reranker().name, "registry_limit": settings.knowledge_registry_limit,
+                   "docs_page_budget": settings.knowledge_docs_page_budget, "in_process_worker": settings.knowledge_ingest_enabled},
+        "coverage": coverage, "runs": runs, "failing": failing[:50], "ingestion": kb_ingest.status(),
+    }
+
+
+@app.post("/admin/knowledge/derive")
+async def admin_knowledge_derive(request: Request):
+    """Recompute derived edges: COMPETITOR_OF (category + shared chain) and
+    corroborated INTEGRATES_WITH (mentions in two or more independent documents)."""
+    _require_admin(request)
+    from app.knowledge import derive as kb_derive
+
+    result = await kb_derive.derive_all()
+    await kb_tool.resolver(force=True)
+    return result
+
+
+@app.get("/knowledge/graph/{entity_id:path}")
+async def knowledge_graph(entity_id: str, relation: str | None = None):
+    """Live edges around one entity, e.g. protocol:aave-v3 — competitors,
+    integrations, chains, category — with confidence and provenance."""
+    store = await kb_store.get_store()
+    entity_ids = {e.id for e in await store.list_entities()}
+    if entity_id not in entity_ids:
+        raise HTTPException(404, f"unknown entity {entity_id}")
+    rels = await store.neighbors(entity_id, relation=relation)
+    # One line per edge; per-document mention rows fold into an evidence count.
+    folded: dict[tuple[str, str, str], dict] = {}
+    for r in sorted(rels, key=lambda r: -r.confidence):
+        key = (r.relation, r.source_entity_id, r.target_entity_id)
+        if key not in folded:
+            folded[key] = {"relation": r.relation, "source": r.source_entity_id, "target": r.target_entity_id, "confidence": r.confidence,
+                           "evidence": 0, "documents": [], "metadata": r.metadata}
+        entry = folded[key]
+        if r.source_document_id:
+            entry["evidence"] += 1
+            if len(entry["documents"]) < 10:
+                entry["documents"].append(r.source_document_id)
+    edges = sorted(folded.values(), key=lambda e: (e["relation"], -e["confidence"]))
+    return {"entity": entity_id, "edges": edges}
 
 
 @app.post("/admin/knowledge/bootstrap")

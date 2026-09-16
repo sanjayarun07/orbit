@@ -32,6 +32,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest==8.4.1"]
+rerank = ["sentence-transformers>=3.0"]  # KNOWLEDGE_RERANKER=cross-encoder
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

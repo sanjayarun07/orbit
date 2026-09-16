@@ -69,7 +69,58 @@ database (the API refreshes its resolver snapshot every two minutes):
 Docs roots are guessed from the DefiLlama website by stripping app-style
 labels (`app.`, `portal.`, `data.`) and trying `docs.<domain>`, `<domain>/docs`
 and `www.<domain>/docs` in order; the first root that serves at least two
-pages wins.
+pages wins. Where docs live elsewhere (GitBook subdomains), or a protocol has
+a Discourse forum or Snapshot space, `app/knowledge/overrides.py` says so by
+DefiLlama slug; bootstrap applies it and the crawler still verifies.
+
+### Running it as a background job
+
+```bash
+mkdir -p ~/Library/Logs/orbit
+nohup .venv/bin/python scripts/kb_ingest.py --loop --parallel 3 >> ~/Library/Logs/orbit/kb_ingest.log 2>&1 &
+```
+
+Each pass ingests every due (protocol, source) pair (docs every 12 h, GitHub
+6 h, forums 6 h, Snapshot 15 min, DefiLlama daily), then recomputes derived
+edges, then sleeps `KNOWLEDGE_INGEST_INTERVAL_SECONDS`. Unchanged pages
+hash-match and cost nothing. Stop it with `pkill -f "kb_ingest.py --loop"`.
+The admin dashboard (`/ui/admin.html`, "Knowledge base" panel) shows totals,
+per-protocol coverage by source, failing sources, recent runs, a search box
+and the graph around any entity.
+
+### Governance: Snapshot and Discourse
+
+`SnapshotConnector` reads a space's proposals (title, state, tally, body);
+`DiscourseConnector` reads a forum's latest topics through the JSON API every
+Discourse site exposes (`/latest.json`, `/t/<id>.json`): the opening post in
+full plus the first replies, one document per thread. Both are
+`source_type = governance`, so "what did the community say about raising the
+LTV" is answered with a link to the thread.
+
+### Derived edges
+
+After a pass (`scripts/kb_ingest.py`, or `POST /admin/knowledge/derive`):
+
+| Edge | Rule | Confidence |
+|---|---|---|
+| `COMPETITOR_OF` | same DefiLlama category and at least one shared chain; each protocol keeps its 10 largest peers | 0.60 |
+| `INTEGRATES_WITH` (corroborated) | mention edges for the pair in two or more documents from different sources, or from both protocols' own docs | 0.75 |
+
+Mention edges stay at 0.5 with their `source_document_id`; one mention never
+promotes on its own. The edge key is (source, relation, target, validity,
+evidence document), so two documents asserting the same fact are two evidence
+rows, and a re-ingested document closes its previous version's edges
+(`valid_to`) before asserting again. `GET /knowledge/graph/<entity id>`
+folds evidence rows into one line per edge with a document count.
+
+### Reranker
+
+`KNOWLEDGE_RERANKER` picks the stage after RRF: `heuristic` (default, entity
+and term boosts, no model), `cross-encoder` (sentence-transformers
+`ms-marco-MiniLM-L-6-v2`, `pip install '.[rerank]'`, ~10 ms per pair on
+CPU, downloads on first use) or `llm` (the chat model grades passages 0-10 in
+one call). Every reranker keeps the retrieval-scope boost so a passage from
+the protocol the question names still beats a lookalike from a competitor.
 
 Set `KNOWLEDGE_INGEST_ENABLED=true` to run small in-process ticks
 (`KNOWLEDGE_INGEST_INTERVAL_SECONDS`, `KNOWLEDGE_INGEST_BATCH`). With

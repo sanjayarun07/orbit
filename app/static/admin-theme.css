@@ -58,6 +58,8 @@ td input[type="number"], td input[type="text"] { width: 84px; padding: 6px 8px; 
 td input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; }
 td button { padding: 6px 10px; font-size: 12px; }
 .ok, .healthy { color: var(--good); } .bad, .unhealthy { color: var(--bad); }
+.pill.ok { border-color: var(--good); color: var(--good); } .pill.bad { border-color: var(--bad); color: var(--bad); background: var(--bad-soft); }
+.metric.warn strong { color: var(--amber); }
 .route-form { display: flex; flex-wrap: wrap; gap: 8px; padding: 16px 20px; }
 .route-form input, .route-form select { flex: 1 1 200px; }
 .results, .lab-body pre, pre { margin: 0; padding: 14px 20px; color: var(--muted); font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -71,7 +73,10 @@ td button { padding: 6px 10px; font-size: 12px; }
 @media (max-width: 860px) { .lab-grid { grid-template-columns: 1fr; } .hero h1 { font-size: 32px; } .hero::after { display: none; } }
 
 /* Accounts & billing ops */
-.ops-grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 20px; }
+.ops-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 20px; }
+#kbPanel .ops-grid { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); }
+#kbPanel .summary { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+#kbPanel .metric strong { font-size: 22px; }
 .ops-h { margin: 14px 0 6px; font-size: 11px; color: var(--subtle); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
 .ops-list { display: grid; gap: 4px; }
 .ops-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 12.5px; background: var(--panel-2); }

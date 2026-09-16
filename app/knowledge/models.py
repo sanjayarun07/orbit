@@ -27,7 +27,8 @@ class Protocol:
     website: str | None = None
     docs_url: str | None = None
     github_org: str | None = None
-    governance_url: str | None = None
+    governance_url: str | None = None   # Snapshot space
+    forum_url: str | None = None        # Discourse forum
     defillama_slug: str | None = None
     coingecko_id: str | None = None
     twitter_handle: str | None = None

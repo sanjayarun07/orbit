@@ -95,8 +95,7 @@ CREATE TABLE IF NOT EXISTS kb_relationships (
     valid_from TIMESTAMPTZ,
     valid_to TIMESTAMPTZ,
     observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    UNIQUE (source_entity_id, relation, target_entity_id, valid_from)
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 CREATE INDEX IF NOT EXISTS kb_relationships_source ON kb_relationships (source_entity_id, relation) WHERE valid_to IS NULL;
 CREATE INDEX IF NOT EXISTS kb_relationships_target ON kb_relationships (target_entity_id, relation) WHERE valid_to IS NULL;
@@ -122,7 +121,26 @@ CREATE TABLE IF NOT EXISTS kb_ingestion_runs (
     chunks_written INTEGER NOT NULL DEFAULT 0,
     errors TEXT[] NOT NULL DEFAULT '{}'
 );
+
+-- additive migrations (safe to re-run)
+ALTER TABLE kb_protocols ADD COLUMN IF NOT EXISTS forum_url TEXT;
+
+-- Edge key: one row per (edge, validity window, evidence document). A mention
+-- in each of two documents is two evidence rows; a derived or structured fact
+-- has no document and is one row. NULLs are coalesced so the key is total --
+-- the original UNIQUE constraint let NULL valid_from rows duplicate on every
+-- bootstrap, so duplicates are collapsed (highest confidence wins) first.
+ALTER TABLE kb_relationships DROP CONSTRAINT IF EXISTS kb_relationships_source_entity_id_relation_target_entity_id_key;
+DELETE FROM kb_relationships r USING kb_relationships k
+ WHERE r.source_entity_id = k.source_entity_id AND r.relation = k.relation AND r.target_entity_id = k.target_entity_id
+   AND coalesce(r.valid_from, '-infinity'::timestamptz) = coalesce(k.valid_from, '-infinity'::timestamptz)
+   AND coalesce(r.source_document_id, '00000000-0000-0000-0000-000000000000'::uuid) = coalesce(k.source_document_id, '00000000-0000-0000-0000-000000000000'::uuid)
+   AND (r.confidence < k.confidence OR (r.confidence = k.confidence AND r.id > k.id));
+CREATE UNIQUE INDEX IF NOT EXISTS kb_relationships_edge_key ON kb_relationships
+    (source_entity_id, relation, target_entity_id, coalesce(valid_from, '-infinity'::timestamptz), coalesce(source_document_id, '00000000-0000-0000-0000-000000000000'::uuid));
 """
+
+EDGE_CONFLICT_KEY = "(source_entity_id, relation, target_entity_id, coalesce(valid_from, '-infinity'::timestamptz), coalesce(source_document_id, '00000000-0000-0000-0000-000000000000'::uuid))"
 
 DDL_VECTOR = "ALTER TABLE kb_chunks ADD COLUMN IF NOT EXISTS embedding vector({dim});"
 DDL_VECTOR_INDEX = "CREATE INDEX IF NOT EXISTS kb_chunks_embedding ON kb_chunks USING hnsw (embedding vector_cosine_ops);"

@@ -16,10 +16,12 @@ from typing import Protocol as TypingProtocol
 from app.knowledge.embeddings import get_embedder
 from app.knowledge.entities import EntityResolver
 from app.knowledge.models import Chunk, RetrievalHit
+from app.knowledge.reranker import HeuristicReranker, build_reranker  # noqa: F401  (HeuristicReranker re-exported for callers/tests)
 from app.knowledge.store import get_store
 
 _WORD = re.compile(r"[a-z0-9$#-]+")
 _STOP = {"the", "a", "an", "of", "on", "in", "to", "for", "and", "or", "is", "are", "what", "how", "does", "do", "explain", "me", "about", "tell", "with", "vs", "versus", "compare"}
+_PROTOCOL_EDGES = ("COMPETITOR_OF", "INTEGRATES_WITH", "FORK_OF")
 
 
 @dataclass
@@ -31,36 +33,24 @@ class RetrievalPlan:
 
 
 class Reranker(TypingProtocol):
+    name: str
+
     def rerank(self, query: str, hits: list[RetrievalHit], plan: RetrievalPlan) -> list[RetrievalHit]: ...
 
 
-class HeuristicReranker:
-    """Boosts chunks that mention resolved entities and exact query terms in
-    their heading; demotes very short chunks. Deterministic and cheap."""
-
-    def rerank(self, query: str, hits: list[RetrievalHit], plan: RetrievalPlan) -> list[RetrievalHit]:
-        terms = [t for t in _WORD.findall(query.lower()) if t not in _STOP and len(t) > 2]
-        names = [r.entity.canonical_name.lower() for r in plan.entities]
-        for hit in hits:
-            text = hit.chunk.text.lower()
-            heading = hit.chunk.heading.lower()
-            boost = 0.0
-            boost += 0.15 * sum(1 for t in terms if t in heading)
-            boost += 0.05 * sum(1 for t in terms if t in text)
-            boost += 0.2 * sum(1 for n in names if n in text)
-            if len(hit.chunk.content) < 120:
-                boost -= 0.2
-            if hit.chunk.protocol_id and hit.chunk.protocol_id in plan.protocol_ids:
-                boost += 0.25
-            hit.score += boost
-        hits.sort(key=lambda h: -h.score)
-        return hits
+_reranker: Reranker | None = None
 
 
-_reranker: Reranker = HeuristicReranker()
+def get_reranker() -> Reranker:
+    """Built lazily from KNOWLEDGE_RERANKER so importing the module never
+    loads a model; `set_reranker` overrides it (tests, experiments)."""
+    global _reranker
+    if _reranker is None:
+        _reranker = build_reranker()
+    return _reranker
 
 
-def set_reranker(reranker: Reranker) -> None:
+def set_reranker(reranker: Reranker | None) -> None:
     global _reranker
     _reranker = reranker
 
@@ -92,16 +82,25 @@ def rrf(rankings: list[list[tuple[Chunk, str]]], k: int = 60) -> dict[str, tuple
 
 
 async def graph_expand(plan: RetrievalPlan, store, max_hops: int = 1) -> list[str]:
-    """Protocol ids reachable from the query's entities over live edges:
-    competitors, protocols on a chain, protocols in a category."""
+    """Protocol ids reachable from the query's entities over live edges.
+    From a protocol, derived protocol-to-protocol edges (COMPETITOR_OF,
+    INTEGRATES_WITH) come first by confidence, then the rest; from a chain or
+    category, the protocols attached to it. Capped per entity so one crowded
+    category cannot flood the scope."""
     found: list[str] = []
+    per_entity = 6
     for resolution in plan.entities:
         entity = resolution.entity
         rels = await store.neighbors(entity.id)
+        rels.sort(key=lambda r: (0 if r.relation in _PROTOCOL_EDGES else 1, -r.confidence))
+        added = 0
         for rel in rels:
             other = rel.target_entity_id if rel.source_entity_id == entity.id else rel.source_entity_id
             if other.startswith("protocol:") and other not in found and other not in plan.protocol_ids:
                 found.append(other)
+                added += 1
+                if added >= per_entity:
+                    break
     return found[:12]
 
 
@@ -125,7 +124,8 @@ async def search(query: str, limit: int = 8, resolver: EntityResolver | None = N
     # When the scope is empty (no entity recognised) the searches ran corpus-wide already.
     fused = rrf(rankings)
     hits = [RetrievalHit(chunk=chunk, score=score, sources=sorted(set(sources))) for chunk, score, sources in fused.values()]
-    hits = _reranker.rerank(query, hits, plan)[: limit * 2]
+    # Model rerankers are CPU-bound (cross-encoder) or blocking I/O (llm): off the loop.
+    hits = (await asyncio.to_thread(get_reranker().rerank, query, hits, plan))[: limit * 2]
     # Hydrate document titles / urls / protocol names for citations.
     docs: dict[str, object] = {}
     for hit in hits:

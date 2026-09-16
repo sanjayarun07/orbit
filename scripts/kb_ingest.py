@@ -55,6 +55,11 @@ async def main(args: argparse.Namespace) -> int:
         batches = await asyncio.gather(*(one(s) for s in args.slug))
         print("total:", _summary([r for batch in batches for r in batch]))
         return 0
+    if args.derive:
+        from app.knowledge.derive import derive_all
+
+        print("derived:", await derive_all(store))
+        return 0
     while True:
         results = await kb_ingest.run_all(parallel=args.parallel, limit=args.limit)
         print(_summary(results))
@@ -69,6 +74,7 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, default=None, help="only the top N protocols by TVL (default: KNOWLEDGE_REGISTRY_LIMIT)")
     parser.add_argument("--slug", nargs="+", help="ingest these protocols now, regardless of refresh timers (DefiLlama slugs, e.g. aave-v3 lido)")
     parser.add_argument("--loop", action="store_true", help="keep running, sleeping KNOWLEDGE_INGEST_INTERVAL_SECONDS between passes")
+    parser.add_argument("--derive", action="store_true", help="only recompute derived edges (competitors, corroborated integrations)")
     parser.add_argument("-v", "--verbose", action="store_true")
     parsed = parser.parse_args()
     logging.basicConfig(level=logging.INFO if parsed.verbose else logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")

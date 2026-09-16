@@ -81,10 +81,16 @@ class EntityResolver:
     def add(self, entity: Entity) -> None:
         self._by_id[entity.id] = entity
         self._by_name[entity.canonical_name.lower()] = entity.id
+        # Case-folded keys: "aave" and "AAVE" are one alias, not two candidates
+        # (two entries for one entity looked ambiguous and blocked resolution).
         for alias in entity.aliases:
-            self._by_alias.setdefault(alias.lower(), []).append(entity.id)
+            bucket = self._by_alias.setdefault(alias.lower(), [])
+            if entity.id not in bucket:
+                bucket.append(entity.id)
         if entity.symbol:
-            self._by_symbol.setdefault(entity.symbol.upper(), []).append(entity.id)
+            bucket = self._by_symbol.setdefault(entity.symbol.upper(), [])
+            if entity.id not in bucket:
+                bucket.append(entity.id)
         if entity.address:
             self._by_address[(entity.chain, entity.address.lower())] = entity.id
             self._by_address[(None, entity.address.lower())] = entity.id

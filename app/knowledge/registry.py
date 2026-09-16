@@ -14,6 +14,7 @@ import httpx
 
 from app.knowledge.entities import category_id, chain_id, protocol_id, seed_chain_entities, slugify
 from app.knowledge.models import Entity, Protocol, Relationship
+from app.knowledge.overrides import overrides_for
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +47,12 @@ def protocol_from_llama(item: dict) -> Protocol | None:
             github = repo.split("/")[0]
             break
     website = item.get("url")
+    extra = overrides_for(slug)
     return Protocol(
         id=protocol_id(slug), slug=slug, name=name, symbol=(item.get("symbol") if item.get("symbol") not in (None, "-") else None),
         category=item.get("category"), description=(item.get("description") or None), website=website,
-        docs_url=None, github_org=github, governance_url=None, defillama_slug=slug, coingecko_id=item.get("gecko_id"),
+        docs_url=extra.get("docs_url"), github_org=github, governance_url=extra.get("governance_url"), forum_url=extra.get("forum_url"),
+        defillama_slug=slug, coingecko_id=item.get("gecko_id"),
         twitter_handle=item.get("twitter"), chains=[slugify(c) for c in (item.get("chains") or [])],
         contracts=[{"chain": slugify(chain), "address": address, "label": "token"} for chain, address in _token_addresses(item)],
         aliases=sorted(a for a in aliases if a and a.lower() != name.lower()), tvl_usd=float(item.get("tvl") or 0) or None,

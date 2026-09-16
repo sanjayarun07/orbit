@@ -110,18 +110,25 @@ def test_ingest_versions_documents_and_reindexes_only_changes():
     store = asyncio.run(kb_store.get_store())
     aave = asyncio.run(store.get_protocol("protocol:aave"))
     doc = DocsConnector.document(aave, "https://docs.aave.com/liquidations", AAVE_DOCS_HTML)
-    before = len(store.relationships)
     changed, chunks, rels = asyncio.run(ingest.ingest_document(doc))
     assert changed and chunks == 3
-    # The docs mention Ethereum/Arbitrum/Base -- edges DefiLlama already gave us
-    # with 0.98 confidence, so the low-confidence mention edges merge, not duplicate.
-    assert rels == 0 and len(store.relationships) == before
+    # The docs mention Ethereum/Arbitrum/Base. DefiLlama already asserted those
+    # DEPLOYED_ON edges at 0.98; the mention is separate low-confidence evidence
+    # carrying its document id, and never raises the structured edge's confidence.
+    assert rels == 3
+    eth = asyncio.run(store.neighbors("protocol:aave", relation="DEPLOYED_ON"))
+    eth = [r for r in eth if r.target_entity_id == "chain:ethereum"]
+    assert {r.confidence for r in eth} == {0.98, 0.55} and [r for r in eth if r.confidence == 0.55][0].source_document_id == doc.id
     assert asyncio.run(ingest.ingest_document(DocsConnector.document(aave, "https://docs.aave.com/liquidations", AAVE_DOCS_HTML))) == (False, 0, 0)
     edited = AAVE_DOCS_HTML.replace("higher liquidation threshold", "much higher liquidation threshold")
-    changed, chunks, _ = asyncio.run(ingest.ingest_document(DocsConnector.document(aave, "https://docs.aave.com/liquidations", edited)))
-    assert changed and chunks == 3
+    old_id = doc.id
+    changed, chunks, rels = asyncio.run(ingest.ingest_document(DocsConnector.document(aave, "https://docs.aave.com/liquidations", edited)))
+    assert changed and chunks == 3 and rels == 3
     live = asyncio.run(store.live_documents("protocol:aave"))
     assert len(live) == 1 and live[0].version == 2
+    # The superseded version's evidence closes with it: live mention edges stay at one per chain.
+    assert all(r.valid_to is not None for r in store.relationships if r.source_document_id == old_id)
+    assert len([r for r in asyncio.run(store.neighbors("protocol:aave", relation="DEPLOYED_ON")) if r.target_entity_id == "chain:ethereum"]) == 2
     assert sum(1 for d in store.documents.values() if d.url.endswith("/liquidations")) == 2  # old version kept, closed
     assert len([c for c in store.chunks.values() if c.document_id == live[0].id]) == 3
 
@@ -230,3 +237,152 @@ def test_research_node_synthesizes_over_knowledge_passages(monkeypatch):
     out = asyncio.run(research_mod.research_node({"request": "How does the Aave health factor work?", "capabilities": ["knowledge"], "chains": [], "history": "", "session_context": {}}))
     assert out["answer"].startswith("The health factor is a safety ratio") and "## Sources" in out["answer"] and "docs.aave.com/liquidations" in out["answer"]
     assert out["trajectory"]["tool_name_0"] == "knowledge_base_search"
+
+
+# --- overrides, Discourse, derived edges, reranker seam -----------------------
+
+
+def test_overrides_apply_docs_forum_and_snapshot_at_bootstrap(monkeypatch):
+    from app.knowledge import overrides
+
+    monkeypatch.setitem(overrides.OVERRIDES, "aave", {"docs_url": "https://aave.gitbook.io/docs", "forum_url": "https://governance.aave.com", "governance_url": "https://snapshot.org/#/aave.eth"})
+    asyncio.run(registry.bootstrap(limit=10))
+    store = asyncio.run(kb_store.get_store())
+    aave = asyncio.run(store.get_protocol("protocol:aave"))
+    assert aave.docs_url == "https://aave.gitbook.io/docs" and aave.forum_url == "https://governance.aave.com"
+    assert registry.guess_docs_urls(aave)[0] == "https://aave.gitbook.io/docs"   # override outranks the guess
+    from app.knowledge.connectors.discourse import DiscourseConnector
+    from app.knowledge.connectors.snapshot import SnapshotConnector
+
+    assert DiscourseConnector().applies(aave) and SnapshotConnector.space_for(aave) == "aave.eth"
+    morpho = asyncio.run(store.get_protocol("protocol:morpho"))
+    assert not DiscourseConnector().applies(morpho)
+
+
+def test_discourse_topic_becomes_governance_document():
+    from app.knowledge.connectors.discourse import DiscourseConnector
+
+    aave = Protocol(id="protocol:aave", slug="aave", name="Aave", forum_url="https://governance.aave.com/")
+    refs = DiscourseConnector().discover(aave)
+    assert refs[0].kind == "proposal" and refs[0].metadata["forum"] == "https://governance.aave.com"
+    topic = {"id": 12345, "title": "[ARFC] Raise USDC LTV on Base", "slug": "arfc-raise-usdc-ltv-on-base", "created_at": "2026-09-01T10:00:00.000Z",
+             "last_posted_at": "2026-09-03T08:00:00Z", "posts_count": 3, "category_id": 7, "tags": ["arfc", "risk"]}
+    detail = {"post_stream": {"posts": [
+        {"username": "chaos-labs", "created_at": "2026-09-01T10:00:00Z", "cooked": "<p>We propose raising the <strong>USDC</strong> loan-to-value on Base from 75% to 78% given liquidity depth and the health factor distribution of current borrowers.</p>"},
+        {"username": "gauntlet", "created_at": "2026-09-02T10:00:00Z", "cooked": "<p>Supportive; our simulations show liquidations stay manageable at 78% under a 30% drawdown.</p>"},
+        {"username": "bot", "created_at": "2026-09-02T11:00:00Z", "cooked": "<p>+1</p>"},
+    ]}}
+    doc = DiscourseConnector.document(aave, "https://governance.aave.com", topic, detail)
+    assert doc.source_type == "governance" and doc.source == "aave_forum"
+    assert doc.url == "https://governance.aave.com/t/arfc-raise-usdc-ltv-on-base/12345" and doc.title.startswith("Forum: [ARFC] Raise USDC LTV")
+    assert doc.published_at.isoformat().startswith("2026-09-01") and doc.metadata["topic_id"] == 12345 and doc.metadata["tags"] == ["arfc", "risk"]
+    assert "## Post" in doc.content and "loan-to-value on Base" in doc.content
+    assert "## Discussion" in doc.content and "**gauntlet**" in doc.content and "+1" not in doc.content   # short replies dropped
+    assert DiscourseConnector.document(aave, "https://governance.aave.com", {"id": 1, "title": "x"}, {"post_stream": {"posts": [{"cooked": "<p>hi</p>"}]}}) is None
+
+
+def test_derived_competitor_and_corroborated_integration_edges():
+    from app.knowledge import derive
+    from app.knowledge.models import Relationship
+
+    asyncio.run(registry.bootstrap(limit=10))
+    store = asyncio.run(kb_store.get_store())
+    # COMPETITOR_OF: Aave and Morpho share Lending + Ethereum/Base; Jupiter (Dexs, Solana) has no peer.
+    assert asyncio.run(derive.derive_competitors(store)) == 1
+    edges = [r for r in asyncio.run(store.neighbors("protocol:aave", relation="COMPETITOR_OF"))]
+    assert len(edges) == 1 and {edges[0].source_entity_id, edges[0].target_entity_id} == {"protocol:aave", "protocol:morpho"}
+    assert edges[0].confidence == derive.COMPETITOR_CONFIDENCE and edges[0].metadata["shared_chains"] == ["base", "ethereum"]
+    assert asyncio.run(store.neighbors("protocol:jupiter", relation="COMPETITOR_OF")) == []
+    assert asyncio.run(derive.derive_competitors(store)) == 0   # idempotent
+    # INTEGRATES_WITH: one mention stays at 0.5; mentions from both sides' docs are promoted to 0.75 with evidence.
+    mention = lambda src, dst, doc, source: Relationship(src, "INTEGRATES_WITH", dst, confidence=0.5, source_document_id=doc, metadata={"method": "mention", "source": source})  # noqa: E731
+    asyncio.run(store.upsert_relationship(mention("protocol:jupiter", "protocol:aave", "d1", "jupiter_docs")))
+    asyncio.run(store.upsert_relationship(mention("protocol:aave", "protocol:morpho", "d2", "aave_docs")))
+    asyncio.run(store.upsert_relationship(mention("protocol:morpho", "protocol:aave", "d3", "morpho_docs")))
+    assert asyncio.run(derive.derive_integrations(store)) == 1
+    promoted = [r for r in asyncio.run(store.list_relationships("INTEGRATES_WITH")) if r.metadata.get("method") == "corroborated_mentions"]
+    assert len(promoted) == 1 and promoted[0].confidence == derive.INTEGRATION_CONFIDENCE and promoted[0].metadata["mutual"] is True
+    assert set(promoted[0].metadata["documents"]) == {"d2", "d3"} and {promoted[0].source_entity_id, promoted[0].target_entity_id} == {"protocol:aave", "protocol:morpho"}
+    jupiter_edges = asyncio.run(store.neighbors("protocol:jupiter", relation="INTEGRATES_WITH"))
+    assert all(r.confidence == 0.5 for r in jupiter_edges)
+    # graph expansion from a protocol prefers the derived protocol edges over "everything on Ethereum".
+    resolver = ent.EntityResolver(asyncio.run(store.list_entities()))
+    plan = asyncio.run(retrieval.plan_query("how does Aave compare", resolver))
+    expanded = asyncio.run(retrieval.graph_expand(plan, store))
+    assert expanded[0] == "protocol:morpho"
+
+
+def test_reranker_seam_and_factory_fallback(monkeypatch):
+    from app.knowledge import reranker as rr
+    from app.knowledge.models import Chunk, RetrievalHit
+
+    assert rr.build_reranker("bogus").name == "heuristic"
+    monkeypatch.setattr(settings, "openai_api_key", None)
+    assert rr.build_reranker("llm").name == "heuristic"          # no key -> heuristic, never a crash
+    monkeypatch.setattr(settings, "knowledge_reranker_model", "not-a-real-model/xyz")
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    assert rr.build_reranker("cross-encoder").name == "heuristic"  # unavailable model -> heuristic
+    # A custom reranker set on the seam is what search() uses.
+    class Reverse:
+        name = "reverse"
+
+        def rerank(self, query, hits, plan):
+            for i, hit in enumerate(hits):      # last becomes first
+                hit.score = float(i)
+            hits.sort(key=lambda h: -h.score)
+            return hits
+
+    asyncio.run(registry.bootstrap(limit=10))
+    store = asyncio.run(kb_store.get_store())
+    aave = asyncio.run(store.get_protocol("protocol:aave"))
+    asyncio.run(ingest.ingest_document(DocsConnector.document(aave, "https://docs.aave.com/liquidations", AAVE_DOCS_HTML)))
+    retrieval.set_reranker(None)
+    baseline, _ = asyncio.run(retrieval.search("Aave health factor", limit=3))
+    retrieval.set_reranker(Reverse())
+    try:
+        reversed_hits, _ = asyncio.run(retrieval.search("Aave health factor", limit=3))
+    finally:
+        retrieval.set_reranker(None)
+    assert retrieval.get_reranker().name == "heuristic"
+    assert [h.chunk.heading for h in reversed_hits] != [h.chunk.heading for h in baseline]
+    # scope boost is shared by every reranker: same-protocol passage wins ties.
+    plan = retrieval.RetrievalPlan(query="q", protocol_ids=["protocol:aave"])
+    inside = RetrievalHit(chunk=Chunk(id="1", document_id="d", protocol_id="protocol:aave", heading="", content="x" * 200, position=0), score=0.1, sources=[])
+    outside = RetrievalHit(chunk=Chunk(id="2", document_id="d", protocol_id="protocol:morpho", heading="", content="x" * 200, position=0), score=0.1, sources=[])
+    assert rr.HeuristicReranker().rerank("q", [outside, inside], plan)[0] is inside
+
+
+def test_graph_and_derive_endpoints(monkeypatch):
+    monkeypatch.setattr(settings, "admin_api_key", "admin-secret")
+    client = TestClient(main.app)
+    admin = {"Authorization": "Bearer admin-secret"}
+    assert client.post("/admin/knowledge/bootstrap?limit=10", headers=admin).json()["protocols"] == 3
+    assert client.post("/admin/knowledge/derive").status_code in (401, 403)
+    assert client.post("/admin/knowledge/derive", headers=admin).json() == {"competitors": 1, "integrations": 0}
+    graph = client.get("/knowledge/graph/protocol:aave").json()
+    relations = {e["relation"] for e in graph["edges"]}
+    assert {"COMPETITOR_OF", "DEPLOYED_ON", "IN_CATEGORY"} <= relations
+    competitors = client.get("/knowledge/graph/protocol:aave?relation=COMPETITOR_OF").json()["edges"]
+    assert len(competitors) == 1 and competitors[0]["metadata"]["method"] == "category_chain"
+    assert client.get("/knowledge/graph/protocol:nope").status_code == 404
+    assert client.get("/knowledge/status").json()["reranker"] == "heuristic"
+    # Dashboard overview: coverage per protocol with documents by source, runs, config.
+    store = asyncio.run(kb_store.get_store())
+    aave = asyncio.run(store.get_protocol("protocol:aave"))
+    asyncio.run(ingest.ingest_document(DocsConnector.document(aave, "https://docs.aave.com/liquidations", AAVE_DOCS_HTML)))
+    overview = client.get("/admin/knowledge/overview", headers=admin).json()
+    assert overview["totals"]["protocols"] == 3 and overview["config"]["reranker"] == "heuristic"
+    row = next(c for c in overview["coverage"] if c["id"] == "protocol:aave")
+    assert row["documents"] == 1 and row["chunks"] == 3 and row["by_source"] == {"protocol_docs": 1} and row["edges"] >= 4
+    assert client.get("/admin/knowledge/overview").status_code in (401, 403)
+
+
+def test_alias_case_variants_do_not_block_resolution():
+    """DefiLlama gives both the parent slug and the ticker ("aave", "AAVE");
+    case-folded they are one alias, so "Aave" must resolve, not look ambiguous."""
+    from app.knowledge.models import Entity
+
+    resolver = ent.EntityResolver([Entity(id="protocol:aave-v3", entity_type="protocol", canonical_name="Aave V3", symbol="AAVE", aliases=["aave", "AAVE", "Aave"])])
+    assert resolver.resolve("Aave").entity.id == "protocol:aave-v3"
+    assert [m.entity.id for m in resolver.mentions("what happens when an Aave health factor drops below 1")] == ["protocol:aave-v3"]
+    assert resolver.resolve("$AAVE").entity.id == "protocol:aave-v3"

@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from app.knowledge.connectors import DefiLlamaConnector, DocsConnector, GitHubConnector, SnapshotConnector
+from app.knowledge.connectors import DefiLlamaConnector, DiscourseConnector, DocsConnector, GitHubConnector, SnapshotConnector
 from app.knowledge.embeddings import get_embedder
 from app.knowledge.entities import EntityResolver
 from app.knowledge.models import Chunk, IngestionResult, NormalizedDocument, Protocol, Relationship
@@ -29,7 +29,7 @@ _status: dict = {"running": False, "last_run": None, "runs": []}
 
 
 def default_connectors() -> list:
-    return [DefiLlamaConnector(), DocsConnector(page_budget=settings.knowledge_docs_page_budget), GitHubConnector(), SnapshotConnector()]
+    return [DefiLlamaConnector(), DocsConnector(page_budget=settings.knowledge_docs_page_budget), GitHubConnector(), SnapshotConnector(), DiscourseConnector()]
 
 
 async def _resolver(store) -> EntityResolver:
@@ -89,12 +89,14 @@ async def ingest_document(doc: NormalizedDocument, store=None, resolver: EntityR
 async def run_source(connector, protocol: Protocol, store=None) -> IngestionResult:
     store = store or await get_store()
     result = IngestionResult(protocol_id=protocol.id, source=connector.name)
+    started = datetime.now(timezone.utc)
     resolver = await _resolver(store)
     try:
         refs = await asyncio.to_thread(list, connector.discover(protocol))
     except Exception as exc:
         result.errors.append(f"discover: {exc}"[:200])
         await store.record_source_state(connector.name, protocol.id, False, 0, str(exc)[:300])
+        await store.record_run(result, started)
         return result
     for ref in refs:
         try:
@@ -117,6 +119,7 @@ async def run_source(connector, protocol: Protocol, store=None) -> IngestionResu
             result.chunks_written += chunks
             result.relationships_written += rels
     await store.record_source_state(connector.name, protocol.id, not result.errors or result.documents_seen > 0, result.documents_seen, "; ".join(result.errors[:3]) or None)
+    await store.record_run(result, started)
     return result
 
 
@@ -133,10 +136,11 @@ async def run_protocol(protocol_id: str, connectors: list | None = None, store=N
     return results
 
 
-async def run_all(parallel: int = 3, limit: int | None = None, only_due: bool = True, connectors: list | None = None) -> list[IngestionResult]:
-    """Every registry protocol, `parallel` at a time, most valuable first.
-    Meant for the standalone ingest process (scripts/kb_ingest.py): the API
-    process should only ever run small `tick`s."""
+async def run_all(parallel: int = 3, limit: int | None = None, only_due: bool = True, connectors: list | None = None, derive: bool = True) -> list[IngestionResult]:
+    """Every registry protocol, `parallel` at a time, most valuable first,
+    then the derived edges (competitors, corroborated integrations). Meant
+    for the standalone ingest process (scripts/kb_ingest.py): the API process
+    should only ever run small `tick`s."""
     store = await get_store()
     connectors = connectors or default_connectors()
     protocols = await store.list_protocols(limit=limit or settings.knowledge_registry_limit)
@@ -155,6 +159,10 @@ async def run_all(parallel: int = 3, limit: int | None = None, only_due: bool = 
                 logger.info("knowledge: %s/%s seen=%d changed=%d chunks=%d errors=%d", protocol.slug, connector.name, result.documents_seen, result.documents_changed, result.chunks_written, len(result.errors))
 
     await asyncio.gather(*(one(p) for p in protocols))
+    if derive:
+        from app.knowledge.derive import derive_all
+
+        await derive_all(store)
     return results
 
 

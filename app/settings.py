@@ -80,6 +80,8 @@ class Settings(BaseSettings):
     knowledge_ingest_enabled: bool = False            # background worker; run manually via admin first
     knowledge_ingest_interval_seconds: int = 300
     knowledge_ingest_batch: int = 5
+    knowledge_reranker: str = "heuristic"             # heuristic | cross-encoder | llm
+    knowledge_reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     github_token: str | None = None
     social_sentiment_ttl_seconds: int = 900
     event_calendar_ttl_seconds: int = 21600

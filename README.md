@@ -615,11 +615,18 @@ guidance, and — when enabled — an **Agent activity** trace of the tools call
   body and batch limits still apply.
 - Rotate any credential that was ever pasted, logged or committed;
   `scripts/check_secrets.py` runs as a pre-commit hook and in CI.
+- Knowledge-base ingestion runs as its own process, never inside the API:
+  `scripts/kb_ingest.py --loop --parallel 3` (crawls docs, GitHub, Snapshot
+  and Discourse forums for the registry, then derives competitor and
+  integration edges). The admin page's "Knowledge base" panel shows coverage
+  per protocol, failing sources, recent runs, a search box and the graph.
 
 ## Documentation
 
 - `docs/routing-architecture.md` — precedence, the speech model, execution
   invariants, outcome-scored tools.
+- `docs/knowledge-service.md` — the protocol knowledge base: registry,
+  connectors, entity graph, hybrid retrieval, rerankers, operations.
 - `docs/production-operations.md` — release gates, credential rotation,
   repository protections.
 - `scripts/routing_eval/` — the labelled routing set and harness.

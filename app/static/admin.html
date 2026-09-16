@@ -30,6 +30,26 @@
    </div>
   </div>
  </section>
+ <section class="panel" id="kbPanel">
+  <div class="panel-head"><h2>Knowledge base</h2><div class="lab-actions"><span class="pill" id="kbConfig">—</span><button id="kbDerive" title="Recompute competitor and integration edges">Derive edges</button><button id="kbRefresh">Refresh</button></div></div>
+  <div class="lab-body">
+   <div class="summary" id="kbMetrics" style="margin-bottom:6px"></div>
+   <div class="ops-grid">
+    <div>
+     <h3 class="ops-h">Coverage by protocol <span class="muted" id="kbCoverageNote"></span></h3>
+     <div class="table-wrap"><table style="min-width:0"><thead><tr><th>Protocol</th><th>Docs</th><th>Chunks</th><th>Edges</th><th>Sources</th><th></th></tr></thead><tbody id="kbCoverage"><tr><td colspan="6" class="empty">Connect to load the knowledge base.</td></tr></tbody></table></div>
+    </div>
+    <div>
+     <h3 class="ops-h">Ask the knowledge base</h3>
+     <div class="route-form" style="padding:0 0 8px"><input id="kbQuery" placeholder="e.g. how does Aave E-mode change the liquidation threshold"><button id="kbSearch">Search</button></div>
+     <div id="kbHits" class="ops-list"></div>
+     <h3 class="ops-h">Graph <span class="muted" id="kbGraphTitle"></span></h3>
+     <div id="kbGraph" class="ops-list muted">Pick a protocol's <b>graph</b> to see its edges.</div>
+     <h3 class="ops-h">Recent ingestion runs</h3><div id="kbRuns" class="ops-list"></div>
+    </div>
+   </div>
+  </div>
+ </section>
  <section class="summary"><div class="metric"><span>Registered tools</span><strong id="registered">—</strong></div><div class="metric"><span>Enabled</span><strong id="enabled">—</strong></div><div class="metric"><span>Healthy</span><strong id="healthy">—</strong></div><div class="metric"><span>Providers</span><strong id="providers">—</strong></div></section>
  <section class="panel"><div class="panel-head"><h2>Data providers and routing policy</h2><button id="refresh">Refresh</button></div><div class="table-wrap"><table><thead><tr><th>Provider / tool</th><th>Capabilities</th><th>Status</th><th>Enabled</th><th>Priority</th><th>RPM quota</th><th>Cost USD</th><th>Remaining</th><th>Actions</th></tr></thead><tbody id="rows"><tr><td colspan="9" class="empty">Enter the admin API key to load providers.</td></tr></tbody></table></div></section>
  <section class="panel"><div class="panel-head"><h2>Route preview</h2></div><div class="route-form"><input id="request" placeholder="e.g. Research Reliance Industries stock"><select id="capability"><option>equity_research</option><option>project_intelligence</option><option>vc_intelligence</option><option>people_intelligence</option><option>market_data</option><option>token_discovery</option><option>token_security</option><option>wallet_intelligence</option><option>defi_data</option><option>listing_events</option><option>finance_data</option><option>web_research</option><option>url_fetch</option></select><input id="chains" placeholder="Chains, comma separated"><button class="primary" id="preview">Preview route</button></div><div class="route-results" id="routeResults"></div></section>
@@ -77,7 +97,33 @@ async function openUser(email){const box=$("#opsUser");box.hidden=false;box.inne
   box.querySelectorAll("[data-revoke]").forEach(b=>b.onclick=async()=>{try{await api(`/admin/users/${encodeURIComponent(email)}/api-keys/${b.dataset.revoke}/revoke`,{method:"POST"});done("Key revoked")}catch(e){status.textContent=e.message}});
  }catch(e){box.innerHTML=`<div class="error">${esc(e.message)}</div>`}}
 $("#opsRefresh").onclick=loadOps;$("#opsSearch").onclick=searchUsers;$("#opsQuery").addEventListener("keydown",e=>{if(e.key==="Enter")searchUsers()});
-const _load=load;load=async function(){await _load();loadOps();searchUsers();};
+// ---- Knowledge base ----
+const SRC_LABEL={defillama:"llama",protocol_docs:"docs",github:"github",snapshot:"snapshot",discourse:"forum",governance:"gov"};
+function ago(iso){if(!iso)return "never";const s=(Date.now()-new Date(iso).getTime())/1000;if(s<90)return "just now";if(s<3600)return `${Math.round(s/60)}m ago`;if(s<86400)return `${Math.round(s/3600)}h ago`;return `${Math.round(s/86400)}d ago`}
+function fmtN(v){return Number(v||0).toLocaleString()}
+async function loadKb(){const m=$("#kbMetrics"),tb=$("#kbCoverage");try{const d=await api("/admin/knowledge/overview");const t=d.totals,c=d.config;
+  $("#kbConfig").textContent=`${t.backend} · ${t.vector_native?"pgvector":"float[]"} · ${c.embedder} · rerank ${c.reranker}`;
+  const lastRun=d.runs[0]?ago(d.runs[0].finished_at||d.runs[0].started_at):"never";
+  m.innerHTML=[["Protocols",t.protocols],["With docs",t.protocols_with_docs],["Documents",fmtN(t.documents)],["Chunks",fmtN(t.chunks)],["Entities",fmtN(t.entities)],["Edges",fmtN(t.relationships)],["Failing sources",t.failing_sources],["Last ingest",lastRun]].map(([k,v])=>`<div class="metric${k==="Failing sources"&&v>0?" warn":""}"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join("");
+  $("#kbCoverageNote").textContent=`${d.coverage.length} protocols by TVL`;
+  tb.innerHTML=d.coverage.map(p=>{const bs=Object.entries(p.by_source||{}).map(([k,v])=>`<span class="pill" title="${esc(k)}">${esc(SRC_LABEL[k]||k)} ${v}</span>`).join("");
+    const src=(p.sources||[]).map(s=>`<span class="pill ${s.error?"bad":(s.documents?"ok":"")}" title="${esc(s.error||`last run ${ago(s.last_run_at)}`)}">${esc(SRC_LABEL[s.source]||s.source)}${s.error?" ✕":""}</span>`).join("");
+    return `<tr data-slug="${esc(p.slug)}" data-id="${esc(p.id)}"><td><div class="provider">${esc(p.name)}</div><div class="tool">${esc(p.category||"")} · ${(p.chains||[]).slice(0,3).map(esc).join(", ")}${p.chains&&p.chains.length>3?` +${p.chains.length-3}`:""}</div></td><td>${fmtN(p.documents)} ${bs}</td><td class="${p.chunks<10?"bad":""}">${fmtN(p.chunks)}</td><td>${fmtN(p.edges)}</td><td>${src||'<span class="muted">none</span>'}</td><td><button class="mini kb-ingest">Ingest</button> <button class="mini kb-graph">Graph</button></td></tr>`}).join("");
+  tb.querySelectorAll(".kb-ingest").forEach(b=>b.onclick=()=>kbIngest(b));tb.querySelectorAll(".kb-graph").forEach(b=>b.onclick=()=>kbGraph(b.closest("tr").dataset.id,b.closest("tr").querySelector(".provider").textContent));
+  $("#kbRuns").innerHTML=d.runs.length?d.runs.slice(0,25).map(r=>`<div class="ops-row"><span>${esc((r.protocol_id||"").replace("protocol:",""))} <span class="pill">${esc(SRC_LABEL[r.source]||r.source)}</span>${r.errors&&r.errors.length?` <span class="pill bad" title="${esc(r.errors[0])}">error</span>`:""}</span><span class="muted">${r.documents_changed}/${r.documents_seen} changed · ${fmtN(r.chunks_written)} chunks · ${r.seconds??"?"}s · ${ago(r.finished_at||r.started_at)}</span></div>`).join(""):'<div class="muted">No runs recorded yet. Run <code>scripts/kb_ingest.py</code> or press Ingest.</div>';
+ }catch(e){m.innerHTML=`<div class="metric error">${esc(e.message)}</div>`;tb.innerHTML=`<tr><td colspan="6" class="error">${esc(e.message)}</td></tr>`}}
+async function kbIngest(btn){const tr=btn.closest("tr");btn.disabled=true;btn.textContent="Running…";try{const r=await api(`/admin/knowledge/ingest/${encodeURIComponent(tr.dataset.slug)}`,{method:"POST"});const total=r.results.reduce((a,x)=>a+x.chunks_written,0);btn.textContent=`+${total} chunks`;setTimeout(loadKb,800)}catch(e){btn.textContent=e.message.slice(0,30)}}
+async function kbGraph(id,name){const box=$("#kbGraph");$("#kbGraphTitle").textContent=name||id;box.classList.remove("muted");box.innerHTML='<div class="muted">Loading…</div>';try{const d=await api(`/knowledge/graph/${encodeURIComponent(id)}`);
+  const groups={};for(const e of d.edges){(groups[e.relation]=groups[e.relation]||[]).push(e)}
+  box.innerHTML=Object.keys(groups).length?Object.entries(groups).map(([rel,edges])=>`<div class="ops-row"><span><b>${esc(rel)}</b></span><span class="muted">${edges.length}</span></div>`+edges.slice(0,12).map(e=>{const other=e.source===id?e.target:e.source;const dir=e.source===id?"→":"←";const why=e.metadata&&e.metadata.method?e.metadata.method.replace(/_/g," "):"";const extra=e.metadata&&e.metadata.shared_chains?` · ${e.metadata.shared_chains.join(", ")}`:"";
+    return `<div class="ops-row"><span>${dir} <a href="#" data-graph="${esc(other)}">${esc(other.replace(/^(protocol|chain|category|token):/,""))}</a><span class="muted"> ${esc(other.split(":")[0])}</span></span><span class="muted">${(e.confidence*100).toFixed(0)}%${e.evidence?` · ${e.evidence} doc${e.evidence>1?"s":""}`:""}${why?` · ${esc(why)}`:""}${esc(extra)}</span></div>`}).join("")).join(""):'<div class="muted">No live edges.</div>';
+  box.querySelectorAll("[data-graph]").forEach(a=>a.onclick=ev=>{ev.preventDefault();kbGraph(a.dataset.graph,a.textContent)});}catch(e){box.innerHTML=`<div class="error">${esc(e.message)}</div>`}}
+async function kbSearch(){const out=$("#kbHits");const q=$("#kbQuery").value.trim();if(!q)return;out.innerHTML='<div class="muted">Searching…</div>';try{const d=await api(`/knowledge/search?q=${encodeURIComponent(q)}&limit=6`);
+  const ents=(d.entities||[]).map(e=>`<span class="pill" title="${esc(e.method)} ${(e.confidence*100).toFixed(0)}%">${esc(e.name)}</span>`).join("");const exp=(d.graph_expanded||[]).map(x=>esc(x.replace("protocol:",""))).join(", ");
+  out.innerHTML=`<div class="ops-row muted"><span>${ents||"no entity recognised"}</span><span>${exp?`expanded: ${exp}`:""}</span></div>`+(d.hits.length?d.hits.map((h,i)=>`<div class="ops-row" style="align-items:flex-start"><span><b>[${i+1}]</b> ${esc(h.protocol||"")} · <a href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.title)}</a>${h.heading?` <span class="muted">› ${esc(h.heading)}</span>`:""}<div class="muted" style="font-size:12px;margin-top:2px">${esc(h.content.slice(0,220))}…</div></span><span class="muted" style="white-space:nowrap">${h.score.toFixed(3)} · ${(h.sources||[]).join("+")}</span></div>`).join(""):'<div class="muted">No passages.</div>')}catch(e){out.innerHTML=`<div class="error">${esc(e.message)}</div>`}}
+$("#kbRefresh").onclick=loadKb;$("#kbSearch").onclick=kbSearch;$("#kbQuery").addEventListener("keydown",e=>{if(e.key==="Enter")kbSearch()});
+$("#kbDerive").onclick=async()=>{const b=$("#kbDerive");b.disabled=true;try{const r=await api("/admin/knowledge/derive",{method:"POST"});b.textContent=`+${r.competitors} competitors · +${r.integrations} integrations`;loadKb()}catch(e){b.textContent=e.message.slice(0,40)}finally{setTimeout(()=>{b.disabled=false;b.textContent="Derive edges"},4000)}};
+const _load=load;load=async function(){await _load();loadOps();searchUsers();loadKb();};
 $("#connect").onclick=load;$("#refresh").onclick=load;$("#preview").onclick=preview;$("#testIntent").onclick=()=>testIntent(false);$("#liveIntent").onclick=()=>testIntent(true);$("#dryProvider").onclick=()=>testProvider(false);$("#liveProvider").onclick=()=>testProvider(true);if(saved)load();
 </script>
 </body></html>
