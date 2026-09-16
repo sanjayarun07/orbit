@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <script>(function(){try{var p=JSON.parse(localStorage.getItem("orbit_theme_v1")||'"system"');var t=p==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):p;document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t;}catch(e){}})();</script>
 <link rel="stylesheet" href="/ui/theme.css?v=1">
-<link rel="stylesheet" href="/ui/chat.css?v=2">
+<link rel="stylesheet" href="/ui/chat.css?v=3">
 <link rel="stylesheet" href="/ui/product.css?v=1">
 </head>
 <body>
@@ -1081,7 +1081,10 @@ form.addEventListener("submit",event=>{event.preventDefault();const text=input.v
 const mentionMenu=$("#mentionMenu");let mentionItems=[],mentionIndex=0,mentionTimer=null,mentionRange=null;
 function closeMentions(){mentionMenu.hidden=true;mentionItems=[];mentionRange=null;}
 function mentionQuery(){const pos=input.selectionStart;const before=input.value.slice(0,pos);const m=before.match(/(?:^|\s)\$([A-Za-z0-9]{1,10})$/);if(!m)return null;return {q:m[1],start:pos-m[1].length-1,end:pos};}
-function renderMentions(){mentionMenu.innerHTML=mentionItems.map((t,i)=>`<button class="mention-item ${i===mentionIndex?"active":""}" type="button" data-i="${i}"><span><b>$${escapeHtml(t.symbol)}</b> ${escapeHtml(t.name||"")}</span><small>${t.verified?"verified":""} ${t.chain==="solana"?"Solana":""}${t.price?" · $"+Number(t.price).toLocaleString(undefined,{maximumSignificantDigits:4}):""}</small></button>`).join("");mentionMenu.hidden=!mentionItems.length;mentionMenu.querySelectorAll("[data-i]").forEach(b=>b.addEventListener("mousedown",e=>{e.preventDefault();pickMention(Number(b.dataset.i));}));}
+function renderMentions(){mentionMenu.innerHTML=mentionItems.map((t,i)=>`<button class="mention-item ${i===mentionIndex?"active":""}" type="button" data-i="${i}"><span><b>$${escapeHtml(t.symbol)}</b> ${escapeHtml(t.name||"")}</span><small>${t.verified?"verified":""} ${t.chain==="solana"?"Solana":""}${t.price?" · $"+Number(t.price).toLocaleString(undefined,{maximumSignificantDigits:4}):""}</small></button>`).join("");mentionMenu.hidden=!mentionItems.length;placeMentions();mentionMenu.querySelectorAll("[data-i]").forEach(b=>b.addEventListener("mousedown",e=>{e.preventDefault();pickMention(Number(b.dataset.i));}));}
+// The list sits above the composer; when the composer is high on the page
+// (the home screen) there is no room there, so it opens below instead.
+function placeMentions(){if(mentionMenu.hidden)return;const box=mentionMenu.offsetParent?.getBoundingClientRect();if(!box)return;const need=mentionMenu.offsetHeight+8;mentionMenu.classList.toggle("below",box.top-need<8&&innerHeight-box.bottom>=need);}
 function pickMention(i){const t=mentionItems[i];if(!t||!mentionRange)return;const before=input.value.slice(0,mentionRange.start),after=input.value.slice(mentionRange.end);input.value=`${before}$${t.symbol} ${after}`;const pos=before.length+t.symbol.length+2;input.setSelectionRange(pos,pos);closeMentions();input.focus();input.dispatchEvent(new Event("input"));}
 input.addEventListener("input",()=>{const q=mentionQuery();if(!q){closeMentions();return;}mentionRange={start:q.start,end:q.end};clearTimeout(mentionTimer);mentionTimer=setTimeout(async()=>{try{const res=await fetch(`/tokens/search?q=${encodeURIComponent(q.q)}`);const d=await res.json();const still=mentionQuery();if(!still||still.q!==q.q)return;mentionItems=d.tokens||[];mentionIndex=0;renderMentions();}catch{closeMentions();}},220);});
 input.addEventListener("keydown",event=>{if(!mentionMenu.hidden&&mentionItems.length){if(event.key==="ArrowDown"){event.preventDefault();mentionIndex=(mentionIndex+1)%mentionItems.length;renderMentions();return;}if(event.key==="ArrowUp"){event.preventDefault();mentionIndex=(mentionIndex-1+mentionItems.length)%mentionItems.length;renderMentions();return;}if(event.key==="Enter"||event.key==="Tab"){event.preventDefault();pickMention(mentionIndex);return;}if(event.key==="Escape"){closeMentions();return;}}
@@ -1108,7 +1111,7 @@ function renderPortfolioCard(snapshot) {
 async function analyzePortfolio(){const address=walletInput.value.trim();if(!address){openDialog("walletDialog");return;}addUserMessage("Analyze my portfolio");const typing=addTyping();busy=true;
   try{const res=await fetch(`/portfolio/${encodeURIComponent(address)}`);const data=await res.json();if(!res.ok)finishAgentMessage(typing,{error:normalizeError(data,res.status)});else{const body=$(".message-body",typing);body.innerHTML="";body.appendChild(renderPortfolioCard(data));}}
   catch(error){finishAgentMessage(typing,{error:error.message});}finally{busy=false;scrollToBottom();}}
-document.addEventListener("click",event=>{const prompt=event.target.closest(".prompt-card, .home-shortcuts button");if(!prompt)return;if(prompt.dataset.action==="portfolio")analyzePortfolio();else if(prompt.dataset.action==="relay")sendMessage("Start a cross-chain swap");else if(prompt.dataset.action==="research"){input.value="Research ";input.focus();}else if(prompt.dataset.msg)sendMessage(prompt.dataset.msg);});
+document.addEventListener("click",event=>{const prompt=event.target.closest(".prompt-card, .home-shortcuts button");if(!prompt)return;if(prompt.dataset.action==="portfolio")analyzePortfolio();else if(prompt.dataset.action==="relay")openRelayDialog();/* the guided swap form, not a bare request */else if(prompt.dataset.action==="research"){input.value="Research ";input.focus();}else if(prompt.dataset.msg)sendMessage(prompt.dataset.msg);});
 
 function relayChain(id){return relayChains.find(chain=>chain.id===Number(id));}
 function relayError(error){
