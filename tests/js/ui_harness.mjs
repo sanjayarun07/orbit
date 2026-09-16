@@ -198,6 +198,129 @@ const CASES = {
     return { quoteArgs: sandbox.recorded.relayQuoteArgs, status: dom.query("#relayStatus").textContent };
   },
 
+  /** A quote still in flight when the inputs change must be discarded.
+   *
+   * The reviewed sequence: ask for 50 bps, change the field to 1 while the
+   * response is outstanding, then press sign. The response used to be assigned
+   * straight to relayQuoteState after the await, restoring the superseded
+   * quote over inputs the user had already changed -- so the handler signed a
+   * 50 bps quote for someone looking at a form that said 1.
+   */
+  async quote_in_flight_is_discarded_when_inputs_change() {
+    const { dom, sandbox, setScriptVar, getScriptVar } = load();
+    setScriptVar("relayChains", [SOLANA, BASE]);
+    dom.query("#relayFromChain").value = "792703809";
+    dom.query("#relayToChain").value = "8453";
+    dom.query("#relayFromToken").value = "SOL";
+    dom.query("#relayToToken").value = "USDC";
+    dom.query("#relayAmount").value = "0.01";
+    dom.query("#relayRecipient").value = "0x1111111111111111111111111111111111111111";
+    dom.query("#relaySlippage").value = "50";
+
+    // Hold the first response open until the inputs have changed under it.
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    sandbox.window.OrbitRelay.getFreshQuote = async (args) => {
+      sandbox.recorded.relayQuoteArgs = args;
+      await held;
+      return { quote: { details: {}, fees: {}, steps: [], slippageBps: args.slippageBps }, wallet: {}, createdAt: Date.now() };
+    };
+
+    const pending = sandbox.requestRelayQuote();
+    // The user edits the field; this is what the dialog's input listener calls.
+    dom.query("#relaySlippage").value = "1";
+    sandbox.invalidateRelayQuote();
+    release();
+    await pending;
+
+    const signed = [];
+    sandbox.window.OrbitExecutors.executeRelay = async (quote) => { signed.push(quote); };
+    await sandbox.executeRelayQuote();
+
+    return {
+      requestedSlippage: sandbox.recorded.relayQuoteArgs?.slippageBps,
+      quoteRetained: Boolean(getScriptVar("relayQuoteState")),
+      signedQuotes: signed.length,
+      status: dom.query("#relayStatus").textContent,
+    };
+  },
+
+  /** Inputs changed AFTER a quote was reviewed must also block signing. */
+  async reviewed_quote_cannot_be_signed_after_inputs_change() {
+    const { dom, sandbox, setScriptVar, getScriptVar } = load();
+    setScriptVar("relayChains", [SOLANA, BASE]);
+    dom.query("#relayFromChain").value = "792703809";
+    dom.query("#relayToChain").value = "8453";
+    dom.query("#relayFromToken").value = "SOL";
+    dom.query("#relayToToken").value = "USDC";
+    dom.query("#relayAmount").value = "0.01";
+    dom.query("#relayRecipient").value = "0x1111111111111111111111111111111111111111";
+    dom.query("#relaySlippage").value = "50";
+
+    await sandbox.requestRelayQuote();
+    const reviewed = Boolean(getScriptVar("relayQuoteState"));
+
+    // Quote on screen, then the user edits an input before pressing sign.
+    dom.query("#relayAmount").value = "10";
+    sandbox.invalidateRelayQuote();
+
+    const signed = [];
+    sandbox.window.OrbitExecutors.executeRelay = async (quote) => { signed.push(quote); };
+    await sandbox.executeRelayQuote();
+    return { reviewed, signedQuotes: signed.length, status: dom.query("#relayStatus").textContent };
+  },
+
+  /** The execute-side revision check on its own.
+   *
+   * Today invalidateRelayQuote both bumps the revision and clears the quote,
+   * so executeRelayQuote returns at its null check before reaching the
+   * revision check. That makes the second check defence in depth rather than
+   * the active guard -- it catches the easy future mistake of bumping the
+   * revision without clearing the quote. This case creates exactly that state
+   * so the guard is actually exercised instead of being dead code nobody has
+   * ever seen run.
+   */
+  async execution_refuses_a_quote_from_a_superseded_revision() {
+    const { dom, sandbox, setScriptVar, evalIn } = load();
+    setScriptVar("relayChains", [SOLANA, BASE]);
+    dom.query("#relayFromChain").value = "792703809";
+    dom.query("#relayToChain").value = "8453";
+    dom.query("#relayFromToken").value = "SOL";
+    dom.query("#relayToToken").value = "USDC";
+    dom.query("#relayAmount").value = "0.01";
+    dom.query("#relayRecipient").value = "0x1111111111111111111111111111111111111111";
+    dom.query("#relaySlippage").value = "50";
+    await sandbox.requestRelayQuote();
+
+    // Revision moves on while the reviewed quote is still held.
+    evalIn("relayInputRevision++;");
+
+    const signed = [];
+    sandbox.window.OrbitExecutors.executeRelay = async (quote) => { signed.push(quote); };
+    await sandbox.executeRelayQuote();
+    return { signedQuotes: signed.length, status: dom.query("#relayStatus").textContent };
+  },
+
+  /** An unchanged quote must still be signable -- the guard must not be a
+   *  blanket refusal that quietly breaks swapping altogether. */
+  async an_unchanged_reviewed_quote_still_signs() {
+    const { dom, sandbox, setScriptVar } = load();
+    setScriptVar("relayChains", [SOLANA, BASE]);
+    dom.query("#relayFromChain").value = "792703809";
+    dom.query("#relayToChain").value = "8453";
+    dom.query("#relayFromToken").value = "SOL";
+    dom.query("#relayToToken").value = "USDC";
+    dom.query("#relayAmount").value = "0.01";
+    dom.query("#relayRecipient").value = "0x1111111111111111111111111111111111111111";
+    dom.query("#relaySlippage").value = "50";
+
+    await sandbox.requestRelayQuote();
+    const signed = [];
+    sandbox.window.OrbitExecutors.executeRelay = async (quote) => { signed.push(quote); };
+    await sandbox.executeRelayQuote();
+    return { signedQuotes: signed.length, status: dom.query("#relayStatus").textContent };
+  },
+
   /** The dialog must recover once a configuration fetch finally succeeds. */
   async dialog_recovers_after_config_failure() {
     let failNext = true;

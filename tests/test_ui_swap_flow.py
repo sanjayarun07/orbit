@@ -92,3 +92,40 @@ def test_research_mode_and_unreachable_configuration_say_different_things():
     assert result["quoteDisabled"] is True
     assert "research mode" in result["status"]
     assert "Could not confirm" not in result["status"]
+
+
+def test_a_quote_still_in_flight_is_discarded_when_the_inputs_change():
+    """The reviewed race: ask for 50 bps, change the field to 1 while the
+    response is outstanding, then sign. The response used to be assigned to the
+    quote state straight after the await, restoring the superseded quote over
+    inputs the user had already changed -- so the sign handler received a 50 bps
+    quote while the form on screen said 1."""
+    result = run_case("quote_in_flight_is_discarded_when_inputs_change")
+    assert result["requestedSlippage"] == 50, "fixture must actually request the old slippage"
+    assert result["quoteRetained"] is False, "a superseded response restored itself as the live quote"
+    assert result["signedQuotes"] == 0, "a quote built from stale inputs reached the execution handler"
+    assert "discarded" in result["status"]
+
+
+def test_a_reviewed_quote_cannot_be_signed_after_the_inputs_change():
+    result = run_case("reviewed_quote_cannot_be_signed_after_inputs_change")
+    assert result["reviewed"] is True, "fixture must produce a reviewable quote first"
+    assert result["signedQuotes"] == 0, "signing went ahead after the inputs changed"
+
+
+def test_execution_refuses_a_quote_whose_revision_has_been_superseded():
+    """The execute-side check on its own. Clearing the quote already stops the
+    common path, so this is the guard that catches a future change which bumps
+    the revision without clearing -- exercised directly rather than left as
+    code nobody has seen run."""
+    result = run_case("execution_refuses_a_quote_from_a_superseded_revision")
+    assert result["signedQuotes"] == 0
+    assert "Inputs changed after this quote" in result["status"]
+
+
+def test_an_unchanged_reviewed_quote_still_signs():
+    """The guard must block stale quotes, not swapping. Without this the two
+    tests above would pass on a dialog that simply never signs anything."""
+    result = run_case("an_unchanged_reviewed_quote_still_signs")
+    assert result["signedQuotes"] == 1, "a valid, unchanged quote was refused"
+    assert "completed" in result["status"]
