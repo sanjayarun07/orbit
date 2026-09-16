@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <script>(function(){try{var p=JSON.parse(localStorage.getItem("orbit_theme_v1")||'"system"');var t=p==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):p;document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t;}catch(e){}})();</script>
 <link rel="stylesheet" href="/ui/theme.css?v=1">
-<link rel="stylesheet" href="/ui/chat.css?v=1">
+<link rel="stylesheet" href="/ui/chat.css?v=2">
 <link rel="stylesheet" href="/ui/product.css?v=1">
 </head>
 <body>
@@ -23,7 +23,7 @@
       <button class="nav-item" id="navTasks" type="button"><svg class="icon" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3V8Z"/><path d="M10 19h4"/></svg>Alerts &amp; tasks</button>
       <button class="nav-item" id="navSettings" type="button"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg>Settings</button>
     </nav>
-    <div class="history-heading">Recent</div>
+    <div class="history-heading"><button class="history-view" id="historyView" type="button" aria-haspopup="menu" aria-expanded="false"><span id="historyViewLabel">Recents</span><svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button></div>
     <div class="history" id="chatList"></div>
     <div class="sidebar-footer">
       <button class="account-button" id="profileBtn">
@@ -316,6 +316,7 @@
 <script defer src="/ui/x402.js?v=1"></script>
 <script>
 const $ = (selector, root = document) => root.querySelector(selector);
+const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 const messagesEl = $("#messages");
 const conversationEl = $("#conversation");
 const form = $("#composer");
@@ -516,24 +517,169 @@ function updateChat(session, text) {
   chatRegistry.sort((a,b) => b.updatedAt - a.updatedAt);
   saveChats(); renderChatList();
 }
-function renderChatList() {
-  chatListEl.innerHTML = "";
-  const valid = chatRegistry.filter(chat => chat?.id && !chat.id.startsWith("draft-"));
-  if (!valid.length) { chatListEl.innerHTML = '<div class="history-empty">Your recent chats appear here.</div>'; return; }
-  valid.forEach(chat => {
-    const item = document.createElement("button"); item.className = `chat-item${chat.id === sessionId ? " active" : ""}`;
-    item.innerHTML = `<span class="chat-item-title">${escapeHtml(chat.title || "New chat")}</span><span class="chat-item-time">${formatRelativeTime(chat.updatedAt)}</span><span class="delete-chat" title="Delete chat" role="button" aria-label="Delete chat">×</span>`;
-    item.addEventListener("click", event => { if (!event.target.closest(".delete-chat, .confirm-delete")) switchSession(chat.id); });
-    $(".delete-chat", item).addEventListener("click", event => {
-      event.stopPropagation();
-      // Confirm inline (never a blocking browser dialog): the row itself asks.
-      item.classList.add("confirming");
-      item.insertAdjacentHTML("beforeend", '<span class="confirm-delete"><button class="yes" type="button">Delete</button><button class="no" type="button">Keep</button></span>');
-      $(".confirm-delete .yes", item).addEventListener("click", e => { e.stopPropagation(); deleteChat(chat.id); });
-      $(".confirm-delete .no", item).addEventListener("click", e => { e.stopPropagation(); renderChatList(); });
-    });
-    chatListEl.appendChild(item);
+// --- Recents: compact rows with pin / archive / rename / project / share ---
+// Titles, pins, archive state and projects live with the chat registry in
+// this browser (the server keeps transcripts and ownership only).
+const PROJECTS_KEY = "orbit_projects_v1";
+let projects = readStorage(PROJECTS_KEY, []);
+let recentsView = readStorage("orbit_recents_view", "recents");   // recents | pinned | archived
+let openMenu = null;
+const ICONS = {
+  pin: '<svg class="icon" viewBox="0 0 24 24"><path d="M15 4v6l3 3H6l3-3V4M12 13v7M9 4h6"/></svg>',
+  more: '<svg class="icon" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>',
+  share: '<svg class="icon" viewBox="0 0 24 24"><path d="M12 4v12M8 8l4-4 4 4M5 14v5h14v-5"/></svg>',
+  rename: '<svg class="icon" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4ZM13 7l4 4"/></svg>',
+  archive: '<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10h14V9M10 13h4"/></svg>',
+  trash: '<svg class="icon" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+  folder: '<svg class="icon" viewBox="0 0 24 24"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7Z"/></svg>',
+  check: '<svg class="icon check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></svg>',
+  chev: '<svg class="icon chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>',
+};
+const VIEW_LABELS = { recents: "Recents", pinned: "Pinned", archived: "Archived" };
+const VIEW_EMPTY = { recents: "Your recent chats appear here.", pinned: "Pin a chat to keep it at hand.", archived: "Archived chats appear here." };
+function saveProjects() { writeStorage(PROJECTS_KEY, projects); }
+function chatById(id) { return chatRegistry.find(chat => chat.id === id); }
+function patchChat(id, fields) { const chat = chatById(id); if (!chat) return; Object.assign(chat, fields); saveChats(); renderChatList(); }
+function sideNote(text) {
+  $$(".history-note", chatListEl).forEach(el => el.remove());
+  const note = document.createElement("div"); note.className = "history-note"; note.setAttribute("role", "status"); note.textContent = text;
+  chatListEl.appendChild(note); setTimeout(() => note.remove(), 2600);
+}
+function closeMenu() {
+  if (!openMenu) return;
+  const { menu, trigger } = openMenu; menu.remove(); openMenu = null;
+  trigger.setAttribute("aria-expanded", "false"); trigger.closest(".chat-item")?.classList.remove("menu-open");
+}
+function placeMenu(menu, trigger) {
+  let r = trigger.getBoundingClientRect(); if (!r.width) r = (trigger.closest(".chat-item") || trigger).getBoundingClientRect();   // a hidden hover action: anchor to its row
+  const m = menu.getBoundingClientRect();
+  let left = Math.min(r.left, innerWidth - m.width - 8); if (left < 8) left = 8;
+  let top = r.bottom + 6; if (top + m.height > innerHeight - 8) top = Math.max(8, r.top - m.height - 6);
+  menu.style.left = `${left}px`; menu.style.top = `${top}px`;
+}
+function showMenu(trigger, build) {
+  const reopen = openMenu?.trigger === trigger; closeMenu(); if (reopen) return;
+  const menu = document.createElement("div"); menu.className = "chat-menu"; menu.setAttribute("role", "menu");
+  build(menu); document.body.appendChild(menu); placeMenu(menu, trigger);
+  openMenu = { menu, trigger }; trigger.setAttribute("aria-expanded", "true"); trigger.closest(".chat-item")?.classList.add("menu-open");
+  const first = $("[role^=menuitem]", menu); if (first) first.focus();
+  menu.addEventListener("keydown", event => {
+    const items = $$("[role^=menuitem]", menu).filter(el => !el.hidden); const i = items.indexOf(document.activeElement);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); items[(i + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus(); }
+    else if (event.key === "Escape") { event.preventDefault(); closeMenu(); trigger.focus(); }
   });
+}
+function menuItem(menu, icon, label, onPick, opts = {}) {
+  const el = document.createElement("button"); el.type = "button"; el.setAttribute("role", opts.role || "menuitem"); el.className = opts.className || "";
+  el.innerHTML = `${icon}<span>${escapeHtml(label)}</span>${opts.trail || ""}`;
+  el.addEventListener("click", event => { event.stopPropagation(); onPick(el); });
+  (opts.parent || menu).appendChild(el); return el;
+}
+function menuRule(menu) { menu.appendChild(document.createElement("hr")); }
+document.addEventListener("pointerdown", event => { if (openMenu && !openMenu.menu.contains(event.target) && !openMenu.trigger.contains(event.target)) closeMenu(); });
+document.addEventListener("keydown", event => { if (event.key === "Escape" && openMenu && !openMenu.menu.contains(document.activeElement)) closeMenu(); });
+addEventListener("resize", closeMenu);
+
+$("#historyView").addEventListener("click", event => {
+  event.stopPropagation();
+  showMenu(event.currentTarget, menu => {
+    for (const [key, label] of Object.entries(VIEW_LABELS)) {
+      const counts = chatRegistry.filter(c => c?.id && !c.id.startsWith("draft-") && (key === "archived" ? c.archived : key === "pinned" ? c.pinned && !c.archived : !c.archived)).length;
+      menuItem(menu, "", label, () => { recentsView = key; writeStorage("orbit_recents_view", key); renderChatList(); },
+        { role: "menuitemradio", trail: `<span class="count">${counts}</span>${key === recentsView ? ICONS.check : ""}` });
+    }
+  });
+});
+
+function chatMenu(trigger, chat) {
+  showMenu(trigger, menu => {
+    menuItem(menu, ICONS.share, "Share", async () => {
+      const url = `${location.origin}${location.pathname}?session=${encodeURIComponent(chat.id)}`;
+      try { await navigator.clipboard.writeText(url); sideNote("Link copied. It opens for your account only."); } catch { sideNote("Copy failed. The link is in the address bar after you open the chat."); }
+      closeMenu();
+    });
+    menuItem(menu, ICONS.rename, "Rename", () => { closeMenu(); startRename(chat.id); });
+    menuRule(menu);
+    menuItem(menu, ICONS.pin, chat.pinned ? "Unpin chat" : "Pin chat", () => { closeMenu(); patchChat(chat.id, { pinned: !chat.pinned }); });
+    menuItem(menu, ICONS.archive, chat.archived ? "Unarchive" : "Archive", () => {
+      closeMenu(); patchChat(chat.id, { archived: !chat.archived, pinned: chat.archived ? chat.pinned : false });
+      sideNote(chat.archived ? "Moved back to Recents." : "Archived. Find it under Recents › Archived.");
+    });
+    menuItem(menu, ICONS.trash, "Delete", () => { closeMenu(); armDelete(chat.id); }, { className: "danger" });
+    menuRule(menu);
+    const sub = document.createElement("div"); sub.className = "submenu"; sub.hidden = true;
+    menuItem(menu, ICONS.folder, "Move to project", el => { sub.hidden = !sub.hidden; el.setAttribute("aria-expanded", String(!sub.hidden)); if (!sub.hidden) placeMenu(menu, trigger); },
+      { trail: ICONS.chev });
+    menu.appendChild(sub);
+    projects.forEach(name => menuItem(menu, "", name, () => { closeMenu(); patchChat(chat.id, { project: name }); },
+      { parent: sub, trail: chat.project === name ? ICONS.check : "" }));
+    if (chat.project) menuItem(menu, "", "Remove from project", () => { closeMenu(); patchChat(chat.id, { project: null }); }, { parent: sub });
+    const form = document.createElement("form"); form.className = "newproj";
+    form.innerHTML = '<input type="text" maxlength="32" placeholder="New project" aria-label="New project name"><button type="submit">Add</button>';
+    form.addEventListener("submit", event => {
+      event.preventDefault(); event.stopPropagation();
+      const name = $("input", form).value.trim().slice(0, 32); if (!name) return;
+      if (!projects.includes(name)) { projects.push(name); projects.sort((a, b) => a.localeCompare(b)); saveProjects(); }
+      closeMenu(); patchChat(chat.id, { project: name });
+    });
+    form.addEventListener("keydown", event => event.stopPropagation());
+    sub.appendChild(form);
+  });
+}
+function startRename(id) {
+  const chat = chatById(id); const row = $(`.chat-item[data-id="${CSS.escape(id)}"]`); if (!chat || !row) return;
+  const title = $(".chat-item-title", row); const input = document.createElement("input");
+  input.className = "chat-rename"; input.type = "text"; input.maxLength = 80; input.value = chat.title || ""; input.setAttribute("aria-label", "Chat name");
+  let done = false;
+  const finish = save => { if (done) return; done = true; const next = input.value.trim(); if (save && next) chat.title = next; saveChats(); renderChatList(); };
+  input.addEventListener("keydown", event => { event.stopPropagation(); if (event.key === "Enter") { event.preventDefault(); finish(true); } if (event.key === "Escape") { event.preventDefault(); finish(false); } });
+  input.addEventListener("blur", () => finish(true));
+  input.addEventListener("click", event => event.stopPropagation());
+  row.classList.add("renaming"); title.replaceWith(input); input.focus(); input.select();
+}
+function armDelete(id) {
+  const row = $(`.chat-item[data-id="${CSS.escape(id)}"]`); if (!row) return;
+  // Confirm inline (never a blocking browser dialog): the row itself asks.
+  row.classList.add("confirming");
+  row.insertAdjacentHTML("beforeend", '<span class="confirm-delete"><button class="yes" type="button">Delete</button><button class="no" type="button">Keep</button></span>');
+  $(".confirm-delete .yes", row).addEventListener("click", e => { e.stopPropagation(); deleteChat(id); });
+  $(".confirm-delete .no", row).addEventListener("click", e => { e.stopPropagation(); renderChatList(); });
+  $(".confirm-delete .yes", row).focus();
+}
+function chatRow(chat) {
+  const row = document.createElement("div");
+  row.className = `chat-item${chat.id === sessionId ? " active" : ""}${chat.pinned ? " pinned" : ""}`;
+  row.dataset.id = chat.id; row.setAttribute("role", "button"); row.tabIndex = 0;
+  row.innerHTML = `<span class="chat-item-title">${escapeHtml(chat.title || "New chat")}</span>
+    <span class="chat-item-meta">${chat.project ? `<span class="chat-tag" title="Project: ${escapeHtml(chat.project)}">${escapeHtml(chat.project)}</span>` : ""}
+      <button class="chat-act pin" type="button" title="${chat.pinned ? "Unpin" : "Pin"}" aria-label="${chat.pinned ? "Unpin chat" : "Pin chat"}" aria-pressed="${chat.pinned ? "true" : "false"}">${ICONS.pin}</button>
+      <button class="chat-act more" type="button" title="More" aria-label="More options" aria-haspopup="menu" aria-expanded="false">${ICONS.more}</button></span>`;
+  row.addEventListener("click", event => { if (!event.target.closest(".chat-act, .confirm-delete, .chat-rename")) switchSession(chat.id); });
+  row.addEventListener("keydown", event => {
+    if (event.target !== row) return;
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); switchSession(chat.id); }
+    if (event.key === "Delete") { event.preventDefault(); armDelete(chat.id); }
+    if (event.key === "F2") { event.preventDefault(); startRename(chat.id); }
+  });
+  $(".chat-act.pin", row).addEventListener("click", event => { event.stopPropagation(); patchChat(chat.id, { pinned: !chat.pinned }); });
+  $(".chat-act.more", row).addEventListener("click", event => { event.stopPropagation(); chatMenu(event.currentTarget, chat); });
+  return row;
+}
+function renderChatList() {
+  closeMenu();
+  chatListEl.innerHTML = "";
+  $("#historyViewLabel").textContent = VIEW_LABELS[recentsView] || "Recents";
+  const valid = chatRegistry.filter(chat => chat?.id && !chat.id.startsWith("draft-"));
+  const shown = valid.filter(c => recentsView === "archived" ? c.archived : recentsView === "pinned" ? c.pinned && !c.archived : !c.archived);
+  if (!shown.length) { chatListEl.innerHTML = `<div class="history-empty">${VIEW_EMPTY[recentsView]}</div>`; syncDeleteButton(); return; }
+  const groups = recentsView === "recents" && shown.some(c => c.pinned)
+    ? [["Pinned", shown.filter(c => c.pinned)], ["Recent", shown.filter(c => !c.pinned)]]
+    : [[null, shown]];
+  for (const [label, chats] of groups) {
+    if (!chats.length) continue;
+    if (label) { const h = document.createElement("div"); h.className = "history-group"; h.textContent = label; chatListEl.appendChild(h); }
+    chats.forEach(chat => chatListEl.appendChild(chatRow(chat)));
+  }
   syncDeleteButton();
 }
 function syncDeleteButton() { const button = $("#deleteChatBtn"); button.hidden = !sessionId; button.classList.remove("confirm"); button.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>'; button.title = "Delete this conversation"; }

@@ -47,3 +47,14 @@ explicit approval language for transactions and clear consequences for deletion.
 
 These informed hierarchy, restrained styling, and navigation. No template code
 or assets were copied.
+
+## Recents (sidebar history)
+
+Compact single-line rows under a "Recents" switcher (Recents / Pinned /
+Archived). A row shows its project tag; pin and "more" appear on hover, focus,
+or touch. The "more" menu offers Share (copies a link that opens for the
+owner's account only), Rename (inline; also F2 on a focused row), Pin, Archive,
+Delete (inline Delete/Keep confirmation, never a browser dialog; also the Delete
+key) and Move to project (existing projects, a new one, or remove). Titles,
+pins, archive state and projects live in this browser's storage with the chat
+registry; the server keeps transcripts and ownership only.

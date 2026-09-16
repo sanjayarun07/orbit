@@ -588,3 +588,44 @@
     .cap-head { flex-direction: column; gap: 2px; }
     .composer { border-radius: 20px; }
   }
+
+  /* Recents (v4): compact single-line rows, actions on hover, per-chat menu. */
+  .history-heading { display: flex; align-items: center; margin: 16px 6px 2px; }
+  .history-view { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; color: var(--subtle); font: inherit; font-size: 12px; font-weight: 500; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+  .history-view:hover, .history-view[aria-expanded="true"] { color: var(--text-strong); background: var(--surface); }
+  .history-view .icon { width: 12px; height: 12px; }
+  .history-group { color: var(--subtle); font-size: 11px; padding: 8px 10px 2px; }
+  .history .chat-item { display: flex; align-items: center; gap: 4px; min-height: 32px; padding: 5px 4px 5px 10px; border: 0; border-radius: 8px; }
+  .history .chat-item::before { display: none; }
+  .history .chat-item:hover, .history .chat-item.active, .history .chat-item.menu-open { background: var(--surface); }
+  .chat-item-title { flex: 1 1 auto; min-width: 0; font-size: 13px; line-height: 1.35; }
+  .chat-item-time { display: none; }
+  .chat-item-meta { display: flex; align-items: center; gap: 0; flex: 0 0 auto; }
+  .chat-tag { font-size: 11px; color: var(--subtle); padding: 0 4px; max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-act { display: none; width: 24px; height: 24px; border: 0; background: transparent; border-radius: 6px; color: var(--subtle); place-items: center; cursor: pointer; padding: 0; }
+  .chat-act .icon { width: 14px; height: 14px; }
+  .chat-item:hover .chat-act, .chat-item:focus-within .chat-act, .chat-item.active .chat-act, .chat-item.menu-open .chat-act, .chat-item.pinned .chat-act.pin { display: grid; }
+  .chat-act:hover, .chat-act[aria-expanded="true"] { color: var(--text-strong); background: var(--surface-hover); }
+  .chat-item.pinned .chat-act.pin { color: var(--brand); }
+  .chat-rename { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 13px; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--brand); background: var(--panel); color: var(--text-strong); outline: none; }
+  .chat-item.renaming .chat-item-meta, .chat-item.confirming .chat-item-meta { display: none; }
+  .history .chat-item.confirming { padding-right: 4px; }
+  .history .confirm-delete { position: static; transform: none; margin-left: auto; }
+  .history-note { font-size: 11.5px; color: var(--subtle); padding: 8px 10px; line-height: 1.4; }
+  .chat-menu { position: fixed; z-index: 60; min-width: 224px; max-width: min(300px, calc(100vw - 16px)); padding: 6px; border-radius: 14px; background: var(--panel); border: 1px solid var(--border); box-shadow: var(--shadow-1, 0 16px 40px rgba(0,0,0,.35)); }
+  .chat-menu [role^="menuitem"] { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: transparent; color: var(--text-strong); font: inherit; font-size: 13.5px; text-align: left; padding: 8px 10px; border-radius: 9px; cursor: pointer; }
+  .chat-menu [role^="menuitem"]:hover, .chat-menu [role^="menuitem"]:focus-visible { background: var(--surface); outline: none; }
+  .chat-menu [role^="menuitem"] .icon { width: 16px; height: 16px; flex: 0 0 auto; }
+  .chat-menu [role^="menuitem"] > span:first-of-type { flex: 1 1 auto; }
+  .chat-menu .danger { color: var(--red); }
+  .chat-menu hr { border: 0; border-top: 1px solid var(--border); margin: 5px 4px; }
+  .chat-menu .chev, .chat-menu .check { width: 13px; height: 13px; margin-left: auto; }
+  .chat-menu .check { color: var(--brand); }
+  .chat-menu .count { margin-left: auto; font-size: 11px; color: var(--subtle); }
+  .chat-menu .count + .check { margin-left: 8px; }
+  .chat-menu .submenu { display: grid; gap: 1px; padding: 0 0 2px 22px; }
+  .chat-menu .submenu [role^="menuitem"] { padding: 6px 10px; font-size: 13px; }
+  .chat-menu .newproj { display: flex; gap: 6px; padding: 4px 6px 4px 10px; }
+  .chat-menu .newproj input { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 13px; padding: 5px 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--text-strong); }
+  .chat-menu .newproj button { border: 0; border-radius: 7px; padding: 0 10px; font: inherit; font-size: 12.5px; font-weight: 600; background: var(--brand); color: var(--on-brand); cursor: pointer; }
+  @media (hover: none) { .chat-act { display: grid; } }
