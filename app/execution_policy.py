@@ -66,7 +66,10 @@ async def execute_chat_turn(body: ChatRequest, identity: Identity | str) -> Agen
                 "message": ("You've used your trial credits. Sign in to get 100 free credits every month."
                             if not identity.signed_in else "You're out of credits for this month. Upgrade or buy a credit pack."),
             })
-    owner_token = set_plan_owner(identity.account_id)
+    # principal_id, not account_id: a plan belongs to the person who asked for
+    # it, not to whichever account is billed for the turn. Team members share
+    # the owner's billing account.
+    owner_token = set_plan_owner(identity.principal_id)
     try:
         response = await _execute_chat_turn(body, identity, session_id)
     except BaseException:

@@ -28,7 +28,7 @@ from app.reconciliation import reconciliation_worker
 from app import relay_tracking
 from fastapi.staticfiles import StaticFiles
 
-from app import deployment, execution_policy, task_scheduling
+from app import deployment, execution_policy, plan_access, task_scheduling
 from app.deployment import ExecutionDisabledError
 from app.service_errors import ServiceError, safe_detail as _safe_detail
 from app.execution import execute_confirmed_plan, prepare_wallet_transaction, submit_wallet_transaction
@@ -1687,21 +1687,14 @@ async def trade_plan(plan_id: str, request: Request):
 
 
 async def _require_plan_access(plan_id: str, request: Request) -> None:
-    """A trade plan belongs to the account it was quoted for. Without this,
+    """A trade plan belongs to the individual who asked for it. Without this,
     plan_id is a bearer token for execution: confirmation_text is just
-    "CONFIRM {plan_id}". Reported as 404, never 403, so plan ids cannot be
-    probed. Plans quoted before this existed carry no owner and stay
-    reachable by whoever holds the id -- they expire within plan_ttl_seconds."""
+    "CONFIRM {plan_id}". The rule itself lives in app/plan_access.py so the
+    MCP server enforces the same one rather than a second copy of it."""
     try:
-        plan = await get_plan(plan_id)
-    except (KeyError, ValueError):
-        return   # the endpoint's own handler reports a missing/invalid plan
-    owner = getattr(plan, "owner_account_id", None)
-    if owner is None:
-        return
-    identity = await resolve_identity(request)
-    if identity.account_id != owner:
-        raise HTTPException(404, "Trade plan not found")
+        await plan_access.require_plan_access(plan_id, await resolve_identity(request))
+    except plan_access.PlanAccessDenied as exc:
+        raise HTTPException(404, "Trade plan not found") from exc
 
 
 @app.post("/trade-plans/{plan_id}/confirm")
@@ -1742,7 +1735,13 @@ async def solana_execution_status(signature: str):
 
 
 @app.post("/executions/relay/{request_id}")
-async def track_relay_execution(request_id: str, request: Request):
+async def track_relay_execution(request_id: str, request: Request,
+                                _mode: None = Depends(_require_execution_mode)):
+    # Claiming a Relay execution is the step immediately before wallet
+    # approval, so it is a money-moving entry point and belongs behind the
+    # same gate as the Jupiter and LI.FI routes. The GET status routes below
+    # are deliberately not gated: an operator still has to reconcile swaps
+    # that happened before a deployment was switched to research mode.
     if not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", request_id):
         raise HTTPException(400, "Invalid Relay request identifier")
     allowed, retry = await allow_chat_request(_client_identity(request))

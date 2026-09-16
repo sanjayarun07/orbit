@@ -30,13 +30,25 @@ The refusal is a FastAPI dependency, so it runs before the ownership lookup: a
 research deployment never reads the plan store to say no, and a route added
 later is covered by declaring `Depends(_require_execution_mode)`.
 
-**Accepted limitation, stated plainly.** Relay quotes and signs entirely in the
-browser against Relay's own API; the server is never asked, so it cannot refuse.
-Research mode reports every provider as unavailable in `GET /config/public` and
-the shipped UI hides the swap dialog and swap cards on that signal. That is a
-product-surface block, not a cryptographic one. Someone driving the Relay SDK
-themselves is not stopped by this deployment's mode. The Jupiter and LI.FI
-routes are genuinely server-enforced.
+Relay's execution *claim* (`POST /executions/relay/{request_id}`) carries the
+same gate. It is the step immediately before wallet approval, so it is a
+money-moving entry point. The `GET` status routes are deliberately not gated: an
+operator still has to reconcile swaps that happened before a deployment was
+switched to research mode.
+
+The browser fails closed. `executionEnabled` starts disabled and is turned on
+only by a configuration load that both succeeded and said execution is enabled;
+a failed fetch leaves swapping off and says so distinctly ("could not confirm
+this deployment's execution settings") rather than claiming research mode, with
+a retry, so a transient blip costs one retry rather than the feature.
+
+**Accepted limitation, stated plainly.** Relay quotes and signs in the browser
+against Relay's own API, so the server is not consulted for the quote or the
+signature. Research mode refuses the claim endpoint, reports every provider
+unavailable in `GET /config/public`, and the shipped UI hides the swap dialog
+and both swap cards. Someone driving the Relay SDK directly, outside this UI,
+is still not stopped from signing a swap with their own wallet. The Jupiter and
+LI.FI routes are genuinely server-enforced.
 
 ## Startup configuration audit
 
@@ -174,7 +186,24 @@ added without a class. The classes are:
 | `admin` | the admin API key | `Depends(_require_admin)` |
 | `owner_scoped` | bound to the resource's own owner | `_require_session_access` / `_require_plan_access` |
 
-Three hardening changes came out of building it:
+**Who pays is not who owns.** `identity.account_id` is the *billing* account,
+and a team member is billed to their owner's account, so every member of a team
+shares one `account_id`. Using it as an ownership key made one teammate's quoted
+trade viewable and executable by another. Ownership keys off
+`identity.principal_id`, which is the individual user (or the anonymous device),
+and billing keys stay where they are. Credits, plans and rate limits still use
+`account_id`, which is correct for them.
+
+**One authorization function, every transport.** The rule lives in
+`app/plan_access.py` and both the HTTP routes and the MCP server call it. The
+MCP tool previously returned whole plans -- `confirmation_text` included, which
+is the only secret the execution endpoints check -- to any caller who knew the
+id, so the HTTP gate could simply be walked around. `plan_access` reads the plan
+through `plans.get_plan` as a module attribute on purpose: the gate and the
+handler must read through the same function, or the gate can answer "no such
+plan" while the handler goes on to find one.
+
+Three earlier hardening changes, from building the matrix itself:
 
 1. **Trade plans are bound to the account that requested them.**
    `confirmation_text` is `CONFIRM {plan_id}`, so plan id alone previously

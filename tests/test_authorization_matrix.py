@@ -217,6 +217,10 @@ def test_another_caller_cannot_touch_someone_elses_trade_plan(monkeypatch):
             return plan
         raise KeyError(plan_id)
 
+    # Patch the single real loader, not main's imported alias: the ownership
+    # gate and every handler must read a plan through the same function, or the
+    # gate can answer "no such plan" while the handler goes on to find one.
+    monkeypatch.setattr("app.plans.get_plan", fake_get_plan)
     monkeypatch.setattr("app.main.get_plan", fake_get_plan)
     intruder = TestClient(app)   # a different (anonymous) account
     body = {"confirmation_text": plan.confirmation_text}

@@ -414,8 +414,17 @@ async def orbit_token_deep_dive(token: str, chain: str | None = None, session_id
 @mcp.tool()
 async def orbit_trade_plan(plan_id: str) -> dict:
     """A quoted plan by id: tokens, amounts, route, warnings, status, expiry."""
+    from app import plan_access
+    from app.identity import current_identity
     from app.plans import get_plan
 
+    # The same gate the HTTP routes use, not a second copy of it. A plan's
+    # confirmation_text is "CONFIRM {plan_id}", so returning a plan to a caller
+    # who does not own it hands them everything the execution endpoints check.
+    try:
+        await plan_access.require_plan_access(plan_id, current_identity.get())
+    except plan_access.PlanAccessDenied:
+        return {"error": "Trade plan not found", "status": 404}
     try:
         plan = await get_plan(plan_id)
     except KeyError as exc:

@@ -1009,7 +1009,7 @@ function renderPlanCard(plan) {
 }
 function findRelayChain(hint){const value=String(hint||"").toLowerCase();return relayChains.find(chain=>chain.name.toLowerCase()===value)||relayChains.find(chain=>chain.name.toLowerCase().includes(value));}
 function renderRelayPlanCard(draft={},revision=sessionRevision){
-  if(!executionEnabled)return researchModeNotice("Swap preview");
+  if(!executionEnabled)return researchModeNotice("Swap preview",()=>renderRelayPlanCard(draft,revision));
   const quoteEpoch=chatTurnEpoch,quoteSession=sessionId;
   const isCurrent=()=>quoteEpoch===chatTurnEpoch&&quoteSession===sessionId&&revision===sessionRevision;
   const card=document.createElement("section");card.className="data-card";card.innerHTML=`<div class="data-card-head"><span class="data-card-title">Swap preview</span><span class="data-card-badge">Relay · Loading</span></div><div class="data-card-body"><div class="swap-status relay-plan-status">Resolving tokens and requesting a live quote…</div><div class="relay-plan-details" hidden></div><div class="card-actions"><button class="primary relay-plan-confirm" type="button" hidden>Confirm swap</button><button class="secondary relay-plan-connect" type="button" hidden>Connect wallet</button><button class="secondary relay-plan-retry" type="button" hidden>Retry quote</button><button class="secondary relay-plan-dismiss" type="button">Dismiss</button></div></div>`;
@@ -1035,7 +1035,7 @@ function renderRelayPlanCard(draft={},revision=sessionRevision){
   connect.addEventListener("click",()=>openDialog("walletDialog"));retry.addEventListener("click",loadQuote);$(".relay-plan-dismiss",card).addEventListener("click",()=>card.remove());void loadQuote();return card;
 }
 function renderInlineRelaySwap(draft={}){
-  if(!executionEnabled)return researchModeNotice("Cross-chain swap");
+  if(!executionEnabled)return researchModeNotice("Cross-chain swap",()=>renderInlineRelaySwap(draft));
   const card=document.createElement("section");card.className="data-card inline-swap-card";card.innerHTML=`<div class="data-card-head"><span class="data-card-title">Cross-chain swap</span><span class="data-card-badge">Relay · Chat route</span></div><div class="data-card-body"><div class="inline-swap-grid"><div class="field"><label>From network</label><select class="inline-from-chain"></select></div><div class="field"><label>To network</label><select class="inline-to-chain"></select></div><div class="field"><label>Amount</label><input class="inline-amount" inputmode="decimal" placeholder="0.01" value="${escapeHtml(draft.amount||"")}" /></div><div class="field"><label>Maximum slippage</label><input class="inline-slippage" inputmode="numeric" type="number" min="0" max="10000" placeholder="Auto" value="${escapeHtml(draft.slippage_bps??"")}" /></div><div class="field"><label>Token you pay</label><input class="inline-from-token" spellcheck="false" placeholder="Symbol, contract, or mint" value="${escapeHtml(draft.input_token||"")}" /></div><div class="field"><label>Token you receive</label><input class="inline-to-token" spellcheck="false" placeholder="Symbol, contract, or mint" value="${escapeHtml(draft.output_token||"")}" /></div><div class="field wide"><label>Receiving wallet</label><input class="inline-recipient" spellcheck="false" placeholder="Required for EVM ↔ Solana" value="${escapeHtml(draft.recipient||"")}" /></div></div><div class="swap-safety">Verify meme-coin contracts, liquidity, holders, and sellability. A ticker alone is accepted only when Relay finds one unambiguous token on the selected chain.</div><div class="swap-status inline-status">Loading networks…</div><section class="relay-quote inline-quote" hidden></section><div class="card-actions"><button class="primary inline-quote-btn" type="button">Get quote</button><button class="primary inline-execute-btn" type="button" hidden>Review &amp; sign</button><button class="secondary inline-dismiss-btn" type="button">Dismiss</button></div></div>`;
   const fromSelect=$(".inline-from-chain",card),toSelect=$(".inline-to-chain",card),amountInput=$(".inline-amount",card),slippageInput=$(".inline-slippage",card),fromToken=$(".inline-from-token",card),toToken=$(".inline-to-token",card),recipient=$(".inline-recipient",card),status=$(".inline-status",card),quoteEl=$(".inline-quote",card),quoteBtn=$(".inline-quote-btn",card),executeBtn=$(".inline-execute-btn",card);let state=null;
   const setStatus=(message,type="")=>{status.textContent=message;status.className=`swap-status inline-status ${type}`.trim();};
@@ -1089,14 +1089,27 @@ function retireQuickActions(){
 // x402 bundle pays from the connected EVM wallet before retrying. The server
 // is the source of truth for whether payment is on and what it costs.
 let x402Config=null;
-/* Deployment mode. Jupiter and LI.FI are refused by the server in research
-   mode, so this flag only changes what we bother showing. Relay is different:
-   it quotes and signs in the browser against Relay's own API, so the server is
-   never asked and this IS the block for that provider. Starts true so a failed
-   config fetch never disables swapping on an execution deployment. */
-let executionEnabled=true;
-function researchModeNotice(title){const card=document.createElement("section");card.className="data-card";card.innerHTML=`<div class="data-card-head"><span class="data-card-title">${escapeHtml(title)}</span><span class="data-card-badge">Research mode</span></div><div class="data-card-body"><div class="swap-status">This deployment is running in research mode, so it cannot move funds. Research, quotes shown for information, history and tasks all work normally.</div><div class="card-actions"><button class="secondary research-dismiss" type="button">Dismiss</button></div></div>`;$(".research-dismiss",card).addEventListener("click",()=>card.remove());return card;}
-async function loadX402Config(){try{const cfg=await (await fetch("/config/public")).json();x402Config=cfg.x402||null;executionEnabled=cfg.deployment?cfg.deployment.execution_enabled!==false:true;}catch{x402Config=null;}syncPayChip();}
+/* Deployment mode. Relay quotes and signs in the browser against Relay's own
+   API, so for that provider this flag is the block, not a convenience -- which
+   is why it starts DISABLED and is only turned on by a config load that
+   actually succeeded and actually said execution is enabled. A failed fetch
+   leaves swapping off; ensureExecutionConfig() retries on demand so a transient
+   blip costs one retry rather than the feature. */
+let executionEnabled=false,executionConfigLoaded=false;
+async function ensureExecutionConfig(){if(executionConfigLoaded)return executionEnabled;await loadX402Config();return executionConfigLoaded&&executionEnabled;}
+/* Two different situations, and saying which is which matters: the deployment
+   really is research-only, or we could not reach its settings and are refusing
+   rather than guessing. Only the second offers a retry. */
+function researchModeNotice(title,rerender){
+  const unknown=!executionConfigLoaded;
+  const card=document.createElement("section");card.className="data-card";
+  card.innerHTML=`<div class="data-card-head"><span class="data-card-title">${escapeHtml(title)}</span><span class="data-card-badge">${unknown?"Unavailable":"Research mode"}</span></div><div class="data-card-body"><div class="swap-status${unknown?" error":""}">${unknown?"Could not confirm this deployment&rsquo;s execution settings, so swapping is held. Nothing was sent.":"This deployment is running in research mode, so it cannot move funds. Research, quotes shown for information, history and tasks all work normally."}</div><div class="card-actions">${unknown?'<button class="primary research-retry" type="button">Try again</button>':""}<button class="secondary research-dismiss" type="button">Dismiss</button></div></div>`;
+  $(".research-dismiss",card).addEventListener("click",()=>card.remove());
+  const retry=$(".research-retry",card);
+  if(retry)retry.addEventListener("click",async()=>{retry.disabled=true;retry.textContent="Checking…";await ensureExecutionConfig();const replacement=rerender?rerender():researchModeNotice(title,rerender);card.replaceWith(replacement);});
+  return card;
+}
+async function loadX402Config(){try{const res=await fetch("/config/public");if(!res.ok)throw new Error("config unavailable");const cfg=await res.json();x402Config=cfg.x402||null;executionEnabled=cfg.deployment?.execution_enabled===true;executionConfigLoaded=true;}catch{x402Config=null;executionEnabled=false;executionConfigLoaded=false;}syncPayChip();}
 async function syncPayChip(){const chip=$("#payChip");if(!x402Config?.enabled){chip.hidden=true;return;}chip.hidden=false;const ready=await (window.OrbitX402?.hasEvmWallet?.()??Promise.resolve(false));chip.classList.toggle("ready",ready);$("#payChipText").textContent=`${x402Config.price}/message · ${ready?"pays from your wallet":"connect an EVM wallet to pay"}`;chip.title=`This Orbit charges ${x402Config.price} per message via x402 (USDC on ${x402Config.network}). ${ready?"Each message is paid from your connected wallet.":"Connect Coinbase Wallet, Privy or WalletConnect to pay."}`;}
 async function chatFetch(url,init){
   init={...init,headers:{...(init?.headers||{}),"X-Orbit-Device":deviceId}};
@@ -1216,7 +1229,7 @@ async function loadRelayChains(){
   try{await ensureRelayChains();const options=relayChains.map(chain=>`<option value="${chain.id}">${escapeHtml(chain.name)} · ${escapeHtml(chain.nativeSymbol)}</option>`).join("");$("#relayFromChain").innerHTML=options;$("#relayToChain").innerHTML=options;const solana=relayChains.find(chain=>chain.id===window.OrbitRelay.constants.SOLANA_CHAIN_ID);const base=relayChains.find(chain=>chain.id===8453);if(solana)$("#relayFromChain").value=String(solana.id);if(base)$("#relayToChain").value=String(base.id);setRelayNativeToken("#relayFromToken","#relayFromChain");setRelayNativeToken("#relayToToken","#relayToChain");setRelayStatus(`${relayChains.length} live Relay routes available.`,"ok");}
   catch(error){setRelayStatus(relayError(error),"error");}
 }
-async function openRelayDialog(){if(!executionEnabled){const host=document.getElementById("relayStatus");if(host){openDialog("relayDialog");host.textContent="This deployment is running in research mode and cannot move funds. Swapping is unavailable.";host.className="swap-status error";const quote=document.getElementById("relayQuoteBtn"),run=document.getElementById("relayExecuteBtn");if(quote)quote.disabled=true;if(run)run.hidden=true;}return;}openDialog("relayDialog");if(!relayChains.length)await loadRelayChains();}
+async function openRelayDialog(){if(!await ensureExecutionConfig()){const host=document.getElementById("relayStatus");if(host){openDialog("relayDialog");host.textContent=executionConfigLoaded?"This deployment is running in research mode and cannot move funds. Swapping is unavailable.":"Could not confirm this deployment's execution settings, so swapping is held. Close and reopen to retry.";host.className="swap-status error";const quote=document.getElementById("relayQuoteBtn"),run=document.getElementById("relayExecuteBtn");if(quote)quote.disabled=true;if(run)run.hidden=true;}return;}openDialog("relayDialog");if(!relayChains.length)await loadRelayChains();}
 async function requestRelayQuote(){
   const from=relayChain($("#relayFromChain").value),to=relayChain($("#relayToChain").value),amount=$("#relayAmount").value.trim(),currency=$("#relayFromToken").value.trim(),toCurrency=$("#relayToToken").value.trim(),recipient=$("#relayRecipient").value.trim();
   if(!from||!to||!currency||!toCurrency||!amount||!Number.isFinite(Number(amount))||Number(amount)<=0){setRelayStatus("Enter both token addresses and a positive amount.","error");return;}

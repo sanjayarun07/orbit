@@ -39,6 +39,22 @@ class Identity:
     def rate_limit_key(self) -> str:
         return self.account_id
 
+    @property
+    def principal_id(self) -> str:
+        """Who this caller *is*, as opposed to which account pays for them.
+
+        These differ for exactly one case, and it is the one that matters:
+        a team member is billed to their owner's account, so `account_id` is
+        shared by every member of a team. It is the right key for credits,
+        plans and rate limits, and the wrong key for ownership -- using it
+        there made one teammate's quoted trade reachable and executable by
+        another. Anonymous callers have no user record, and their account id
+        already identifies the individual device.
+        """
+        if self.user is not None:
+            return f"user:{self.user['id']}"
+        return self.account_id
+
     def has_scope(self, scope: str) -> bool:
         if self.api_key is None:
             return True

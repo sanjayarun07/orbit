@@ -33,12 +33,22 @@ HISTORY_KEY = "chat_history:{}"
 
 
 def _ttl(session_id: str) -> int | None:
-    """Seconds left on the stored transcript, or None without Redis."""
+    """Seconds left on the stored transcript, or None when Redis is not usable.
+
+    "Not usable" has to include unreachable, not just unconfigured: a sandboxed
+    or network-restricted CI runner has a REDIS_URL that refuses to connect, and
+    these tests should skip there rather than fail on the environment. The
+    behaviour itself still needs a Redis-backed run to be verified, which is
+    what the skip message says.
+    """
     async def _read():
-        redis = await get_redis()
-        if redis is None:
+        try:
+            redis = await get_redis()
+            if redis is None:
+                return None
+            return await redis.ttl(HISTORY_KEY.format(session_id))
+        except Exception:
             return None
-        return await redis.ttl(HISTORY_KEY.format(session_id))
     return asyncio.run(_read())
 
 
@@ -63,7 +73,10 @@ def _forget_process_state(session_id: str) -> None:
 @pytest.fixture
 def redis_backed():
     if _ttl("probe-for-redis") is None:
-        pytest.skip("retention is expressed as Redis key TTLs; no Redis configured")
+        pytest.skip(
+            "retention is expressed as Redis key TTLs and Redis is not reachable here; "
+            "the extend-only expiry behaviour is UNVERIFIED in this run"
+        )
 
 
 # --- retention survives a restart or a second worker --------------------------
