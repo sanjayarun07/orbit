@@ -60,10 +60,6 @@ body.home .jump-latest { display: none; }
 .send:hover { background: var(--brand-hover); }
 .home-below { display: none; max-width: var(--content-width); margin: 18px auto 0; }
 body.home .home-below { display: block; animation: orbit-enter var(--motion-enter) var(--ease-out); }
-.home-shortcuts { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 34px; }
-.home-shortcuts button { background: transparent; border: 1px solid var(--border); border-radius: 7px; padding: 9px 12px; color: var(--text-2); font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 18px; }
-.home-shortcuts button:hover { border-color: var(--hover-border); background: var(--surface-2); }
-.home-shortcuts span { color: var(--subtle); }
 .home-below .mono-cap { margin: 0 0 12px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; }
 .home-below .prompts { grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; }
 .home-below .prompt-card { min-height: 116px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; transform: none; }
@@ -146,8 +142,6 @@ body.home .home-below { display: block; animation: orbit-enter var(--motion-ente
   .policy-chip { max-width: 150px; }
   .policy-chip .icon { display: none; }
   .credits-chip { font-size: 10px; }
-  .home-shortcuts { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .home-shortcuts button { justify-content: space-between; gap: 4px; font-size: 11px; }
   .home-below .prompts { gap: 8px; }
   .home-below .prompt-card { padding: 12px; }
   .overlay { padding: 12px; }

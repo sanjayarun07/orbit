@@ -10,7 +10,7 @@
 <script>(function(){try{var p=JSON.parse(localStorage.getItem("orbit_theme_v1")||'"system"');var t=p==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):p;document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t;}catch(e){}})();</script>
 <link rel="stylesheet" href="/ui/theme.css?v=1">
 <link rel="stylesheet" href="/ui/chat.css?v=3">
-<link rel="stylesheet" href="/ui/product.css?v=1">
+<link rel="stylesheet" href="/ui/product.css?v=2">
 </head>
 <body>
 <div class="app">
@@ -79,12 +79,6 @@
         </div>
       </form>
       <div class="home-below" id="homeBelow">
-        <div class="home-shortcuts" aria-label="Start a conversation">
-          <button type="button" data-msg="How is the crypto market today?">Market overview <span aria-hidden="true">↗</span></button>
-          <button type="button" data-action="portfolio">My portfolio <span aria-hidden="true">↗</span></button>
-          <button type="button" data-action="research">Research an asset <span aria-hidden="true">↗</span></button>
-          <button type="button" data-action="relay">Swap assets <span aria-hidden="true">↗</span></button>
-        </div>
         <div class="mono-cap" id="highlightsCaption" hidden></div>
         <div class="prompts" id="homePrompts" hidden></div>
         <details class="explore" id="exploreMore">
@@ -1111,7 +1105,7 @@ function renderPortfolioCard(snapshot) {
 async function analyzePortfolio(){const address=walletInput.value.trim();if(!address){openDialog("walletDialog");return;}addUserMessage("Analyze my portfolio");const typing=addTyping();busy=true;
   try{const res=await fetch(`/portfolio/${encodeURIComponent(address)}`);const data=await res.json();if(!res.ok)finishAgentMessage(typing,{error:normalizeError(data,res.status)});else{const body=$(".message-body",typing);body.innerHTML="";body.appendChild(renderPortfolioCard(data));}}
   catch(error){finishAgentMessage(typing,{error:error.message});}finally{busy=false;scrollToBottom();}}
-document.addEventListener("click",event=>{const prompt=event.target.closest(".prompt-card, .home-shortcuts button");if(!prompt)return;if(prompt.dataset.action==="portfolio")analyzePortfolio();else if(prompt.dataset.action==="relay")openRelayDialog();/* the guided swap form, not a bare request */else if(prompt.dataset.action==="research"){input.value="Research ";input.focus();}else if(prompt.dataset.msg)sendMessage(prompt.dataset.msg);});
+document.addEventListener("click",event=>{const prompt=event.target.closest(".prompt-card");if(!prompt)return;if(prompt.dataset.action==="portfolio")analyzePortfolio();else if(prompt.dataset.action==="relay")openRelayDialog();/* the guided swap form, not a bare request */else if(prompt.dataset.action==="research"){input.value="Research ";input.focus();}else if(prompt.dataset.msg)sendMessage(prompt.dataset.msg);});
 
 function relayChain(id){return relayChains.find(chain=>chain.id===Number(id));}
 function relayError(error){
