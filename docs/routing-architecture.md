@@ -139,3 +139,21 @@ identifier.
 `POST /admin/intents/preview` exposes the semantic intent, capabilities, chain
 evidence, confidence, route mode, selected execution provider, missing fields,
 and rule reason without consuming provider quota.
+
+## Tool catalogue: what each API can answer
+
+`app/tool_catalog.py` gives every registered provider tool a `ToolSpec`: the
+API and endpoints it calls, the inputs a request must carry, the fields it
+returns, and the question *dimensions* it can answer or must never be chosen
+for (volume, price_change, boosts, narratives, new_listings, liquidity,
+holders, security, trades, balances, transactions, perps, tvl, fees, yields,
+sentiment, social, listings, news, people, projects, vcs, docs, url). The
+router reads the request's asked dimensions with the same vocabulary and adds
+`spec.fit(request)` to every tool's score: +2.5 per dimension the tool serves,
+-6 per dimension it explicitly cannot. Regex gates still decide who *may*
+fire; the spec decides who *should* when words overlap ("trending tokens by
+volume" matches the boosts tool's words, but only the CoinGecko markets tool
+can rank by volume). Every spec also feeds the semantic fallback's description,
+so no tool is invisible to it. `tests/test_tool_catalog.py` fails the build
+when a registered tool has no spec. `python scripts/tool_catalog_doc.py`
+renders docs/tool-catalog.md.

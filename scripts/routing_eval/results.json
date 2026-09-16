@@ -2,11 +2,11 @@
  "router": {
   "mode": "router",
   "metrics": {
-   "cases": 33,
+   "cases": 34,
    "abstain": 0,
-   "top1": 0.9696969696969697,
-   "recall_at_k": 0.9242424242424241,
-   "mrr": 0.9696969696969697,
+   "top1": 0.9705882352941176,
+   "recall_at_k": 0.926470588235294,
+   "mrr": 0.9705882352941176,
    "forbidden_at_1": 0.0
   },
   "rows": [
@@ -270,6 +270,14 @@
     "kb-global-incident",
     "OK",
     "knowledge_base_search",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "trending-by-volume",
+    "OK",
+    "coingecko_top_volume",
     "1.00",
     "1.00",
     ""

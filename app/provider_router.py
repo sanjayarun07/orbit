@@ -8,7 +8,7 @@ import logging
 import re
 from threading import Condition, Lock
 import time
-from typing import Callable
+from typing import Any, Callable
 
 import httpx
 
@@ -104,6 +104,9 @@ class ProviderTool:
     # zero behavior change. Only set on tools where the regex `matches`
     # gate is known to have real, hard-to-close coverage gaps.
     description: str | None = None
+    # Attached by app.tool_catalog.attach_specs: what the tool's API can and
+    # cannot answer, scored in _score() via spec.fit(request).
+    spec: Any = None
 
 
 @dataclass(frozen=True)
@@ -154,6 +157,9 @@ class ProviderRouter:
         if any(existing.name == tool.name for existing in self._tools):
             raise ValueError(f"Provider tool already registered: {tool.name}")
         self._tools.append(tool)
+
+    def tools(self) -> tuple[ProviderTool, ...]:
+        return tuple(self._tools)
 
     def apply_overrides(self, overrides: dict[str, dict]) -> None:
         known = {tool.name for tool in self._tools}
@@ -236,11 +242,16 @@ class ProviderRouter:
         latency_penalty = min((health.latency_ewma_ms or 0) / 2000, 2.0)
         cost_penalty = float(self._effective(tool, "cost_usd")) * settings.provider_cost_weight
         breadth_penalty = max(0, len(words) - 30) * 0.01
+        # What the tool's API can answer versus what the request asks for
+        # (app.tool_catalog): a volume ranking asked of a paid-boosts tool is
+        # pushed down no matter how many keywords overlap.
+        spec_fit = float(tool.spec.fit(request)) if tool.spec is not None else 0.0
         return (
             float(self._effective(tool, "priority"))
             + 8.0
             + keyword_hits * 2.0
             + chain_fit
+            + spec_fit
             + health.reliability * settings.provider_health_weight
             + tool_outcomes.adjustment(tool.name)
             - health.consecutive_failures * 2.0

@@ -329,6 +329,8 @@ def get_provider_router() -> ProviderRouter:
                 router.apply_overrides(value)
         except (OSError, json.JSONDecodeError):
             pass
+    from app.tool_catalog import attach_specs
+    attach_specs(router)   # every tool learns what its API can and cannot answer
     return router
 
 

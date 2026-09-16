@@ -41,8 +41,8 @@ def _matches(pattern: str):
 # word "token" somewhere in the sentence. Without this, "top holders of BONK
 # token" matched ("top" ... "token") and wrongly returned a trending list.
 TRENDING_TOKENS = re.compile(
-    r"\b(?:trending|hot|hottest|top|latest|newest|popular|biggest)"
-    r"(?:\s+(?:trending|hot|new|latest|top|meme|solana|base|bsc|active|popular|newest|biggest))*"
+    r"\b(?:trending|hot|hottest|top|latest|newest|popular|biggest|boosted|promoted)"
+    r"(?:\s+(?:trending|hot|new|latest|top|meme|solana|base|bsc|active|popular|newest|biggest|boosted|promoted))*"
     r"\s+(?:tokens?|coins?|gems?|memecoins?)\b"
     r"|\b(?:pump\.?\s?fun|pumpfun|letsbonk|bonk\.?fun|moonshot)\b",
     re.IGNORECASE,
