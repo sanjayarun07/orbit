@@ -107,6 +107,57 @@ async def clawed_back(account_id: str, charge_id: str) -> int:
                if row["reason"].startswith("refund:") and str((row.get("meta") or {}).get("charge")) == charge_id)
 
 
+_clawback_locks: dict[tuple[int, str], asyncio.Lock] = {}   # keyed per event loop, like _reserve_locks
+
+
+async def claw_back(account_id: str, charge_id: str, target: int, reason: str, ref_type: str, ref_id: str, meta: dict | None = None) -> tuple[int, int]:
+    """Bring the credits clawed back for one charge up to `target` (a
+    cumulative figure, like Stripe's amount_refunded) and return
+    (deducted_now, total_clawed_back). Reading the running total and appending
+    the increment happen under a per-charge lock -- a Postgres advisory lock
+    inside one transaction, or an asyncio lock in memory -- so two overlapping
+    refund events cannot both read the old total and over-deduct."""
+    pool = await get_pg_pool()
+    if pool is not None:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", f"clawback:{charge_id}")
+                already = int(await conn.fetchval(
+                    "SELECT COALESCE(SUM(-delta), 0) FROM credit_ledger WHERE account_id = $1 AND reason LIKE 'refund:%' AND meta->>'charge' = $2",
+                    account_id, charge_id,
+                ) or 0)
+                increment = target - already
+                if increment <= 0:
+                    return 0, already
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO credit_ledger (id, account_id, delta, reason, ref_type, ref_id, meta)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT (account_id, ref_type, ref_id) DO NOTHING
+                    RETURNING id
+                    """,
+                    str(uuid4()), account_id, -increment, reason, ref_type, ref_id, json.dumps(meta or {}),
+                )
+                return (increment, target) if row is not None else (0, already)
+    lock = _clawback_locks.setdefault((id(asyncio.get_running_loop()), charge_id), asyncio.Lock())
+    async with lock:
+        already = await clawed_back(account_id, charge_id)
+        increment = target - already
+        if increment <= 0:
+            return 0, already
+        applied = await append(account_id, -increment, reason, ref_type, ref_id, meta)
+        return (increment, target) if applied else (0, already)
+
+
+async def has_ref(account_id: str, ref_type: str, ref_id: str) -> bool:
+    """Whether a ledger row with this idempotency reference already exists
+    (e.g. an occurrence charged by a run that died before delivering)."""
+    pool = await get_pg_pool()
+    if pool is not None:
+        return await pool.fetchval("SELECT 1 FROM credit_ledger WHERE account_id = $1 AND ref_type = $2 AND ref_id = $3", account_id, ref_type, ref_id) is not None
+    return (account_id, ref_type, ref_id) in _refs
+
+
 async def history(account_id: str, limit: int = 50) -> list[dict]:
     pool = await get_pg_pool()
     if pool is not None:

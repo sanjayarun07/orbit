@@ -290,3 +290,33 @@ def test_successive_partial_refunds_deduct_only_their_increment():
     assert post_event(client, event("evt_q3", "charge.refunded", {**charge, "amount_refunded": 500})).json()["credits"] == 0
     full = post_event(client, event("evt_q4", "charge.refunded", {**charge, "amount_refunded": 1000})).json()
     assert full["credits"] == -50 and client.get("/me").json()["credits"]["balance"] == base - 100
+
+
+def test_overlapping_refund_events_never_over_deduct(monkeypatch):
+    client = TestClient(main.app)
+    me = sign_in(client, email="overlap@example.com")
+    user_id = me["user"]["id"]
+    session = {"id": "cs_o", "object": "checkout.session", "mode": "payment", "payment_status": "paid", "customer": "cus_o",
+               "client_reference_id": user_id, "payment_intent": "pi_o", "amount_total": 1000, "currency": "usd",
+               "metadata": {"user_id": user_id, "kind": "pack", "pack_id": "pack_500", "credits": "100"}}
+    assert post_event(client, event("evt_o0", "checkout.session.completed", session)).json()["credits"] == 100
+    base = client.get("/me").json()["credits"]["balance"]
+    # Open a window between reading the running total and appending the
+    # increment (on Postgres those are two round trips): without a per-charge
+    # lock both events read zero and deduct 25 + 50 instead of 25 + 25.
+    real_append = credits.append
+
+    async def slow_append(*args, **kwargs):
+        await asyncio.sleep(0.02)
+        return await real_append(*args, **kwargs)
+
+    monkeypatch.setattr(credits, "append", slow_append)
+    charge = {"id": "ch_o", "object": "charge", "customer": "cus_o", "amount": 1000, "metadata": {"user_id": user_id, "kind": "pack", "pack_id": "pack_500", "credits": "100"}}
+
+    async def overlap():
+        return await asyncio.gather(billing._on_charge_refunded("evt_o1", {**charge, "amount_refunded": 250}),
+                                    billing._on_charge_refunded("evt_o2", {**charge, "amount_refunded": 500}))
+
+    results = asyncio.run(overlap())
+    assert sum(-r["credits"] for r in results) == 50 and max(r["clawed_back_total"] for r in results) == 50
+    assert asyncio.run(credits.balance(credits.user_account_id(user_id))) == base - 50

@@ -491,13 +491,18 @@ async def _run_claimed(task: dict, user: dict) -> dict:
         charge = settings.credit_cost_brief if task["kind"] == "brief" else 0
         if charge:
             account_id = credits.user_account_id(user.get("team_owner_id") or user["id"])
-            if await credits.balance(account_id) < charge:
+            ref = f"{task['id']}:{task['occurrence']}"
+            # Keyed by the scheduled occurrence, not the wall clock: the ledger's
+            # unique reference makes a repeated run of the same occurrence free.
+            # An occurrence a crashed run already paid for is delivered even when
+            # that charge took the last credit -- the balance gate is for new charges.
+            if await credits.has_ref(account_id, "task_run", ref):
+                pass
+            elif await credits.balance(account_id) < charge:
                 updates["last_result"] = "skipped: out of credits"
                 fired = False
             else:
-                # Keyed by the scheduled occurrence, not the wall clock: the ledger's
-                # unique reference makes a repeated run of the same occurrence free.
-                await credits.append(account_id, -charge, "task:brief", "task_run", f"{task['id']}:{task['occurrence']}", {"kind": "brief"})
+                await credits.append(account_id, -charge, "task:brief", "task_run", ref, {"kind": "brief"})
     if fired and body:
         await notify(user["id"], task["title"], body, kind=task["kind"], task_id=task["id"])
         if task.get("channel") == "email":

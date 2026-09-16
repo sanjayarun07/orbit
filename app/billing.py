@@ -432,15 +432,13 @@ async def _on_charge_refunded(event_id: str, charge: dict) -> dict:
     # deducted now (25% then 50% of a 100-credit pack costs 25 + 25, not 25 + 50).
     account_id = credits.user_account_id(user["id"])
     target = bought if refunded >= total else round(bought * refunded / total)
-    already = await credits.clawed_back(account_id, str(charge.get("id")))
-    clawback = target - already
-    if clawback <= 0:
-        return {"status": "duplicate", "credits": 0, "clawed_back_total": already}
-    applied = await credits.append(
-        account_id, -clawback, f"refund:{metadata.get('pack_id') or 'pack'}",
+    deducted, total_clawed = await credits.claw_back(
+        account_id, str(charge.get("id")), target, f"refund:{metadata.get('pack_id') or 'pack'}",
         "stripe_event", event_id, {"charge": charge.get("id"), "amount_refunded": refunded},
     )
-    return {"status": "clawed_back" if applied else "duplicate", "credits": -clawback, "clawed_back_total": target if applied else already}
+    if deducted <= 0:
+        return {"status": "duplicate", "credits": 0, "clawed_back_total": total_clawed}
+    return {"status": "clawed_back", "credits": -deducted, "clawed_back_total": total_clawed}
 
 
 _HANDLERS = {

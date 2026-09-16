@@ -358,3 +358,23 @@ def test_recovering_an_expired_claim_charges_the_occurrence_once(monkeypatch):
     assert client.get("/me").json()["credits"]["balance"] == before - settings.credit_cost_brief
     after = asyncio.run(tasks.get_task(task["id"]))
     assert after["claimed_occurrence"] is None and after["claimed_until"] is None and after["next_run_at"]
+
+
+def test_a_paid_occurrence_is_delivered_on_recovery_even_with_no_credits_left(monkeypatch):
+    monkeypatch.setattr(tasks.home_highlights, "get_highlights", lambda force=False: {"as_of": "x", "source": "news", "cards": []})
+    monkeypatch.setattr(tasks.market_overview, "_get_json", lambda url: {})
+    client, user, task = _make_task(kind="brief", schedule={"daily": "08:00"})
+    account = credits.user_account_id(user["id"])
+    running = asyncio.run(tasks.claim_task(dict(task)))
+    # The run charged the brief with the user's last credits, then died before delivering.
+    asyncio.run(credits.append(account, -settings.credit_cost_brief, "task:brief", "task_run", f"{task['id']}:{running['occurrence']}", {"kind": "brief"}))
+    remaining = asyncio.run(credits.balance(account))
+    asyncio.run(credits.append(account, -remaining, "drain", "test", "drain"))
+    assert asyncio.run(credits.balance(account)) == 0
+    asyncio.run(tasks.update_task(task["id"], user["id"], claimed_until=(datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()))
+    recovered = asyncio.run(tasks.run_task(asyncio.run(tasks.get_task(task["id"]))))
+    assert recovered["fired"] is True and recovered["result"] != "skipped: out of credits"
+    assert len([i for i in asyncio.run(tasks.inbox(user["id"])) if i.get("task_id") == task["id"]]) == 1
+    assert asyncio.run(credits.balance(account)) == 0          # nothing charged twice
+    after = asyncio.run(tasks.get_task(task["id"]))
+    assert after["fire_count"] == 1 and after["claimed_occurrence"] is None and after["next_run_at"]
