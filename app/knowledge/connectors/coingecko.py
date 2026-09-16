@@ -38,7 +38,7 @@ _ADDRESS = re.compile(r"^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}|0x[0-9
 
 _throttle_lock = threading.Lock()
 _last_call = 0.0
-MIN_INTERVAL = 2.5  # seconds between calls, process-wide
+MIN_INTERVAL = 6.5  # seconds between calls, process-wide (anonymous tier tolerates ~10/min sustained)
 
 
 def _throttled_get(client: httpx.Client, url: str) -> httpx.Response:

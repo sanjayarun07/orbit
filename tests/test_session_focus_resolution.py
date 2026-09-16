@@ -28,7 +28,7 @@ def test_security_ask_resolves_token_without_token_capabilities(monkeypatch):
     monkeypatch.setattr(research_node_mod, "search_verified_tokens",
                         lambda q: [{"mint": BONK, "symbol": "BONK", "tags": ["verified"]}])
     monkeypatch.setattr(research_node_mod, "token_candidates", lambda symbol, chains=(): [])
-    monkeypatch.setattr(research_node_mod, "bitquery_evm_candidates", lambda symbol, chain: [])
+    monkeypatch.setattr(research_node_mod, "bitquery_evm_lookup", lambda symbol, chain: ([], True))
     # The speech layer tags "should I ape into X" as advice -> web capabilities only.
     out = asyncio.run(research_node_mod._resolve_named_token(
         "can you check if BONK is safe to ape into", {"finance_data", "web_research"}))

@@ -536,3 +536,23 @@ def test_name_aliases_and_shared_alias_disambiguation_by_tvl():
     assert resolver.resolve("Aave", context="how does Aave V4 differ").entity.id == "protocol:aave-v4"
     assert [m.entity.id for m in resolver.mentions("has Aave ever been hacked?")] == ["protocol:aave-v3"]
     assert {m.entity.id for m in resolver.mentions("compare Aave Horizon RWA with Aave V3")} == {"protocol:aave-horizon-rwa", "protocol:aave-v3"}
+
+
+def test_failed_source_retries_after_an_hour_not_a_week():
+    from datetime import datetime, timezone
+
+    from app.knowledge.connectors.coingecko import CoinGeckoConnector
+
+    asyncio.run(registry.bootstrap(limit=10))
+    store = asyncio.run(kb_store.get_store())
+    aave = asyncio.run(store.get_protocol("protocol:aave"))
+    gecko = CoinGeckoConnector()                      # refresh_every = 7 days
+    assert asyncio.run(ingest.due(gecko, aave, store))
+    asyncio.run(store.record_source_state("coingecko", aave.id, False, 0, "coingecko rate limited (429)"))
+    assert not asyncio.run(ingest.due(gecko, aave, store))             # just failed: back off
+    state = store.source_state[("coingecko", aave.id)]
+    state["last_run_at"] = datetime.now(timezone.utc) - timedelta(hours=2)
+    assert asyncio.run(ingest.due(gecko, aave, store))                 # failed two hours ago: try again
+    asyncio.run(store.record_source_state("coingecko", aave.id, True, 1, None))
+    store.source_state[("coingecko", aave.id)]["last_run_at"] = datetime.now(timezone.utc) - timedelta(hours=2)
+    assert not asyncio.run(ingest.due(gecko, aave, store))             # succeeded two hours ago: wait the week

@@ -19,7 +19,7 @@ def test_resolve_named_token_injects_mint_for_holders_query(monkeypatch):
     monkeypatch.setattr(research_node_mod, "search_verified_tokens",
                         lambda q: [{"mint": "BONKmint1111", "symbol": "BONK", "tags": ["verified"]}])
     monkeypatch.setattr(research_node_mod, "token_candidates", lambda symbol, chains=(): [])
-    monkeypatch.setattr(research_node_mod, "bitquery_evm_candidates",
+    monkeypatch.setattr(research_node_mod, "bitquery_evm_lookup",
                         lambda symbol, chain: (_ for _ in ()).throw(AssertionError("no EVM lookup when Solana is authoritative")))
     caps = {"token_discovery", "token_security"}
     out = asyncio.run(research_node_mod._resolve_named_token("top holders of BONK token", caps))
@@ -43,7 +43,7 @@ def test_resolve_named_token_asks_when_symbol_is_ambiguous_across_chains(monkeyp
         "ethereum": [{"chain": "ethereum", "address": "0x6982", "symbol": "PEPE", "liquidity_usd": 3.9e6, "traders": 120}],
         "base": [{"chain": "base", "address": "0x6921", "symbol": "PEPE", "liquidity_usd": 1.5e6, "traders": 80}],
     }
-    monkeypatch.setattr(research_node_mod, "bitquery_evm_candidates", lambda symbol, chain: bq.get(chain, []))
+    monkeypatch.setattr(research_node_mod, "bitquery_evm_lookup", lambda symbol, chain: (bq.get(chain, []), True))
     monkeypatch.setattr(research_node_mod, "token_candidates",
                         lambda symbol, chains=(): [
                             {"chain": "ethereum", "address": "0x6982", "symbol": "PEPE", "liquidity_usd": 310_000_000.0},
@@ -61,15 +61,51 @@ def test_resolve_named_token_asks_when_symbol_is_ambiguous_across_chains(monkeyp
     assert "0x6921" in out2.request and out2.chain == "base"
 
 
+def test_verified_solana_token_is_not_made_ambiguous_by_dex_screener_pollution(monkeypatch):
+    """Live regression (2026-09-16): DEX Screener search listed a 'BONK' on
+    Ethereum with $342M of liquidity while Bitquery saw no token with real
+    traders there. That is pollution, not a rival: BONK resolves to its
+    verified Solana mint. Only when Bitquery cannot answer (outage, 402) does
+    the DEX Screener entry still count, so a real rival is never dropped."""
+    monkeypatch.setattr(research_node_mod, "search_verified_tokens",
+                        lambda q: [{"mint": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", "symbol": "BONK", "tags": ["verified"]}])
+    decoy = [
+        {"chain": "ethereum", "address": "0x8955322D800D17BD2561Bb3B59c88171a9980456", "symbol": "BONK", "liquidity_usd": 342_036_373.0, "volume_24h_usd": 0.0},
+        {"chain": "solana", "address": "56Lc5By6bBmewoLZLy2QWs9L9nd8aQHFZrYCSaX5KDCm", "symbol": "BONK", "liquidity_usd": 249_356_112.0, "volume_24h_usd": 4.0},
+    ]
+    monkeypatch.setattr(research_node_mod, "token_candidates", lambda symbol, chains=(): decoy)
+    caps = {"token_discovery", "token_security"}
+    # Zero 24h volume behind $342M "liquidity": not a rival, whatever Bitquery says or cannot say.
+    for verdict in (([], True), ([], False)):
+        monkeypatch.setattr(research_node_mod, "bitquery_evm_lookup", lambda symbol, chain, v=verdict: v)
+        out = asyncio.run(research_node_mod._resolve_named_token("top holders of BONK", caps))
+        assert out.clarification is None and out.chain == "solana" and "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263" in out.request
+    # Real volume on Ethereum but Bitquery answered "no token with real traders": still pollution.
+    traded = [{**decoy[0], "volume_24h_usd": 5_000_000.0}, decoy[1]]
+    monkeypatch.setattr(research_node_mod, "token_candidates", lambda symbol, chains=(): traded)
+    monkeypatch.setattr(research_node_mod, "bitquery_evm_lookup", lambda symbol, chain: ([], True))
+    out = asyncio.run(research_node_mod._resolve_named_token("top holders of BONK", caps))
+    assert out.clarification is None and out.chain == "solana"
+    # Real volume and Bitquery unavailable: no verdict, so the question is still asked (a real rival is never dropped).
+    monkeypatch.setattr(research_node_mod, "bitquery_evm_lookup", lambda symbol, chain: ([], False))
+    out = asyncio.run(research_node_mod._resolve_named_token("top holders of BONK", caps))
+    assert out.clarification is not None and {c["chain"] for c in out.pending["candidates"]} == {"solana", "ethereum"}
+    # Real volume and Bitquery sees traders: a genuine ambiguity.
+    monkeypatch.setattr(research_node_mod, "bitquery_evm_lookup",
+                        lambda symbol, chain: ([{"chain": "ethereum", "address": "0x8955", "symbol": "BONK", "liquidity_usd": 2e6, "traders": 300}], True))
+    out = asyncio.run(research_node_mod._resolve_named_token("top holders of BONK", caps))
+    assert out.clarification is not None
+
+
 def test_resolve_named_token_asks_when_verified_solana_has_evm_rival(monkeypatch):
     # A verified Solana PEPE AND a large Ethereum PEPE share the ticker -> ask,
     # listing the verified Solana option first, rather than silently picking it.
     monkeypatch.setattr(research_node_mod, "search_verified_tokens",
                         lambda q: [{"mint": "SolPEPEmint", "symbol": "PEPE", "tags": ["verified"]}])
     # Bitquery confirms a real Ethereum PEPE; Base has none.
-    monkeypatch.setattr(research_node_mod, "bitquery_evm_candidates",
-                        lambda symbol, chain: [{"chain": "ethereum", "address": "0x6982", "symbol": "PEPE",
-                                                "liquidity_usd": 3.9e6, "traders": 120}] if chain == "ethereum" else [])
+    monkeypatch.setattr(research_node_mod, "bitquery_evm_lookup",
+                        lambda symbol, chain: ([{"chain": "ethereum", "address": "0x6982", "symbol": "PEPE",
+                                                 "liquidity_usd": 3.9e6, "traders": 120}] if chain == "ethereum" else [], True))
     monkeypatch.setattr(research_node_mod, "token_candidates",
                         lambda symbol, chains=(): [
                             {"chain": "ethereum", "address": "0x6982", "symbol": "PEPE", "liquidity_usd": 3.1e8},
@@ -81,7 +117,7 @@ def test_resolve_named_token_asks_when_verified_solana_has_evm_rival(monkeypatch
     assert chains[0] == "solana" and "ethereum" in chains
 
     # A verified Solana token with no real same-ticker EVM activity resolves.
-    monkeypatch.setattr(research_node_mod, "bitquery_evm_candidates", lambda symbol, chain: [])
+    monkeypatch.setattr(research_node_mod, "bitquery_evm_lookup", lambda symbol, chain: ([], True))
     monkeypatch.setattr(research_node_mod, "token_candidates",
                         lambda symbol, chains=(): [
                             {"chain": "solana", "address": "BONKmint", "symbol": "BONK", "liquidity_usd": 5e6},
@@ -97,9 +133,9 @@ def test_resolve_named_token_picks_evm_when_no_verified_solana(monkeypatch):
     # AERO: not verified on Solana; DEX Screener's inflated "Solana AERO" must be
     # ignored, and Bitquery's real Base volume wins -> resolve to Base.
     monkeypatch.setattr(research_node_mod, "search_verified_tokens", lambda q: [])
-    monkeypatch.setattr(research_node_mod, "bitquery_evm_candidates",
-                        lambda symbol, chain: [{"chain": "base", "address": "0x9401", "symbol": "AERO",
-                                                "liquidity_usd": 5.2e7, "traders": 318}] if chain == "base" else [])
+    monkeypatch.setattr(research_node_mod, "bitquery_evm_lookup",
+                        lambda symbol, chain: ([{"chain": "base", "address": "0x9401", "symbol": "AERO",
+                                                 "liquidity_usd": 5.2e7, "traders": 318}] if chain == "base" else [], True))
     monkeypatch.setattr(research_node_mod, "token_candidates",
                         lambda symbol, chains=(): [
                             {"chain": "solana", "address": "93Wvz", "symbol": "AERO", "liquidity_usd": 1.0e9},

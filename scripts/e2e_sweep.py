@@ -64,6 +64,9 @@ def sign_in(base: str) -> dict:
         headers = {"authorization": f"Bearer {admin_key}"}
         _request(base, "PUT", f"/admin/users/{SWEEP_EMAIL}/plan", {"plan_id": "max"}, 30, headers)
         _request(base, "POST", f"/admin/users/{SWEEP_EMAIL}/credits", {"amount": 500, "reason": "e2e sweep", "reference": f"sweep-{int(time.time())}"}, 30, headers)
+    # A previous run that stopped mid-way can leave the sweep account with a
+    # tight risk charter; quotes would then be blocked and look like regressions.
+    _post(base, "/chat", {"message": "clear my risk charter", "session_id": f"sweep-reset-{int(time.time())}", "wallet_address": READ_ONLY_SOL_WALLET}, timeout=60)
     status, me = _request(base, "GET", "/me", None, 30)
     print(f"signed in as {me.get('user', {}).get('email')} · plan {me.get('plan', {}).get('id')} · {me.get('credits', {}).get('balance')} credits")
     return me

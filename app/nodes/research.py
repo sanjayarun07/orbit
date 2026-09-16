@@ -19,7 +19,7 @@ from app.market_providers import TRENDING_TOKENS
 from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available
 from app.provider_registry import get_provider_router
 from app.repeat_guard import guard_tools
-from app.token_resolve import bitquery_evm_candidates, clear_winner, token_candidates
+from app.token_resolve import bitquery_evm_lookup, clear_winner, token_candidates
 from app.token_deepdive import ANALYSIS_RULES, build_token_evidence, extract_market_price, format_evidence_bundle
 from app import role_memory
 from app.source_cards import extract_source_cards
@@ -857,6 +857,9 @@ _MIRROR_CHAINS = {"robinhood", "hyperliquid"}
 # real same-ticker token (a genuine cross-chain rival to a verified Solana one),
 # not dust -- the Bitquery-independent signal for ambiguity detection.
 _RIVAL_EVM_LIQUIDITY = 1_000_000.0
+# A rival chain must also show real trading: DEX Screener listings with $342M of
+# "liquidity" and $0 of 24h volume (the fake Ethereum BONK) are decoys.
+_RIVAL_EVM_VOLUME = 100_000.0
 # Cap how many EVM chains we resolve per no-chain resolution (cost/latency).
 _MAX_EVM_PROBES = 3
 
@@ -874,12 +877,18 @@ def _jupiter_solana_mint(ticker: str) -> str | None:
     return chosen.get("mint") if chosen and chosen.get("mint") else None
 
 
-async def _canonical_on_chain(ticker: str, chain: str) -> dict | None:
+async def _canonical_on_chain(ticker: str, chain: str, strict: bool = False) -> dict | None:
     """The single best (chain, address) candidate for a ticker on ONE chain:
     Jupiter's verified registry for Solana, Bitquery's real-volume ranking for
     EVM (the primary EVM resolver), DEX Screener as the fallback. None if nothing
     on that chain qualifies. This is where "which address on this chain" is
     decided accurately, separate from the cheaper cross-chain "which chain" pick.
+
+    `strict` is for rival detection: when Bitquery answered and found no token
+    with real traders on the chain, DEX Screener's entry for it is pollution
+    (a "BONK" on Ethereum showing $342M of fake liquidity) and must not turn a
+    clean Solana resolution into a "which chain?" question. The fallback stays
+    for a Bitquery outage and for chains the user named explicitly.
     """
     key = _chain_key(chain)
     if key == "solana":
@@ -888,7 +897,9 @@ async def _canonical_on_chain(ticker: str, chain: str) -> dict | None:
             return {"chain": "solana", "address": mint, "symbol": ticker, "liquidity_usd": 0.0, "verified": True}
     candidates: list[dict] = []
     if key != "solana":
-        candidates = await asyncio.to_thread(bitquery_evm_candidates, ticker, chain)
+        candidates, answered = await asyncio.to_thread(bitquery_evm_lookup, ticker, chain)
+        if strict and answered and not candidates:
+            return None
     if not candidates:
         try:
             ds = await asyncio.to_thread(token_candidates, ticker)
@@ -974,19 +985,23 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
     # ADDRESS is then resolved via _canonical_on_chain (Bitquery first, DEX
     # Screener fallback) so a real EVM rival is never silently dropped.
     liquidity_by_chain: dict[str, float] = {}
+    volume_by_chain: dict[str, float | None] = {}
     for c in ds_candidates:
         key = _chain_key(c["chain"])
         liquidity_by_chain[key] = liquidity_by_chain.get(key, 0.0) + (c.get("liquidity_usd") or 0.0)
+        if c.get("volume_24h_usd") is not None:   # unknown (older callers) keeps the liquidity-only rule
+            volume_by_chain[key] = (volume_by_chain.get(key) or 0.0) + float(c["volume_24h_usd"])
     rival_chains = [
         k for k in sorted(liquidity_by_chain, key=lambda k: liquidity_by_chain[k], reverse=True)
         if k != "solana" and liquidity_by_chain[k] >= _RIVAL_EVM_LIQUIDITY
+        and (volume_by_chain.get(k) is None or volume_by_chain[k] >= _RIVAL_EVM_VOLUME)
     ]
 
     entries: list[dict] = []
     if mint:
         entries.append({"chain": "solana", "address": mint, "symbol": ticker, "liquidity_usd": 0.0, "verified": True})
     for chain in rival_chains[:_MAX_EVM_PROBES]:
-        candidate = await _canonical_on_chain(ticker, chain)
+        candidate = await _canonical_on_chain(ticker, chain, strict=True)
         if candidate:
             entries.append(candidate)
 

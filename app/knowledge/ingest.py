@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from app.knowledge.connectors import CoinGeckoConnector, DefiLlamaConnector, DiscourseConnector, DocsConnector, GitHubConnector, SnapshotConnector
@@ -202,14 +202,23 @@ async def run_all(parallel: int = 3, limit: int | None = None, only_due: bool = 
     return results
 
 
+RETRY_AFTER_FAILURE = timedelta(hours=1)
+
+
 async def due(connector, protocol: Protocol, store) -> bool:
+    """Due when never run, when the refresh interval has elapsed, or -- after a
+    failed run (rate limit, timeout) -- once an hour, so a weekly source does
+    not wait a week to recover from one 429."""
     state = await store.get_source_state(connector.name, protocol.id)
     last = (state or {}).get("last_run_at")
     if not last:
         return True
     if isinstance(last, str):
         last = datetime.fromisoformat(last)
-    return datetime.now(timezone.utc) - last >= connector.refresh_every
+    age = datetime.now(timezone.utc) - last
+    if state.get("last_error") and age >= min(RETRY_AFTER_FAILURE, connector.refresh_every):
+        return True
+    return age >= connector.refresh_every
 
 
 async def tick(limit: int = 5, connectors: list | None = None) -> list[IngestionResult]:

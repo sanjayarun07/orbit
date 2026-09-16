@@ -150,3 +150,40 @@ def test_resolve_pending_token_no_match_returns_none():
 def test_resolve_contextual_request_consumes_pending_before_history():
     out = resolve_contextual_request("Base", "", {"pending_token": _PENDING})
     assert out == f"top holders of PEPE {_BASE_ADDR} on base"
+
+
+def test_bitquery_evm_lookup_distinguishes_no_token_from_no_answer(monkeypatch):
+    """`answered` lets the resolver trust an empty result ("no real token on
+    this chain") but fall back when Bitquery could not be asked at all."""
+    monkeypatch.setattr(token_resolve.settings, "bitquery_api_key", None)
+    assert token_resolve.bitquery_evm_lookup("PEPE", "ethereum") == ([], False)      # unconfigured
+    monkeypatch.setattr(token_resolve.settings, "bitquery_api_key", "k")
+    assert token_resolve.bitquery_evm_lookup("PEPE", "solana") == ([], False)        # not an EVM chain
+
+    class _Resp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class _Client:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, *a, **k):
+            return _Resp(self._payload)
+
+    monkeypatch.setattr(token_resolve.httpx, "Client", lambda **k: _Client({"data": {"EVM": {"DEXTradeByTokens": []}}}))
+    assert token_resolve.bitquery_evm_lookup("BONK", "ethereum") == ([], True)       # answered: nothing real
+    monkeypatch.setattr(token_resolve.httpx, "Client", lambda **k: _Client({"errors": [{"message": "402 credits"}]}))
+    assert token_resolve.bitquery_evm_lookup("BONK", "ethereum") == ([], False)      # errored: no verdict

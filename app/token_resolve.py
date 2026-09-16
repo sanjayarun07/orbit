@@ -50,10 +50,20 @@ def bitquery_evm_candidates(symbol: str, chain: str) -> list[dict]:
     Bitquery. Each candidate carries `liquidity_usd` = traded volume (the ranking
     magnitude, so `clear_winner` works unchanged) plus `traders`. Empty when
     Bitquery is unconfigured, the chain is unsupported, or nothing qualifies."""
+    return bitquery_evm_lookup(symbol, chain)[0]
+
+
+def bitquery_evm_lookup(symbol: str, chain: str) -> tuple[list[dict], bool]:
+    """(candidates, answered). `answered` is True when Bitquery actually
+    replied for this chain -- so an empty list then means "no token with real
+    traders on this chain", which callers may trust over DEX Screener's
+    polluted search results. False when Bitquery is unconfigured, the chain is
+    unsupported, or the request failed (402 credits, timeout): then the caller
+    has no verdict and falls back."""
     symbol = symbol.strip().lstrip("$")
     network = _BITQUERY_EVM_NETWORKS.get((chain or "").strip().lower())
     if not symbol or not network or not settings.bitquery_api_key:
-        return []
+        return [], False
     try:
         with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
             response = client.post(
@@ -65,10 +75,10 @@ def bitquery_evm_candidates(symbol: str, chain: str) -> list[dict]:
             payload = response.json()
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("bitquery symbol resolve failed for %s on %s: %s", symbol, chain, exc)
-        return []
+        return [], False
     if payload.get("errors"):
         logger.warning("bitquery symbol resolve error for %s on %s: %s", symbol, chain, payload["errors"][:1])
-        return []
+        return [], False
     rows = (((payload.get("data") or {}).get("EVM") or {}).get("DEXTradeByTokens")) or []
     candidates: list[dict] = []
     for row in rows:
@@ -94,7 +104,7 @@ def bitquery_evm_candidates(symbol: str, chain: str) -> list[dict]:
             "liquidity_usd": volume,
             "traders": traders,
         })
-    return candidates
+    return candidates, True
 
 
 def token_candidates(symbol: str, chains: tuple[str, ...] = ()) -> list[dict]:
@@ -125,6 +135,10 @@ def token_candidates(symbol: str, chains: tuple[str, ...] = ()) -> list[dict]:
                 liquidity = float((pair.get("liquidity") or {}).get("usd") or 0)
             except (TypeError, ValueError):
                 liquidity = 0.0
+            try:
+                volume = float((pair.get("volume") or {}).get("h24") or 0)
+            except (TypeError, ValueError):
+                volume = 0.0
             key = (chain, address)
             existing = by_key.get(key)
             if existing is None:
@@ -137,9 +151,13 @@ def token_candidates(symbol: str, chains: tuple[str, ...] = ()) -> list[dict]:
                     # pools, so max-per-pool would let a single deep pool of an
                     # unrelated same-ticker token outrank a blue-chip.
                     "liquidity_usd": liquidity,
+                    # Polluted listings fake liquidity but rarely fake trading:
+                    # 24h volume is what separates a rival from a decoy.
+                    "volume_24h_usd": volume,
                 }
             else:
                 existing["liquidity_usd"] += liquidity
+                existing["volume_24h_usd"] += volume
             break  # counted on the matching side; don't double-count
     candidates = sorted(by_key.values(), key=lambda c: c["liquidity_usd"], reverse=True)
     if chains:
