@@ -206,6 +206,10 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             # The canonical text is what the chat phrase path would have stored,
             # so the transcript, the chip and the Risk agent all see one rendering.
             body.message = f"set my risk charter: {charter_fields.render()}"
+        # A wallet connected earlier in this conversation is remembered: a turn
+        # that names none uses it, until the client disconnects (DELETE /chat/wallet).
+        remembered_wallet = ((session_context or {}).get("connected_wallet") or {}).get("address")
+        effective_wallet = body.wallet_address or remembered_wallet or ""
         task_reply = await task_scheduling.handle_chat_control(body, identity, action)
         if task_reply is not None:
             from app.graph import AgentRun
@@ -215,7 +219,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             run = await asyncio.wait_for(
                 run_agent(
                     body.message,
-                    body.wallet_address or "",
+                    effective_wallet,
                     history,
                     session_context,
                     action,
@@ -260,7 +264,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         next_context = advance_session_context(
             session_context,
             body.message,
-            body.wallet_address,
+            effective_wallet or None,
             run.intent,
             run.capabilities,
             context_capsules,

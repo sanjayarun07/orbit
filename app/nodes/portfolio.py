@@ -14,7 +14,14 @@ from app.nodes.research import _nansen_wallet_tool_call, _provider_trajectory, _
 @trace(name="portfolio", as_type="agent")
 async def portfolio_node(state: AgentState) -> dict:
     if not state.get("wallet_address"):
-        return {"answer": "I need a wallet address to check balances or analyze a portfolio.", "trajectory": None}
+        # Parked like a swap without a wallet: "connected" on the next turn
+        # re-runs this request instead of falling through to a clarification.
+        return {
+            "answer": ("I need a wallet to check balances or analyze a portfolio. Connect one with **Connect wallet** "
+                       "(or paste a public address), then reply `connected` and I'll run this check."),
+            "trajectory": None,
+            "pending_wallet_request": state["request"],
+        }
     capabilities = set(state.get("capabilities", []))
     request = _effective_request(state)
     if "wallet_transactions" in capabilities:

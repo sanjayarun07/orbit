@@ -67,3 +67,11 @@ up on touch reveals them with a height-and-fade transition (grid-track
 animation, no measured heights); scrolling back up once the page is at the top
 folds them away. The folded content is inert so keyboard focus never lands in
 it. Reduced-motion users get an instant toggle and no chevron nudge.
+
+## Wallet memory (chat)
+
+A wallet connected during a conversation is remembered by the server for that
+conversation: a later turn that names no wallet still uses it. Disconnecting
+in the UI calls `DELETE /chat/wallet/{session_id}` so the server forgets it.
+Any wallet-gated request made without a wallet (swap, portfolio, wallet
+health) is parked; replying `connected` after connecting re-runs it.

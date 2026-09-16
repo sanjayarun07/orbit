@@ -1425,6 +1425,20 @@ async def chat_history(session_id: str, identity: Identity = Depends(require_use
     }
 
 
+@app.delete("/chat/wallet/{session_id}")
+async def forget_chat_wallet(session_id: str, identity: Identity = Depends(require_user)):
+    """The client disconnected its wallet: stop remembering it for this
+    conversation (and drop any request parked for a wallet)."""
+    from app.sessions import get_session_context, save_session_context
+
+    await _require_session_access(session_id, identity)
+    context = await get_session_context(session_id)
+    context["connected_wallet"] = None
+    context["pending_wallet_request"] = None
+    await save_session_context(session_id, context)
+    return {"status": "forgotten"}
+
+
 @app.delete("/chat/history/{session_id}")
 async def clear_chat_history(session_id: str, identity: Identity = Depends(require_user)):
     await _require_session_access(session_id, identity)

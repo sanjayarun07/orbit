@@ -11,9 +11,15 @@ awaiting approval, and an amount that opens the message needs no verb.
 import asyncio
 
 import pytest
+from fastapi.testclient import TestClient
+
+from app import execution_policy, main
+from app.graph import AgentRun
+from tests.conftest import sign_in
 
 from app import experience
-from app.nodes import trading
+from app.nodes import portfolio, trading
+from app.routing.controls import is_wallet_connected_ack
 from app.routing import resolver
 from app.routing.trade_parser import parse_execution_draft
 
@@ -68,3 +74,32 @@ def test_a_pending_quote_survives_an_acknowledgement_but_not_a_topic_switch(requ
     previous = {"revision": 3, "focus": None, "active_workflow": dict(_QUOTED)}
     context = experience.advance_session_context(previous, request_text, None, "general", [], [], None)
     assert (context["active_workflow"] is not None) is kept
+
+
+def test_a_portfolio_check_without_a_wallet_is_parked_for_the_connected_reply():
+    """Transcript: "Wallet health check" -> "I need a wallet address"; "yes connected" -> generic clarification."""
+    out = asyncio.run(portfolio.portfolio_node({"request": "Wallet health check", "wallet_address": "", "capabilities": ["wallet_health"], "session_context": {}}))
+    assert out["pending_wallet_request"] == "Wallet health check" and "reply `connected`" in out["answer"]
+    assert is_wallet_connected_ack("yes connected")
+
+
+def test_a_connected_wallet_is_remembered_until_the_client_disconnects(monkeypatch):
+    seen = []
+
+    async def fake_run(message, wallet, history, session_context, action):
+        seen.append(wallet)
+        return AgentRun(answer="ok", trajectory=None, trade_plan=None, intent="portfolio", capabilities=[])
+
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run)
+    client = TestClient(main.app)
+    sign_in(client, email="remember-wallet@example.com")
+    wallet = "0x1111111111111111111111111111111111111111"
+    sid = client.post("/chat", json={"message": "wallet health check", "wallet_address": wallet}).json()["session_id"]
+    client.post("/chat", json={"message": "and my token holdings?", "session_id": sid})            # no wallet named
+    assert seen == [wallet, wallet]
+    assert client.delete(f"/chat/wallet/{sid}").json()["status"] == "forgotten"
+    client.post("/chat", json={"message": "wallet health check", "session_id": sid})
+    assert seen[-1] == ""
+    # Another account cannot forget (or probe) someone else's conversation.
+    other = TestClient(main.app); sign_in(other, email="remember-other@example.com")
+    assert other.delete(f"/chat/wallet/{sid}").status_code == 404
