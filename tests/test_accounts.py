@@ -5,6 +5,8 @@ run out, sign-in gates, preferences, and per-user API keys on /chat and /mcp."""
 import asyncio
 
 import pytest
+
+from app import billing_plans
 from fastapi.testclient import TestClient
 
 from app import execution_policy
@@ -84,7 +86,16 @@ def test_failed_turn_costs_nothing(monkeypatch):
     assert client.get("/me").json()["credits"]["balance"] == before
 
 
-def test_anonymous_trial_runs_out_with_a_402_that_points_to_sign_in(fake_agent, monkeypatch):
+def test_anonymous_trial_runs_out_with_a_402_that_points_to_sign_in(request, fake_agent, monkeypatch):
+    # This test spends the whole trial in one loop. The Trial plan publishes
+    # ten requests a minute and admission now honours the published rate,
+    # so give the loop headroom; the rate limit has its own tests.
+    # Plan is a frozen dataclass and identity holds a direct reference to the
+    # module singleton, so patch the attribute in place and restore it after.
+    previous = billing_plans.ANONYMOUS.chat_requests_per_minute
+    object.__setattr__(billing_plans.ANONYMOUS, "chat_requests_per_minute", 1000)
+    request.addfinalizer(lambda: object.__setattr__(billing_plans.ANONYMOUS, "chat_requests_per_minute", previous))
+
     client = TestClient(main.app, headers={"X-Orbit-Device": "device-A"})
     for _ in range(ANONYMOUS.trial_credits):
         assert client.post("/chat", json={"message": "hello"}).status_code == 200

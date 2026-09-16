@@ -122,7 +122,7 @@ def test_export_and_delete_conversations_cover_the_accounts_sessions(fake_agent)
     assert {c["session_id"] for c in export["conversations"]} == {first["session_id"], second["session_id"]}
     assert [m["content"] for m in next(c for c in export["conversations"] if c["session_id"] == first["session_id"])["messages"]] == ["hello", "ok", "again", "ok"]
     assert export["credits"]["balance"] == FREE.monthly_credits - 3 and any(r["reason"] == "settle" for r in export["credits"]["ledger"])
-    assert client.delete("/me/conversations").json() == {"deleted": 2}
+    assert client.delete("/me/conversations").json() == {"deleted": 2, "busy": 0}   # busy: conversations kept because a turn held them
     assert client.get(f"/chat/history/{first['session_id']}").json()["messages"] == []
     assert client.get("/me/export").json()["conversations"] == []
 

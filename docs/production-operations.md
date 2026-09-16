@@ -479,3 +479,74 @@ an account whose recorded subscription is not known to be terminal, and the UI
 sends that case to the billing portal, which edits the subscription Stripe
 already has. Account deletion now lists every live subscription for the
 customer and cancels each, not only the one id on record.
+
+## Consolidated review of 2026-09-17: the eight P2 findings
+
+Verified the same way as the P1s: `tests/test_review_20260917_p2*.py` assert
+the rules with the review's inputs, and the review's own checks fail against
+the tree. One exception is recorded honestly below.
+
+**R06, public cost admission could be reset from the client.** The trial
+account is keyed on a browser-supplied device id, so rotating it minted a fresh
+trial and a fresh chat rate bucket. The device key stays (two people behind one
+NAT should not share credits), with server-controlled budgets on top: a per-IP
+cap on new trial grants per day, and a per-IP chat rate bucket the client
+cannot rotate away from. The public knowledge route now has a query size bound,
+the caller's and the network's rate buckets, a concurrency cap, and a daily
+spending ceiling for the whole deployment. The review's rotation check still
+passes because it rotates twice against a default budget of three; the
+regression tests set the budget to two and prove the third device gets nothing.
+
+**R07, two brief occurrences could spend the same last credit.** The brief
+path read the balance and then appended a debit, unlocked. Every spender now
+goes through `credits.charge_once`: one atomic check-and-debit under the same
+per-account lock chat reservations use, idempotent on the occurrence. The
+charge is taken before the brief is composed and refunded if composition
+fails, and the payer is resolved through the same team validation identity
+uses, without its monthly-grant side effect. The review's check for this one
+hangs rather than fails: it synchronises two callers at the balance read and
+waits for both, and the first now holds the lock while it waits, so the
+second can never arrive. A mutex makes that gate unreachable by construction.
+
+**R08, conversation ownership was not part of the turn.** A server-minted
+conversation id was mapped to its owner only after the answer, with failure
+swallowed, so under a database fault a private answer came back on an unowned
+id. The claim now happens before any work for minted ids as well as named
+ones, and if it cannot be recorded there is no turn. Bulk deletion takes each
+conversation's turn lease like single deletion does; conversations mid-turn
+are kept, still owned, and reported.
+
+**R09, task recovery could lose or repeat work.** An evaluation that failed
+was returned as "did not fire", so a one-shot brief whose provider was offline
+was marked done. Failures now raise, and the recovery handler keeps the
+occurrence identity across the retry, which the claim prefers over the new
+scheduled time. The inbox row is the durable delivery record, keyed by
+occurrence, so a retry of an occurrence that delivered is a no-op. Email
+failure behaviour, stated: the inbox row stands as the delivery of record and a
+failed send is recorded and not retried, because a retry cannot tell a lost
+email from a late one and a duplicate brief is the worse outcome.
+
+**R10, team membership was not exclusive and seats were not serialised.**
+Joining team B now leaves team A in the same step, an owner removing a member
+clears the user's team pointer only if it still points at that owner, and
+invitations count and insert under a per-team lock.
+
+**R11, advertised entitlements differed from enforced ones.** A member's task
+limit, API-key eligibility and chat rate now come from the effective plan the
+UI shows, resolved once and shared, with the global chat rate kept as the
+ceiling.
+
+**R12, ingestion could neither recover nor reindex.** A document is now "done"
+only when its content, a pipeline fingerprint (embedder, dimension, extraction
+version) and a completion flag all match. A failed derived write leaves the
+document incomplete and the next pass resumes from the derived step without
+re-embedding; a changed embedder forces a new version with fresh vectors even
+when the content did not change.
+
+**R13, the shipped Redis could evict a held lock.** The compose file now runs
+`noeviction`: this instance holds turn locks, sessions and retained history,
+none of which may silently disappear. A write refused for memory surfaces as a
+typed error the chat path answers with 503, which is the safe failure. The
+regression test starts a real one-megabyte `redis-server` under each policy so
+the difference is demonstrated rather than asserted from documentation; it
+skips honestly when the binary is absent.

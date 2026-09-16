@@ -34,6 +34,7 @@ from app.service_errors import ServiceError, safe_detail as _safe_detail
 from app.execution import execute_confirmed_plan, prepare_wallet_transaction, submit_wallet_transaction
 from app.graph import resolve_intent_node
 from app.capability_router import route_capabilities
+from app import limits
 from app.limits import allow_chat_request, allow_rpc_request
 from app.lifi import get_quote as get_lifi_quote, get_status as get_lifi_status
 from app.mcp_tools import close_mcp_gateway, discover_mcp_tools, get_mcp_registry
@@ -1217,11 +1218,30 @@ async def my_conversations(identity: Identity = Depends(require_browser_session)
 
 @app.delete("/me/conversations")
 async def delete_my_conversations(identity: Identity = Depends(require_browser_session)):
+    """Delete every conversation the account owns -- with the same guarantee
+    single deletion gives. Deleting one conversation takes its turn lease, so
+    an in-flight turn cannot commit history back after the delete; this route
+    used to skip the lease, remove the ownership mapping and report success
+    while a running turn could still write. Now each conversation is deleted
+    under its lease; ones busy with a turn are reported, kept, and remain the
+    account's to delete again."""
     session_ids = await accounts.list_chat_sessions(identity.user["id"])
+    deleted, busy = [], []
     for session_id in session_ids:
-        await clear_history(session_id)
-    await accounts.forget_chat_sessions(identity.user["id"])
-    return {"deleted": len(session_ids)}
+        try:
+            lease = await acquire_session_turn(session_id)
+        except asyncio.TimeoutError:
+            busy.append(session_id)
+            continue
+        try:
+            await clear_history(session_id)
+            deleted.append(session_id)
+        finally:
+            await lease.release()
+    if deleted:
+        await accounts.forget_chat_sessions(identity.user["id"], deleted)
+    return {"deleted": len(deleted), "busy": len(busy),
+            **({"message": f"{len(busy)} conversation(s) are still processing a request and were kept; delete again once they finish."} if busy else {})}
 
 
 @app.delete("/me")
@@ -1283,9 +1303,12 @@ async def invite_team_member(body: TeamInvite, request: Request, identity: Ident
     if email == identity.user["email"]:
         raise HTTPException(400, "You are already the owner of this team")
     members = await accounts.list_team_members(identity.user["id"])
-    if len([m for m in members if m["email"] != email]) + 1 >= identity.plan.seats:
-        raise HTTPException(400, f"All {identity.plan.seats} seats are in use (owner + {identity.plan.seats - 1} members)")
-    record = await accounts.invite_team_member(identity.user["id"], email, body.role)
+    # The seat count and the insert are serialised per team inside accounts;
+    # a pre-check here would be the very read-then-write the review raced.
+    try:
+        record = await accounts.invite_team_member_within_seats(identity.user["id"], email, identity.plan.seats, body.role)
+    except accounts.SeatsExhausted as exc:
+        raise HTTPException(400, str(exc)) from exc
     owner_name = identity.user.get("display_name") or identity.user["email"]
     link = f"{_public_base(request)}/ui/?team=1"
     await emailer.send_email(
@@ -1465,11 +1488,31 @@ async def read_my_inbox(body: InboxRead, identity: Identity = Depends(require_br
 # ---- Knowledge service ----
 
 @app.get("/knowledge/search")
-async def knowledge_search(q: str, limit: int = 6):
-    """Hybrid retrieval over the knowledge base: passages with citations."""
+async def knowledge_search(q: str, request: Request, limit: int = 6):
+    """Hybrid retrieval over the knowledge base: passages with citations.
+
+    Public, and it reaches a paid embedder and optional reranker, so it gets
+    the same admission a chat turn does: a size bound, the caller's rate
+    bucket, the network's rate bucket, a concurrency cap, and a daily ceiling
+    on how much the whole deployment will spend from this route."""
     if not q.strip():
         raise HTTPException(400, "q is required")
-    hits, plan = await kb_retrieval.search(q, limit=max(1, min(limit, 20)), resolver=await kb_tool.resolver())
+    if len(q) > settings.knowledge_search_max_query_chars:
+        raise HTTPException(413, f"Queries are limited to {settings.knowledge_search_max_query_chars} characters")
+    identity = await resolve_identity(request)
+    allowed, retry_after = await limits.allow_knowledge_search(identity.rate_limit_key, identity.ip)
+    if not allowed:
+        raise HTTPException(429, "Too many knowledge searches; please retry shortly", headers={"Retry-After": str(retry_after)})
+    if not await limits.spend_daily_budget("knowledge-search", settings.knowledge_search_daily_budget):
+        raise HTTPException(429, "The knowledge search budget for today is exhausted", headers={"Retry-After": "3600"})
+    try:
+        await asyncio.wait_for(limits._knowledge_slots.acquire(), timeout=settings.request_queue_timeout_seconds)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(503, "Knowledge search is busy; please retry shortly") from exc
+    try:
+        hits, plan = await kb_retrieval.search(q, limit=max(1, min(limit, 20)), resolver=await kb_tool.resolver())
+    finally:
+        limits._knowledge_slots.release()
     context, citations = kb_retrieval.build_context(hits)
     return {
         "query": q,

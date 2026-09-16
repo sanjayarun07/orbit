@@ -79,7 +79,17 @@ def client_ip(request: Request) -> str:
     return peer
 
 
-async def _identity_for_user(user: dict, ip: str, api_key: dict | None = None) -> Identity:
+async def resolve_billing(user: dict) -> tuple[dict, dict | None, Plan]:
+    """(user, team_owner, effective plan) -- who pays and on what plan, with the
+    team relationship validated: an owner that no longer exists or whose plan
+    lost its seats is dropped and the stale pointer cleared.
+
+    Deliberately grant-free. Identity resolution also applies the monthly
+    allowance, which is right for a request but wrong for a lookup: a task
+    resolving its payer through the full identity path silently granted the
+    account a month of credits in the middle of a test of running out of them.
+    Every path that needs the payer or the effective plan without the side
+    effect -- task billing, task limits -- uses this."""
     billed = user
     team_owner = None
     if user.get("team_owner_id"):
@@ -90,7 +100,12 @@ async def _identity_for_user(user: dict, ip: str, api_key: dict | None = None) -
             # The team no longer exists or the owner's plan lost its seats.
             await accounts.update_user(user["id"], team_owner_id=None)
             user = {**user, "team_owner_id": None}
-    plan = get_plan(billed.get("plan_id"))
+    return user, team_owner, get_plan(billed.get("plan_id"))
+
+
+async def _identity_for_user(user: dict, ip: str, api_key: dict | None = None) -> Identity:
+    user, team_owner, plan = await resolve_billing(user)
+    billed = team_owner or user
     account_id = credits.user_account_id(billed["id"])
     # Paid plans get their allowance from Stripe's invoice.paid webhook; the
     # lazy monthly grant is for the Free tier and admin-set plans without a
@@ -110,14 +125,18 @@ async def resolve_identity(request: Request) -> Identity:
         user = await accounts.get_user(record["user_id"])
         if user is None:
             raise HTTPException(401, "API key belongs to a deleted account")
-        if not get_plan(user.get("plan_id")).api_keys:
+        # The EFFECTIVE plan decides, the same one key creation was allowed
+        # under: a member of a Max team could mint a key and then be refused
+        # for it, because this check read the personal Free plan.
+        resolved = await _identity_for_user(user, ip, api_key=record)
+        if not resolved.plan.api_keys:
             raise HTTPException(403, "API keys are available on Pro and Max plans")
-        return await _identity_for_user(user, ip, api_key=record)
+        return resolved
     user = await accounts.get_session_user(request.cookies.get(accounts.USER_COOKIE))
     if user is not None:
         return await _identity_for_user(user, ip)
     account_id = credits.anonymous_account_id(ip, request.headers.get(DEVICE_HEADER))
-    await credits.ensure_trial_grant(account_id, ANONYMOUS)
+    await credits.ensure_trial_grant(account_id, ANONYMOUS, ip=ip)
     return Identity("anonymous", account_id, ip, plan=ANONYMOUS)
 
 

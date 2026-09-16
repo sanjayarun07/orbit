@@ -322,6 +322,16 @@ class Settings(BaseSettings):
     # Capacity and token controls. Defaults are deliberately conservative so a
     # single instance remains responsive under load without overwhelming model,
     # RPC, or MCP providers.
+    # --- Public cost admission (R06) ---------------------------------------
+    # The trial account is keyed on a browser-supplied device id so that two
+    # people behind one NAT do not share credits. That id is caller-controlled,
+    # so on its own it is a resettable boundary: rotate it and the trial
+    # renews. These are the server-controlled budgets layered on top.
+    trial_accounts_per_ip_per_day: int = 3          # new trial grants one IP may mint in 24h
+    chat_requests_per_minute_per_ip: int = 120      # ceiling per IP regardless of device ids
+    knowledge_search_max_query_chars: int = 400
+    knowledge_search_daily_budget: int = 5000       # embedder/reranker calls from the public route, per day, whole deployment
+    max_concurrent_knowledge_searches: int = 8
     max_concurrent_chat_requests: int = 32
     max_concurrent_llm_requests: int = 16
     chat_requests_per_minute: int = 60

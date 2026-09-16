@@ -50,7 +50,14 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    # noeviction, not allkeys-lru: this Redis holds turn locks, sessions and
+    # retained history, none of which may silently disappear under memory
+    # pressure. With allkeys-lru a held lock could be evicted mid-turn and a
+    # second caller would acquire it while the first was still running. Under
+    # noeviction a write beyond the limit fails loudly and the API answers 503,
+    # which is the failure that is safe. Size maxmemory for retention, and keep
+    # any evictable cache in a separate instance.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
     volumes:
       - redis-data:/data
     healthcheck:

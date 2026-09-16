@@ -17,7 +17,7 @@ from app.experience import (advance_session_context, build_context_capsules, bui
     with_resolved_token, build_gas_advisory, build_intent_lock, build_trade_readiness)
 from app.graph import run_agent
 from app.identity import Identity, current_identity, service_identity
-from app.limits import acquire_chat_slot, allow_chat_request, release_chat_slot
+from app.limits import acquire_chat_slot, allow_chat_request, allow_chat_request_from_ip, release_chat_slot
 from app.metrics import increment
 from app.models import AgentResponse, ChatRequest, RiskCharterFields
 from app.plans import reset_plan_owner, set_plan_owner, mark_plan_superseded
@@ -25,7 +25,7 @@ from app.public_activity import public_activity
 from app.routing.controls import is_trade_confirmation, is_charter_clear
 from app.routing.workflow import WorkflowState, WorkflowEvent, apply_event
 from app.service_errors import ServiceError, safe_detail as _safe_detail
-from app.sessions import acquire_session_turn, commit_turn, extend_retention, get_session_snapshot, history_text_from_messages
+from app.sessions import CoordinationStoreFull, acquire_session_turn, commit_turn, extend_retention, get_session_snapshot, history_text_from_messages
 from app.settings import settings
 from app.solana_rpc import rpc
 
@@ -43,12 +43,25 @@ async def execute_chat_turn(body: ChatRequest, identity: Identity | str) -> Agen
     if isinstance(identity, str):
         identity = current_identity.get() or service_identity(identity)
     session_id = body.session_id or str(uuid4())
+    # A conversation is private to the account that first used it while signed
+    # in; nobody else may read, extend or delete it by knowing its id. A
+    # signed-in caller claims it here, BEFORE any work -- for an id the caller
+    # named and for one the server just minted alike. The server-minted case
+    # used to be mapped only after the turn, with the failure swallowed: under
+    # a database fault a private answer came back on a conversation nobody
+    # owned, claimable by whoever learned its id. Now the claim is part of the
+    # turn, and if it cannot be recorded there is no turn.
     if body.session_id:
-        # A conversation is private to the account that first used it while
-        # signed in; nobody else may read, extend or delete it by knowing its id.
-        # A signed-in caller claims an unowned one here, before any work: a
-        # claim that loses a race is a 404, never a turn on someone else's chat.
         await _require_session_access(session_id, identity, claim=True)
+    elif identity.signed_in:
+        try:
+            if not await accounts.touch_chat_session(identity.user["id"], session_id):
+                raise ServiceError(409, "Could not start a new conversation; try again.")
+        except ServiceError:
+            raise
+        except Exception as exc:
+            logger.warning("chat session ownership could not be recorded", exc_info=True)
+            raise ServiceError(503, "History is unavailable right now, so this conversation cannot be started. Try again shortly.") from exc
     if body.wallet_address and not identity.signed_in and identity.kind != "service":
         raise ServiceError(401, {"error": "sign_in_required", "message": "Sign in with your email to use a wallet, trade, or keep history."})
     if identity.api_key is not None and not identity.has_scope("chat"):
@@ -124,7 +137,11 @@ async def _require_session_access(session_id: str, identity: Identity | None, cl
 
 
 async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: str) -> AgentResponse:
-    allowed, retry_after = await allow_chat_request(identity.rate_limit_key)
+    allowed, retry_after = await allow_chat_request(identity.rate_limit_key, getattr(identity.plan, "chat_requests_per_minute", None))
+    if allowed and identity.kind != "service":
+        # The identity bucket is keyed by a device id the caller chooses; the
+        # network bucket cannot be rotated away from the client side.
+        allowed, retry_after = await allow_chat_request_from_ip(identity.ip)
     if not allowed:
         increment("chat_rate_limited")
         raise ServiceError(
@@ -142,6 +159,9 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
     try:
         try:
             session_lease = await acquire_session_turn(session_id)
+        except CoordinationStoreFull as exc:
+            increment("chat_lock_store_full")
+            raise ServiceError(503, "The conversation store is full; please retry shortly") from exc
         except asyncio.TimeoutError as exc:
             raise ServiceError(
                 409,

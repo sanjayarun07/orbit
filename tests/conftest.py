@@ -18,6 +18,21 @@ def _reset_account_stores(monkeypatch):
         monkeypatch.setattr(module, "get_pg_pool", no_pool)
     billing.reset()
     tasks.reset()
+    # Rate-limit and daily-budget windows are module state too. Every test
+    # client shares one IP, so without this the per-IP trial budget spent by
+    # one test starves the anonymous callers of every test after it.
+    from app import limits
+
+    limits._local_windows.clear()
+
+    # And they must not reach a real Redis from the suite: the per-IP trial
+    # budget lives for two days, so one run against the dev instance starved
+    # every anonymous caller of every later run. Retention tests still reach
+    # Redis through sessions.get_redis; this only keeps admission in memory.
+    async def no_redis():
+        return None
+
+    monkeypatch.setattr(limits, "get_redis", no_redis)
     # The /auth/ rate limit is per IP and lives in Redis when configured; every
     # test signs in from the same client IP, so it must not carry across tests.
     from app import main

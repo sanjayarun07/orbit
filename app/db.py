@@ -131,6 +131,10 @@ CREATE TABLE IF NOT EXISTS user_inbox (
     read_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS user_inbox_user ON user_inbox (user_id, created_at DESC);
+-- The inbox row is the durable delivery record for a task occurrence, so a
+-- retry of an occurrence that already delivered is a no-op.
+ALTER TABLE user_inbox ADD COLUMN IF NOT EXISTS occurrence TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS user_inbox_occurrence ON user_inbox (task_id, occurrence) WHERE occurrence IS NOT NULL;
 CREATE TABLE IF NOT EXISTS user_wallets (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     chain TEXT NOT NULL,

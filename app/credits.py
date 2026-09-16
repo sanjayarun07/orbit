@@ -14,6 +14,7 @@ Accounts are either a signed-in user (`user:<id>`) or an anonymous visitor
 from __future__ import annotations
 
 import asyncio
+from enum import Enum
 
 import hashlib
 import json
@@ -175,9 +176,68 @@ async def history(account_id: str, limit: int = 50) -> list[dict]:
 # Grants
 # ----------------------------------------------------------------------------
 
-async def ensure_trial_grant(account_id: str, plan: Plan) -> None:
-    if plan.trial_credits > 0:
-        await append(account_id, plan.trial_credits, "trial_grant", "grant", "trial")
+async def ensure_trial_grant(account_id: str, plan: Plan, ip: str | None = None) -> None:
+    """Grant the trial once per anonymous account, and only so many times per
+    network address. The account is keyed on a device id the browser chooses,
+    so without the second bound a caller mints a fresh trial per request just
+    by rotating that id. The IP budget counts grants that were actually new,
+    so a returning device does not spend it."""
+    if plan.trial_credits <= 0:
+        return
+    if await has_ref(account_id, "grant", "trial"):
+        return
+    if ip and settings.trial_accounts_per_ip_per_day > 0:
+        from app.limits import spend_daily_budget
+        if not await spend_daily_budget(f"trial-ip:{hashlib.sha256(ip.encode()).hexdigest()[:24]}",
+                                        settings.trial_accounts_per_ip_per_day):
+            # The account exists with nothing in it; the next turn gets the
+            # ordinary insufficient-credits answer rather than a fresh trial.
+            return
+    await append(account_id, plan.trial_credits, "trial_grant", "grant", "trial")
+
+
+class ChargeOutcome(str, Enum):
+    CHARGED = "charged"
+    ALREADY_CHARGED = "already_charged"
+    INSUFFICIENT = "insufficient"
+
+
+async def charge_once(account_id: str, amount: int, reason: str, ref_type: str, ref_id: str, meta: dict | None = None) -> ChargeOutcome:
+    """One atomic check-and-debit, idempotent on (ref_type, ref_id), under the
+    same per-account lock `reserve` uses.
+
+    Every spender must go through a protocol like this rather than reading the
+    balance and then appending: two brief occurrences each read the last
+    credit and each debited it, leaving the account at -1. The occurrence key
+    already made a repeated run of the SAME occurrence free; it did nothing to
+    serialise different occurrences, or to coordinate with chat reservations.
+    """
+    amount = max(0, int(amount))
+    if amount == 0:
+        return ChargeOutcome.CHARGED
+    pool = await get_pg_pool()
+    if pool is not None:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", account_id)
+                if await conn.fetchval("SELECT 1 FROM credit_ledger WHERE account_id = $1 AND ref_type = $2 AND ref_id = $3", account_id, ref_type, ref_id):
+                    return ChargeOutcome.ALREADY_CHARGED
+                current = int(await conn.fetchval("SELECT COALESCE(SUM(delta), 0) FROM credit_ledger WHERE account_id = $1", account_id) or 0)
+                if current < amount:
+                    return ChargeOutcome.INSUFFICIENT
+                await conn.execute(
+                    "INSERT INTO credit_ledger (id, account_id, delta, reason, ref_type, ref_id, meta) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                    str(uuid4()), account_id, -amount, reason, ref_type, ref_id, json.dumps(meta or {}),
+                )
+        return ChargeOutcome.CHARGED
+    lock = _reserve_locks.setdefault((id(asyncio.get_running_loop()), account_id), asyncio.Lock())
+    async with lock:
+        if await has_ref(account_id, ref_type, ref_id):
+            return ChargeOutcome.ALREADY_CHARGED
+        if await balance(account_id) < amount:
+            return ChargeOutcome.INSUFFICIENT
+        await append(account_id, -amount, reason, ref_type, ref_id, meta)
+        return ChargeOutcome.CHARGED
 
 
 async def ensure_monthly_grant(account_id: str, plan: Plan, now: datetime | None = None) -> None:

@@ -119,23 +119,55 @@ def extract_relationships(doc: NormalizedDocument, resolver: EntityResolver) -> 
     return out[:40]
 
 
+# Bump when mention extraction or fact derivation changes meaning, so every
+# document is re-derived on the next pass instead of only ones whose text moved.
+EXTRACTION_VERSION = 2
+
+
+def pipeline_fingerprint(embedder) -> str:
+    """What was used to produce a document's derived records. A document is
+    only "already done" when its content AND this match AND the whole
+    pipeline completed; content alone decided before, which left two holes:
+    a document whose graph writes had failed was never repaired (the retry saw
+    the same hash and stopped), and changing the embedder left old vectors in
+    place under a new query embedder."""
+    return f"{getattr(embedder, 'name', 'unknown')}:{int(settings.knowledge_embedding_dim)}:v{EXTRACTION_VERSION}"
+
+
 async def ingest_document(doc: NormalizedDocument, store=None, resolver: EntityResolver | None = None) -> tuple[bool, int, int]:
     """(changed, chunks_written, relationships_written)."""
     store = store or await get_store()
     current = await store.live_document(doc.url)
-    if current and current.content_hash == doc.content_hash:
+    embedder = get_embedder()
+    fingerprint = pipeline_fingerprint(embedder)
+    same_content = bool(current and current.content_hash == doc.content_hash)
+    same_pipeline = bool(current and current.metadata.get("pipeline") == fingerprint)
+    if same_content and same_pipeline and current.metadata.get("complete"):
         return False, 0, 0
+    if same_content and same_pipeline:
+        # Content and vectors are current; only the derived records never
+        # finished. Resume from there rather than re-embedding.
+        resolver = resolver or await _resolver(store)
+        doc.id = current.id
+        written = 0
+        for rel in await asyncio.to_thread(extract_relationships, doc, resolver):
+            written += int(await store.upsert_relationship(rel))
+        written += await apply_facts(doc, store, resolver)
+        await store.mark_document_complete(current.id, fingerprint)
+        return True, 0, written
     # Chunking, embedding and mention extraction are CPU-bound (regex over the
     # whole document, hundreds of entity names): keep them off the event loop
     # so chat requests stay responsive while a large docs site is ingested.
     pieces = await asyncio.to_thread(chunk_markdown, doc.content)
     if not pieces:
         return False, 0, 0
-    embedder = get_embedder()
     vectors = await asyncio.to_thread(embedder.embed, [f"{p['heading']}\n{p['content']}" for p in pieces])
     chunks = [Chunk(id=str(uuid4()), document_id="", protocol_id=doc.protocol_id, heading=p["heading"], content=p["content"], position=p["position"], embedding=v,
                     metadata={"source_type": doc.source_type, "embedder": embedder.name}) for p, v in zip(pieces, vectors)]
-    doc_id, changed = await store.write_document(doc, chunks)
+    doc.metadata = {**doc.metadata, "pipeline": fingerprint, "complete": False}
+    # `replace` forces a new version even when the content hash matches: the
+    # pipeline changed, so the old chunks and vectors are wrong for it.
+    doc_id, changed = await store.write_document(doc, chunks, replace=same_content and not same_pipeline)
     if not changed:
         return False, 0, 0
     doc.id = doc_id
@@ -144,6 +176,9 @@ async def ingest_document(doc: NormalizedDocument, store=None, resolver: EntityR
     for rel in await asyncio.to_thread(extract_relationships, doc, resolver):
         written += int(await store.upsert_relationship(rel))
     written += await apply_facts(doc, store, resolver)
+    # Only now is the document "done"; a failure anywhere above leaves it
+    # incomplete and the next pass resumes the derived writes.
+    await store.mark_document_complete(doc_id, fingerprint)
     return True, len(chunks), written
 
 

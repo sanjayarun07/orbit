@@ -217,7 +217,12 @@ async def assert_can_activate(user: dict, exclude_task_id: str | None = None, db
     tasks and switch them all on. The limit is about how many tasks run, not
     how many were created, so it belongs at every transition into "active".
     """
-    plan = get_plan(user.get("plan_id"))
+    # The effective plan -- a team member's owner's -- is what the UI shows
+    # as the limit; enforcing the personal plan here stopped a Max member at
+    # the Free count.
+    from app.identity import resolve_billing
+
+    _user, _owner, plan = await resolve_billing(user)
     limit = TASK_LIMITS.get(plan.id, 3)
     active = [
         t for t in await list_tasks(user["id"], include_done=False, db=db)
@@ -339,19 +344,29 @@ async def due_tasks(now: datetime | None = None, limit: int = 50) -> list[dict]:
 # Inbox
 # ----------------------------------------------------------------------------
 
-async def notify(user_id: str, title: str, body: str, kind: str = "task", task_id: str | None = None) -> dict:
+async def notify(user_id: str, title: str, body: str, kind: str = "task", task_id: str | None = None,
+                 occurrence: str | None = None) -> tuple[dict, bool]:
+    """Deliver to the inbox. Returns (item, new).
+
+    Keyed by the task occurrence when there is one: the inbox row IS the
+    durable delivery record, so a retry of an occurrence that already
+    delivered finds its row and does nothing, and email -- which cannot be
+    de-duplicated after the fact -- is sent only when the row was new."""
     item = {"id": str(uuid4()), "user_id": user_id, "title": title[:200], "body": body[:4000], "kind": kind,
-            "task_id": task_id, "created_at": _iso(_now()), "read_at": None}
+            "task_id": task_id, "occurrence": occurrence, "created_at": _iso(_now()), "read_at": None}
     pool = await get_pg_pool()
     if pool is not None:
-        await pool.execute(
-            "INSERT INTO user_inbox (id, user_id, title, body, kind, task_id) VALUES ($1, $2, $3, $4, $5, $6)",
-            item["id"], user_id, item["title"], item["body"], kind, task_id,
+        status = await pool.execute(
+            "INSERT INTO user_inbox (id, user_id, title, body, kind, task_id, occurrence) VALUES ($1, $2, $3, $4, $5, $6, $7) "
+            "ON CONFLICT DO NOTHING",
+            item["id"], user_id, item["title"], item["body"], kind, task_id, occurrence,
         )
-    else:
-        _inbox.setdefault(user_id, []).append(item)
-        del _inbox[user_id][:-200]
-    return item
+        return item, status.endswith("1")
+    if occurrence and any(i.get("task_id") == task_id and i.get("occurrence") == occurrence for i in _inbox.get(user_id, [])):
+        return item, False
+    _inbox.setdefault(user_id, []).append(item)
+    del _inbox[user_id][:-200]
+    return item, True
 
 
 async def inbox(user_id: str, limit: int = 50) -> list[dict]:
@@ -430,9 +445,13 @@ async def evaluate(task: dict) -> tuple[bool, str, str | None]:
             return hit, text, (f"{spec['symbol'].upper()} crossed your alert: ${price:,.4g} is {'below' if spec.get('op', '<') == '<' else 'above'} ${target:,.4g}." if hit else None)
         if kind == "brief":
             return True, "delivered", await compose_brief(task)
-    except Exception as exc:
-        logger.warning("tasks: evaluation failed for %s", task["id"], exc_info=True)
-        return False, f"error: {exc}"[:200], None
+    except Exception:
+        # An evaluation that FAILED is not a condition that did not fire. The
+        # old return of (False, "error: ...") was indistinguishable from "not
+        # due", so a one-shot brief whose provider was offline was marked done
+        # and the promised brief was lost. Raising lets run_task's recovery
+        # handler record the error and reschedule, occurrence intact.
+        raise
     return False, "unknown kind", None
 
 
@@ -496,7 +515,11 @@ async def claim_task(task: dict) -> dict | None:
     # The occurrence key is persisted with the claim: recovering an expired
     # claim reuses it, so the ledger's unique reference keeps a run that died
     # after charging from charging again.
-    occurrence_key = occurrence or task.get("claimed_occurrence") or f"manual:{now.isoformat()}"
+    # An unfinished occurrence comes first: the recovery handler keeps
+    # `claimed_occurrence` and schedules a retry time, and that retry has to run
+    # AS the occurrence it never completed, or its charge and delivery get a new
+    # key and happen again.
+    occurrence_key = task.get("claimed_occurrence") or occurrence or f"manual:{now.isoformat()}"
     pool = await get_pg_pool()
     if pool is not None:
         row = await pool.fetchrow(
@@ -547,35 +570,79 @@ async def run_task(task: dict) -> dict:
         logger.warning("tasks: run failed for %s", task["id"], exc_info=True)
         now = _now()
         nxt = next_run(task["schedule"], task.get("tz_offset_min", 0), after=now) or (now + timedelta(minutes=settings.task_alert_check_minutes))
-        await update_task(task["id"], task["user_id"], last_run_at=now, last_result=f"error: {str(exc)[:160] or exc.__class__.__name__}", next_run_at=nxt, claimed_until=None, claimed_occurrence=None)
+        # The occurrence identity is KEPT across the retry. Clearing it gave the
+        # retry a fresh key, so a run that had already delivered and charged --
+        # and failed only on its final bookkeeping write -- delivered and
+        # charged again. With the same key, the charge is idempotent and the
+        # inbox row is a no-op.
+        await update_task(task["id"], task["user_id"], last_run_at=now, last_result=f"error: {str(exc)[:160] or exc.__class__.__name__}", next_run_at=nxt, claimed_until=None)
         return {"id": task["id"], "fired": False, "result": "error", "status": "active"}
 
 
+async def _billing_account_for(user: dict) -> str:
+    """The account a task's cost is charged to, by the same rule chat uses.
+
+    A member's task used to charge whatever `team_owner_id` said, unchecked;
+    identity resolution validates that the team still exists and still has
+    seats, and clears a stale pointer. Charging must go through that rule too,
+    or a task keeps billing an owner who dropped the member."""
+    from app.identity import resolve_billing
+
+    user, team_owner, _plan = await resolve_billing(user)
+    return credits.user_account_id((team_owner or user)["id"])
+
+
 async def _run_claimed(task: dict, user: dict) -> dict:
-    fired, result, body = await evaluate(task)
+    charge = settings.credit_cost_brief if task["kind"] == "brief" else 0
+    ref = f"{task['id']}:{task['occurrence']}"
+    account_id = await _billing_account_for(user) if charge else None
+    # Reserve BEFORE the cost-bearing work, as a chat turn does: composing a
+    # brief calls the model, and a brief nobody can pay for should not be
+    # composed. The charge is one atomic check-and-debit keyed by the
+    # occurrence -- two occurrences can no longer both spend the same last
+    # credit, and a re-run of an occurrence that already paid is free.
+    if charge:
+        outcome = await credits.charge_once(account_id, charge, "task:brief", "task_run", ref, {"kind": "brief"})
+        if outcome is credits.ChargeOutcome.INSUFFICIENT:
+            now = _now()
+            updates = {"last_run_at": now, "last_result": "skipped: out of credits", "claimed_until": None, "claimed_occurrence": None}
+            interval = task["schedule"]
+            nxt = next_run(interval, task.get("tz_offset_min", 0), after=now)
+            updates["next_run_at"] = nxt
+            if nxt is None:
+                updates["status"] = "done"
+            await update_task(task["id"], task["user_id"], **updates)
+            return {"id": task["id"], "fired": False, "result": updates["last_result"], "status": updates.get("status", "active")}
+    try:
+        fired, result, body = await evaluate(task)
+    except Exception:
+        # The work failed after the charge: give it back, keyed so a retry of
+        # the same occurrence cannot refund twice. The outer handler records
+        # the error and reschedules.
+        if charge:
+            await credits.append(account_id, charge, "task:brief-refund", "task_refund", ref, {"kind": "brief"})
+        raise
     now = _now()
     updates: dict = {"last_run_at": now, "last_result": result, "claimed_until": None, "claimed_occurrence": None}
+    if charge and not (fired and body):
+        # Composed nothing deliverable (a condition that did not fire): refund.
+        await credits.append(account_id, charge, "task:brief-refund", "task_refund", ref, {"kind": "brief"})
     if fired and body:
-        charge = settings.credit_cost_brief if task["kind"] == "brief" else 0
-        if charge:
-            account_id = credits.user_account_id(user.get("team_owner_id") or user["id"])
-            ref = f"{task['id']}:{task['occurrence']}"
-            # Keyed by the scheduled occurrence, not the wall clock: the ledger's
-            # unique reference makes a repeated run of the same occurrence free.
-            # An occurrence a crashed run already paid for is delivered even when
-            # that charge took the last credit -- the balance gate is for new charges.
-            if await credits.has_ref(account_id, "task_run", ref):
-                pass
-            elif await credits.balance(account_id) < charge:
-                updates["last_result"] = "skipped: out of credits"
-                fired = False
-            else:
-                await credits.append(account_id, -charge, "task:brief", "task_run", ref, {"kind": "brief"})
-    if fired and body:
-        await notify(user["id"], task["title"], body, kind=task["kind"], task_id=task["id"])
-        if task.get("channel") == "email":
-            await emailer.send_email(user["email"], f"{settings.product_name}: {task['title']}", "<p>" + body.replace("\n", "<br>") + "</p>", text=body)
-        updates["fire_count"] = int(task.get("fire_count") or 0) + 1
+        _item, delivered_now = await notify(user["id"], task["title"], body, kind=task["kind"], task_id=task["id"], occurrence=ref)
+        if delivered_now and task.get("channel") == "email" and user.get("email"):
+            # Email failure behaviour, stated: the inbox row already stands as
+            # the delivery of record, so a failed send is recorded and NOT
+            # retried -- a retry cannot tell a lost email from a late one, and
+            # a duplicate brief is the worse outcome.
+            try:
+                sent = await emailer.send_email(user["email"], f"{settings.product_name}: {task['title']}", "<p>" + body.replace("\n", "<br>") + "</p>", text=body)
+                if not sent:
+                    updates["last_result"] = f"{result} (email not sent)"
+            except Exception:
+                logger.warning("tasks: email delivery failed for %s", task["id"], exc_info=True)
+                updates["last_result"] = f"{result} (email failed)"
+        if delivered_now:
+            updates["fire_count"] = int(task.get("fire_count") or 0) + 1
     one_shot = "at" in task["schedule"] or (task["kind"] == "price_alert" and not task["spec"].get("repeat"))
     if fired and one_shot:
         updates["status"] = "done"

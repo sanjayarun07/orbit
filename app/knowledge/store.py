@@ -66,10 +66,12 @@ class MemoryStore:
                 return doc
         return None
 
-    async def write_document(self, doc: NormalizedDocument, chunks: list[Chunk]) -> tuple[str, bool]:
-        """(document_id, changed). Unchanged content is a no-op."""
+    async def write_document(self, doc: NormalizedDocument, chunks: list[Chunk], replace: bool = False) -> tuple[str, bool]:
+        """(document_id, changed). Unchanged content is a no-op unless `replace`
+        says the pipeline that produced the old chunks is no longer the one
+        queries use."""
         current = await self.live_document(doc.url)
-        if current and current.content_hash == doc.content_hash:
+        if current and current.content_hash == doc.content_hash and not replace:
             return current.id, False
         if current:
             now = datetime.now(timezone.utc)
@@ -90,6 +92,11 @@ class MemoryStore:
 
     async def get_document(self, document_id: str) -> NormalizedDocument | None:
         return self.documents.get(document_id)
+
+    async def mark_document_complete(self, document_id: str, fingerprint: str) -> None:
+        doc = self.documents.get(document_id)
+        if doc is not None:
+            doc.metadata = {**doc.metadata, "pipeline": fingerprint, "complete": True}
 
     async def live_documents(self, protocol_id: str | None = None) -> list[NormalizedDocument]:
         return [d for d in self.documents.values() if self.doc_valid_to.get(d.id) is None and (protocol_id is None or d.protocol_id == protocol_id)]
@@ -268,9 +275,9 @@ class PostgresStore:
             metadata=json.loads(meta) if isinstance(meta, str) else dict(meta or {}), version=int(row["version"]),
         )
 
-    async def write_document(self, doc: NormalizedDocument, chunks: list[Chunk]) -> tuple[str, bool]:
+    async def write_document(self, doc: NormalizedDocument, chunks: list[Chunk], replace: bool = False) -> tuple[str, bool]:
         current = await self.live_document(doc.url)
-        if current and current.content_hash == doc.content_hash:
+        if current and current.content_hash == doc.content_hash and not replace:
             return current.id, False
         doc.id = doc.id or str(uuid4())
         doc.version = (current.version + 1) if current else 1
@@ -307,6 +314,13 @@ class PostgresStore:
                 embedding = chunk.embedding
             rows.append((chunk.id, chunk.document_id, chunk.protocol_id, chunk.heading, chunk.content, chunk.position, embedding, json.dumps(chunk.metadata)))
         return rows
+
+    async def mark_document_complete(self, document_id: str, fingerprint: str) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE kb_documents SET metadata = metadata || $2::jsonb WHERE id = $1",
+                document_id, json.dumps({"pipeline": fingerprint, "complete": True}),
+            )
 
     async def get_document(self, document_id: str) -> NormalizedDocument | None:
         row = await self.pool.fetchrow("SELECT * FROM kb_documents WHERE id = $1", document_id)

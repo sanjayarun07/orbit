@@ -48,6 +48,13 @@ class SessionTurnLease:
             self.lock.release()
 
 
+class CoordinationStoreFull(RuntimeError):
+    """The lock store refused a write for lack of memory. Deliberately its own
+    error: the store is configured `noeviction` precisely so that a full store
+    fails the request rather than evicting somebody else's held lock, and the
+    caller has to answer 503, not carry on."""
+
+
 async def acquire_session_turn(session_id: str) -> SessionTurnLease:
     """Serialize each conversation across tabs, workers, and retries."""
     redis = await get_redis()
@@ -58,7 +65,13 @@ async def acquire_session_turn(session_id: str) -> SessionTurnLease:
             timeout=max(15, settings.chat_execution_timeout_seconds + 15),
             blocking_timeout=wait_seconds,
         )
-        if not await lock.acquire():
+        try:
+            acquired = await lock.acquire()
+        except Exception as exc:
+            if "OOM" in str(exc) or exc.__class__.__name__ == "OutOfMemoryError":
+                raise CoordinationStoreFull(str(exc)) from exc
+            raise
+        if not acquired:
             raise asyncio.TimeoutError("Another request is already updating this chat")
         return SessionTurnLease(lock, distributed=True)
     lock = _session_locks.setdefault(session_id, asyncio.Lock())

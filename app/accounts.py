@@ -11,6 +11,7 @@ user rather than being an account of its own.
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 import logging
 import re
 import secrets
@@ -645,6 +646,46 @@ async def list_team_members(owner_id: str) -> list[dict]:
     return [_member_public(m) for (owner, _), m in _team_members.items() if owner == owner_id]
 
 
+_team_locks: dict[tuple[int, str], "asyncio.Lock"] = {}
+
+
+@asynccontextmanager
+async def team_seat_gate(owner_id: str):
+    """Serialise seat allocation per team. Counting the members and inserting
+    an invite are two operations; two concurrent invitations both read the
+    same free seat and both succeeded past the purchased count."""
+    pool = await get_pg_pool()
+    if pool is not None:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", f"team:{owner_id}")
+                yield conn
+        return
+    import asyncio
+    lock = _team_locks.setdefault((id(asyncio.get_running_loop()), owner_id), asyncio.Lock())
+    async with lock:
+        yield None
+
+
+class SeatsExhausted(ValueError):
+    """Every purchased seat is taken."""
+
+
+async def invite_team_member_within_seats(owner_id: str, email: str, seats: int, role: str = "member") -> dict:
+    """Invite under the seat gate: the count and the insert cannot interleave
+    with another invitation for the same team."""
+    email = normalize_email(email)
+    async with team_seat_gate(owner_id) as conn:
+        if conn is not None:
+            rows = await conn.fetch("SELECT email FROM team_members WHERE owner_id = $1", owner_id)
+            taken = {r["email"] for r in rows}
+        else:
+            taken = {k[1] for k in _team_members if k[0] == owner_id}
+        if email not in taken and len(taken) + 1 >= seats:
+            raise SeatsExhausted(f"All {seats} seats are in use (owner + {seats - 1} members)")
+        return await invite_team_member(owner_id, email, role)
+
+
 async def invite_team_member(owner_id: str, email: str, role: str = "member") -> dict:
     email = normalize_email(email)
     role = role if role in ("member", "owner") else "member"
@@ -668,6 +709,9 @@ async def invite_team_member(owner_id: str, email: str, role: str = "member") ->
 
 
 async def remove_team_member(owner_id: str, email: str) -> bool:
+    """Remove a member. The user's team pointer is cleared only if it still
+    points at THIS owner -- an owner removing a stale record must not detach
+    the user from the team they have since joined."""
     email = normalize_email(email)
     pool = await get_pg_pool()
     if pool is not None:
@@ -675,13 +719,15 @@ async def remove_team_member(owner_id: str, email: str) -> bool:
         if row is None:
             return False
         if row["user_id"]:
-            await update_user(str(row["user_id"]), team_owner_id=None)
+            await pool.execute("UPDATE users SET team_owner_id = NULL WHERE id = $1 AND team_owner_id = $2", str(row["user_id"]), owner_id)
         return True
     record = _team_members.pop((owner_id, email), None)
     if record is None:
         return False
     if record.get("user_id"):
-        await update_user(record["user_id"], team_owner_id=None)
+        current = _users.get(record["user_id"])
+        if current and current.get("team_owner_id") == owner_id:
+            await update_user(record["user_id"], team_owner_id=None)
     return True
 
 
@@ -705,21 +751,32 @@ async def pending_invites_for(email: str | None) -> list[dict]:
 
 
 async def accept_team_invite(user: dict, owner_id: str) -> dict | None:
-    """The signed-in user joins the owner's team (the invite must be for their email)."""
+    """The signed-in user joins the owner's team (the invite must be for their
+    email). One active membership per user: joining team B leaves team A in
+    the same step, so A's owner cannot later "remove" a record that should not
+    exist and clear the user's pointer to B with it."""
     email = user["email"]
     pool = await get_pg_pool()
     if pool is not None:
-        row = await pool.fetchrow(
-            "UPDATE team_members SET status = 'active', accepted_at = NOW(), user_id = $3 WHERE owner_id = $1 AND email = $2 AND status = 'invited' RETURNING role",
-            owner_id, email, user["id"],
-        )
-        if row is None:
-            return None
-    else:
-        record = _team_members.get((owner_id, email))
-        if record is None or record["status"] != "invited":
-            return None
-        record.update({"status": "active", "accepted_at": _now(), "user_id": user["id"]})
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "UPDATE team_members SET status = 'active', accepted_at = NOW(), user_id = $3 WHERE owner_id = $1 AND email = $2 AND status = 'invited' RETURNING role",
+                    owner_id, email, user["id"],
+                )
+                if row is None:
+                    return None
+                await conn.execute(
+                    "DELETE FROM team_members WHERE user_id = $1 AND owner_id <> $2", user["id"], owner_id,
+                )
+                await conn.execute("UPDATE users SET team_owner_id = $2 WHERE id = $1", user["id"], owner_id)
+        return await get_user(user["id"])
+    record = _team_members.get((owner_id, email))
+    if record is None or record["status"] != "invited":
+        return None
+    for key in [k for k, m in _team_members.items() if m.get("user_id") == user["id"] and k[0] != owner_id]:
+        _team_members.pop(key, None)
+    record.update({"status": "active", "accepted_at": _now(), "user_id": user["id"]})
     return await update_user(user["id"], team_owner_id=owner_id)
 
 
