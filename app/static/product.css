@@ -70,12 +70,16 @@ body.home .home-below { display: block; animation: orbit-enter var(--motion-ente
 .home-below .prompt-desc, .home-below .prompt-arrow { display: none; }
 .home-below .prompt-source { padding-top: 12px; font-size: 10px; }
 .explore { margin: 24px 0; }
-.explore summary { list-style: none; display: flex; align-items: center; gap: 8px; width: fit-content; padding: 6px 0; color: var(--muted); font-size: 12px; cursor: pointer; }
-.explore summary::-webkit-details-marker { display: none; }
-.explore summary:hover { color: var(--text); }
-.explore summary .icon { width: 14px; height: 14px; transition: transform var(--motion-fast); }
-.explore[open] summary .icon { transform: rotate(180deg); }
-.explore-body { padding-top: 12px; }
+.explore-toggle { display: flex; align-items: center; gap: 8px; width: fit-content; padding: 6px 0; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.explore-toggle:hover, .explore-toggle:focus-visible { color: var(--text); }
+.explore-toggle .icon { width: 14px; height: 14px; transition: transform .35s var(--ease-out); animation: explore-nudge 2.4s ease-in-out infinite; }
+.explore.open .explore-toggle .icon { transform: rotate(180deg); animation: none; }
+/* Height animates through the grid track (0fr -> 1fr), so the content's real size is never measured or hard-coded. */
+.explore-body { display: grid; grid-template-rows: 0fr; opacity: 0; transform: translateY(-8px); transition: grid-template-rows .5s var(--ease-out), opacity .35s ease, transform .5s var(--ease-out); }
+.explore.open .explore-body { grid-template-rows: 1fr; opacity: 1; transform: none; }
+.explore-inner { overflow: hidden; min-height: 0; padding-top: 12px; }
+@keyframes explore-nudge { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(3px); } }
+@media (prefers-reduced-motion: reduce) { .explore-toggle .icon { animation: none; } .explore-body { transition: none; } }
 .capabilities { margin-top: 24px; }
 .cap-head h2 { font-family: var(--font-sans); font-size: 18px; font-weight: 500; }
 .cap-head p { font-size: 12px; }

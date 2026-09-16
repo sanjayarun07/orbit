@@ -10,7 +10,7 @@
 <script>(function(){try{var p=JSON.parse(localStorage.getItem("orbit_theme_v1")||'"system"');var t=p==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):p;document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t;}catch(e){}})();</script>
 <link rel="stylesheet" href="/ui/theme.css?v=1">
 <link rel="stylesheet" href="/ui/chat.css?v=3">
-<link rel="stylesheet" href="/ui/product.css?v=2">
+<link rel="stylesheet" href="/ui/product.css?v=3">
 </head>
 <body>
 <div class="app">
@@ -81,14 +81,16 @@
       <div class="home-below" id="homeBelow">
         <div class="mono-cap" id="highlightsCaption" hidden></div>
         <div class="prompts" id="homePrompts" hidden></div>
-        <details class="explore" id="exploreMore">
-          <summary><span>Explore examples</span><svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></summary>
-          <div class="explore-body">
-            <div class="chips" id="homeChips" hidden></div>
-            <div class="suggest-rows" id="homeRows" hidden></div>
-            <section class="capabilities" id="homeCapabilities" aria-label="Start with a question"></section>
+        <section class="explore" id="exploreMore">
+          <button class="explore-toggle" id="exploreToggle" type="button" aria-expanded="false" aria-controls="exploreBody"><span>Explore more</span><svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+          <div class="explore-body" id="exploreBody">
+            <div class="explore-inner">
+              <div class="chips" id="homeChips" hidden></div>
+              <div class="suggest-rows" id="homeRows" hidden></div>
+              <section class="capabilities" id="homeCapabilities" aria-label="Start with a question"></section>
+            </div>
           </div>
-        </details>
+        </section>
       </div>
       <div class="disclaimer">Review sources and transaction details before making a decision.</div>
     </div>
@@ -1105,6 +1107,21 @@ function renderPortfolioCard(snapshot) {
 async function analyzePortfolio(){const address=walletInput.value.trim();if(!address){openDialog("walletDialog");return;}addUserMessage("Analyze my portfolio");const typing=addTyping();busy=true;
   try{const res=await fetch(`/portfolio/${encodeURIComponent(address)}`);const data=await res.json();if(!res.ok)finishAgentMessage(typing,{error:normalizeError(data,res.status)});else{const body=$(".message-body",typing);body.innerHTML="";body.appendChild(renderPortfolioCard(data));}}
   catch(error){finishAgentMessage(typing,{error:error.message});}finally{busy=false;scrollToBottom();}}
+// "Explore more": folded by default. A click, a wheel/trackpad scroll down or a
+// swipe up on the home screen reveals it with a height+fade transition; scrolling
+// back up once the page is at the top folds it away again.
+const exploreEl=$("#exploreMore"),exploreToggle=$("#exploreToggle"),exploreBody=$("#exploreBody"),mainEl=$(".main");
+const reducedMotion=()=>matchMedia("(prefers-reduced-motion: reduce)").matches;
+function exploreOpen(){return exploreEl.classList.contains("open");}
+function setExplore(open,{scroll=false}={}){exploreEl.classList.toggle("open",open);exploreToggle.setAttribute("aria-expanded",String(open));exploreBody.inert=!open;if(open&&scroll)setTimeout(()=>exploreEl.scrollIntoView({behavior:reducedMotion()?"auto":"smooth",block:"start"}),80);}
+exploreToggle.addEventListener("click",()=>setExplore(!exploreOpen(),{scroll:true}));
+let exploreGestureAt=0;
+function exploreGesture(direction){if(!document.body.classList.contains("home"))return;const now=Date.now();if(now-exploreGestureAt<700)return;if(direction>0&&!exploreOpen()){exploreGestureAt=now;setExplore(true,{scroll:true});}else if(direction<0&&exploreOpen()&&mainEl.scrollTop<=1){exploreGestureAt=now;setExplore(false);}}
+mainEl.addEventListener("wheel",event=>{if(Math.abs(event.deltaY)>8)exploreGesture(Math.sign(event.deltaY));},{passive:true});
+let exploreTouchY=null;
+mainEl.addEventListener("touchstart",event=>{exploreTouchY=event.touches[0].clientY;},{passive:true});
+mainEl.addEventListener("touchmove",event=>{if(exploreTouchY===null)return;const dy=exploreTouchY-event.touches[0].clientY;if(Math.abs(dy)>40){exploreTouchY=null;exploreGesture(Math.sign(dy));}},{passive:true});
+setExplore(false);
 document.addEventListener("click",event=>{const prompt=event.target.closest(".prompt-card");if(!prompt)return;if(prompt.dataset.action==="portfolio")analyzePortfolio();else if(prompt.dataset.action==="relay")openRelayDialog();/* the guided swap form, not a bare request */else if(prompt.dataset.action==="research"){input.value="Research ";input.focus();}else if(prompt.dataset.msg)sendMessage(prompt.dataset.msg);});
 
 function relayChain(id){return relayChains.find(chain=>chain.id===Number(id));}

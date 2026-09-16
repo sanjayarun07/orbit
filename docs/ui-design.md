@@ -58,3 +58,12 @@ Delete (inline Delete/Keep confirmation, never a browser dialog; also the Delete
 key) and Move to project (existing projects, a new one, or remove). Titles,
 pins, archive state and projects live in this browser's storage with the chat
 registry; the server keeps transcripts and ownership only.
+
+## Explore more (home)
+
+The examples, chips and capability catalogue sit folded under "Explore more"
+beneath the market tiles. A click, a wheel or trackpad scroll down, or a swipe
+up on touch reveals them with a height-and-fade transition (grid-track
+animation, no measured heights); scrolling back up once the page is at the top
+folds them away. The folded content is inert so keyboard focus never lands in
+it. Reduced-motion users get an instant toggle and no chevron nudge.
