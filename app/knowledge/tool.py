@@ -89,7 +89,7 @@ def matches(request: str) -> bool:
     res = snapshot()
     if res is None or len(res) == 0:
         return False
-    return any(r.entity.entity_type in ("protocol", "token") for r in res.mentions(request)) or any(
+    return any(r.entity.entity_type in ("protocol", "token", "incident") for r in res.mentions(request)) or any(
         (r := res.resolve(tok.lstrip("$"), context=request)) and r.confidence >= 0.75 and r.entity.entity_type == "protocol"
         for tok in re.findall(r"[A-Za-z$][A-Za-z0-9$.-]+", request)
     )

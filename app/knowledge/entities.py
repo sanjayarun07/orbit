@@ -167,6 +167,14 @@ class EntityResolver:
         by_tvl = sorted(candidates, key=lambda cid: -float(self._by_id[cid].metadata.get("tvl_usd") or 0))
         if by_tvl and float(self._by_id[by_tvl[0]].metadata.get("tvl_usd") or 0) > 0 and self._by_id[by_tvl[0]].entity_type == "protocol":
             return by_tvl[0]
+        # Several incidents share a name ("Ronin Network" was hit in 2022 and 2024):
+        # a year in the text picks one, otherwise the most recent is what people mean.
+        incidents = [cid for cid in candidates if self._by_id[cid].entity_type == "incident"]
+        if incidents and len(incidents) == len(candidates):
+            years = set(re.findall(r"\b(20\d{2})\b", context))
+            dated = [cid for cid in incidents if str(self._by_id[cid].metadata.get("date") or "")[:4] in years]
+            pool = dated or incidents
+            return max(pool, key=lambda cid: str(self._by_id[cid].metadata.get("date") or ""))
         return None
 
     def mentions(self, text: str, context: str = "") -> list[Resolution]:

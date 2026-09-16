@@ -115,10 +115,20 @@ class GlobalHacksConnector:
             content=content, content_hash=content_hash(content), published_at=datetime.fromisoformat(date).replace(tzinfo=timezone.utc),
             metadata={"date": date, "amount_usd": hack.get("amount"), "returned_usd": hack.get("returnedFunds"), "technique": hack.get("technique"), "classification": hack.get("classification"),
                       "chains": chains, "target": name, "bridge_hack": bool(hack.get("bridgeHack")),
-                      "facts": [{"target": {"id": incident_id, "type": "incident", "name": title, "aliases": [name] if len(name) > 3 else [],
+                      "facts": [{"target": {"id": incident_id, "type": "incident", "name": title, "aliases": _incident_aliases(name),
                                             "metadata": {"date": date, "amount_usd": hack.get("amount"), "technique": hack.get("technique"), "classification": hack.get("classification"), "target": name}}}]
                       + [{"source": incident_id, "relation": "DEPLOYED_ON", "target": {"id": chain_id(c), "type": "chain", "name": c}, "confidence": 0.9, "metadata": {"source": "defillama"}} for c in chains[:4]]},
         )
+
+
+def _incident_aliases(name: str) -> list[str]:
+    """"Ronin Network" is asked about as "Ronin": the full name plus the
+    first-word alias people use, so the incident is a recognised mention."""
+    from app.knowledge.registry import name_aliases
+
+    out = {name} if len(name) > 3 else set()
+    out |= name_aliases(name)
+    return sorted(out)
 
 
 def _normalise_hack(hack: dict) -> dict | None:

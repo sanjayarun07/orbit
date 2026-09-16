@@ -116,6 +116,10 @@ async def search(query: str, limit: int = 8, resolver: EntityResolver | None = N
     plan = await plan_query(query, resolver)
     plan.graph_expanded = await graph_expand(plan, store)
     scope = plan.protocol_ids + plan.graph_expanded
+    # Incidents and stablecoins have documents of their own outside any protocol
+    # scope ("Ronin bridge hack" must not be narrowed to protocols on Ronin).
+    if any(r.entity.entity_type == "incident" or r.entity.id.startswith("stablecoin:") for r in plan.entities):
+        scope = []
     embedder = get_embedder()
     embedding = (await asyncio.to_thread(embedder.embed, [query]))[0]
     semantic, lexical = await asyncio.gather(

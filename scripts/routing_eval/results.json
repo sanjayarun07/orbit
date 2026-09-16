@@ -2,11 +2,11 @@
  "router": {
   "mode": "router",
   "metrics": {
-   "cases": 27,
+   "cases": 33,
    "abstain": 0,
-   "top1": 0.9629629629629629,
-   "recall_at_k": 0.9074074074074073,
-   "mrr": 0.9629629629629629,
+   "top1": 0.9696969696969697,
+   "recall_at_k": 0.9242424242424241,
+   "mrr": 0.9696969696969697,
    "forbidden_at_1": 0.0
   },
   "rows": [
@@ -223,6 +223,54 @@
     "OK",
     "defillama_protocols",
     "0.50",
+    "1.00",
+    ""
+   ],
+   [
+    "news-tile-explainer",
+    "OK",
+    "perplexity_web_search",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "fees-named-protocol",
+    "OK",
+    "defillama_fees_revenue",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "fees-leaderboard",
+    "OK",
+    "defillama_fees_revenue",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "yields-staking",
+    "OK",
+    "defillama_yields",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "kb-stablecoin-backing",
+    "OK",
+    "knowledge_base_search",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "kb-global-incident",
+    "OK",
+    "knowledge_base_search",
+    "1.00",
     "1.00",
     ""
    ]

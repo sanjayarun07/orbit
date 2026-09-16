@@ -589,9 +589,23 @@ def test_global_hacks_attach_to_registry_protocols_or_stand_alone():
         asyncio.run(ingest.ingest_document(d))
     entities = {e.id: e for e in asyncio.run(store.list_entities())}
     assert entities["incident:ronin-network:2022-03-28"].entity_type == "incident" and "Ronin Network" in entities["incident:ronin-network:2022-03-28"].aliases
+    assert "Ronin" in entities["incident:ronin-network:2022-03-28"].aliases
+    assert kb_tool.matches("what happened in the Ronin bridge hack") is False   # no snapshot yet
+    asyncio.run(kb_tool.resolver(force=True))
+    assert kb_tool.matches("what happened in the Ronin bridge hack")           # an incident mention routes to the KB
     assert any(r.relation == "HAD_INCIDENT" for r in asyncio.run(store.neighbors("protocol:aave")))
     assert [r.target_entity_id for r in asyncio.run(store.neighbors("incident:ronin-network:2022-03-28", relation="DEPLOYED_ON"))] == ["chain:ronin"]
-    # Standalone incidents are searchable without any protocol scope.
+    # Standalone incidents are searchable without any protocol scope -- even when a
+    # registry protocol lives on the Ronin chain and has bridge docs of its own.
+    katana = Protocol(id="protocol:katana", slug="katana", name="Katana", category="Dexs", chains=["ronin"], tvl_usd=1e8)
+    asyncio.run(store.upsert_protocol(katana))
+    from app.knowledge.registry import entities_for
+    for e in entities_for(katana)[0]:
+        asyncio.run(store.upsert_entity(e))
+    for r in entities_for(katana)[1]:
+        asyncio.run(store.upsert_relationship(r))
+    bridge_html = "<html><body><main><h1>Bridge design</h1><p>The Ronin bridge lets users move assets between Ethereum and the Ronin chain; typical bridge architecture uses validators and a multisig, and bridge hacks target those validator keys.</p></main></body></html>"
+    asyncio.run(ingest.ingest_document(DocsConnector.document(katana, "https://docs.katana.example/bridge", bridge_html)))
     hits, plan = asyncio.run(retrieval.search("what happened in the Ronin bridge hack", limit=3))
     assert hits and hits[0].document_title.startswith("Ronin Network exploit")
 
@@ -656,3 +670,17 @@ def test_global_connectors_run_once_per_pass_under_the_global_key():
     assert len(results) == 1 and results[0].protocol_id == GLOBAL_PROTOCOL_ID and results[0].documents_seen == 1 and Stub.calls == 1
     assert asyncio.run(ingest.run_global(store, connectors=[Stub()])) == []       # not due again within the hour
     assert asyncio.run(store.get_source_state("stub_global", GLOBAL_PROTOCOL_ID))["documents"] == 1
+
+
+def test_repeated_incident_names_resolve_to_the_year_asked_or_the_latest():
+    from app.knowledge.models import Entity
+
+    resolver = ent.EntityResolver([
+        Entity(id="chain:ronin", entity_type="chain", canonical_name="Ronin", aliases=[]),
+        Entity(id="incident:ronin-network:2022-03-28", entity_type="incident", canonical_name="Ronin Network exploit — 2022-03-28", aliases=["Ronin", "Ronin Network"], metadata={"date": "2022-03-28"}),
+        Entity(id="incident:ronin-network:2024-08-06", entity_type="incident", canonical_name="Ronin Network exploit — 2024-08-06", aliases=["Ronin", "Ronin Network"], metadata={"date": "2024-08-06"}),
+    ])
+    found = {m.entity.id for m in resolver.mentions("what happened in the Ronin bridge hack")}
+    assert "incident:ronin-network:2024-08-06" in found and "incident:ronin-network:2022-03-28" not in found
+    found = {m.entity.id for m in resolver.mentions("the 2022 Ronin Network hack")}
+    assert "incident:ronin-network:2022-03-28" in found
