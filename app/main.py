@@ -69,6 +69,8 @@ from app.models import (
     SignedTransactionRequest,
     WalletAuthChallengeRequest,
     WalletAuthVerifyRequest,
+    WalletChallengeRequest,
+    WalletVerifyRequest,
     WashTradingDetectionRequest,
 )
 from app.plans import get_plan
@@ -78,11 +80,11 @@ from app.portfolio import build_portfolio_snapshot
 from app.wallet_insights import portfolio_scenario, wallet_health
 from app.wallet_auth import (
     COOKIE_NAME,
-    SESSION_TTL,
     create_challenge,
+    create_solana_challenge,
     delete_auth_session,
-    get_auth_session,
     verify_challenge,
+    verify_solana_challenge,
 )
 from app.sessions import acquire_session_turn, clear_history, get_messages, get_session_context
 from app.jupiter import jupiter as _jupiter_client
@@ -209,9 +211,50 @@ async def health():
     return {"status": "ok", "counters": snapshot()}
 
 
+_EVM_CHAIN_NAMES = {1: "ethereum", 10: "optimism", 56: "bsc", 137: "polygon", 8453: "base", 42161: "arbitrum", 43114: "avalanche"}
+
+
+def _wallet_chain_label(chain: str) -> str:
+    if chain == "solana":
+        return "solana"
+    try:
+        chain_id = int(chain)
+    except ValueError as exc:
+        raise HTTPException(400, "Unknown chain") from exc
+    return _EVM_CHAIN_NAMES.get(chain_id, f"evm-{chain_id}")
+
+
+async def _finish_wallet_signin(chain: str, address: str, request: Request, response: Response) -> dict:
+    """After a signature is verified: a wallet already linked to an account
+    always signs the caller in as that account's owner (a verified signature
+    can only ever come from the real key-holder, so this never lets one
+    account steal another's wallet). A new wallet either links to the
+    caller's current signed-in session, or -- with no session at all --
+    creates a fresh, email-less account: wallet-only sign-in, exactly like
+    the email magic link, minus the email."""
+    existing_owner = await accounts.get_user_by_wallet(chain, address)
+    if existing_owner is not None:
+        user, created = existing_owner, False
+    else:
+        current = await resolve_identity(request)
+        if current.signed_in:
+            await accounts.link_wallet(current.user["id"], chain, address)
+            user, created = current.user, False
+        else:
+            user = await accounts.create_wallet_user(chain, address)
+            created = True
+    token = await accounts.create_user_session(user["id"], ip=_client_identity(request), user_agent=request.headers.get("user-agent"))
+    _set_user_cookie(response, request, token)
+    identity = await resolve_identity_for_user(user, request)
+    return {**await _me_payload(identity), "created": created}
+
+
 @app.post("/auth/coinbase/challenge")
 async def coinbase_auth_challenge(body: WalletAuthChallengeRequest, request: Request):
-    """Create a short-lived, address-bound login message; no transaction is created."""
+    """EVM-only, fixed shape: the Coinbase Wallet SDK bundle (app/static/
+    coinbase.js) calls this by name right after every connect, with no
+    server-side change needed on the frontend -- keep the path and body
+    shape exactly as it expects. Other wallets go through /auth/wallet/*."""
     host = request.headers.get("host", request.url.hostname or "Orbit").split("/", 1)[0]
     uri = f"{request.url.scheme}://{host}"
     try:
@@ -221,35 +264,53 @@ async def coinbase_auth_challenge(body: WalletAuthChallengeRequest, request: Req
 
 
 @app.post("/auth/coinbase/verify")
-async def coinbase_auth_verify(
-    body: WalletAuthVerifyRequest, response: Response, request: Request, identity: Identity = Depends(require_user)
-):
+async def coinbase_auth_verify(body: WalletAuthVerifyRequest, response: Response, request: Request):
     try:
-        token, session = await verify_challenge(body.address, body.nonce, body.signature)
-        await accounts.link_wallet(identity.user["id"], "evm", session["address"])
+        await verify_challenge(body.address, body.nonce, body.signature)
     except (ValueError, TypeError) as exc:
         raise HTTPException(401, _safe_detail(exc, "Wallet authentication failed")) from exc
-    response.set_cookie(
-        COOKIE_NAME,
-        token,
-        max_age=SESSION_TTL,
-        httponly=True,
-        secure=request.url.scheme == "https",
-        samesite="lax",
-        path="/",
-    )
-    return {"authenticated": True, **session}
+    # The verified challenge doesn't carry its chain_id back out, and an EOA
+    # signature verifies the same regardless of which EVM chain the wallet
+    # happened to be on -- "evm" is an honest label here, not a guess at a
+    # specific chain (the general /auth/wallet/* pair does track it).
+    return await _finish_wallet_signin("evm", body.address.lower(), request, response)
 
 
-@app.get("/auth/session")
-async def auth_session(request: Request):
-    session = await get_auth_session(request.cookies.get(COOKIE_NAME))
-    return {"authenticated": bool(session), **(session or {})}
+@app.post("/auth/wallet/challenge")
+async def wallet_auth_challenge(body: WalletChallengeRequest, request: Request):
+    """The general pair: any wallet, EVM or Solana. No sign-in required to
+    call this -- proving control of an address is itself how you sign in."""
+    host = request.headers.get("host", request.url.hostname or "Orbit").split("/", 1)[0]
+    uri = f"{request.url.scheme}://{host}"
+    try:
+        if body.chain == "solana":
+            return await create_solana_challenge(body.address, host, uri)
+        return await create_challenge(body.address, host, uri, int(body.chain))
+    except ValueError as exc:
+        raise HTTPException(400, _safe_detail(exc, "Unsupported wallet or network")) from exc
+
+
+@app.post("/auth/wallet/verify")
+async def wallet_auth_verify(body: WalletVerifyRequest, response: Response, request: Request):
+    chain = _wallet_chain_label(body.chain)
+    address = body.address if chain == "solana" else body.address.lower()
+    try:
+        if chain == "solana":
+            await verify_solana_challenge(address, body.nonce, body.signature)
+        else:
+            await verify_challenge(address, body.nonce, body.signature)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(401, _safe_detail(exc, "Wallet authentication failed")) from exc
+    return await _finish_wallet_signin(chain, address, request, response)
 
 
 @app.post("/auth/logout")
 async def auth_logout(request: Request, response: Response):
+    """The Coinbase Wallet bundle calls this (not /auth/signout) on
+    disconnect or account switch; make it a real, full sign-out too."""
+    await accounts.delete_user_session(request.cookies.get(accounts.USER_COOKIE))
     await delete_auth_session(request.cookies.get(COOKIE_NAME))
+    response.delete_cookie(accounts.USER_COOKIE, path="/")
     response.delete_cookie(COOKIE_NAME, path="/")
     return {"authenticated": False}
 
@@ -975,8 +1036,13 @@ async def delete_my_account(body: DeleteAccountRequest, request: Request, respon
     user = identity.user
     if identity.api_key is not None:
         raise HTTPException(403, "Delete the account from a signed-in browser session")
-    if body.confirm_email.strip().lower() != user["email"]:
-        raise HTTPException(400, "Type your account email exactly to confirm deletion")
+    # A wallet-only account has no email; accept any of its linked wallet
+    # addresses as the confirmation value instead.
+    confirm = body.confirm_email.strip().lower()
+    accepted = {(user.get("email") or "").lower()} | {w["address"].lower() for w in await accounts.list_wallets(user["id"])}
+    accepted.discard("")
+    if confirm not in accepted:
+        raise HTTPException(400, "Type your account email (or a linked wallet address) exactly to confirm deletion")
     for session_id in await accounts.list_chat_sessions(user["id"]):
         await clear_history(session_id)
     for key in await api_keys.list_for_user(user["id"]):

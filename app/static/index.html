@@ -493,7 +493,7 @@ function initProfile() {
   $("#profileName").textContent = profile.name || "Your account";
   $("#profileRisk").textContent = `${(profile.riskProfile || "balanced")[0].toUpperCase()}${(profile.riskProfile || "balanced").slice(1)} risk`;
   $("#profileAvatar").textContent = (profile.name || "W").trim()[0].toUpperCase();
-  walletInput.value = profile.defaultWallet || "";
+  if (!activeProvider && !walletInput.value) walletInput.value = profile.defaultWallet || "";   // never overwrite a live connection
   if (profile.defaultWallet) setReadOnlyWallet(profile.defaultWallet);
 }
 
@@ -1200,7 +1200,8 @@ function syncIdentityDisplay(){
     $("#profileName").textContent=shortAddr(connected);
     $("#profileAvatar").textContent=(connected.startsWith("0x")?connected.slice(2,3):connected.slice(0,1)).toUpperCase();
   }else if(signedIn){
-    const label=profile.name||user.display_name||user.email||"Your account";
+    const linkedFirst=account?.wallets?.[0]?.address;
+    const label=profile.name||user.display_name||user.email||(linkedFirst?shortAddr(linkedFirst):"Your account");
     $("#profileName").textContent=label;
     $("#profileAvatar").textContent=label.trim()[0].toUpperCase();
   }else{
@@ -1216,21 +1217,77 @@ function syncIdentityDisplay(){
     walletsEl.classList.toggle("muted",!rows.length);
   }
 }
+// Proving control of a wallet by signature, after it's already connected
+// (read-only), IS how a user signs in here -- no email required. Best-effort
+// and never blocks the connect flow: any failure (declined signature, a
+// provider without message-signing) just leaves the wallet connected
+// exactly as before, not signed in. Fire-and-forget from each connect path
+// so the wallet-extension's signature prompt never delays showing "connected".
+function toHex(bytes){return Array.from(bytes).map(b=>b.toString(16).padStart(2,"0")).join("");}
+async function signInWithWallet(chain,address,signMessage){
+  try{
+    const challenge=await(await fetch("/auth/wallet/challenge",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({address,chain})})).json();
+    if(!challenge?.message)throw new Error(challenge?.detail||"Could not start wallet sign-in");
+    const signature=await signMessage(challenge.message);
+    const res=await fetch("/auth/wallet/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({address,chain,nonce:challenge.nonce,signature})});
+    const data=await res.json();
+    if(!res.ok||!data.authenticated)throw new Error(data?.detail||"Wallet sign-in failed");
+    await loadAccount();
+    return true;
+  }catch(error){
+    console.warn("Wallet sign-in skipped:",error);
+    return false;
+  }
+}
+async function evmSignMessage(provider,address,message){
+  const signature=await provider.request({method:"personal_sign",params:[message,address]});
+  const value=typeof signature==="string"?signature:(signature?.signature||signature?.result);
+  if(typeof value!=="string")throw new Error("Unsupported signature format");
+  return value;
+}
+async function evmChainIdOf(provider){
+  const hex=await provider.request({method:"eth_chainId"});
+  return String(parseInt(hex,16));
+}
+async function solanaStandardSignMessage(wallet,account,message){
+  const encoded=new TextEncoder().encode(message);
+  const results=await wallet.features["standard:signMessage"].signMessage({account,message:encoded});
+  const signature=results?.[0]?.signature;
+  if(!signature)throw new Error("No signature returned");
+  return toHex(signature instanceof Uint8Array?signature:new Uint8Array(signature));
+}
+async function phantomSignMessage(message){
+  const encoded=new TextEncoder().encode(message);
+  const result=await window.solana.signMessage(encoded,"utf8");
+  const signature=result?.signature??result;
+  return toHex(signature instanceof Uint8Array?signature:new Uint8Array(Object.values(signature)));
+}
+async function privySolanaSignMessage(provider,message){
+  const encoded=new TextEncoder().encode(message);
+  const result=await provider.request({method:"signMessage",params:{message:encoded}});
+  const signature=result?.signature??result;
+  return toHex(signature instanceof Uint8Array?signature:new Uint8Array(Object.values(signature)));
+}
 function setWalletConnected(address,label,addresses=[]){walletInput.value=address;walletInput.disabled=true;window.OrbitWalletContext={provider:activeProvider};syncPayChip();syncIdentityDisplay();$("#walletButton").classList.add("connected");$("#walletLabel").textContent=shortAddress(address);$("#connectedPanel").hidden=false;$("#connectedProvider").textContent=`Connected with ${label}`;$("#connectedAddress").textContent=addresses.length?addresses.join(" · "):address;$("#walletOptions").hidden=true;$("#disconnectWalletBtn").hidden=false;}
 function setWalletDisconnected(){activeProvider=null;metamaskWallet=null;metamaskAccount=null;window.OrbitSolanaWallet=null;window.OrbitWalletContext={provider:null};syncPayChip();walletInput.disabled=false;walletInput.value=profile.defaultWallet||"";$("#connectedPanel").hidden=true;$("#walletOptions").hidden=false;$("#privyAuth").hidden=true;$("#disconnectWalletBtn").hidden=true;if(walletInput.value)setReadOnlyWallet(walletInput.value);else{$("#walletButton").classList.remove("connected");$("#walletLabel").textContent="Connect wallet";}syncIdentityDisplay();}
 function getPhantomProvider(){return window.solana?.isPhantom?window.solana:null;}
 function setPrivyStatus(message,type=""){const el=$("#privyStatus");el.textContent=message;el.className=`privy-auth-status ${type}`.trim();}
-function applyPrivyState(state,close=false){const button=$("#connectPrivyBtn"),help=$("#privyOptionHelp");button.disabled=!state.configured;help.textContent=state.configured?"Email sign-in with Ethereum and Solana wallets":"Currently unavailable";if(!state.authenticated)return;activeProvider="privy";const primary=state.solanaAddress||state.evmAddress;const addresses=[state.solanaAddress&&`SOL ${shortAddress(state.solanaAddress)}`,state.evmAddress&&`EVM ${shortAddress(state.evmAddress)}`].filter(Boolean);if(primary)setWalletConnected(primary,"Privy",addresses);if(close)closeDialog("walletDialog");}
+function applyPrivyState(state,close=false){const button=$("#connectPrivyBtn"),help=$("#privyOptionHelp");button.disabled=!state.configured;help.textContent=state.configured?"Email sign-in with Ethereum and Solana wallets":"Currently unavailable";if(!state.authenticated)return;activeProvider="privy";const primary=state.solanaAddress||state.evmAddress;const addresses=[state.solanaAddress&&`SOL ${shortAddress(state.solanaAddress)}`,state.evmAddress&&`EVM ${shortAddress(state.evmAddress)}`].filter(Boolean);if(primary)setWalletConnected(primary,"Privy",addresses);
+  if(state.solanaAddress){window.OrbitPrivy.getSolanaWallet().then(({provider})=>signInWithWallet("solana",state.solanaAddress,msg=>privySolanaSignMessage(provider,msg))).catch(()=>{});}
+  else if(state.evmAddress){window.OrbitPrivy.getEvmWallet().then(async({provider})=>{const chain=await evmChainIdOf(provider);await signInWithWallet(chain,state.evmAddress.toLowerCase(),msg=>evmSignMessage(provider,state.evmAddress,msg));}).catch(()=>{});}
+  if(close)closeDialog("walletDialog");}
 function showPrivyError(error){console.warn("Email wallet unavailable",error);$("#privyAuth").hidden=true;$("#privyEmailRow").hidden=true;$("#privyCodeRow").hidden=true;$("#privyOptionHelp").textContent="Unavailable right now. Try another wallet.";}
 async function connectPrivy(){try{const state=await window.OrbitPrivy.initialize();if(!state.configured){throw new Error("Email wallets are currently unavailable. Choose another wallet to continue.");}if(state.authenticated){applyPrivyState(state,true);return;}$("#privyEmailRow").hidden=false;$("#privyAuth").hidden=false;$("#privyEmail").focus();}catch(error){showPrivyError(error);}}
-function applyCoinbaseState(state,close=false){if(!state?.connected||!state.address||!state.authenticated){if(activeProvider==="coinbase")setWalletDisconnected();return;}activeProvider="coinbase";setWalletConnected(state.address,"Coinbase Wallet · Signed in");if(close)closeDialog("walletDialog");}
+function applyCoinbaseState(state,close=false){if(!state?.connected||!state.address||!state.authenticated){if(activeProvider==="coinbase")setWalletDisconnected();return;}activeProvider="coinbase";setWalletConnected(state.address,"Coinbase Wallet · Signed in");loadAccount();if(close)closeDialog("walletDialog");}
 async function connectCoinbase(){const button=$("#connectCoinbaseBtn"),help=$("#coinbaseOptionHelp"),previous=activeProvider;button.disabled=true;help.textContent="Connect, then sign the gas-free login message…";activeProvider="coinbase";try{const state=await window.OrbitCoinbase.connect();applyCoinbaseState(state,true);help.textContent="Smart Wallet, extension, or mobile";}catch(error){activeProvider=previous;help.textContent=relayError(error);console.error(error);}finally{button.disabled=false;}}
-function applyReownState(state,close=false){const button=$("#connectReownBtn"),help=$("#reownOptionHelp");button.disabled=!state.configured;help.textContent=state.configured?"Connect a compatible Ethereum wallet":"Currently unavailable";if(!state.connected||!state.address)return;activeProvider="reown";setWalletConnected(state.address,"Reown WalletConnect");if(close)closeDialog("walletDialog");}
+function applyReownState(state,close=false){const button=$("#connectReownBtn"),help=$("#reownOptionHelp");button.disabled=!state.configured;help.textContent=state.configured?"Connect a compatible Ethereum wallet":"Currently unavailable";if(!state.connected||!state.address)return;activeProvider="reown";setWalletConnected(state.address,"Reown WalletConnect");
+  window.OrbitReown.getEvmWallet().then(async({provider,address})=>{const chain=await evmChainIdOf(provider);await signInWithWallet(chain,address.toLowerCase(),msg=>evmSignMessage(provider,address,msg));}).catch(()=>{});
+  if(close)closeDialog("walletDialog");}
 async function connectReown(){try{await window.OrbitReown.connect();applyReownState(window.OrbitReown.getState(),true);}catch(error){$("#reownOptionHelp").textContent=relayError(error);}}
 async function sendPrivyCode(){const button=$("#privySendCodeBtn");button.disabled=true;setPrivyStatus("Sending a secure one-time code…");try{await window.OrbitPrivy.sendEmailCode($("#privyEmail").value);$("#privyCodeRow").hidden=false;setPrivyStatus("Code sent. Enter it to create or reconnect your wallets.","ok");$("#privyCode").focus();}catch(error){setPrivyStatus(relayError(error),"error");}finally{button.disabled=false;}}
 async function verifyPrivyCode(){const button=$("#privyVerifyBtn");button.disabled=true;setPrivyStatus("Verifying and preparing your embedded wallets…");try{const state=await window.OrbitPrivy.verifyEmailCode($("#privyEmail").value,$("#privyCode").value);applyPrivyState(state,true);}catch(error){setPrivyStatus(relayError(error),"error");}finally{button.disabled=false;}}
-async function connectPhantom(){const provider=getPhantomProvider();if(!provider){$("#connectedProvider").textContent="Phantom was not found";window.open("https://phantom.app/","_blank","noopener");return;}try{const response=await provider.connect();activeProvider="phantom";setWalletConnected(response.publicKey.toString(),"Phantom");closeDialog("walletDialog");}catch(error){console.error(error);}}
-async function connectMetaMask(){const btn=$("#connectMetaMaskBtn");btn.disabled=true;try{const{createSolanaClient}=await import("https://esm.sh/@metamask/connect-solana@2");const client=await createSolanaClient({dapp:{name:"Orbit",url:location.origin},api:{supportedNetworks:{mainnet:`${location.origin}/rpc/solana`}}});const wallet=client.getWallet();const{accounts}=await wallet.features["standard:connect"].connect();if(!accounts?.length)throw new Error("No account returned");metamaskWallet=client;metamaskAccount=accounts[0];window.OrbitSolanaWallet={address:accounts[0].address,signAndSendTransaction:signAndSendMetaMaskSolanaTransaction};activeProvider="metamask";setWalletConnected(accounts[0].address,"MetaMask");closeDialog("walletDialog");}catch(error){$("#walletLabel").textContent="Connection failed";console.error(error);}finally{btn.disabled=false;}}
+async function connectPhantom(){const provider=getPhantomProvider();if(!provider){$("#connectedProvider").textContent="Phantom was not found";window.open("https://phantom.app/","_blank","noopener");return;}try{const response=await provider.connect();activeProvider="phantom";const address=response.publicKey.toString();setWalletConnected(address,"Phantom");closeDialog("walletDialog");signInWithWallet("solana",address,phantomSignMessage);}catch(error){console.error(error);}}
+async function connectMetaMask(){const btn=$("#connectMetaMaskBtn");btn.disabled=true;try{const{createSolanaClient}=await import("https://esm.sh/@metamask/connect-solana@2");const client=await createSolanaClient({dapp:{name:"Orbit",url:location.origin},api:{supportedNetworks:{mainnet:`${location.origin}/rpc/solana`}}});const wallet=client.getWallet();const{accounts}=await wallet.features["standard:connect"].connect();if(!accounts?.length)throw new Error("No account returned");metamaskWallet=client;metamaskAccount=accounts[0];window.OrbitSolanaWallet={address:accounts[0].address,signAndSendTransaction:signAndSendMetaMaskSolanaTransaction};activeProvider="metamask";setWalletConnected(accounts[0].address,"MetaMask");closeDialog("walletDialog");signInWithWallet("solana",accounts[0].address,msg=>solanaStandardSignMessage(wallet,accounts[0],msg));}catch(error){$("#walletLabel").textContent="Connection failed";console.error(error);}finally{btn.disabled=false;}}
 async function disconnectWallet(){try{if(activeProvider==="privy")await window.OrbitPrivy.logout();else if(activeProvider==="coinbase")await window.OrbitCoinbase.disconnect();else if(activeProvider==="reown")await window.OrbitReown.disconnect();else if(activeProvider==="phantom")await getPhantomProvider()?.disconnect();else if(activeProvider==="metamask")await metamaskWallet?.disconnect();}catch{}setWalletDisconnected();if(sessionId)fetch(`/chat/wallet/${encodeURIComponent(sessionId)}`,{method:"DELETE"}).catch(()=>{});}
 $("#walletButton").addEventListener("click",()=>openDialog("walletDialog"));   // read-only wallet connection never requires signing in -- chat already tells anonymous users to do exactly this
 $("#relayQuoteBtn").addEventListener("click",requestRelayQuote);
@@ -1256,7 +1313,7 @@ function renderCredits(){const chip=$("#creditsChip");if(!account){chip.hidden=t
 function renderAccount(){
   renderCredits();fillGreeting();refreshInboxBadge();loadHighlights();loadSuggestions();
   const signedIn=Boolean(account?.authenticated);const user=account?.user||{};
-  $("#accountEmail").textContent=signedIn?user.email:"Not signed in";$("#accountEmail").classList.toggle("muted",!signedIn);
+  $("#accountEmail").textContent=signedIn?(user.email||(account.wallets?.[0]?`Signed in with wallet ${shortAddr(account.wallets[0].address)}`:"Signed in")):"Not signed in";$("#accountEmail").classList.toggle("muted",!signedIn);
   $("#accountPlan").textContent=account?.plan?.name||"Trial";
   $("#accountWallets").textContent=signedIn&&account.wallets?.length?account.wallets.map(w=>`${w.address.slice(0,6)}…${w.address.slice(-4)}`).join(", "):"No wallets linked";
   $("#signinBtn").hidden=signedIn;$("#signoutBtn").hidden=!signedIn;

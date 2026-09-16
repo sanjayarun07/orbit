@@ -94,3 +94,21 @@ persisted server-side -- see the code review note in
 `docs/routing-architecture.md`-adjacent memory about `app/wallet_auth.py`
 being unreachable from any UI button today (a real signature-verify-and-
 link flow exists on the backend but nothing calls it).
+
+## Wallet sign-in (no email required)
+
+Three ways in, all equal: chat anonymously on trial credits; sign in by
+email magic link; or sign in with a wallet alone. Connecting a wallet from
+the picker (Phantom, MetaMask, Coinbase Wallet, WalletConnect, Privy email
+wallet, or a pasted public address) never requires signing in first.
+After a provider connects, the page asks it to sign a one-time challenge
+(`POST /auth/wallet/challenge` then `/auth/wallet/verify`; Coinbase's SDK
+bundle drives the equivalent `/auth/coinbase/*` pair itself). A valid
+signature signs the user in exactly like the email link does: same cookie,
+same account model, an email-less `users` row on first use, Free plan and
+monthly credits. A wallet already linked to an account always resumes that
+account; while signed in by email, a newly verified wallet links to that
+account instead. Signing is best-effort and never blocks connecting: if the
+user declines the signature prompt the wallet stays connected read-only,
+not signed in. Solana signatures are Ed25519 over the challenge text; EVM
+signatures are EIP-191 with ERC-1271/6492 for smart wallets.

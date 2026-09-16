@@ -53,7 +53,7 @@ ALTER TABLE relay_executions ADD COLUMN IF NOT EXISTS revision BIGINT;
 CREATE UNIQUE INDEX IF NOT EXISTS relay_execution_turn ON relay_executions (session_id, revision) WHERE session_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
+    email TEXT UNIQUE,
     display_name TEXT,
     plan_id TEXT NOT NULL DEFAULT 'free',
     stripe_customer_id TEXT UNIQUE,
@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS team_owner_id UUID;
+ALTER TABLE users ALTER COLUMN email DROP NOT NULL;   -- a wallet-only account has none
 CREATE TABLE IF NOT EXISTS user_chat_sessions (
     session_id TEXT PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

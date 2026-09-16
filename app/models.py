@@ -352,6 +352,7 @@ class PortfolioScenarioRequest(BaseModel):
 
 
 class WalletAuthChallengeRequest(BaseModel):
+    """EVM-only, fixed shape the Coinbase Wallet SDK bundle calls directly."""
     address: str = Field(pattern=r"^0x[0-9a-fA-F]{40}$")
     chain_id: int = Field(default=1, ge=1, le=2_147_483_647)
 
@@ -359,8 +360,23 @@ class WalletAuthChallengeRequest(BaseModel):
 class WalletAuthVerifyRequest(BaseModel):
     address: str = Field(pattern=r"^0x[0-9a-fA-F]{40}$")
     nonce: str = Field(min_length=16, max_length=128)
-    # EOAs use 65-byte signatures, while smart/counterfactual wallets can
-    # return much larger ERC-1271/ERC-6492 payloads.
+    signature: str = Field(min_length=2, max_length=32_770, pattern=r"^(?:0x)?(?:[0-9a-fA-F]{2})+$")
+
+
+class WalletChallengeRequest(BaseModel):
+    # Solana: a base58 Ed25519 public key (32-44 chars). EVM: a 0x + 40-hex
+    # address. `chain` is the literal "solana", or an EVM chain_id as a
+    # decimal string ("1", "8453", ...) -- app.wallet_auth resolves which.
+    address: str = Field(min_length=32, max_length=66)
+    chain: str = Field(default="1", min_length=1, max_length=20)
+
+
+class WalletVerifyRequest(BaseModel):
+    address: str = Field(min_length=32, max_length=66)
+    chain: str = Field(default="1", min_length=1, max_length=20)
+    nonce: str = Field(min_length=16, max_length=128)
+    # EOA/Ed25519 signatures are fixed-size; smart/counterfactual EVM wallets
+    # can return much larger ERC-1271/ERC-6492 payloads.
     signature: str = Field(
         min_length=2,
         max_length=32_770,

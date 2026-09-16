@@ -1,4 +1,10 @@
-"""One-time EVM signature challenges and HttpOnly wallet login sessions."""
+"""One-time signature challenges proving control of a wallet -- EVM (EIP-191/
+1271/6492) and Solana (Ed25519). Used by /auth/wallet/* (app/main.py) both to
+sign a caller in with no email at all and to link a wallet to an already
+signed-in account; the caller-facing session this produces is the ordinary
+USER_COOKIE session (app/accounts.py's create_user_session), not anything in
+this module -- create_challenge/verify_challenge and their Solana siblings
+only answer one question: does this signature prove control of this address."""
 
 from __future__ import annotations
 
@@ -7,7 +13,10 @@ import json
 import secrets
 import time
 
+import base58
 import httpx
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from eth_abi import encode
 from eth_account import Account
 from eth_account.messages import defunct_hash_message, encode_defunct
@@ -135,6 +144,75 @@ async def verify_challenge(address: str, nonce: str, signature: str) -> tuple[st
     else:
         _sessions[token] = (time.time() + SESSION_TTL, session)
     return token, session
+
+
+_SOLANA_CHALLENGE_TTL = CHALLENGE_TTL
+_solana_challenges: dict[str, tuple[float, dict]] = {}
+
+
+def _prune_solana() -> None:
+    now = time.time()
+    for key in [key for key, (expires, _) in _solana_challenges.items() if expires <= now]:
+        _solana_challenges.pop(key, None)
+
+
+async def create_solana_challenge(address: str, domain: str, uri: str) -> dict:
+    """Sign-In-With-Solana-style message; the address itself is the base58
+    Ed25519 public key, so there is no separate chain_id/RPC to configure."""
+    try:
+        if len(base58.b58decode(address)) != 32:
+            raise ValueError
+    except ValueError as exc:
+        raise ValueError("Not a Solana address") from exc
+    nonce = secrets.token_urlsafe(24)
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(seconds=_SOLANA_CHALLENGE_TTL)
+    message = (
+        f"{domain} wants you to sign in with your Solana account:\n"
+        f"{address}\n\nSign in to Orbit. This request does not initiate a transaction or cost gas.\n\n"
+        f"URI: {uri}\nVersion: 1\nNonce: {nonce}\n"
+        f"Issued At: {now.isoformat()}\nExpiration Time: {expires.isoformat()}"
+    )
+    value = {"address": address, "message": message, "expires_at": expires.isoformat()}
+    redis = await get_redis()
+    if redis is not None:
+        await redis.setex(f"wallet_auth_challenge_sol:{nonce}", _SOLANA_CHALLENGE_TTL, json.dumps(value))
+    else:
+        _prune_solana()
+        _solana_challenges[nonce] = (time.time() + _SOLANA_CHALLENGE_TTL, value)
+    return {"nonce": nonce, "message": message, "expires_at": expires.isoformat()}
+
+
+def _verify_ed25519(address: str, message: str, signature_hex: str) -> bool:
+    try:
+        public_key = base58.b58decode(address)
+        if len(public_key) != 32:
+            return False
+        signature = bytes.fromhex(signature_hex.removeprefix("0x"))
+        if len(signature) != 64:
+            return False
+        Ed25519PublicKey.from_public_bytes(public_key).verify(signature, message.encode("utf-8"))
+        return True
+    except (InvalidSignature, ValueError):
+        return False
+
+
+async def verify_solana_challenge(address: str, nonce: str, signature: str) -> None:
+    """Raises ValueError on any failure (expired/used/unknown nonce, wrong
+    address, bad signature) -- mirrors verify_challenge's EVM contract so the
+    route layer handles both the same way. Returns None on success."""
+    redis = await get_redis()
+    if redis is not None:
+        raw = await redis.getdel(f"wallet_auth_challenge_sol:{nonce}")
+        value = json.loads(raw) if raw else None
+    else:
+        _prune_solana()
+        stored = _solana_challenges.pop(nonce, None)
+        value = stored[1] if stored and stored[0] > time.time() else None
+    if not value or value.get("address") != address:
+        raise ValueError("Login challenge is invalid, expired, or already used")
+    if not _verify_ed25519(address, value["message"], signature):
+        raise ValueError("Wallet signature does not match the requested address")
 
 
 async def get_auth_session(token: str | None) -> dict | None:

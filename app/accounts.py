@@ -97,7 +97,7 @@ async def search_users(query: str = "", limit: int = 25) -> list[dict]:
             "SELECT * FROM users WHERE ($1 = '' OR email LIKE '%' || $1 || '%') ORDER BY created_at DESC LIMIT $2", query, limit,
         )
         return [_row_to_user(row) for row in rows]
-    users = [dict(u) for u in _users.values() if not query or query in u["email"]]
+    users = [dict(u) for u in _users.values() if not query or query in (u.get("email") or "")]
     return sorted(users, key=lambda u: u.get("created_at") or "", reverse=True)[:limit]
 
 
@@ -225,6 +225,55 @@ async def list_wallets(user_id: str) -> list[dict]:
         rows = await pool.fetch("SELECT chain, address, linked_at FROM user_wallets WHERE user_id = $1 ORDER BY linked_at", user_id)
         return [{"chain": r["chain"], "address": r["address"], "linked_at": r["linked_at"].isoformat()} for r in rows]
     return [{"chain": chain, "address": address, "linked_at": None} for (chain, _), (owner, address) in _wallets.items() if owner == user_id]
+
+
+async def get_user_by_wallet(chain: str, address: str) -> dict | None:
+    """The account a wallet is linked to, or None. Case-sensitive on `address`
+    for EVM checksum forms -- callers normalize (lowercase for EVM, as-is
+    base58 for Solana) before calling, matching link_wallet's own key."""
+    pool = await get_pg_pool()
+    if pool is not None:
+        row = await pool.fetchrow(
+            "SELECT u.* FROM users u JOIN user_wallets w ON w.user_id = u.id WHERE w.chain = $1 AND w.address = $2",
+            chain, address,
+        )
+        return _row_to_user(row) if row else None
+    owner = _wallets.get((chain, address.lower()))
+    return dict(_users[owner[0]]) if owner and owner[0] in _users else None
+
+
+async def create_wallet_user(chain: str, address: str) -> dict:
+    """A brand-new account with no email, for a wallet no one has linked yet.
+    Callers that need "find-or-create" should check get_user_by_wallet first
+    -- a wallet already linked always resolves to its existing account; this
+    never reassigns one."""
+    user = {
+        "id": str(uuid4()), "email": None, "display_name": None, "plan_id": "free",
+        "stripe_customer_id": None, "stripe_subscription_id": None, "subscription_status": None,
+        "team_owner_id": None, "preferences": {}, "created_at": _now(),
+    }
+    pool = await get_pg_pool()
+    if pool is not None:
+        row = await pool.fetchrow(
+            "INSERT INTO users (id, email, display_name, plan_id, preferences) VALUES ($1, NULL, NULL, 'free', '{}'::jsonb) RETURNING *",
+            user["id"],
+        )
+        stored = _row_to_user(row)
+    else:
+        _users[user["id"]] = user
+        stored = dict(user)
+    await link_wallet(stored["id"], chain, address)
+    return stored
+
+
+async def sign_in_with_wallet(chain: str, address: str, ip: str | None = None, user_agent: str | None = None) -> tuple[dict, str, bool]:
+    """A verified wallet signature -> (user, session token, created). The
+    wallet's existing owner, if any, always wins -- this never creates a
+    second account for a wallet that's already linked to one."""
+    existing = await get_user_by_wallet(chain, address)
+    user = existing or await create_wallet_user(chain, address)
+    session = await create_user_session(user["id"], ip, user_agent)
+    return user, session, existing is None
 
 
 # ----------------------------------------------------------------------------
@@ -534,7 +583,9 @@ async def remove_team_member(owner_id: str, email: str) -> bool:
     return True
 
 
-async def pending_invites_for(email: str) -> list[dict]:
+async def pending_invites_for(email: str | None) -> list[dict]:
+    if not email:   # a wallet-only account has none, and therefore no email-addressed invites
+        return []
     email = normalize_email(email)
     pool = await get_pg_pool()
     if pool is not None:
