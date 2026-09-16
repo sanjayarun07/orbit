@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import contextvars
+import re
 from datetime import datetime, timezone
 from threading import Condition
 import time
@@ -27,8 +28,20 @@ def _requested_chains(query: str) -> tuple[str, ...]:
     return tuple(chain for chain in _CHAINS if chain in lowered)
 
 
+# "What are the trending narratives / themes / sectors right now": the answer
+# people want is the market-wide story (AI agents, RWA, perp DEXs, stablecoin
+# yields, ETF flows...) with the on-chain metas as the memecoin lens -- not a
+# chain-volume table topped by promoted tokens.
+_NARRATIVE_ASK = re.compile(r"\b(?:narratives?|themes?|sectors?|metas?|sector rotation)\b", re.I)
+_TOKEN_ASK = re.compile(r"\b(?:tokens?|coins?|gainers?|losers?|pairs?|launches?|new pairs)\b", re.I)
+
+
+def _narratives_mode(query: str) -> bool:
+    return bool(_NARRATIVE_ASK.search(query or "")) and not _TOKEN_ASK.search(query or "")
+
+
 def _cache_key(query: str) -> str:
-    return ",".join(_requested_chains(query)) or "global"
+    return (",".join(_requested_chains(query)) or "global") + (":narratives" if _narratives_mode(query) else "")
 
 
 def _get_json(url: str) -> Any:
@@ -127,6 +140,17 @@ def _build_crypto_market_brief(query: str) -> str:
             contextvars.copy_context().run,
             get_provider_router().try_route, narrative_request, "token_discovery", requested_chains,
         )
+        narratives_mode = _narratives_mode(query)
+        story_future = None
+        if narratives_mode:
+            story_request = (
+                "What are the dominant crypto market narratives this week? Cover sector themes (for example AI agents, "
+                "real-world assets, perp DEXs, stablecoins and yields, restaking, memecoins, ETF flows, layer-2s), what is "
+                "driving each, and which tokens or protocols are the flagbearers. Cite sources. Start directly with the first "
+                "narrative as a heading; no preamble about what you are doing."
+                + (f" Focus on {chain_label}." if requested_chains else "")
+            )
+            story_future = executor.submit(contextvars.copy_context().run, get_provider_router().try_route, story_request, "web_research", ())
         for future in as_completed(futures):
             try:
                 results[futures[future]] = future.result()
@@ -141,13 +165,23 @@ def _build_crypto_market_brief(query: str) -> str:
             )
         except Exception:
             narratives = "Narrative search is temporarily unavailable."
+        story = None
+        if story_future is not None:
+            try:
+                story_result = story_future.result()
+                story = story_result.output if story_result is not None else None
+            except Exception:
+                story = None
+
+    coins = (results.get("prices") or {}).get("coins") or {}
+    total = results.get("total") or {}
+    if narratives_mode:
+        return _compose_narratives(query, chain_label, requested_chains, story, narratives, coins, total)
 
     lines = [
         f"# {chain_label} crypto market brief" if requested_chains else "# Crypto market brief",
         f"**Data freshness**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
     ]
-    coins = (results.get("prices") or {}).get("coins") or {}
-    total = results.get("total") or {}
     if coins or total:
         lines.extend(["", "## Market pulse"])
         for coin_id, label in (("coingecko:bitcoin", "Bitcoin (BTC)"), ("coingecko:ethereum", "Ethereum (ETH)")):
@@ -210,6 +244,30 @@ def _build_crypto_market_brief(query: str) -> str:
         "",
         "**Note**: Launchpad tokens and DEX Screener-boosted coins are often extremely volatile and low-liquidity. Verify on-chain liquidity, holder concentration, and contract metadata before trading. I can run those checks for any specific token you choose.",
     ])
+    return compact_tool_result("\n".join(lines))
+
+
+def _compose_narratives(query: str, chain_label: str, requested_chains: tuple[str, ...], story: str | None, metas: str, coins: dict, total: dict) -> str:
+    """Narratives-first layout: the market-wide story from the news, then the
+    on-chain metas, then one line of pulse. No chain table, no promoted tokens."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    lines = [f"# Crypto narratives right now{' · ' + chain_label if requested_chains else ''}", f"**As of** {now}", ""]
+    lines.append("## What the market is trading on")
+    if story:
+        lines.append(story.strip())
+    else:
+        lines.append("Web research is unavailable right now, so this is the on-chain view only.")
+    lines += ["", "## On-chain metas (DEX Screener)", "Where memecoin volume is clustering today. Attention, not a recommendation.", "", metas.strip()]
+    pulse = []
+    for coin_id, label in (("coingecko:bitcoin", "BTC"), ("coingecko:ethereum", "ETH")):
+        coin = coins.get(coin_id) or {}
+        if coin.get("price") is not None:
+            pulse.append(f"{label} {_money(coin['price'])}")
+    if total.get("total24h") is not None:
+        pulse.append(f"DEX volume {_money(total['total24h'])} / 24h ({_pct(total.get('change_1d'))} d/d)")
+    if pulse:
+        lines += ["", "## Pulse", " · ".join(pulse) + " (DefiLlama)"]
+    lines += ["", "Ask for any narrative by name and I'll pull the leading tokens, their liquidity and what's driving them."]
     return compact_tool_result("\n".join(lines))
 
 

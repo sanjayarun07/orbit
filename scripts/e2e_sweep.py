@@ -138,6 +138,8 @@ def _remember_plan(st, d, t, c):
 
 SCENARIOS = [
     S("market overview card", [dict(message="how is the crypto market today", check=_all(_intent("research"), _tools_any("crypto_market_overview")))], "research"),
+    S("trending narratives lead with the story", [dict(message="What are the trending narratives right now in crypto?",
+                                                       check=_all(_intent("research"), _tools_any("crypto_market_brief"), _contains("Crypto narratives right now", "What the market is trading on", "On-chain metas"), _not_contains("Promoted-token attention")))], "research"),
     S("token deep dive", [dict(message="deep dive on BONK", check=_all(_intent("research"), _tools_any("token_deep_dive")))], "research"),
     S("chain ambiguity: ask then answer", [
         dict(message="price of PEPE", check=_all(_intent("research"), _contains("which one you mean"))),
