@@ -122,3 +122,43 @@ def test_only_the_capped_prefix_is_shown_to_the_model(monkeypatch):
 
 def test_disabled_by_default():
     assert settings.llm_tool_selection_enabled is False, "must ship OFF: an explicit opt-in pilot, not a silent default"
+
+
+def test_a_self_hosted_endpoint_passes_api_base_and_key_through(monkeypatch):
+    """settings.tool_selector_api_base/_api_key (a vLLM-style self-hosted
+    endpoint, e.g. a local Qwen deployment) must reach dspy.LM's kwargs --
+    LiteLLM has no other way to find a non-default-provider server."""
+    monkeypatch.setattr(settings, "tool_selector_model", "hosted_vllm/Qwen3-VL-32B-Instruct-FP8")
+    monkeypatch.setattr(settings, "tool_selector_api_base", "https://example-infra.internal/v1")
+    monkeypatch.setattr(settings, "tool_selector_api_key", "test-key-123")
+    captured = {}
+
+    def fake_lm(model, **kwargs):
+        captured["model"] = model
+        captured.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(tool_selector.dspy, "LM", fake_lm)
+    selector = tool_selector.ToolSelector()
+    selector._lm_for(selector._model_name())
+    assert captured["model"] == "hosted_vllm/Qwen3-VL-32B-Instruct-FP8"
+    assert captured["api_base"] == "https://example-infra.internal/v1"
+    assert captured["api_key"] == "test-key-123"
+
+
+def test_a_normal_hosted_model_never_gets_api_base_kwargs(monkeypatch):
+    """The default path (no self-hosted endpoint configured) must be
+    byte-identical to before this setting existed -- no empty api_base/
+    api_key kwargs sent to a normal OpenAI-style model."""
+    monkeypatch.setattr(settings, "tool_selector_model", "openai/gpt-4.1-nano")
+    monkeypatch.setattr(settings, "tool_selector_api_base", None)
+    monkeypatch.setattr(settings, "tool_selector_api_key", None)
+    captured = {}
+
+    def fake_lm(model, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(tool_selector.dspy, "LM", fake_lm)
+    tool_selector.ToolSelector()._lm_for("openai/gpt-4.1-nano")
+    assert "api_base" not in captured and "api_key" not in captured

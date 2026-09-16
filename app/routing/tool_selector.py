@@ -107,7 +107,12 @@ class ToolSelector:
 
     def _lm_for(self, model: str) -> dspy.LM:
         if self._lm is None or self._lm_model != model:
-            self._lm = dspy.LM(model, timeout=settings.tool_selector_timeout_seconds, num_retries=1)
+            kwargs: dict = {}
+            if settings.tool_selector_api_base:
+                kwargs["api_base"] = settings.tool_selector_api_base
+            if settings.tool_selector_api_key:
+                kwargs["api_key"] = settings.tool_selector_api_key
+            self._lm = dspy.LM(model, timeout=settings.tool_selector_timeout_seconds, num_retries=1, **kwargs)
             self._lm_model = model
         return self._lm
 

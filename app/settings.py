@@ -122,6 +122,18 @@ class Settings(BaseSettings):
     # LiteLLM -- to pilot it without touching the answer model.
     llm_tool_selection_enabled: bool = False
     tool_selector_model: str | None = None
+    # A self-hosted / OpenAI-compatible endpoint for tool_selector_model, e.g. a
+    # vLLM-served Qwen instance on your own infrastructure -- LiteLLM (which
+    # dspy.LM wraps) reaches it via these two, not the OpenAI/Anthropic default
+    # base URLs. Leave both empty to use a normal hosted provider (OpenAI, etc)
+    # exactly as the other model tiers do. For vLLM specifically, prefix the
+    # model name with "hosted_vllm/" (e.g. tool_selector_model=
+    # "hosted_vllm/Qwen3-VL-32B-Instruct-FP8") -- LiteLLM's dedicated vLLM
+    # provider, not "openai/", so generation kwargs and tool-calling pass
+    # through correctly; tool_selector_api_base then points at that server's
+    # OpenAI-compatible root (usually ending in /v1).
+    tool_selector_api_base: str | None = None
+    tool_selector_api_key: str | None = None
     tool_selector_timeout_seconds: float = 6.0
     tool_selector_min_candidates: int = 2       # fewer than this: nothing to arbitrate, skip the call
     tool_selector_max_candidates: int = 6        # shown to the model; the rest keep their deterministic order behind them
