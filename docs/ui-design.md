@@ -75,3 +75,22 @@ conversation: a later turn that names no wallet still uses it. Disconnecting
 in the UI calls `DELETE /chat/wallet/{session_id}` so the server forgets it.
 Any wallet-gated request made without a wallet (swap, portfolio, wallet
 health) is parked; replying `connected` after connecting re-runs it.
+
+## Identity display (sidebar chip, Settings > Account)
+
+One function, `syncIdentityDisplay()`, is the only place that writes the
+sidebar profile chip's name/avatar and the Settings "Linked wallets" row. A
+connected wallet (any provider) always wins there over a signed-in email,
+since it's the clearer signal of who is at the keyboard right now; signed
+out with no wallet falls back to "Your account". Called on every
+`renderAccount()` pass and from `setWalletConnected`/`setWalletDisconnected`
+directly, so the chip updates immediately on connect/disconnect without
+waiting on a server round trip, and never keeps showing a stale email after
+sign-out (the previous bug: the old code only set `#profileName` inside
+`renderAccount()`'s signed-in branch, with nothing to reset it on sign-out).
+
+The "connected this session" wallet shown here is client-side only, never
+persisted server-side -- see the code review note in
+`docs/routing-architecture.md`-adjacent memory about `app/wallet_auth.py`
+being unreachable from any UI button today (a real signature-verify-and-
+link flow exists on the backend but nothing calls it).

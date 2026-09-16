@@ -1173,8 +1173,38 @@ async function executeRelayQuote(){
 async function hydrateHistory(){messagesEl.innerHTML="";if(!sessionId){sessionRevision=0;messagesEl.innerHTML=welcomeMarkup;return;}try{const res=await fetch(`/chat/history/${encodeURIComponent(sessionId)}`);if(!res.ok)throw new Error();const data=await res.json();sessionRevision=Number(data.context?.revision||0);syncTeamMode(data.context?.team_mode);syncPolicy(data.context?.risk_charter,data.context?.risk_charter_fields);if(!(data.messages||[]).length){chatRegistry=chatRegistry.filter(chat=>chat.id!==sessionId);saveChats();sessionId=null;sessionRevision=0;sessionStorage.removeItem("orbit_session_id");renderChatList();messagesEl.innerHTML=welcomeMarkup;return;}for(const msg of data.messages){if(msg.role==="user")addUserMessage(msg.content);else{const agentMessage=addAgentMessage(msg.content);if(msg.trajectory||msg.trade_plan||msg.quick_actions?.length||msg.suggestions?.length||msg.intent||msg.cross_chain_swap||msg.context_capsules?.length)finishAgentMessage(agentMessage,{answer:msg.content,trajectory:msg.trajectory,trade_plan:msg.trade_plan,quick_actions:msg.quick_actions,suggestions:msg.suggestions,session_revision:msg.session_revision,intent:msg.intent,capabilities:msg.capabilities,cross_chain_swap:msg.cross_chain_swap,context_capsules:msg.context_capsules,intent_lock:msg.intent_lock,evidence:msg.evidence,trade_readiness:msg.trade_readiness,gas_advisory:msg.gas_advisory});}}const groups=[...document.querySelectorAll(".quick-actions")];groups.slice(0,-1).forEach(group=>group.querySelectorAll(".followup-action").forEach(button=>{button.disabled=true;button.setAttribute("aria-disabled","true");}));scrollToBottom();}catch{sessionRevision=0;messagesEl.innerHTML=welcomeMarkup;}}
 
 function setReadOnlyWallet(address){walletInput.value=address;$("#walletButton").classList.add("connected");$("#walletLabel").textContent=shortAddress(address);}
-function setWalletConnected(address,label,addresses=[]){walletInput.value=address;walletInput.disabled=true;window.OrbitWalletContext={provider:activeProvider};syncPayChip();$("#walletButton").classList.add("connected");$("#walletLabel").textContent=shortAddress(address);$("#connectedPanel").hidden=false;$("#connectedProvider").textContent=`Connected with ${label}`;$("#connectedAddress").textContent=addresses.length?addresses.join(" · "):address;$("#walletOptions").hidden=true;$("#disconnectWalletBtn").hidden=false;}
-function setWalletDisconnected(){activeProvider=null;metamaskWallet=null;metamaskAccount=null;window.OrbitSolanaWallet=null;window.OrbitWalletContext={provider:null};syncPayChip();walletInput.disabled=false;walletInput.value=profile.defaultWallet||"";$("#connectedPanel").hidden=true;$("#walletOptions").hidden=false;$("#privyAuth").hidden=true;$("#disconnectWalletBtn").hidden=true;if(walletInput.value)setReadOnlyWallet(walletInput.value);else{$("#walletButton").classList.remove("connected");$("#walletLabel").textContent="Connect wallet";}}
+// One source of truth for "who is this, on screen" everywhere identity shows up
+// (the sidebar profile chip, Settings > Account): a connected wallet is the
+// clearest signal of who is using the app right now, so it wins over a signed-
+// in account's email whenever one is connected -- and, unlike before, the chip
+// no longer keeps showing a stale email after sign-out.
+function shortAddr(address){return address?`${address.slice(0,6)}…${address.slice(-4)}`:"";}
+function syncIdentityDisplay(){
+  const connected=(walletInput?.value||"").trim();
+  const signedIn=Boolean(account?.authenticated);
+  const user=account?.user||{};
+  if(connected){
+    $("#profileName").textContent=shortAddr(connected);
+    $("#profileAvatar").textContent=(connected.startsWith("0x")?connected.slice(2,3):connected.slice(0,1)).toUpperCase();
+  }else if(signedIn){
+    const label=profile.name||user.display_name||user.email||"Your account";
+    $("#profileName").textContent=label;
+    $("#profileAvatar").textContent=label.trim()[0].toUpperCase();
+  }else{
+    $("#profileName").textContent="Your account";
+    $("#profileAvatar").textContent="A";
+  }
+  const walletsEl=$("#accountWallets");
+  if(walletsEl){
+    const linked=(signedIn&&account?.wallets?.length)?account.wallets.map(w=>shortAddr(w.address)):[];
+    const sessionAddr=connected?shortAddr(connected):null;
+    const rows=sessionAddr&&!linked.includes(sessionAddr)?[...linked,`${sessionAddr} (connected this session)`]:linked;
+    walletsEl.textContent=rows.length?rows.join(", "):"No wallets connected";
+    walletsEl.classList.toggle("muted",!rows.length);
+  }
+}
+function setWalletConnected(address,label,addresses=[]){walletInput.value=address;walletInput.disabled=true;window.OrbitWalletContext={provider:activeProvider};syncPayChip();syncIdentityDisplay();$("#walletButton").classList.add("connected");$("#walletLabel").textContent=shortAddress(address);$("#connectedPanel").hidden=false;$("#connectedProvider").textContent=`Connected with ${label}`;$("#connectedAddress").textContent=addresses.length?addresses.join(" · "):address;$("#walletOptions").hidden=true;$("#disconnectWalletBtn").hidden=false;}
+function setWalletDisconnected(){activeProvider=null;metamaskWallet=null;metamaskAccount=null;window.OrbitSolanaWallet=null;window.OrbitWalletContext={provider:null};syncPayChip();walletInput.disabled=false;walletInput.value=profile.defaultWallet||"";$("#connectedPanel").hidden=true;$("#walletOptions").hidden=false;$("#privyAuth").hidden=true;$("#disconnectWalletBtn").hidden=true;if(walletInput.value)setReadOnlyWallet(walletInput.value);else{$("#walletButton").classList.remove("connected");$("#walletLabel").textContent="Connect wallet";}syncIdentityDisplay();}
 function getPhantomProvider(){return window.solana?.isPhantom?window.solana:null;}
 function setPrivyStatus(message,type=""){const el=$("#privyStatus");el.textContent=message;el.className=`privy-auth-status ${type}`.trim();}
 function applyPrivyState(state,close=false){const button=$("#connectPrivyBtn"),help=$("#privyOptionHelp");button.disabled=!state.configured;help.textContent=state.configured?"Email sign-in with Ethereum and Solana wallets":"Currently unavailable";if(!state.authenticated)return;activeProvider="privy";const primary=state.solanaAddress||state.evmAddress;const addresses=[state.solanaAddress&&`SOL ${shortAddress(state.solanaAddress)}`,state.evmAddress&&`EVM ${shortAddress(state.evmAddress)}`].filter(Boolean);if(primary)setWalletConnected(primary,"Privy",addresses);if(close)closeDialog("walletDialog");}
@@ -1218,7 +1248,7 @@ function renderAccount(){
   $("#accountWallets").textContent=signedIn&&account.wallets?.length?account.wallets.map(w=>`${w.address.slice(0,6)}…${w.address.slice(-4)}`).join(", "):"No wallets linked";
   $("#signinBtn").hidden=signedIn;$("#signoutBtn").hidden=!signedIn;
   $("#accountHelp").textContent=signedIn?`${account.plan?.monthly_credits?.toLocaleString()||0} credits are added every month on the ${account.plan?.name} plan.`:"Sign in to access your history, connect wallets, and receive 100 monthly credits.";
-  if(signedIn){const prefs=user.preferences||{};profile={name:user.display_name||profile.name||"",riskProfile:prefs.risk_profile||profile.riskProfile||"balanced",defaultWallet:prefs.default_wallet??profile.defaultWallet??""};writeStorage(PROFILE_KEY,profile);initProfile();$("#profileName").textContent=profile.name||user.email;}
+  if(signedIn){const prefs=user.preferences||{};profile={name:user.display_name||profile.name||"",riskProfile:prefs.risk_profile||profile.riskProfile||"balanced",defaultWallet:prefs.default_wallet??profile.defaultWallet??""};writeStorage(PROFILE_KEY,profile);initProfile();}
   const keys=$("#apiKeysSection");keys.hidden=!signedIn;
   if(signedIn){if(account.plan?.entitlements?.api_keys){$("#apiKeysHelp").textContent="Connect Orbit to your tools with an API key. Keys cannot sign transactions.";$("#createApiKeyBtn").disabled=false;loadApiKeys();}else{$("#apiKeysHelp").textContent="API keys and MCP access for Claude / ChatGPT are included in Pro and Max.";$("#apiKeysList").innerHTML="";$("#createApiKeyBtn").disabled=true;}}
   $("#profileRisk").textContent=signedIn?`${account.plan?.name} · ${Number(account.credits?.balance??0).toLocaleString()} credits`:`Trial · ${Number(account?.credits?.balance??0)} credits left`;
@@ -1229,6 +1259,7 @@ function renderAccount(){
   $("#teamInvites").innerHTML=invites.map(i=>`<div class="key-row"><span>${escapeHtml(i.owner_name||i.owner_email)} invited you to their team (${escapeHtml(i.role)})</span><button class="primary" type="button" data-accept="${escapeHtml(i.owner_id)}">Join</button></div>`).join("");
   $("#teamInvites").querySelectorAll("[data-accept]").forEach(b=>b.addEventListener("click",async()=>{b.disabled=true;try{const res=await fetch("/me/team/accept",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({owner_id:b.dataset.accept})});if(!res.ok)throw new Error(normalizeError(await res.json(),res.status));await loadAccount();openSettings("members");}catch(error){b.disabled=false;b.textContent=error.message;}}));
   const fields=signedIn?(user.preferences||{}).risk_charter_fields:null;$("#charterSummaryText").textContent=fields?summarizeCharter(fields):"No custom trade preferences.";
+  syncIdentityDisplay();
   if($("#profileDialog").classList.contains("open"))settingsTab($("#settingsTabs .tab.active")?.dataset.tab||"account");
 }
 function summarizeCharter(f){const parts=[];if(f.max_trade_usd!=null)parts.push(`max $${Number(f.max_trade_usd).toLocaleString()} per trade`);if(f.max_slippage_bps!=null)parts.push(`max ${f.max_slippage_bps} bps slippage`);if(f.verified_only)parts.push("verified tokens only");if(f.max_price_impact_pct!=null)parts.push(`max ${f.max_price_impact_pct}% price impact`);if(f.max_position_pct!=null)parts.push(`position limit ${f.max_position_pct}%`);if(Array.isArray(f.allowed_chains)&&f.allowed_chains.length)parts.push(`networks: ${f.allowed_chains.join(", ")}`);if(f.notes)parts.push(f.notes);return parts.join(" · ")||"Custom trade preferences";}
@@ -1342,7 +1373,7 @@ $("#composerPlus").addEventListener("click",()=>{if(account&&!account.authentica
 fillGreeting();$("#mobileMenu").addEventListener("click",()=>setSidebar(!$("#sidebar").classList.contains("open")));$("#sidebarBackdrop").addEventListener("click",closeSidebar);
 
 async function checkHealth(){let online=false;try{online=(await fetch("/health")).ok;}catch{}$("#healthDot").classList.toggle("online",online);$("#healthLabel").textContent=online?"Online":"Offline";}
-syncViewportLayout();initProfile();renderChatList();hydrateHistory();checkHealth();setInterval(checkHealth,15000);
+syncViewportLayout();initProfile();syncIdentityDisplay();renderChatList();hydrateHistory();checkHealth();setInterval(checkHealth,15000);
 window.addEventListener("orbit:privy-state",event=>applyPrivyState(event.detail));
 window.addEventListener("orbit:privy-error",event=>showPrivyError(event.detail?.message||"Privy initialization failed."));
 window.addEventListener("orbit:coinbase-state",event=>{if(activeProvider==="coinbase"||event.detail?.authenticated&&!activeProvider)applyCoinbaseState(event.detail)});
