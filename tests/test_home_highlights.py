@@ -34,7 +34,7 @@ def test_news_answer_becomes_four_tiles(monkeypatch):
     assert data["source"] == "news" and len(data["cards"]) == 4
     assert [c["kind"] for c in data["cards"]] == ["crypto", "crypto", "stocks", "stocks"]
     assert data["cards"][0]["title"].startswith("Bitcoin tops $120k") and data["cards"][0]["source"] == "coindesk.com"
-    assert data["cards"][2]["prompt"].startswith("Tell me more about this") and "Nvidia" in data["cards"][2]["prompt"]
+    assert data["cards"][2]["prompt"].startswith("What does this mean for the market: ") and "Nvidia" in data["cards"][2]["prompt"]
     assert calls[0][0] == "web_search"
     # Second read within the window is served from cache -- no second paid call.
     home_highlights.get_highlights()
@@ -102,7 +102,9 @@ def test_tile_prompt_routes_to_web_research_not_a_token_lookup():
     route = intent_router.route_capabilities(prompt)
     assert route is not None and route.reason == "news_explainer" and route.intent == "research" and route.capabilities == ("web_research",)
     assert "news_explainer" in resolver._ANCHORED_REASONS
-    for other in ("explain this headline: SOL hits new high", "what does this mean: Fed holds rates"):
+    for other in ("explain this headline: SOL hits new high", "what does this mean: Fed holds rates",
+                  "What does this mean for the market: Bitcoin and Ethereum ETFs lose a combined $592 million",   # the tile + chip template
+                  "What does this mean for the market: Senate blocks CLARITY Act in 49–50 procedural vote?"):
         assert intent_router.route_capabilities(other).reason == "news_explainer", other
     # Plain token asks are untouched.
     assert (intent_router.route_capabilities("price of BONK") or type("r", (), {"reason": None})).reason != "news_explainer"

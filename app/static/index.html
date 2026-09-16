@@ -583,7 +583,8 @@
   .prompt-card > span:not(.prompt-tile):not(.prompt-desc):not(.prompt-source) { display: none; }
   .prompt-desc { display: block; margin-top: 4px; font-size: 11.5px; line-height: 1.45; color: var(--subtle); }
   .prompt-source { margin-top: auto; padding-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; color: var(--subtle); }
-  .prompt-source .prompt-arrow { margin-top: 0; }
+  .prompt-source > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prompt-source .prompt-arrow { margin-top: 0; flex: 0 0 auto; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 22px; width: 100%; }
   .suggest-rows { width: 100%; }
   .chip { border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; padding: 6px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }

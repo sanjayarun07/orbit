@@ -95,7 +95,7 @@ def _news_cards() -> list[dict] | None:
             cards.append({
                 "id": f"{kind}-{index}", "kind": kind, "tone": tone if index == 0 else ("violet" if kind == "crypto" else "amber"),
                 "title": item["headline"], "summary": item["summary"], "source": item["source"],
-                "prompt": f"Tell me more about this and why it matters for the market: {item['headline']}",
+                "prompt": f"What does this mean for the market: {item['headline']}",
             })
     return cards or None
 
@@ -190,10 +190,11 @@ def suggestions(wallet_holdings: list[str] | None = None) -> list[dict]:
     data = get_highlights()
     trending = []
     for card in data.get("cards", []):
-        if card.get("kind") in ("crypto", "stocks"):
-            trending.append(f"What does this mean for the market: {card['title']}?")
-        elif card.get("prompt"):
+        # The chip and the tile ask the same thing in the same words; no "?" after a headline.
+        if card.get("prompt"):
             trending.append(card["prompt"])
+        elif card.get("kind") in ("crypto", "stocks"):
+            trending.append(f"What does this mean for the market: {card['title']}")
     for extra in ("How's the crypto market today?", "Why is BTC moving today?"):
         if extra not in trending:
             trending.append(extra)

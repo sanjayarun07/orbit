@@ -22,7 +22,7 @@ def test_suggestions_have_categories_and_wallet_rows_when_linked(monkeypatch):
     client = TestClient(main.app)
     anon = client.get("/home/suggestions").json()["categories"]
     assert [c["id"] for c in anon] == ["trending", "week", "crypto", "stocks", "macro"]
-    assert anon[0]["rows"][0] == "What does this mean for the market: BTC tops $120k?"
+    assert anon[0]["rows"][0] == "What does this mean for the market: BTC tops $120k"   # same words as the tile, no "?" after a headline
     assert "Why is BTC moving today?" in anon[0]["rows"]
     sign_in(client, email="chips@example.com")
     client.put("/me/preferences", json={"default_wallet": "5CEbueQnq1Ym2uSSx2xXds3jQAqT1BDnkA59RZobSPAG"})
