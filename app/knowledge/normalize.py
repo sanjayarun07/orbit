@@ -100,7 +100,8 @@ def html_to_markdown(html: str) -> str:
 
 
 def clean_markdown(text: str) -> str:
-    text = text.replace("\r", "")
+    # NUL bytes survive HTML extraction on a few docs sites and Postgres rejects them in TEXT.
+    text = text.replace("\r", "").replace("\x00", "")
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]{2,}", " ", text)

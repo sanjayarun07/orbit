@@ -386,3 +386,9 @@ def test_alias_case_variants_do_not_block_resolution():
     assert resolver.resolve("Aave").entity.id == "protocol:aave-v3"
     assert [m.entity.id for m in resolver.mentions("what happens when an Aave health factor drops below 1")] == ["protocol:aave-v3"]
     assert resolver.resolve("$AAVE").entity.id == "protocol:aave-v3"
+
+
+def test_clean_markdown_strips_nul_bytes():
+    """Pendle's docs carried a NUL byte; Postgres rejects it in TEXT columns."""
+    assert "\x00" not in normalize.clean_markdown("# Minting\x00\n\nYield\x00 tokenization")
+    assert normalize.html_to_markdown("<h1>Min\x00ting</h1><p>text</p>") == "# Minting\n\ntext"
