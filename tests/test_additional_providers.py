@@ -476,3 +476,35 @@ def test_fee_and_yield_matchers_stay_out_of_gas_and_tradfi_asks():
     assert "defillama_fees_revenue" not in names("what is the gas fee on ethereum right now")
     assert "defillama_yields" not in names("treasury bond yields this week")
     assert "defillama_fees_revenue" in names("top protocols by fees") and "defillama_protocols" in names("top protocols by fees")
+
+
+def test_coingecko_top_volume_ranks_by_24h_volume_market_wide_and_per_chain(monkeypatch):
+    captured = {}
+    payload = [
+        {"symbol": "btc", "current_price": 75_000, "total_volume": 30_000_000_000, "market_cap": 1.5e12, "price_change_percentage_24h": -2.1},
+        {"symbol": "usdt", "current_price": 1.0, "total_volume": 90_000_000_000, "market_cap": 1.7e11, "price_change_percentage_24h": 0.0},
+        {"symbol": "sol", "current_price": 97.9, "total_volume": 4_000_000_000, "market_cap": 5.3e10, "price_change_percentage_24h": 1.4},
+    ]
+    _client(monkeypatch, payload, captured)
+    output = CoinGeckoProvider().top_volume("top tokens by volume in 24hrs")
+    assert captured["url"].endswith("/coins/markets") and "category" not in captured["params"] and captured["params"]["per_page"] == 250
+    assert output.index("USDT") < output.index("BTC") < output.index("SOL")       # by volume, not list order
+    assert "$90.00B" in output and "$1.50T" in output
+    # "Trending" leaves dollar-pegged and wrapped assets out: they always lead on volume and never trend.
+    trending = CoinGeckoProvider().top_volume("trending tokens by volume in 24hrs")
+    assert "USDT" not in trending.split("Note")[0] and trending.index("BTC") < trending.index("SOL")
+    output = CoinGeckoProvider().top_volume("top coins by 24h volume on solana")
+    assert captured["params"]["category"] == "solana-ecosystem" and "on Solana" in output
+
+
+def test_a_volume_ranking_is_not_answered_with_paid_boosts():
+    """Transcript: "trending tokens by volume in 24hrs" returned DEX Screener boosts (paid attention)."""
+    from app.market_providers import VOLUME_RANKED
+    for text in ("trending tokens by volume in 24hrs", "top coins by 24h volume", "highest volume tokens today", "most traded tokens on base"):
+        names = [tool.name for tool in get_provider_router().candidates(text, "token_discovery")]
+        assert names and names[0] == "coingecko_top_volume", (text, names)
+        # The boosts list may remain a keyword fallback, but never ahead of the volume ranking.
+        assert "dexscreener_boosted_tokens" not in names[:1], text
+    assert not VOLUME_RANKED.search("what is the 24h volume of SOL")
+    names = [tool.name for tool in get_provider_router().candidates("trending tokens on solana", "token_discovery")]
+    assert "dexscreener_boosted_tokens" in names and "coingecko_top_volume" not in names

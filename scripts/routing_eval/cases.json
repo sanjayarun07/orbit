@@ -761,5 +761,19 @@
     "expected_intent": "research",
     "router": true,
     "notes": "incident outside the protocol registry: global hacks list"
+  },
+  {
+    "id": "trending-by-volume",
+    "query": "trending tokens by volume in 24hrs",
+    "expected_tools": [
+      "coingecko_top_volume"
+    ],
+    "forbidden_tools": [
+      "dexscreener_boosted_tokens",
+      "bitquery_token_top_holders"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "a volume RANKING -- paid DEX Screener boosts are attention, not volume (user transcript 2026-09-16)"
   }
 ]

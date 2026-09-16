@@ -48,6 +48,14 @@ TRENDING_TOKENS = re.compile(
     re.IGNORECASE,
 )
 _TOKEN_WORD = re.compile(r"\b(?:tokens?|coins?|gems?|memecoins?)\b", re.IGNORECASE)
+# "trending tokens by volume", "top coins by 24h volume", "most traded tokens
+# today", "highest volume coins": a volume RANKING, which DEX Screener's paid
+# boosts cannot answer -- CoinGecko markets sorted by 24h volume can.
+VOLUME_RANKED = re.compile(
+    r"\b(?:by|highest|most|largest|biggest|top)\b[^.?!\n]{0,30}?\b(?:24\s*-?\s*h(?:ou)?rs?|daily|trading)?\s*volumes?\b"
+    r"|\bvolume\s+(?:leaders?|ranking|rank)\b|\bmost\s+traded\b",
+    re.IGNORECASE,
+)
 _TREND_WORD = re.compile(r"\b(?:trending|trends?|narratives?|metas?|hot)\b", re.IGNORECASE)
 
 
@@ -80,6 +88,8 @@ def _money(value: Any) -> str:
         number = float(value)
     except (TypeError, ValueError):
         return "—"
+    if abs(number) >= 1_000_000_000_000:
+        return f"${number / 1_000_000_000_000:.2f}T"
     if abs(number) >= 1_000_000_000:
         return f"${number / 1_000_000_000:.2f}B"
     if abs(number) >= 1_000_000:
@@ -124,7 +134,7 @@ class DexScreenerProvider:
             # A ranked LIST OF TOKENS for "trending tokens on <chain/launchpad>".
             # Wins over trending_metas (narratives) and latest_profiles for
             # token-level asks via priority + keyword hits.
-            matches=lambda request: bool(TRENDING_TOKENS.search(request)),
+            matches=lambda request: bool(TRENDING_TOKENS.search(request)) and not VOLUME_RANKED.search(request),
             chains=_SUPPORTED_CHAINS + ("robinhood",),
             quota_per_minute=60, cache_ttl_seconds=60, priority=7,
             description="Ranked list of trending/boosted tokens on a chain or launchpad (pump.fun, etc.), with live price, volume, and liquidity",

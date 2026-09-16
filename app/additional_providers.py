@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
-from app.market_providers import _address, _chain, _has_chain_and_address, _money, _snapshot
+from app.market_providers import VOLUME_RANKED, _address, _chain, _has_chain_and_address, _money, _snapshot
 from app.perplexity_tools import perplexity_available, perplexity_web_search
 from app.provider_router import ProviderRouter, ProviderTool
 from app.settings import settings
@@ -56,6 +56,7 @@ _GAINERS_CATEGORY = {
 _GAINERS_LOSERS = re.compile(
     r"\bgainers?\b|\blosers?\b|\b(?:top|biggest|best|worst)\s+(?:movers?|performers?)\b|\bwinners?\b", re.I
 )
+_PEGGED_OR_WRAPPED = re.compile(r"^(?:usd\w*|\w*usd[cdtes]?|dai|fdusd|pyusd|tusd|busd|frax|w(?:sol|eth|btc|bnb|avax|pol|matic)|steth|cbbtc|weth)$", re.I)
 _LOSER_WORDS = re.compile(r"\blosers?\b|\bworst\b|\bdump(?:ing)?\b|\bdeclin\w*\b|\bfalling\b", re.I)
 
 
@@ -118,6 +119,61 @@ class CoinGeckoProvider:
             "price_change_24h": market.get("price_change_percentage_24h"),
         }
         return _snapshot("CoinGecko", data, "https://docs.coingecko.com/reference/coins-contract-address")
+
+    def top_volume(self, request: str) -> str:
+        """Tokens ranked by 24h trading volume: the whole market (top 250 by
+        market cap, re-ranked by volume) or one chain's ecosystem category.
+        Ranking is client-side; the free tier ignores CoinGecko's order param."""
+        try:
+            chain = _chain(request)
+        except ValueError:
+            chain = None
+        category = _GAINERS_CATEGORY.get(chain) if chain else None
+        params = {"vs_currency": "usd", "per_page": 100 if category else 250, "page": 1, "price_change_percentage": "24h", "order": "market_cap_desc"}
+        if category:
+            params["category"] = category
+        headers = {"x-cg-pro-api-key": settings.coingecko_api_key} if settings.coingecko_api_key else {}
+        with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
+            response = client.get(f"{settings.coingecko_base_url}/coins/markets", params=params, headers=headers)
+            response.raise_for_status()
+            rows = response.json()
+        candidates = [row for row in (rows if isinstance(rows, list) else []) if (row.get("total_volume") or 0) > 0]
+        # "Trending" asks want what is moving, so dollar-pegged and wrapped
+        # assets (always the volume leaders) are left out; a plain "top by
+        # volume" keeps them.
+        trending = bool(re.search(r"\btrending\b", request, re.I))
+        if trending:
+            candidates = [row for row in candidates if not _PEGGED_OR_WRAPPED.match(str(row.get("symbol") or ""))]
+        candidates.sort(key=lambda row: row.get("total_volume") or 0, reverse=True)
+        top = candidates[:10]
+        scope = f" on {chain.title()}" if category else ""
+        if not top:
+            return (f"# Top tokens by 24h volume{scope}\n\nCoinGecko returned no volume data right now.\n\n"
+                    "Source: [CoinGecko markets](https://docs.coingecko.com/reference/coins-markets)")
+        lines = [
+            f"# Top tokens by 24h volume{scope}",
+            f"**Data freshness**: {_utc()} · 24h trading volume across exchanges tracked by CoinGecko",
+            "",
+            "| # | Token | Price | 24h volume | Market cap | 24h change |",
+            "|---:|---|---:|---:|---:|---:|",
+        ]
+        for i, row in enumerate(top, 1):
+            change = row.get("price_change_percentage_24h")
+            lines.append(
+                f"| {i} | {(row.get('symbol') or '?').upper()} | {_money(row.get('current_price'))} | {_money(row.get('total_volume'))} | "
+                f"{_money(row.get('market_cap'))} | {'' if change is None else f'{change:+.1f}%'} |"
+            )
+        source = f"CoinGecko markets, {category} category" if category else "CoinGecko markets, top 250 by market cap re-ranked by volume"
+        lines.extend([
+            "",
+            f"Source: [{source}](https://docs.coingecko.com/reference/coins-markets)",
+            "",
+            ("**Note**: stablecoins and wrapped assets are left out of a trending list; ask for *top tokens by volume* to include them."
+             if trending else
+             "**Note**: volume counts centralized and decentralized exchanges CoinGecko tracks, so stablecoins and "
+             "wrapped assets rank high by design; ask for *trending tokens by volume* to leave them out."),
+        ])
+        return "\n".join(lines)
 
     def gainers_losers(self, request: str) -> str:
         chain = _chain(request)
@@ -183,6 +239,14 @@ class CoinGeckoProvider:
             chains=tuple(_CG_PLATFORMS), quota_per_minute=settings.coingecko_requests_per_minute,
             cache_ttl_seconds=60, priority=2,
             description="Token identity, price, volume, and market cap for a token, looked up by chain and contract address",
+        ))
+        router.register(ProviderTool(
+            "coingecko_top_volume", self.name, ("token_discovery", "market_data"), self.top_volume,
+            matches=lambda request: bool(VOLUME_RANKED.search(request)),
+            keywords=("volume", "traded", "trending", "top", "tokens", "coins"),
+            chains=tuple(_GAINERS_CATEGORY), quota_per_minute=settings.coingecko_requests_per_minute,
+            cache_ttl_seconds=120, priority=9,
+            description="Tokens ranked by 24h trading volume, market-wide or within one chain's ecosystem (a volume ranking, not paid boosts)",
         ))
         router.register(ProviderTool(
             "coingecko_gainers_losers", self.name, ("token_discovery", "market_data"), self.gainers_losers,
