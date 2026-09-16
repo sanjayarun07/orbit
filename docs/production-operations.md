@@ -295,6 +295,14 @@ resolved by `accounts.find_wallet_owner`, which matches EOA rows across every
 non-Solana chain label. Solana is a different curve and a different address
 space, so it is matched exactly.
 
+**The network comes from the verified challenge, never from the request.**
+Both `/auth/wallet/verify` and `/auth/coinbase/verify` derive the chain from the
+challenge that was actually verified. Taking it from the request body let a
+signature validated against Base be presented as Ethereum and resume an
+Ethereum-linked account; a mismatch between the two is now rejected outright.
+The Coinbase endpoint used to record every network as `evm`, which is the same
+merge in a different shape, since Coinbase Smart Wallet is a contract wallet.
+
 **A contract wallet is scoped to the network it was verified on.** A contract
 address is derived from its deployer and nonce, not from a key, so the same
 address on Base and Ethereum can be two different contracts with two different
@@ -342,11 +350,15 @@ renewing, leaving a recurring charge nobody can map back to a person. If the
 cancellation fails the deletion stops with HTTP 409 and the account is left
 intact: that is recoverable, and deleting anyway is not.
 
-**Stripe events apply only to the subscription they name.** Events arrive late
-and out of order, so a customer who cancelled and resubscribed has two
-subscription ids. `customer.subscription.deleted` for the old one used to
-downgrade the new one to Free; it is now ignored when a different subscription
-is active.
+**Stripe events apply only to the subscription the account is actually on.**
+Events arrive late and out of order, so a customer who cancelled and
+resubscribed has two subscription ids. One rule covers every subscription-state
+handler: an event for the current subscription always applies, a different one
+applies only when it is demonstrably newer (`created`, recorded as
+`users.subscription_created`), and without timestamps to compare a different id
+is treated as stale. Guarding only the deletion handler was not enough -- an
+out-of-order `customer.subscription.updated` made the old subscription current
+again, after which the old deletion matched and downgraded the account.
 
 **Entitlements come from the price being charged, not from checkout metadata.**
 Metadata is written once at checkout and never updated, so after an upgrade it
@@ -361,6 +373,14 @@ only where one is created. Creation was the only check, so pausing tasks and
 resuming them walked straight past it. `tasks.assert_can_activate` now runs on
 both paths and excludes the task being changed, so a task at the limit can
 still be edited.
+
+Counting and activating are two operations, so checking the count and then
+activating still let two concurrent resumptions take the same last slot. Both
+paths hold `tasks.account_task_gate`, a per-account mutex: a Postgres session
+advisory lock where a pool exists, so it serialises across every worker, and an
+asyncio lock keyed by `(loop, account)` otherwise. The lock is held on its own
+connection, which is fine because it is only a mutex -- every writer takes it,
+so the work itself can happen on any connection.
 
 ## Risk charter
 

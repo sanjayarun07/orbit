@@ -62,6 +62,10 @@ CREATE TABLE IF NOT EXISTS users (
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status TEXT;
+-- Stripe events arrive late and out of order. Keeping the active
+-- subscription's creation time lets a stale event for a superseded
+-- subscription be recognised and ignored instead of overwriting it.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_created BIGINT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS team_owner_id UUID;
 ALTER TABLE users ALTER COLUMN email DROP NOT NULL;   -- a wallet-only account has none
 CREATE TABLE IF NOT EXISTS user_chat_sessions (

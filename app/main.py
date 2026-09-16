@@ -428,11 +428,13 @@ async def coinbase_auth_verify(body: WalletAuthVerifyRequest, response: Response
         _token, verified = await verify_challenge(body.address, body.nonce, body.signature)
     except (ValueError, TypeError) as exc:
         raise HTTPException(401, _safe_detail(exc, "Wallet authentication failed")) from exc
-    # The verified challenge doesn't carry its chain_id back out, and an EOA
-    # signature verifies the same regardless of which EVM chain the wallet
-    # happened to be on -- "evm" is an honest label here, not a guess at a
-    # specific chain (the general /auth/wallet/* pair does track it).
-    return await _finish_wallet_signin("evm", body.address.lower(), request, response, verified["wallet_type"])
+    # The chain comes from the VERIFIED challenge, never from this request.
+    # "evm" used to be the label here, which collapsed every network into one
+    # bucket -- harmless for an EOA, but for a contract wallet it is exactly the
+    # cross-network merge that must not happen, since Coinbase Smart Wallet is
+    # a contract wallet.
+    chain = _wallet_chain_label(str(verified["chain_id"]))
+    return await _finish_wallet_signin(chain, body.address.lower(), request, response, verified["wallet_type"])
 
 
 @app.post("/auth/wallet/challenge")
@@ -451,15 +453,24 @@ async def wallet_auth_challenge(body: WalletChallengeRequest, request: Request):
 
 @app.post("/auth/wallet/verify")
 async def wallet_auth_verify(body: WalletVerifyRequest, response: Response, request: Request):
-    chain = _wallet_chain_label(body.chain)
-    address = body.address if chain == "solana" else body.address.lower()
+    requested = _wallet_chain_label(body.chain)
+    address = body.address if requested == "solana" else body.address.lower()
     wallet_type = accounts.EOA
     try:
-        if chain == "solana":
+        if requested == "solana":
             await verify_solana_challenge(address, body.nonce, body.signature)
+            chain = "solana"
         else:
             _token, verified = await verify_challenge(address, body.nonce, body.signature)
             wallet_type = verified["wallet_type"]
+            # The network an identity is scoped to must come from the challenge
+            # that was actually verified, not from this request. The challenge
+            # fixes which chain's validator checked a contract signature, so
+            # taking the chain from the body let a Base-validated signature be
+            # presented as Ethereum and resume an Ethereum-linked account.
+            chain = _wallet_chain_label(str(verified["chain_id"]))
+            if chain != requested:
+                raise HTTPException(400, "This signature was issued for a different network. Request a fresh challenge.")
     except (ValueError, TypeError) as exc:
         raise HTTPException(401, _safe_detail(exc, "Wallet authentication failed")) from exc
     return await _finish_wallet_signin(chain, address, request, response, wallet_type)

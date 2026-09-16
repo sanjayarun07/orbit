@@ -312,3 +312,164 @@ def test_the_trade_routes_honour_one_policy_rather_than_two():
             "mode is the single execution policy"
         )
         assert "require_execution_enabled" in source or "require_custodial_signing" in source
+
+
+# --- follow-ups from the review of 71019a19 ----------------------------------
+
+def test_the_verified_challenge_decides_the_chain_not_the_verify_request():
+    """A contract signature is validated against ONE network's validator, so
+    the chain the identity is scoped to must come from the challenge that was
+    verified. Taking it from the request body let a Base-validated signature be
+    presented as Ethereum and resume an Ethereum-linked account."""
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+
+    client = TestClient(app)
+    account = Account.create()
+    challenge = client.post("/auth/wallet/challenge", json={"address": account.address, "chain": "8453"}).json()
+    signature = Account.sign_message(encode_defunct(text=challenge["message"]), account.key).signature.hex()
+    mismatched = client.post("/auth/wallet/verify", json={
+        "address": account.address, "chain": "1",          # claim Ethereum
+        "nonce": challenge["nonce"], "signature": signature})
+    assert mismatched.status_code == 400, f"a Base challenge verified as Ethereum ({mismatched.status_code})"
+    assert "different network" in mismatched.json()["detail"]
+
+
+def test_a_matching_chain_still_verifies():
+    """The control: the check must reject mismatches, not every request."""
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+
+    client = TestClient(app)
+    account = Account.create()
+    challenge = client.post("/auth/wallet/challenge", json={"address": account.address, "chain": "8453"}).json()
+    signature = Account.sign_message(encode_defunct(text=challenge["message"]), account.key).signature.hex()
+    ok = client.post("/auth/wallet/verify", json={
+        "address": account.address, "chain": "8453", "nonce": challenge["nonce"], "signature": signature})
+    assert ok.status_code == 200
+    assert ok.json()["wallets"][0]["chain"] == "base"
+
+
+def test_the_coinbase_endpoint_records_the_verified_network_not_a_bucket():
+    """It labelled every chain "evm", which collapses contract wallets from
+    different networks into one identity -- and Coinbase Smart Wallet is a
+    contract wallet."""
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+
+    client = TestClient(app)
+    account = Account.create()
+    challenge = client.post("/auth/coinbase/challenge", json={"address": account.address, "chain_id": 8453}).json()
+    signature = Account.sign_message(encode_defunct(text=challenge["message"]), account.key).signature.hex()
+    verified = client.post("/auth/coinbase/verify", json={
+        "address": account.address, "nonce": challenge["nonce"], "signature": signature}).json()
+    assert verified["wallets"][0]["chain"] == "base", "the verified network was replaced by a generic bucket"
+
+
+def test_a_stale_subscription_update_cannot_make_an_old_subscription_current():
+    """The guard covered deletions only, so an out-of-order update quietly made
+    the old subscription current again -- and the old deletion, now matching,
+    downgraded the account."""
+    user, _ = asyncio.run(accounts.get_or_create_user("out-of-order@example.com"))
+    asyncio.run(accounts.update_user(user["id"], stripe_customer_id="cus_ooo",
+                                     stripe_subscription_id="sub_new", subscription_created=2000,
+                                     subscription_status="active", plan_id="max"))
+
+    updated = asyncio.run(billing._on_subscription_updated(
+        "evt_old_update", {"id": "sub_old", "customer": "cus_ooo", "status": "active", "created": 1000}))
+    assert updated["status"] == "ignored"
+    assert asyncio.run(accounts.get_user(user["id"]))["stripe_subscription_id"] == "sub_new"
+
+    # And the deletion that used to follow it still cannot land.
+    deleted = asyncio.run(billing._on_subscription_deleted(
+        "evt_old_delete", {"id": "sub_old", "customer": "cus_ooo", "created": 1000}))
+    assert deleted["status"] == "ignored"
+    after = asyncio.run(accounts.get_user(user["id"]))
+    assert after["plan_id"] == "max" and after["stripe_subscription_id"] == "sub_new"
+
+
+def test_a_newer_subscription_still_replaces_the_current_one():
+    """The control: an upgrade or a resubscribe is a different id and must be
+    accepted, or the guard would freeze every account on its first subscription."""
+    user, _ = asyncio.run(accounts.get_or_create_user("upgrades@example.com"))
+    asyncio.run(accounts.update_user(user["id"], stripe_customer_id="cus_up",
+                                     stripe_subscription_id="sub_old", subscription_created=1000,
+                                     subscription_status="active", plan_id="pro"))
+    result = asyncio.run(billing._on_subscription_updated(
+        "evt_new", {"id": "sub_new", "customer": "cus_up", "status": "active", "created": 3000,
+                    "items": {"data": [{"price": {"id": settings.stripe_price_max}}]},
+                    "metadata": {"plan_id": "max"}}))
+    assert result["status"] == "updated"
+    after = asyncio.run(accounts.get_user(user["id"]))
+    assert after["stripe_subscription_id"] == "sub_new"
+
+
+def test_resumption_serialises_the_check_and_the_write_per_account():
+    """Counting the active tasks and activating one are two operations, so two
+    resumptions could both see the same last free slot.
+
+    Asserted as mutual exclusion rather than as an outcome, deliberately. Racing
+    real coroutines and counting the survivors is not a reliable reproduction:
+    whether the interleaving happens depends on where the awaits land, and my
+    own first attempt at that passed against the unfixed code. This checks the
+    property the fix actually provides -- no two activations for one account are
+    ever inside the check-and-write window at the same time.
+    """
+    from app import task_scheduling
+
+    user, _ = asyncio.run(accounts.get_or_create_user("serialised-tasks@example.com"))
+    limit = tasks.TASK_LIMITS.get("free", 3)
+
+    made = []
+    for index in range(limit + 2):
+        task = asyncio.run(tasks.create_task(user, "reminder", {"message": f"s{index}"}, {"every_minutes": 60}))
+        asyncio.run(tasks.update_task(task["id"], user["id"], status="paused"))
+        made.append(task)
+
+    inside = 0
+    overlaps = []
+    real_check = tasks.assert_can_activate
+
+    async def instrumented(*args, **kwargs):
+        nonlocal inside
+        inside += 1
+        if inside > 1:
+            overlaps.append(inside)
+        try:
+            await real_check(*args, **kwargs)
+            await asyncio.sleep(0)      # a real yield between check and write
+            return None
+        finally:
+            inside -= 1
+
+    async def race():
+        async def resume(task):
+            try:
+                await task_scheduling.update_task(task["id"], user["id"], user=user, status="active")
+                return True
+            except Exception:
+                return False
+        return await asyncio.gather(*(resume(task) for task in made))
+
+    original = tasks.assert_can_activate
+    tasks.assert_can_activate = instrumented
+    try:
+        results = asyncio.run(race())
+    finally:
+        tasks.assert_can_activate = original
+
+    assert overlaps == [], f"activations overlapped inside the check-and-write window: {overlaps}"
+    active = [t for t in asyncio.run(tasks.list_tasks(user["id"], include_done=False)) if t["status"] == "active"]
+    assert len(active) <= limit, f"{len(active)} tasks active on a limit of {limit}"
+    assert sum(results) <= limit
+
+
+def test_a_single_resumption_is_not_blocked_by_the_gate():
+    """The control: serialising must not turn into refusing."""
+    from app import task_scheduling
+
+    user, _ = asyncio.run(accounts.get_or_create_user("gate-control@example.com"))
+    task = asyncio.run(tasks.create_task(user, "reminder", {"message": "one"}, {"every_minutes": 60}))
+    asyncio.run(tasks.update_task(task["id"], user["id"], status="paused"))
+    revived = asyncio.run(task_scheduling.update_task(task["id"], user["id"], user=user, status="active"))
+    assert revived["status"] == "active"

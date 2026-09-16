@@ -21,8 +21,10 @@ CREDIT_COST_BRIEF from the owner's pool, and plans cap active tasks.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -31,6 +33,9 @@ from app.billing_plans import get_plan
 from app.db import get_pg_pool
 from app.jupiter import jupiter
 from app.settings import settings
+
+# Per-account activation mutexes for the no-Postgres path, keyed by (loop, user).
+_account_locks: dict[tuple[int, str], asyncio.Lock] = {}
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +166,47 @@ async def get_task(task_id: str) -> dict | None:
     return dict(task) if task else None
 
 
+@asynccontextmanager
+async def account_task_gate(user_id: str):
+    """Serialise task activation per account, across processes.
+
+    Counting the active tasks and then activating one are two operations, so
+    two concurrent resumptions both saw a free slot and both took it. This is
+    the mutex that makes the pair atomic. A Postgres session advisory lock does
+    it across every worker; the lock is held on its own connection, which is
+    fine because it is only a mutex -- every writer takes it, so the work can
+    happen on any connection.
+
+    Without Postgres there is one process, so an asyncio lock is equivalent. It
+    is keyed by running loop as well as account: a lock object belongs to the
+    loop that created it, and this repo has been bitten before by reusing one
+    across loops.
+    """
+    pool = await get_pg_pool()
+    if pool is not None:
+        key = _advisory_key(user_id)
+        connection = await pool.acquire()
+        try:
+            await connection.execute("SELECT pg_advisory_lock($1)", key)
+            try:
+                yield
+            finally:
+                await connection.execute("SELECT pg_advisory_unlock($1)", key)
+        finally:
+            await pool.release(connection)
+        return
+    loop_id = id(asyncio.get_running_loop())
+    lock = _account_locks.setdefault((loop_id, user_id), asyncio.Lock())
+    async with lock:
+        yield
+
+
+def _advisory_key(user_id: str) -> int:
+    """A stable 63-bit key for pg_advisory_lock, namespaced to task limits."""
+    digest = hashlib.blake2b(f"tasks:{user_id}".encode(), digest_size=8).digest()
+    return int.from_bytes(digest, "big") & ((1 << 63) - 1)
+
+
 async def assert_can_activate(user: dict, exclude_task_id: str | None = None) -> None:
     """The plan's active-task limit, checked wherever a task BECOMES active.
 
@@ -182,10 +228,16 @@ async def assert_can_activate(user: dict, exclude_task_id: str | None = None) ->
 async def create_task(user: dict, kind: str, spec: dict, schedule: dict, channel: str = "inapp", tz_offset_min: int = 0, title: str | None = None) -> dict:
     if kind not in KINDS:
         raise ValueError(f"Unknown task kind {kind!r}")
-    await assert_can_activate(user)
     when = next_run(schedule, tz_offset_min)
     if when is None:
         raise ValueError("That schedule has no future run (is the time in the past?)")
+    async with account_task_gate(user["id"]):
+        return await _create_task_locked(user, kind, spec, schedule, channel, tz_offset_min, title, when)
+
+
+async def _create_task_locked(user: dict, kind: str, spec: dict, schedule: dict, channel: str,
+                              tz_offset_min: int, title: str | None, when) -> dict:
+    await assert_can_activate(user)
     task = {
         "id": str(uuid4()), "user_id": user["id"], "kind": kind, "title": (title or _default_title(kind, spec))[:140],
         "spec": dict(spec), "schedule": dict(schedule), "channel": channel if channel in ("inapp", "email") else "inapp",

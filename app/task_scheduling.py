@@ -31,14 +31,20 @@ async def create_task(user: dict, kind: str, spec: dict, schedule: dict, channel
 async def update_task(task_id: str, user_id: str, user: dict | None = None, **fields) -> dict:
     current = await require_task(task_id, user_id)
     if fields.get("status") == "active" and current["status"] != "active":
-        # Resuming a paused task makes it active, so it has to pass the same
-        # plan limit creating one does.
-        if user is not None:
-            try:
-                await tasks.assert_can_activate(user, exclude_task_id=task_id)
-            except ValueError as exc:
-                raise ServiceError(403, str(exc)) from exc
         fields["next_run_at"] = tasks.next_run(current["schedule"], current.get("tz_offset_min", 0))
+        if user is not None:
+            # Counting the active tasks and activating one are two operations,
+            # so they are done under the same per-account mutex creation uses --
+            # otherwise two concurrent resumptions each see the last free slot.
+            async with tasks.account_task_gate(user_id):
+                try:
+                    await tasks.assert_can_activate(user, exclude_task_id=task_id)
+                except ValueError as exc:
+                    raise ServiceError(403, str(exc)) from exc
+                task = await tasks.update_task(task_id, user_id, **fields)
+                if task is None:
+                    raise ServiceError(404, "Task not found")
+                return task
     task = await tasks.update_task(task_id, user_id, **fields)
     if task is None:
         raise ServiceError(404, "Task not found")

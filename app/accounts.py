@@ -59,6 +59,7 @@ def _row_to_user(row) -> dict:
         "stripe_customer_id": row["stripe_customer_id"],
         "stripe_subscription_id": row.get("stripe_subscription_id") if hasattr(row, "get") else row["stripe_subscription_id"],
         "subscription_status": row.get("subscription_status") if hasattr(row, "get") else row["subscription_status"],
+        "subscription_created": (row.get("subscription_created") if hasattr(row, "get") else row["subscription_created"]),
         "team_owner_id": str(row["team_owner_id"]) if (row.get("team_owner_id") if hasattr(row, "get") else row["team_owner_id"]) else None,
         "preferences": json.loads(row["preferences"]) if isinstance(row["preferences"], str) else (row["preferences"] or {}),
         "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else row["created_at"],
@@ -141,6 +142,7 @@ async def get_or_create_user(email: str) -> tuple[dict, bool]:
         "stripe_customer_id": None,
         "stripe_subscription_id": None,
         "subscription_status": None,
+        "subscription_created": None,
         "team_owner_id": None,
         "preferences": {},
         "created_at": _now(),
@@ -176,7 +178,7 @@ async def get_user_by_stripe_customer(customer_id: str) -> dict | None:
 
 async def update_user(user_id: str, **fields) -> dict | None:
     """Update a whitelisted set of columns; preferences are merged, not replaced."""
-    allowed = {"display_name", "plan_id", "stripe_customer_id", "stripe_subscription_id", "subscription_status", "preferences", "team_owner_id"}
+    allowed = {"display_name", "plan_id", "stripe_customer_id", "stripe_subscription_id", "subscription_status", "subscription_created", "preferences", "team_owner_id"}
     changes = {key: value for key, value in fields.items() if key in allowed}
     if not changes:
         return await get_user(user_id)

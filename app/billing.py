@@ -367,9 +367,15 @@ async def _on_checkout_completed(event_id: str, session: dict) -> dict:
     if session.get("mode") == "subscription":
         plan_id = metadata.get("plan_id")
         if plan_id in PLANS:
-            await accounts.update_user(
-                user["id"], plan_id=plan_id, stripe_subscription_id=session.get("subscription"), subscription_status="active",
-            )
+            # `created` here is the checkout session's, which is the moment this
+            # subscription came into being. It is the ordering key every later
+            # subscription event is compared against, so a stale event for a
+            # subscription this one replaced cannot overwrite it.
+            fields = {"plan_id": plan_id, "stripe_subscription_id": session.get("subscription"),
+                      "subscription_status": "active"}
+            if session.get("created") is not None:
+                fields["subscription_created"] = int(session["created"])
+            await accounts.update_user(user["id"], **fields)
         return {"status": "subscribed", "plan_id": plan_id}
     return {"status": "ignored"}
 
@@ -441,13 +447,46 @@ async def _on_invoice_paid(event_id: str, invoice: dict) -> dict:
     return {"status": "credited" if applied else "duplicate", "plan_id": plan.id, "credits": plan.monthly_credits}
 
 
+def _superseded_subscription(user: dict, subscription: dict) -> str | None:
+    """Why this event is about a subscription the account has moved on from.
+
+    One rule for every subscription-state handler. Guarding only the deletion
+    handler was not enough: an out-of-order `subscription.updated` for the old
+    subscription would quietly make it current again, and the old deletion that
+    followed then matched and downgraded the account.
+
+    An event for the account's current subscription always applies. A different
+    subscription applies only when it is demonstrably newer, which is what makes
+    an upgrade or a resubscribe work; without timestamps to compare, a different
+    id is treated as stale rather than allowed to overwrite the active one.
+    """
+    event_subscription = subscription.get("id")
+    current = user.get("stripe_subscription_id")
+    if not event_subscription or not current or event_subscription == current:
+        return None
+    event_created = subscription.get("created")
+    current_created = user.get("subscription_created")
+    if event_created is not None and current_created is not None:
+        if int(event_created) < int(current_created):
+            return "a newer subscription is active"
+        return None
+    return "a different subscription is active"
+
+
 async def _on_subscription_updated(event_id: str, subscription: dict) -> dict:
     user = await _user_for(subscription)
     if user is None:
         return {"status": "no_user"}
+    superseded = _superseded_subscription(user, subscription)
+    if superseded:
+        return {"status": "ignored", "reason": superseded,
+                "active_subscription": user.get("stripe_subscription_id"),
+                "event_subscription": subscription.get("id")}
     status = subscription.get("status")
     plan_id = _plan_from_subscription(subscription)
     fields: dict[str, Any] = {"subscription_status": status, "stripe_subscription_id": subscription.get("id")}
+    if subscription.get("created") is not None:
+        fields["subscription_created"] = int(subscription["created"])
     if status in {"active", "trialing", "past_due"} and plan_id:
         fields["plan_id"] = plan_id
     elif status in {"canceled", "unpaid", "incomplete_expired"}:
@@ -460,16 +499,13 @@ async def _on_subscription_deleted(event_id: str, subscription: dict) -> dict:
     user = await _user_for(subscription)
     if user is None:
         return {"status": "no_user"}
-    # Stripe events arrive late and out of order. A customer who cancelled and
-    # resubscribed has two subscription ids, and the old one's deletion must
-    # not downgrade the new one -- it applies to the subscription it names, or
-    # to nothing.
-    deleted_id = subscription.get("id")
-    current_id = user.get("stripe_subscription_id")
-    if current_id and deleted_id and current_id != deleted_id:
-        return {"status": "ignored", "reason": "a different subscription is active",
-                "active_subscription": current_id, "event_subscription": deleted_id}
-    await accounts.update_user(user["id"], plan_id="free", subscription_status="canceled", stripe_subscription_id=None)
+    superseded = _superseded_subscription(user, subscription)
+    if superseded:
+        return {"status": "ignored", "reason": superseded,
+                "active_subscription": user.get("stripe_subscription_id"),
+                "event_subscription": subscription.get("id")}
+    await accounts.update_user(user["id"], plan_id="free", subscription_status="canceled",
+                               stripe_subscription_id=None, subscription_created=None)
     return {"status": "downgraded", "plan_id": "free"}
 
 

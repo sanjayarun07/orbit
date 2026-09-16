@@ -220,7 +220,11 @@ def test_coinbase_bundle_shape_signs_in_with_no_prior_session():
     assert body["authenticated"] is True and body["created"] is True and body["user"]["email"] is None
     assert "HttpOnly" in verified.headers["set-cookie"]
     assert client.get("/me").json()["wallets"][0]["address"] == account.address.lower()
-    assert client.get("/me").json()["wallets"][0]["chain"] == "evm"   # this path doesn't carry a chain_id back out of verify_challenge
+    # Was "evm": a single bucket for every EVM network. verify_challenge now
+    # returns the chain_id from the challenge it verified, so the link records
+    # the network the signature was actually checked on -- which is what keeps
+    # a contract wallet's identity from spanning networks it never proved.
+    assert client.get("/me").json()["wallets"][0]["chain"] == "ethereum"
 
 
 def test_auth_logout_is_a_real_full_signout_not_just_the_dead_wallet_cookie():
