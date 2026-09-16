@@ -76,9 +76,23 @@ def validate_address(address: str) -> tuple[str, str]:
     raise ValueError("Not a recognised public wallet address (expected Solana base58 or EVM 0x…).")
 
 
+async def _guard(session_id: str | None, claim: bool = False) -> None:
+    """The ownership rule of app.session_access for the MCP caller (the
+    identity the admission middleware resolved from the bearer key). A denied
+    conversation is a 404 here as on HTTP, so ids cannot be probed."""
+    from app.identity import current_identity
+    from app.session_access import SessionAccessDenied, require_session_access
+
+    try:
+        await require_session_access(session_id, current_identity.get(), claim=claim)
+    except SessionAccessDenied as exc:
+        raise HTTPException(404, "Conversation not found") from exc
+
+
 async def _context(session_id: str | None) -> dict:
     if not session_id:
         return {}
+    await _guard(session_id)
     from app.sessions import get_session_context
     return await get_session_context(session_id)
 
@@ -88,7 +102,7 @@ async def _session_wallet(session_id: str | None) -> str | None:
 
 
 async def _resolve_wallet(session_id: str | None, wallet_address: str | None) -> str | None:
-    wallet = wallet_address.strip() if wallet_address else await _session_wallet(session_id)
+    wallet = wallet_address.strip() if wallet_address else await _session_wallet(session_id)   # raises 404 when not the caller's
     if wallet:
         wallet, _ = validate_address(wallet)
     return wallet
@@ -106,6 +120,7 @@ async def _turn(message: str, session_id: str | None, wallet: str | None, **extr
 
     body = ChatRequest(message=message, session_id=session_id, wallet_address=wallet, **extra)
     try:
+        await _guard(session_id)
         return _response_payload(await execute_chat_turn(body, identity="mcp"))
     except HTTPException as exc:
         return _error(exc)
@@ -166,6 +181,10 @@ async def orbit_connect_wallet(session_id: str | None, address: str) -> dict:
 
     canonical, family = validate_address(address)
     sid = session_id or str(uuid4())
+    try:
+        await _guard(sid, claim=True)
+    except HTTPException as exc:
+        return _error(exc)
     context = await get_session_context(sid)
     context["mcp_wallet_address"] = canonical
     await save_session_context(sid, context)
@@ -260,7 +279,10 @@ async def orbit_policy(session_id: str | None = None) -> dict:
     user's risk charter if one is set."""
     from app.nodes.general import policy_summary
 
-    context = await _context(session_id)
+    try:
+        context = await _context(session_id)
+    except HTTPException as exc:
+        return _error(exc)
     return {"session_id": session_id, "policy": policy_summary({"session_context": context, "wallet_address": context.get("mcp_wallet_address") or ""})}
 
 
@@ -270,6 +292,10 @@ async def orbit_history(session_id: str) -> dict:
     entity, risk charter, team mode) -- what GET /chat/history returns."""
     from app.sessions import get_messages, get_session_context
 
+    try:
+        await _guard(session_id, claim=True)
+    except HTTPException as exc:
+        return _error(exc)
     messages = await get_messages(session_id)
     return {
         "session_id": session_id,
@@ -285,6 +311,10 @@ async def orbit_delete_history(session_id: str) -> dict:
     from app.sessions import acquire_session_turn, clear_history
 
     try:
+        await _guard(session_id)
+    except HTTPException as exc:
+        return _error(exc)
+    try:
         lease = await acquire_session_turn(session_id)
     except asyncio.TimeoutError:
         return {"error": "This chat is still processing a request. Wait for it to finish before deleting it.", "status": 409}
@@ -299,6 +329,10 @@ async def orbit_delete_history(session_id: str) -> dict:
 async def orbit_handoff_url(session_id: str) -> dict:
     """A link that opens this session in the Orbit web UI, where the user can
     connect a wallet and confirm any pending quote with their own signature."""
+    try:
+        await _guard(session_id)
+    except HTTPException as exc:
+        return _error(exc)
     return {"session_id": session_id, "handoff_url": handoff_url(session_id),
             "note": "Wallet signing happens only in the browser; this conversation never holds keys."}
 
@@ -311,7 +345,10 @@ async def orbit_portfolio(session_id: str | None = None, wallet_address: str | N
     USD values (GET /portfolio/{wallet})."""
     from app.portfolio import build_portfolio_snapshot
 
-    wallet = await _resolve_wallet(session_id, wallet_address)
+    try:
+        wallet = await _resolve_wallet(session_id, wallet_address)
+    except HTTPException as exc:      # the session is not the caller's
+        return _error(exc)
     if not wallet:
         return {"error": "no_wallet", "detail": "Pass wallet_address or bind one with orbit_connect_wallet."}
     try:
@@ -327,7 +364,10 @@ async def orbit_wallet_health(session_id: str | None = None, wallet_address: str
     from app.portfolio import build_portfolio_snapshot
     from app.wallet_insights import wallet_health
 
-    wallet = await _resolve_wallet(session_id, wallet_address)
+    try:
+        wallet = await _resolve_wallet(session_id, wallet_address)
+    except HTTPException as exc:      # the session is not the caller's
+        return _error(exc)
     if not wallet:
         return {"error": "no_wallet", "detail": "Pass wallet_address or bind one with orbit_connect_wallet."}
     try:
@@ -343,7 +383,10 @@ async def orbit_portfolio_scenario(change_pct: float, session_id: str | None = N
     from app.portfolio import build_portfolio_snapshot
     from app.wallet_insights import portfolio_scenario
 
-    wallet = await _resolve_wallet(session_id, wallet_address)
+    try:
+        wallet = await _resolve_wallet(session_id, wallet_address)
+    except HTTPException as exc:      # the session is not the caller's
+        return _error(exc)
     if not wallet:
         return {"error": "no_wallet", "detail": "Pass wallet_address or bind one with orbit_connect_wallet."}
     try:
@@ -524,12 +567,14 @@ async def health_resource() -> str:
 @mcp.resource("orbit://history/{session_id}")
 async def history_resource(session_id: str) -> str:
     """JSON transcript and context of one session."""
+    await _guard(session_id)          # a resource has no error envelope: the 404 propagates
     return json.dumps(await orbit_history(session_id), default=str)
 
 
 @mcp.resource("orbit://policy/{session_id}")
 async def policy_resource(session_id: str) -> str:
     """The trading policy in force for one session."""
+    await _guard(session_id)
     return (await orbit_policy(session_id))["policy"]
 
 

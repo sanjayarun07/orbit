@@ -47,7 +47,7 @@ from app.lifi import get_quote as get_lifi_quote, get_status as get_lifi_status
 from app.mcp_tools import close_mcp_gateway, discover_mcp_tools, get_mcp_registry
 from app.metrics import increment, snapshot
 from app.wash_trading import nansen_enrich, pipeline as wash_trading_pipeline, schema as wash_trading_schema
-from app import accounts, api_keys, billing, billing_plans, credits, emailer, event_calendar, feedback, home_highlights, mcp_server, notifications, research_gaps, tasks, tasks_nl, tool_outcomes, x402_gate
+from app import accounts, api_keys, billing, billing_plans, credits, emailer, event_calendar, feedback, home_highlights, mcp_server, notifications, research_gaps, session_access, tasks, tasks_nl, tool_outcomes, x402_gate
 from app.knowledge import ingest as kb_ingest, registry as kb_registry, retrieval as kb_retrieval
 from app.knowledge import store as kb_store, tool as kb_tool
 from app.identity import Identity, current_identity, require_user, resolve_identity, service_identity
@@ -806,16 +806,11 @@ async def execute_chat_turn(body: ChatRequest, identity: Identity | str) -> Agen
 
 
 async def _require_session_access(session_id: str, identity: Identity | None, claim: bool = False) -> None:
-    """Ownership gate for every operation on a conversation. An owned
-    conversation is reachable only by its owner; an unowned one stays open
-    (anonymous ids are random and never mapped) and, with `claim`, becomes
-    the signed-in caller's. A miss is a 404 so ids cannot be probed."""
-    owner = await accounts.chat_session_owner(session_id)
-    user_id = identity.user["id"] if identity is not None and identity.signed_in and identity.user else None
-    if owner is not None and owner != user_id:
-        raise HTTPException(404, "Conversation not found")
-    if owner is None and claim and user_id:
-        await accounts.touch_chat_session(user_id, session_id)
+    """HTTP face of app.session_access: a denied conversation is a 404."""
+    try:
+        await session_access.require_session_access(session_id, identity, claim=claim)
+    except session_access.SessionAccessDenied as exc:
+        raise HTTPException(404, "Conversation not found") from exc
 
 
 async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: str) -> AgentResponse:

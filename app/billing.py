@@ -344,13 +344,18 @@ async def _on_invoice_paid(event_id: str, invoice: dict) -> dict:
                 break
         if plan_id:
             break
-    plan_id = plan_id or user.get("plan_id")
-    plan = get_plan(plan_id)
-    if plan.price_usd_month <= 0:
-        return {"status": "ignored", "reason": "free plan"}
     subscription = invoice.get("subscription")
     if isinstance(subscription, dict):
         subscription = subscription.get("id")
+    # Only a subscription invoice whose line matches a plan price grants the
+    # monthly allowance. A credit-pack invoice (one-off Checkout with
+    # invoice_creation) has no plan line and no subscription: its credits were
+    # granted by checkout.session.completed, never here.
+    if not plan_id or not subscription:
+        return {"status": "ignored", "reason": "not a subscription invoice"}
+    plan = get_plan(plan_id)
+    if plan.price_usd_month <= 0:
+        return {"status": "ignored", "reason": "free plan"}
     await accounts.update_user(
         user["id"], plan_id=plan.id, subscription_status="active",
         **({"stripe_subscription_id": subscription} if subscription else {}),

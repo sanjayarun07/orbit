@@ -132,6 +132,7 @@ def _row(row) -> dict:
         "channel": row["channel"], "status": row["status"], "tz_offset_min": int(row["tz_offset_min"] or 0),
         "created_at": _iso(row["created_at"]), "next_run_at": _iso(row["next_run_at"]), "last_run_at": _iso(row["last_run_at"]),
         "last_result": row["last_result"], "fire_count": int(row["fire_count"] or 0),
+        "claimed_until": _iso(row["claimed_until"]) if "claimed_until" in row.keys() else None,
     }
 
 
@@ -201,7 +202,7 @@ def _default_title(kind: str, spec: dict) -> str:
 
 
 async def update_task(task_id: str, user_id: str, **fields) -> dict | None:
-    allowed = {"status", "next_run_at", "last_run_at", "last_result", "fire_count", "channel", "schedule", "spec"}
+    allowed = {"status", "next_run_at", "last_run_at", "last_result", "fire_count", "channel", "schedule", "spec", "claimed_until"}
     changes = {k: v for k, v in fields.items() if k in allowed}
     pool = await get_pg_pool()
     if pool is not None:
@@ -213,7 +214,7 @@ async def update_task(task_id: str, user_id: str, **fields) -> dict | None:
         for index, (key, value) in enumerate(changes.items(), start=3):
             if key in ("schedule", "spec"):
                 value = json.dumps(value)
-            elif key in ("next_run_at", "last_run_at"):
+            elif key in ("next_run_at", "last_run_at", "claimed_until"):
                 value = _parse_dt(value)
             sets.append(f"{key} = ${index}")
             values.append(value)
@@ -225,7 +226,7 @@ async def update_task(task_id: str, user_id: str, **fields) -> dict | None:
     if task is None or task["user_id"] != user_id:
         return None
     for key, value in changes.items():
-        task[key] = _iso(_parse_dt(value)) if key in ("next_run_at", "last_run_at") and value is not None else value
+        task[key] = _iso(_parse_dt(value)) if key in ("next_run_at", "last_run_at", "claimed_until") and value is not None else value
     return dict(task)
 
 
@@ -246,11 +247,23 @@ async def due_tasks(now: datetime | None = None, limit: int = 50) -> list[dict]:
     pool = await get_pg_pool()
     if pool is not None:
         rows = await pool.fetch(
-            "SELECT * FROM user_tasks WHERE status = 'active' AND next_run_at IS NOT NULL AND next_run_at <= $1 ORDER BY next_run_at LIMIT $2", now, limit,
+            """
+            SELECT * FROM user_tasks WHERE status = 'active'
+              AND ((next_run_at IS NOT NULL AND next_run_at <= $1) OR (next_run_at IS NULL AND claimed_until IS NOT NULL AND claimed_until < $1))
+            ORDER BY next_run_at NULLS FIRST LIMIT $2
+            """, now, limit,
         )
         return [_row(r) for r in rows]
-    due = [dict(t) for t in _tasks.values() if t["status"] == "active" and t.get("next_run_at") and _parse_dt(t["next_run_at"]) <= now]
-    return sorted(due, key=lambda t: t["next_run_at"])[:limit]
+
+    def _due(t: dict) -> bool:
+        if t["status"] != "active":
+            return False
+        if t.get("next_run_at"):
+            return _parse_dt(t["next_run_at"]) <= now
+        lease = _parse_dt(t.get("claimed_until"))
+        return lease is not None and lease < now      # stale claim: the worker died mid-run
+    due = [dict(t) for t in _tasks.values() if _due(t)]
+    return sorted(due, key=lambda t: t.get("next_run_at") or "")[:limit]
 
 
 # ----------------------------------------------------------------------------
@@ -399,6 +412,7 @@ async def compose_brief(task: dict) -> str:
 
 
 _claim_lock = asyncio.Lock()
+CLAIM_LEASE_SECONDS = 15 * 60   # a run that outlives this is presumed dead and its occurrence recoverable
 
 
 async def claim_task(task: dict) -> dict | None:
@@ -408,11 +422,18 @@ async def claim_task(task: dict) -> dict | None:
     matches nothing and it skips. The occurrence key is returned on the task
     as `occurrence` and later stamps the charge and the reschedule."""
     occurrence = task.get("next_run_at")
+    now = _now()
+    lease_until = now + timedelta(seconds=CLAIM_LEASE_SECONDS)
     pool = await get_pg_pool()
     if pool is not None:
         row = await pool.fetchrow(
-            "UPDATE user_tasks SET next_run_at = NULL, last_result = 'running' WHERE id = $1 AND status IN ('active', 'paused') AND next_run_at IS NOT DISTINCT FROM $2 RETURNING *",
-            task["id"], _parse_dt(occurrence),
+            """
+            UPDATE user_tasks SET next_run_at = NULL, last_result = 'running', claimed_until = $4
+            WHERE id = $1 AND status IN ('active', 'paused') AND next_run_at IS NOT DISTINCT FROM $2
+              AND (claimed_until IS NULL OR claimed_until < $3)
+            RETURNING *
+            """,
+            task["id"], _parse_dt(occurrence), now, lease_until,
         )
         if row is None:
             return None
@@ -420,12 +441,15 @@ async def claim_task(task: dict) -> dict | None:
     else:
         async with _claim_lock:
             current = _tasks.get(task["id"])
-            if current is None or current["status"] not in ("active", "paused") or current.get("next_run_at") != occurrence:
+            lease = _parse_dt(current.get("claimed_until")) if current else None
+            if (current is None or current["status"] not in ("active", "paused") or current.get("next_run_at") != occurrence
+                    or (lease is not None and lease >= now)):
                 return None
             current["next_run_at"] = None
             current["last_result"] = "running"
+            current["claimed_until"] = _iso(lease_until)
             claimed = dict(current)
-    claimed["occurrence"] = occurrence or f"manual:{_now().isoformat()}"
+    claimed["occurrence"] = occurrence or f"manual:{now.isoformat()}"
     return claimed
 
 
@@ -441,9 +465,22 @@ async def run_task(task: dict) -> dict:
     if claimed is None:
         return {"id": task["id"], "fired": False, "result": "skipped: already running", "status": task.get("status", "active")}
     task = claimed
+    try:
+        return await _run_claimed(task, user)
+    except Exception as exc:
+        # Never leave a failed task stranded with no schedule: record the error,
+        # release the lease and put it back on its schedule (or retry soon).
+        logger.warning("tasks: run failed for %s", task["id"], exc_info=True)
+        now = _now()
+        nxt = next_run(task["schedule"], task.get("tz_offset_min", 0), after=now) or (now + timedelta(minutes=settings.task_alert_check_minutes))
+        await update_task(task["id"], task["user_id"], last_run_at=now, last_result=f"error: {str(exc)[:160] or exc.__class__.__name__}", next_run_at=nxt, claimed_until=None)
+        return {"id": task["id"], "fired": False, "result": "error", "status": "active"}
+
+
+async def _run_claimed(task: dict, user: dict) -> dict:
     fired, result, body = await evaluate(task)
     now = _now()
-    updates: dict = {"last_run_at": now, "last_result": result}
+    updates: dict = {"last_run_at": now, "last_result": result, "claimed_until": None}
     if fired and body:
         charge = settings.credit_cost_brief if task["kind"] == "brief" else 0
         if charge:

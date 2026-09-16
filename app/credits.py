@@ -13,6 +13,8 @@ Accounts are either a signed-in user (`user:<id>`) or an anonymous visitor
 
 from __future__ import annotations
 
+import asyncio
+
 import hashlib
 import json
 import logging
@@ -162,18 +164,42 @@ def max_turn_cost() -> int:
     )
 
 
+_reserve_locks: dict[tuple[int, str], asyncio.Lock] = {}   # keyed per event loop: a Lock must not cross loops
+
+
 async def reserve(account_id: str, turn_id: str, amount: int | None = None) -> int:
     """Hold the maximum a turn can cost. Raises InsufficientCredits when the
     balance can't cover even the cheapest turn (so a user with 1 credit left can
-    still ask a plain question)."""
+    still ask a plain question).
+
+    Check-and-hold is atomic per account: in Postgres the balance is read and
+    the hold inserted inside one transaction under an account-level advisory
+    lock, so two concurrent turns cannot both reserve the last credits; the
+    in-memory store serialises on a per-account lock."""
     amount = amount if amount is not None else max_turn_cost()
-    current = await balance(account_id)
     minimum = settings.credit_cost_chat_turn
-    if current < minimum:
-        raise InsufficientCredits(current, minimum)
-    amount = min(amount, current)
-    await append(account_id, -amount, "reserve", "turn", turn_id)
-    return amount
+    pool = await get_pg_pool()
+    if pool is not None:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", account_id)
+                current = int(await conn.fetchval("SELECT COALESCE(SUM(delta), 0) FROM credit_ledger WHERE account_id = $1", account_id) or 0)
+                if current < minimum:
+                    raise InsufficientCredits(current, minimum)
+                amount = min(amount, current)
+                await conn.execute(
+                    "INSERT INTO credit_ledger (id, account_id, delta, reason, ref_type, ref_id, meta) VALUES ($1, $2, $3, 'reserve', 'turn', $4, '{}') ON CONFLICT DO NOTHING",
+                    str(uuid4()), account_id, -amount, turn_id,
+                )
+        return amount
+    lock = _reserve_locks.setdefault((id(asyncio.get_running_loop()), account_id), asyncio.Lock())
+    async with lock:
+        current = await balance(account_id)
+        if current < minimum:
+            raise InsufficientCredits(current, minimum)
+        amount = min(amount, current)
+        await append(account_id, -amount, "reserve", "turn", turn_id)
+        return amount
 
 
 async def settle(account_id: str, turn_id: str, reserved: int, actual: int, kind: str, api_key_id: str | None = None) -> int:

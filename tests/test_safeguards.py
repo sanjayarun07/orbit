@@ -8,6 +8,12 @@
    passed; the position limit measures post-trade exposure.
 4. A scheduled occurrence is claimed atomically: concurrent workers, or a
    worker overlapping "run now", deliver and charge it once.
+5. The MCP server applies the same ownership rule to every session operation.
+6. Credit holds are atomic per account: concurrent turns cannot overspend.
+7. Only subscription invoices grant the monthly allowance; a credit-pack
+   invoice grants nothing beyond the pack itself.
+8. A running task holds a lease: "run now" cannot re-claim it, a failed run is
+   rescheduled, and a claim whose lease expired is recovered.
 """
 import asyncio
 from datetime import datetime, timedelta, timezone
@@ -16,7 +22,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app import accounts, main, tasks
+from app import accounts, billing, credits, main, mcp_server, tasks
+from app.identity import current_identity
 from app.graph import AgentRun
 from app.nodes import trading
 from app.settings import settings
@@ -186,3 +193,105 @@ def test_run_now_overlapping_the_worker_charges_a_brief_once(monkeypatch):
     run = client.post(f"/me/tasks/{task['id']}/run").json()
     assert run["fired"] is True
     assert client.get("/me").json()["credits"]["balance"] == before - 2 * settings.credit_cost_brief
+
+
+# --- 5. MCP ownership ---------------------------------------------------------
+
+def _mcp_identity(client):
+    """The Identity the MCP admission middleware would resolve for this signed-in client."""
+    from app.identity import Identity
+    from app.billing_plans import get_plan
+    me = client.get("/me").json()
+    user = asyncio.run(accounts.get_user(me["user"]["id"]))
+    return Identity(kind="user", account_id=user["id"], ip="test", user=user, plan=get_plan(user.get("plan_id")))
+
+
+def test_mcp_session_tools_apply_the_ownership_rule(fake_agent):
+    alice, bob = TestClient(main.app), TestClient(main.app)
+    sign_in(alice, email="mcp-alice@example.com")
+    sign_in(bob, email="mcp-bob@example.com")
+    sid = alice.post("/chat", json={"message": "hello"}).json()["session_id"]
+    token = current_identity.set(_mcp_identity(bob))
+    try:
+        assert asyncio.run(mcp_server.orbit_history(sid)) == {"error": "Conversation not found", "status": 404}
+        assert asyncio.run(mcp_server.orbit_delete_history(sid))["status"] == 404
+        assert asyncio.run(mcp_server.orbit_policy(sid))["status"] == 404
+        assert asyncio.run(mcp_server.orbit_handoff_url(sid))["status"] == 404
+        assert asyncio.run(mcp_server.orbit_connect_wallet(sid, "0x1111111111111111111111111111111111111111"))["status"] == 404
+        assert asyncio.run(mcp_server._turn("hijack", sid, None))["status"] == 404
+        with pytest.raises(Exception):
+            asyncio.run(mcp_server.history_resource(sid))
+        with pytest.raises(Exception):
+            asyncio.run(mcp_server.policy_resource(sid))
+    finally:
+        current_identity.reset(token)
+    # Nothing leaked or changed: Alice still owns an intact conversation with no wallet bound.
+    history = alice.get(f"/chat/history/{sid}").json()
+    assert len(history["messages"]) == 2 and not history["context"].get("mcp_wallet_address")
+    # The owner's own MCP calls work, and an unowned session is claimed by the MCP caller too.
+    token = current_identity.set(_mcp_identity(alice))
+    try:
+        assert len(asyncio.run(mcp_server.orbit_history(sid))["messages"]) == 2
+        fresh = asyncio.run(mcp_server.orbit_connect_wallet(None, "0x1111111111111111111111111111111111111111"))["session_id"]
+    finally:
+        current_identity.reset(token)
+    assert asyncio.run(accounts.chat_session_owner(fresh)) == alice.get("/me").json()["user"]["id"]
+    assert bob.get(f"/chat/history/{fresh}").status_code == 404
+
+
+# --- 6. atomic credit holds ---------------------------------------------------
+
+def test_concurrent_reserves_cannot_overspend():
+    client = TestClient(main.app)
+    me = sign_in(client, email="spender@example.com")
+    account = me["user"]["id"]
+    balance = asyncio.run(credits.balance(account))
+    hold = max(balance // 2 + 1, settings.credit_cost_chat_turn)      # two full holds would exceed the balance
+
+    async def race():
+        return await asyncio.gather(*(credits.reserve(account, f"turn-{i}", amount=hold) for i in range(6)), return_exceptions=True)
+
+    results = asyncio.run(race())
+    held = [r for r in results if isinstance(r, int)]
+    assert sum(held) <= balance and asyncio.run(credits.balance(account)) == balance - sum(held) >= 0
+    assert any(isinstance(r, credits.InsufficientCredits) for r in results)
+
+
+# --- 8. task leases and failure recovery ------------------------------------
+
+def test_run_now_cannot_reclaim_a_running_task_and_a_stale_lease_is_recovered():
+    client, user, task = _make_task(kind="reminder")
+    running = asyncio.run(tasks.claim_task(dict(task)))
+    assert running is not None and running["claimed_until"]
+    # While the lease holds, neither the worker nor "run now" can take it again.
+    assert all(t["id"] != task["id"] for t in asyncio.run(tasks.due_tasks()))
+    assert asyncio.run(tasks.run_task(asyncio.run(tasks.get_task(task["id"]))))["result"] == "skipped: already running"
+    assert client.post(f"/me/tasks/{task['id']}/run").json()["result"] == "skipped: already running"
+    # The worker died: once the lease expires the occurrence is due again and runs.
+    expired = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    asyncio.run(tasks.update_task(task["id"], user["id"], claimed_until=expired))
+    assert any(t["id"] == task["id"] for t in asyncio.run(tasks.due_tasks()))
+    result = asyncio.run(tasks.run_task(asyncio.run(tasks.get_task(task["id"]))))
+    assert result["fired"] is True
+    after = asyncio.run(tasks.get_task(task["id"]))
+    assert after["claimed_until"] is None and after["next_run_at"] > datetime.now(timezone.utc).isoformat()
+
+
+def test_a_failed_run_is_rescheduled_and_releases_its_lease(monkeypatch):
+    client, user, task = _make_task(kind="reminder")
+    real_evaluate = tasks.evaluate
+
+    async def boom(task):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(tasks, "evaluate", boom)
+    result = asyncio.run(tasks.run_task(dict(task)))
+    assert result == {"id": task["id"], "fired": False, "result": "error", "status": "active"}
+    after = asyncio.run(tasks.get_task(task["id"]))
+    assert after["last_result"].startswith("error: provider down") and after["claimed_until"] is None
+    assert after["next_run_at"] and after["next_run_at"] > datetime.now(timezone.utc).isoformat()
+    # It is no longer stuck: the next occurrence runs normally.
+    monkeypatch.setattr(tasks, "evaluate", real_evaluate)
+    past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    asyncio.run(tasks.update_task(task["id"], user["id"], next_run_at=past))
+    assert asyncio.run(tasks.run_task(asyncio.run(tasks.get_task(task["id"]))))["fired"] is True

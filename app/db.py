@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS user_tasks (
     fire_count INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS user_tasks_due ON user_tasks (next_run_at) WHERE status = 'active';
+ALTER TABLE user_tasks ADD COLUMN IF NOT EXISTS claimed_until TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS user_tasks_user ON user_tasks (user_id, created_at DESC);
 CREATE TABLE IF NOT EXISTS user_inbox (
     id UUID PRIMARY KEY,

@@ -2,6 +2,7 @@
 webhook path end to end -- real signature verification through the Stripe SDK
 on locally signed payloads, idempotent ledger effects per event id, plan
 changes from subscription events, and pro-rata clawback on refunds."""
+import asyncio
 import hashlib
 import hmac
 import json
@@ -210,3 +211,22 @@ def test_events_for_unknown_users_and_unhandled_types_are_acknowledged():
     assert post_event(client, event("evt_10", "invoice.paid", ghost)).json()["status"] == "no_user"
     assert post_event(client, event("evt_11", "payment_intent.created", {})).json()["status"] == "ignored"
     assert client.get("/health").json()["counters"].get("stripe_ignored", 0) >= 1
+
+
+def test_a_credit_pack_invoice_grants_no_monthly_allowance():
+    client = TestClient(main.app)
+    me = sign_in(client, email="packer@example.com")
+    user_id = me["user"]["id"]
+    # A Pro subscriber (plan set directly, as a Checkout would) buys a 500-credit pack.
+    asyncio.run(accounts.update_user(user_id, plan_id="pro"))
+    session = {"id": "cs_p", "object": "checkout.session", "mode": "payment", "payment_status": "paid", "customer": "cus_p",
+               "client_reference_id": user_id, "payment_intent": "pi_p", "amount_total": 600, "currency": "usd",
+               "metadata": {"user_id": user_id, "kind": "pack", "pack_id": "pack_500", "credits": "500"}}
+    credited = post_event(client, event("evt_p1", "checkout.session.completed", session)).json()
+    assert credited.get("credits") == 500, credited
+    before = client.get("/me").json()["credits"]["balance"]
+    # Stripe also emails an invoice for the one-off payment: no subscription, no plan line.
+    invoice = {"id": "in_p", "object": "invoice", "customer": "cus_p", "subscription": None, "period_end": 1_800_000_000,
+               "lines": {"data": [{"price": {"id": "price_pack_500"}, "metadata": {}}]}}
+    paid = post_event(client, event("evt_p2", "invoice.paid", invoice)).json()
+    assert paid["status"] == "ignored" and client.get("/me").json()["credits"]["balance"] == before

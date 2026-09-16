@@ -402,7 +402,8 @@ async def chat_session_owner(session_id: str) -> str | None:
     (anonymous conversations are not mapped)."""
     pool = await get_pg_pool()
     if pool is not None:
-        return await pool.fetchval("SELECT user_id FROM user_chat_sessions WHERE session_id = $1", session_id)
+        owner = await pool.fetchval("SELECT user_id FROM user_chat_sessions WHERE session_id = $1", session_id)
+        return str(owner) if owner is not None else None   # UUID column; identities carry the id as text
     for user_id, sessions in _chat_sessions.items():
         if session_id in sessions:
             return user_id
