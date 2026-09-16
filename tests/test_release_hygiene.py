@@ -7,6 +7,7 @@ with SystemExit at import time. These tests fail the build for that class
 of mistake rather than letting it surface as a red pipeline later.
 """
 import ast
+import os
 import importlib.util
 try:
     import tomllib            # 3.11+
@@ -79,3 +80,32 @@ def test_settings_never_renders_a_credential():
     # A connection string carries its password inline.
     assert "hunter2" not in _mask_secret("database_url", "postgresql://app:hunter2@db:5432/orbit")
     assert isinstance(Settings().model, str)
+
+
+def test_every_inline_script_in_the_page_parses():
+    """index.html carries its application code inline, so a syntax error there
+    breaks the whole page silently -- the browser stops at the bad token and
+    every later function is simply never defined. This has happened once
+    already, when a `//` comment swallowed the rest of a minified line.
+    """
+    import json
+    import re
+    import shutil
+    import subprocess
+    import tempfile
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed; cannot parse the page's inline scripts")
+    html = (ROOT / "app" / "static" / "index.html").read_text()
+    blocks = [b for b in re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", html, re.S) if b.strip()]
+    assert blocks, "index.html has no inline script; this test is checking the wrong file"
+    for index, block in enumerate(blocks):
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as handle:
+            handle.write(block)
+            path = handle.name
+        try:
+            result = subprocess.run([node, "--check", path], capture_output=True, text=True, timeout=60)
+            assert result.returncode == 0, f"inline script block {index} does not parse:\n{result.stderr[:1500]}"
+        finally:
+            os.unlink(path)

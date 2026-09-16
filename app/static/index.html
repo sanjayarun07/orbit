@@ -294,6 +294,7 @@
         <div class="field swap-span"><label for="relayFromToken">You pay · token address</label><input id="relayFromToken" spellcheck="false" /></div>
         <div class="field"><label for="relayAmount">Amount</label><input id="relayAmount" inputmode="decimal" placeholder="0.01" /></div>
         <div class="field"><label for="relayToToken">You receive · token address</label><input id="relayToToken" spellcheck="false" /></div>
+        <div class="field"><label for="relaySlippage">Maximum slippage</label><input id="relaySlippage" inputmode="numeric" type="number" min="0" max="10000" placeholder="Auto" /><div class="field-help">Basis points. Leave blank for Relay&rsquo;s automatic slippage.</div></div>
         <div class="field swap-span"><label for="relayRecipient">Receiving wallet</label><input id="relayRecipient" spellcheck="false" placeholder="Wallet receiving the output" /><div class="field-help">Required when swapping between different wallet types, such as EVM → Solana.</div></div>
       </div>
       <div class="swap-safety">Verify token addresses and quoted amounts before signing. Different tokens can share the same name.</div>
@@ -1229,13 +1230,41 @@ async function loadRelayChains(){
   try{await ensureRelayChains();const options=relayChains.map(chain=>`<option value="${chain.id}">${escapeHtml(chain.name)} · ${escapeHtml(chain.nativeSymbol)}</option>`).join("");$("#relayFromChain").innerHTML=options;$("#relayToChain").innerHTML=options;const solana=relayChains.find(chain=>chain.id===window.OrbitRelay.constants.SOLANA_CHAIN_ID);const base=relayChains.find(chain=>chain.id===8453);if(solana)$("#relayFromChain").value=String(solana.id);if(base)$("#relayToChain").value=String(base.id);setRelayNativeToken("#relayFromToken","#relayFromChain");setRelayNativeToken("#relayToToken","#relayToChain");setRelayStatus(`${relayChains.length} live Relay routes available.`,"ok");}
   catch(error){setRelayStatus(relayError(error),"error");}
 }
-async function openRelayDialog(){if(!await ensureExecutionConfig()){const host=document.getElementById("relayStatus");if(host){openDialog("relayDialog");host.textContent=executionConfigLoaded?"This deployment is running in research mode and cannot move funds. Swapping is unavailable.":"Could not confirm this deployment's execution settings, so swapping is held. Close and reopen to retry.";host.className="swap-status error";const quote=document.getElementById("relayQuoteBtn"),run=document.getElementById("relayExecuteBtn");if(quote)quote.disabled=true;if(run)run.hidden=true;}return;}openDialog("relayDialog");if(!relayChains.length)await loadRelayChains();}
+/* Both paths set the dialog's controls explicitly. Disabling on the failure
+   path without re-enabling on the success path left the dialog permanently
+   dead after one bad config fetch, recoverable only by reloading the page. */
+function setRelaySwapAvailable(available){
+  const quote=document.getElementById("relayQuoteBtn"),run=document.getElementById("relayExecuteBtn");
+  if(quote){quote.disabled=!available;quote.textContent="Get quote";}
+  if(run&&!available)run.hidden=true;
+}
+async function openRelayDialog(){
+  openDialog("relayDialog");
+  if(!await ensureExecutionConfig()){
+    setRelaySwapAvailable(false);
+    setRelayStatus(executionConfigLoaded
+      ? "This deployment is running in research mode and cannot move funds. Swapping is unavailable."
+      : "Could not confirm this deployment's execution settings, so swapping is held. Close and reopen to try again.","error");
+    return;
+  }
+  setRelaySwapAvailable(true);
+  invalidateRelayQuote();
+  setRelayStatus("Loading networks…");
+  if(!relayChains.length)await loadRelayChains();
+}
 async function requestRelayQuote(){
   const from=relayChain($("#relayFromChain").value),to=relayChain($("#relayToChain").value),amount=$("#relayAmount").value.trim(),currency=$("#relayFromToken").value.trim(),toCurrency=$("#relayToToken").value.trim(),recipient=$("#relayRecipient").value.trim();
+  // `slippage` used to be referenced here without ever being declared or having
+  // a field to read -- every standalone quote threw ReferenceError before it
+  // reached Relay. Blank means Relay's automatic slippage, as the inline card
+  // already treated it.
+  const slippage=($("#relaySlippage")?.value||"").trim();
+  const slippageBps=slippage===""?null:Number(slippage);
   if(!from||!to||!currency||!toCurrency||!amount||!Number.isFinite(Number(amount))||Number(amount)<=0){setRelayStatus("Enter both token addresses and a positive amount.","error");return;}
+  if(slippageBps!==null&&(!Number.isFinite(slippageBps)||slippageBps<0||slippageBps>10000)){setRelayStatus("Maximum slippage must be between 0 and 10,000 basis points, or blank for automatic.","error");return;}
   if(from.vmType!==to.vmType&&!recipient){setRelayStatus("Enter the destination recipient for a cross-wallet-type route.","error");return;}
   const button=$("#relayQuoteBtn");button.disabled=true;button.textContent="Finding route…";invalidateRelayQuote();setRelayStatus("Connecting the source wallet and requesting a fresh Relay quote…");
-  try{relayQuoteState=await window.OrbitRelay.getFreshQuote({chainId:from.id,toChainId:to.id,currency,toCurrency,amount,recipient:recipient||undefined,slippageBps:slippage?Number(slippage):undefined});const veto=charterQuoteVeto(relayQuoteState.quote,slippage?Number(slippage):null,from,to);if(veto){relayQuoteState=null;setRelayStatus(veto,"error");return;}renderRelayQuote(relayQuoteState);setRelayStatus("Review every value below. Nothing has been signed.","ok");}
+  try{relayQuoteState=await window.OrbitRelay.getFreshQuote({chainId:from.id,toChainId:to.id,currency,toCurrency,amount,recipient:recipient||undefined,slippageBps:slippageBps??undefined});const veto=charterQuoteVeto(relayQuoteState.quote,slippageBps,from,to);if(veto){relayQuoteState=null;setRelayStatus(veto,"error");return;}renderRelayQuote(relayQuoteState);setRelayStatus("Review every value below. Nothing has been signed.","ok");}
   catch(error){setRelayStatus(relayError(error),"error");}
   finally{button.disabled=false;button.textContent="Get quote";}
 }
