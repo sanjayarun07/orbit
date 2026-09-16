@@ -205,7 +205,27 @@ async def update_user(user_id: str, **fields) -> dict | None:
 # Wallets linked to a user
 # ----------------------------------------------------------------------------
 
+def is_evm_chain(chain: str) -> bool:
+    """Every chain label except Solana names an EVM network.
+
+    This matters for identity, not just naming: an EVM address is the same
+    secp256k1 key on Ethereum, Base, Arbitrum and everywhere else, so the same
+    wallet must be the same account regardless of which network it happened to
+    be connected to when it signed in. Solana is a different curve and a
+    different address space, so it stays separate.
+    """
+    return chain != "solana"
+
+
 async def link_wallet(user_id: str, chain: str, address: str) -> None:
+    # The stored chain is provenance -- the network this wallet first signed in
+    # from, which is what Settings displays. Identity is resolved by
+    # find_wallet_owner, so a second network for an address already linked to
+    # this account adds nothing and would only show as a duplicate row.
+    if is_evm_chain(chain):
+        existing = await find_wallet_owner(chain, address)
+        if existing is not None and existing["id"] == user_id:
+            return
     pool = await get_pg_pool()
     if pool is not None:
         await pool.execute(
@@ -242,11 +262,47 @@ async def get_user_by_wallet(chain: str, address: str) -> dict | None:
     return dict(_users[owner[0]]) if owner and owner[0] in _users else None
 
 
+async def find_wallet_owner(chain: str, address: str) -> dict | None:
+    """The account this wallet signs in as -- the identity lookup.
+
+    Differs from get_user_by_wallet, which matches one exact (chain, address)
+    row, in the one way that matters: for EVM it matches the address on *any*
+    EVM network. Without that, the same MetaMask wallet signing in on Base
+    instead of Ethereum, or through the Coinbase entry point (which labels the
+    chain "evm") instead of the picker, resolved to no owner and minted a
+    second account -- silently splitting one person's history, credits and
+    plan in two.
+    """
+    pool = await get_pg_pool()
+    if pool is not None:
+        if is_evm_chain(chain):
+            row = await pool.fetchrow(
+                "SELECT u.* FROM users u JOIN user_wallets w ON w.user_id = u.id "
+                "WHERE w.chain <> 'solana' AND w.address = $1 ORDER BY w.linked_at LIMIT 1",
+                address,
+            )
+        else:
+            row = await pool.fetchrow(
+                "SELECT u.* FROM users u JOIN user_wallets w ON w.user_id = u.id "
+                "WHERE w.chain = 'solana' AND w.address = $1 LIMIT 1",
+                address,
+            )
+        return _row_to_user(row) if row else None
+    for (stored_chain, stored_address), (owner_id, _) in _wallets.items():
+        if stored_address != address.lower():
+            continue
+        if is_evm_chain(chain) != is_evm_chain(stored_chain):
+            continue
+        return dict(_users[owner_id]) if owner_id in _users else None
+    return None
+
+
 async def create_wallet_user(chain: str, address: str) -> dict:
     """A brand-new account with no email, for a wallet no one has linked yet.
-    Callers that need "find-or-create" should check get_user_by_wallet first
-    -- a wallet already linked always resolves to its existing account; this
-    never reassigns one."""
+    Callers that need "find-or-create" must check find_wallet_owner first (not
+    get_user_by_wallet, which matches one exact chain label and so misses the
+    same EVM address on another network) -- a wallet already linked always
+    resolves to its existing account; this never reassigns one."""
     user = {
         "id": str(uuid4()), "email": None, "display_name": None, "plan_id": "free",
         "stripe_customer_id": None, "stripe_subscription_id": None, "subscription_status": None,
@@ -270,7 +326,7 @@ async def sign_in_with_wallet(chain: str, address: str, ip: str | None = None, u
     """A verified wallet signature -> (user, session token, created). The
     wallet's existing owner, if any, always wins -- this never creates a
     second account for a wallet that's already linked to one."""
-    existing = await get_user_by_wallet(chain, address)
+    existing = await find_wallet_owner(chain, address)
     user = existing or await create_wallet_user(chain, address)
     session = await create_user_session(user["id"], ip, user_agent)
     return user, session, existing is None

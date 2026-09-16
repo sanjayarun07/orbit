@@ -375,7 +375,11 @@ async def _finish_wallet_signin(chain: str, address: str, request: Request, resp
     caller's current signed-in session, or -- with no session at all --
     creates a fresh, email-less account: wallet-only sign-in, exactly like
     the email magic link, minus the email."""
-    existing_owner = await accounts.get_user_by_wallet(chain, address)
+    # find_wallet_owner, not get_user_by_wallet: for EVM the address is the
+    # identity on every network, so switching networks in the wallet -- or
+    # arriving through the Coinbase entry point, which labels the chain "evm"
+    # rather than "ethereum" -- resumes the same account instead of making one.
+    existing_owner = await accounts.find_wallet_owner(chain, address)
     if existing_owner is not None:
         user, created = existing_owner, False
     else:

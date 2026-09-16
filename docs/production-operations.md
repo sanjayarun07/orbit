@@ -194,3 +194,32 @@ Three hardening changes came out of building it:
 Still open, and deliberately not claimed as done: the wallet sign-in paths
 other than Phantom have not been exercised with real extensions, and this
 matrix is a structural guarantee, not a penetration test.
+
+## Wallet account identity
+
+**One EVM address is one account on every EVM network.** An EVM address is the
+same secp256k1 key on Ethereum, Base, Arbitrum and the rest, so identity is
+resolved by `accounts.find_wallet_owner`, which matches the address across every
+non-Solana chain label. Solana is a different curve and a different address
+space, so it stays separate and is matched exactly.
+
+This was a real defect, not a hypothetical. Identity used to be the exact
+`(chain, address)` pair, so the same wallet produced a different account
+depending on how it arrived:
+
+- MetaMask on Ethereum stored `ethereum`, the same wallet switched to Base
+  stored `base`, and the Coinbase SDK entry point stores `evm`.
+- Signing in from a second network with no existing session therefore created a
+  brand-new empty account, silently splitting one person's conversations,
+  credits and plan in two, with no error anywhere.
+
+The stored chain label is now provenance only -- the network a wallet first
+signed in from, which is what Settings displays. Linking an address that already
+belongs to the same account under another EVM label adds no second row.
+
+`tests/test_wallet_lifecycle.py` holds the rest of the lifecycle evidence:
+challenge expiry under real elapsed time, nonce substitution, cross-family
+replay (a Solana nonce offered to the EVM verifier), address binding, sign-out
+revoking the token server-side rather than only clearing the cookie, deletion
+releasing the wallet so it can start over, and every account surface answering
+without a 500 for an account whose email is `null`.
