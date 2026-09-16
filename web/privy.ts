@@ -114,7 +114,7 @@ async function initialize() {
   if (initialization) return initialization;
   initialization = (async () => {
     const response = await fetch("/config/public", {headers: {Accept: "application/json"}});
-    if (!response.ok) throw new Error("Could not load wallet configuration.");
+    if (!response.ok) throw new Error("Wallet options could not load. Please try again.");
     const config = await response.json() as PublicConfig;
     if (!config.privy.enabled || !config.privy.app_id || !config.privy.client_id) {
       emitState();
@@ -146,7 +146,7 @@ async function initialize() {
 
 async function sendEmailCode(email: string) {
   await initialize();
-  if (!client) throw new Error("Privy is not configured for this deployment.");
+  if (!client) throw new Error("Email wallets are currently unavailable. Choose another wallet to continue.");
   const normalized = email.trim().toLowerCase();
   if (!/^\S+@\S+\.\S+$/.test(normalized)) throw new Error("Enter a valid email address.");
   await client.auth.email.sendCode(normalized);
@@ -154,7 +154,7 @@ async function sendEmailCode(email: string) {
 
 async function verifyEmailCode(email: string, code: string) {
   await initialize();
-  if (!client) throw new Error("Privy is not configured for this deployment.");
+  if (!client) throw new Error("Email wallets are currently unavailable. Choose another wallet to continue.");
   currentUser = (await client.auth.email.loginWithCode(email.trim().toLowerCase(), code.trim())).user;
   return ensureWallets();
 }

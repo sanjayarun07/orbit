@@ -4,779 +4,14 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="color-scheme" content="dark light" />
-<title>Orbit — Web3 Copilot</title>
+<title>Orbit — Research & markets</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <script>(function(){try{var p=JSON.parse(localStorage.getItem("orbit_theme_v1")||'"system"');var t=p==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):p;document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t;}catch(e){}})();</script>
-<style>
-  :root {
-    --bg: #18181b;
-    --sidebar: #101011;
-    --surface: #242427;
-    --surface-2: #2d2d31;
-    --surface-hover: #343439;
-    --border: rgba(255,255,255,.09);
-    --text: #f4f4f5;
-    --muted: #a1a1aa;
-    --subtle: #71717a;
-    --brand: #9b87f5;
-    --brand-strong: #7c5ce7;
-    --brand-soft: rgba(155,135,245,.14);
-    --green: #4ade80;
-    --red: #fb7185;
-    --amber: #fbbf24;
-    --radius: 14px;
-    --app-height: 100dvh;
-    --composer-height: 108px;
-    --content-width: 860px;
-    --on-brand: white;
-    --text-strong: #fafafa; --text-2: #e4e4e7; --text-3: #d4d4d8;
-    --link: #b8a8ff; --brand-text: #c4b5fd; --brand-text-2: #ddd6fe; --brand-hover: #8d70ec;
-    --brand-border: rgba(155,135,245,.24); --brand-border-strong: rgba(155,135,245,.45); --brand-ring: rgba(155,135,245,.08); --brand-soft-strong: rgba(155,135,245,.22);
-    --card: #202023; --card-2: #18181a; --code-bg: #101011; --code-text: #c7c7ce;
-    --overlay-fill: rgba(16,16,17,.5); --overlay-fill-2: rgba(16,16,17,.42); --overlay-fill-3: rgba(16,16,17,.45); --overlay-fill-4: rgba(16,16,17,.55); --overlay-backdrop: rgba(0,0,0,.58);
-    --topbar-bg: rgba(24,24,27,.82); --composer-shell-from: rgba(24,24,27,.72); --composer-bg: rgba(42,42,46,.96); --composer-border: rgba(255,255,255,.13); --jump-bg: rgba(45,45,49,.94);
-    --faint-line: rgba(255,255,255,.045); --faint-line-2: rgba(255,255,255,.04); --hover-fill: rgba(255,255,255,.025); --hover-border: rgba(255,255,255,.14); --dash-line: rgba(161,161,170,.3);
-    --send-bg: white; --send-fg: #18181b; --send-hover: #e4e4e7; --scroll-thumb: #44444a; --disclaimer: #606069;
-    --caution-text: #fcd98b; --caution-text-2: #fcd34d; --error-text: #fecdd3; --error-text-2: #fca5a5;
-    --red-soft: rgba(251,113,133,.09); --red-border: rgba(251,113,133,.22); --amber-soft: rgba(251,191,36,.07); --amber-border: rgba(251,191,36,.25);
-    --green-soft: rgba(74,222,128,.05); --green-border: rgba(74,222,128,.2); --green-border-strong: rgba(74,222,128,.3);
-    --shadow-1: rgba(0,0,0,.3); --shadow-2: rgba(0,0,0,.34); --shadow-3: rgba(0,0,0,.45);
-    --source-card-bg: rgba(24,24,26,.72); --source-card-hover: #202024; --portfolio-grad-a: #222126; --portfolio-grad-b: #1d1d20; --avatar-grad-a: #3f3f46; --avatar-grad-b: #52525b;
-  }
-  /* Light theme: same tokens, re-pointed. Stamped by the head script from the
-     saved preference (or the OS setting), so the first paint is already right. */
-  :root[data-theme="light"] {
-    --bg: #f6f6f8; --sidebar: #ededf1; --surface: #ffffff; --surface-2: #f0f0f4; --surface-hover: #e6e6ec;
-    --border: rgba(20,20,30,.1); --text: #17171c; --muted: #52525b; --subtle: #6f6f7a;
-    --brand: #6b4fe3; --brand-strong: #6b4fe3; --brand-soft: rgba(107,79,227,.11); --green: #15803d; --red: #dc2626; --amber: #b45309;
-    --on-brand: white;
-    --text-strong: #09090b; --text-2: #27272a; --text-3: #3f3f46;
-    --link: #5b3fd6; --brand-text: #5b3fd6; --brand-text-2: #4c34c2; --brand-hover: #5b3fd6;
-    --brand-border: rgba(107,79,227,.28); --brand-border-strong: rgba(107,79,227,.5); --brand-ring: rgba(107,79,227,.1); --brand-soft-strong: rgba(107,79,227,.2);
-    --card: #ffffff; --card-2: #f4f4f7; --code-bg: #f1f1f5; --code-text: #2a2a31;
-    --overlay-fill: rgba(20,20,30,.03); --overlay-fill-2: rgba(20,20,30,.03); --overlay-fill-3: rgba(20,20,30,.035); --overlay-fill-4: rgba(20,20,30,.04); --overlay-backdrop: rgba(20,20,30,.38);
-    --topbar-bg: rgba(246,246,248,.86); --composer-shell-from: rgba(246,246,248,.72); --composer-bg: rgba(255,255,255,.97); --composer-border: rgba(20,20,30,.13); --jump-bg: rgba(255,255,255,.96);
-    --faint-line: rgba(20,20,30,.07); --faint-line-2: rgba(20,20,30,.06); --hover-fill: rgba(20,20,30,.035); --hover-border: rgba(20,20,30,.18); --dash-line: rgba(113,113,122,.35);
-    --send-bg: #17171c; --send-fg: #ffffff; --send-hover: #2f2f36; --scroll-thumb: #c6c6ce; --disclaimer: #8a8a94;
-    --caution-text: #92400e; --caution-text-2: #92400e; --error-text: #b91c1c; --error-text-2: #b91c1c;
-    --red-soft: rgba(220,38,38,.07); --red-border: rgba(220,38,38,.25); --amber-soft: rgba(180,83,9,.08); --amber-border: rgba(180,83,9,.3);
-    --green-soft: rgba(21,128,61,.06); --green-border: rgba(21,128,61,.22); --green-border-strong: rgba(21,128,61,.35);
-    --shadow-1: rgba(20,20,30,.08); --shadow-2: rgba(20,20,30,.1); --shadow-3: rgba(20,20,30,.16);
-    --source-card-bg: rgba(255,255,255,.85); --source-card-hover: #ffffff; --portfolio-grad-a: #ffffff; --portfolio-grad-b: #f3f2f9; --avatar-grad-a: #d4d4d8; --avatar-grad-b: #a1a1aa;
-  }
-  * { box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
-  body {
-    position: fixed; inset: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    -webkit-font-smoothing: antialiased;
-  }
-  button, input, textarea, select { font: inherit; }
-  button { color: inherit; }
-  button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
-    outline: 2px solid var(--brand); outline-offset: 2px;
-  }
-  ::-webkit-scrollbar { width: 7px; }
-  ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 10px; }
-  .icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-  .app { display: grid; grid-template-columns: 260px minmax(0, 1fr); height: var(--app-height); min-height: 0; overflow: hidden; }
-
-  /* Familiar chat sidebar */
-  .sidebar {
-    background: var(--sidebar); border-right: 1px solid var(--border); padding: 10px;
-    display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; z-index: 20;
-  }
-  .side-brand { height: 48px; padding: 0 9px; display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 680; }
-  .mark { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; color: var(--on-brand); background: linear-gradient(145deg,#ad8cff,#6e56cf); box-shadow: 0 5px 18px rgba(124,92,231,.24); }
-  .mark svg { width: 16px; height: 16px; }
-  .new-chat {
-    width: 100%; height: 42px; margin-top: 5px; border-radius: 10px; border: 1px solid var(--border);
-    background: transparent; display: flex; align-items: center; gap: 11px; padding: 0 12px; cursor: pointer; font-weight: 560; font-size: 13px;
-  }
-  .new-chat:hover { background: var(--surface); }
-  .history-heading { color: var(--subtle); font-size: 11px; font-weight: 650; margin: 21px 10px 8px; text-transform: uppercase; letter-spacing: .06em; }
-  .history { flex: 1 1 0; overflow-x: hidden; overflow-y: auto; min-height: 0; overscroll-behavior: contain; scrollbar-gutter: stable; padding-bottom: 8px; }
-  .history-empty { color: var(--subtle); font-size: 12px; line-height: 1.5; padding: 10px; }
-  .chat-item { position: relative; width: 100%; border: 0; background: transparent; text-align: left; border-radius: 9px; padding: 10px 34px 10px 11px; cursor: pointer; color: var(--text-3); }
-  .chat-item:hover, .chat-item.active { background: var(--surface); color: var(--text-strong); }
-  .chat-item-title { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
-  .chat-item-time { display: block; margin-top: 3px; font-size: 10px; color: var(--subtle); }
-  .delete-chat { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; border: 0; background: transparent; border-radius: 6px; color: var(--subtle); display: none; place-items: center; cursor: pointer; }
-  .chat-item:hover .delete-chat { display: grid; }
-  .delete-chat:hover { color: var(--red); background: var(--red-soft); }
-  .sidebar-footer { border-top: 1px solid var(--border); padding-top: 9px; }
-  .account-button { width: 100%; border: 0; background: transparent; border-radius: 10px; padding: 8px; display: flex; align-items: center; gap: 10px; cursor: pointer; text-align: left; }
-  .account-button:hover { background: var(--surface); }
-  .account-avatar { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg,var(--avatar-grad-a),var(--avatar-grad-b)); display: grid; place-items: center; font-weight: 700; font-size: 12px; }
-  .account-copy { flex: 1; min-width: 0; }
-  .account-name { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .account-tier { display: block; font-size: 11px; color: var(--subtle); margin-top: 2px; }
-
-  /* Main chat shell */
-  .main { min-width: 0; min-height: 0; height: var(--app-height); overflow: hidden; position: relative; display: flex; flex-direction: column; background: radial-gradient(circle at 50% -20%,rgba(155,135,245,.055),transparent 34%),var(--bg); }
-  .topbar { height: 60px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom: 1px solid var(--faint-line); background: var(--topbar-bg); backdrop-filter: blur(14px); z-index: 8; }
-  .model-label { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 14px; font-weight: 600; }
-  .network-pill { border: 1px solid var(--border); border-radius: 999px; padding: 5px 9px; font-size: 10px; color: var(--muted); font-weight: 600; display: flex; align-items: center; gap: 6px; }
-  .network-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--subtle); }
-  .network-dot.online { background: var(--green); box-shadow: 0 0 0 3px rgba(74,222,128,.1); }
-  .top-actions { display: flex; align-items: center; gap: 8px; }
-  .wallet-button { height: 36px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); padding: 0 12px; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
-  .wallet-button:hover { background: var(--surface-hover); }
-  .wallet-button.connected { border-color: var(--green-border-strong); }
-  .wallet-status { width: 7px; height: 7px; border-radius: 50%; background: var(--subtle); }
-  .wallet-button.connected .wallet-status { background: var(--green); }
-  .icon-button { width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); display: grid; place-items: center; cursor: pointer; color: var(--muted); }
-  .icon-button:hover { background: var(--surface-hover); color: var(--text); }
-  .icon-button[hidden] { display: none; }
-  /* Sun in dark mode (click = go light), moon in light mode. Driven by the root
-     theme attribute: `el.hidden` is an HTMLElement property and does nothing on inline SVG. */
-  :root[data-theme="dark"] #themeIconMoon { display: none; }
-  :root[data-theme="light"] #themeIconSun { display: none; }
-  .icon-button.danger { border-color: var(--red-border); color: var(--red); }
-  .icon-button.confirm { width: auto; padding: 0 10px; font-size: 11px; font-weight: 650; gap: 6px; grid-auto-flow: column; background: var(--red); color: var(--on-brand); border-color: transparent; }
-  .chat-item.active .delete-chat { display: grid; }
-  .chat-item.confirming { padding-right: 118px; }
-  .chat-item.confirming .delete-chat { display: none; }
-  .confirm-delete { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); display: flex; gap: 4px; }
-  .confirm-delete button { border: 0; border-radius: 6px; padding: 4px 8px; font-size: 10px; font-weight: 650; cursor: pointer; }
-  .confirm-delete .yes { background: var(--red); color: var(--on-brand); }
-  .confirm-delete .no { background: var(--surface-hover); color: var(--text); }
-  .danger-link { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
-  .danger-link .secondary.danger { color: var(--red); border-color: var(--red-border); }
-  .danger-link .secondary.danger:hover, .danger-link .secondary.danger.confirm { background: var(--red); color: var(--on-brand); border-color: transparent; }
-  .danger-link .field-help { margin-top: 8px; }
-  .mobile-menu { display: none; width: 36px; height: 36px; border: 0; border-radius: 8px; background: transparent; place-items: center; cursor: pointer; }
-  .mobile-menu:hover { background: var(--surface); }
-
-  .conversation { position: relative; flex: 1 1 0; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; scrollbar-gutter: stable; scroll-padding-bottom: 32px; }
-  .thread { width: 100%; max-width: var(--content-width); margin: 0 auto; padding: 18px 24px 40px; }
-  .welcome { min-height: calc(100vh - 250px); display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 40px 0; }
-  .welcome-mark { width: 48px; height: 48px; border-radius: 15px; margin-bottom: 20px; display: grid; place-items: center; background: linear-gradient(145deg,#ad8cff,#6e56cf); box-shadow: 0 10px 30px rgba(124,92,231,.2); }
-  .welcome h1 { margin: 0; font-size: clamp(26px,4vw,34px); letter-spacing: -.035em; font-weight: 680; }
-  .welcome p { max-width: 520px; margin: 12px auto 28px; color: var(--muted); font-size: 14px; line-height: 1.6; }
-  .prompts { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .prompt-card { min-height: 82px; border: 1px solid var(--border); background: transparent; border-radius: 13px; padding: 13px 14px; text-align: left; cursor: pointer; }
-  .prompt-card:hover { background: var(--surface); border-color: var(--hover-border); }
-  .prompt-card strong { display: block; font-size: 13px; margin-bottom: 6px; font-weight: 600; }
-  .prompt-card span { color: var(--subtle); font-size: 11.5px; line-height: 1.4; }
-
-  .message { display: grid; grid-template-columns: 30px minmax(0,1fr); gap: 13px; padding: 20px 0; }
-  .message.user { grid-template-columns: minmax(0,1fr); justify-items: end; }
-  .avatar { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-size: 11px; font-weight: 750; background: linear-gradient(145deg,#ad8cff,#6e56cf); }
-  .message-body { min-width: 0; font-size: 14px; line-height: 1.65; color: var(--text-2); }
-  .answer { white-space: pre-wrap; overflow-wrap: anywhere; }
-  .answer a, .rendered-result a { color: var(--link); text-decoration: none; }
-  .answer a:hover, .rendered-result a:hover { text-decoration: underline; }
-  .answer strong { color: var(--text-strong); font-weight: 650; }
-  .message.user .message-body { max-width: min(82%, 620px); background: var(--surface-2); border-radius: 18px 18px 5px 18px; padding: 10px 15px; color: var(--text-strong); }
-  .message.error .message-body { border: 1px solid var(--red-border); color: var(--error-text); background: var(--red-soft); border-radius: 12px; padding: 11px 13px; }
-  .typing { height: 30px; display: flex; align-items: center; gap: 4px; }
-  .typing i { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); animation: pulse 1.25s infinite ease-in-out; }
-  .typing i:nth-child(2) { animation-delay: .15s; } .typing i:nth-child(3) { animation-delay: .3s; }
-  @keyframes pulse { 0%,70%,100%{opacity:.25;transform:translateY(0)}35%{opacity:1;transform:translateY(-2px)} }
-
-  /* Agent activity/tool cards */
-  .activity { margin-top: 14px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--overlay-fill); }
-  .activity-summary { width: 100%; height: 42px; border: 0; background: transparent; padding: 0 13px; display: flex; align-items: center; gap: 9px; cursor: pointer; color: var(--text-3); font-size: 12px; text-align: left; }
-  .activity-summary:hover { background: var(--hover-fill); }
-  .activity-summary .count { color: var(--subtle); }
-  .activity-summary .source-count { padding: 3px 7px; border: 1px solid var(--brand-border); border-radius: 999px; color: var(--brand-text); background: var(--brand-soft); }
-  .activity-summary .chevron { margin-left: auto; transition: transform .18s; }
-  .activity.open .chevron { transform: rotate(180deg); }
-  .activity-list { display: none; border-top: 1px solid var(--border); }
-  .activity.open .activity-list { display: block; }
-  .tool-card { position: relative; padding: 15px 13px 15px 28px; border-bottom: 1px solid var(--border); }
-  .tool-card:last-child { border-bottom: 0; }
-  .tool-card::before { content: ""; position: absolute; left: 13px; top: 0; bottom: 0; border-left: 1px dashed var(--dash-line); }
-  .tool-card::after { content: "✓"; position: absolute; left: 6px; top: 16px; width: 15px; height: 15px; border-radius: 50%; display: grid; place-items: center; color: var(--bg); background: var(--muted); font-size: 9px; font-weight: 800; }
-  .tool-card.failed::after { content: "!"; color: var(--on-brand); background: var(--red); }
-  .tool-head { display: flex; align-items: center; gap: 8px; }
-  .tool-icon { width: 26px; height: 26px; border-radius: 7px; background: var(--brand-soft); color: var(--brand-text); display: grid; place-items: center; }
-  .tool-copy { min-width: 0; }
-  .tool-label { display: block; color: var(--text-2); font-size: 11px; font-weight: 620; }
-  .tool-name { display: block; margin-top: 1px; color: var(--subtle); font: 500 8.5px ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap: anywhere; }
-  .tool-category { margin-left: auto; padding: 3px 6px; border-radius: 999px; color: var(--link); background: var(--brand-soft); font-size: 8px; text-transform: uppercase; letter-spacing: .04em; }
-  .tool-ok { margin-left: 4px; color: var(--green); font-size: 10px; }
-  .tool-error { margin-left: 4px; color: var(--red); font-size: 10px; }
-  .tool-reason { color: var(--muted); font-size: 11.5px; line-height: 1.5; margin: 9px 0 0 34px; }
-  .tool-data { margin: 10px 0 0 34px; }
-  .tool-data details { margin-top: 6px; }
-  .tool-data summary { color: var(--subtle); font-size: 10px; cursor: pointer; user-select: none; }
-  .tool-data pre { margin: 7px 0 0; padding: 10px; max-height: 220px; overflow: auto; border-radius: 8px; border: 1px solid var(--border); background: var(--code-bg); color: var(--code-text); font: 10.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .tool-evidence { margin: 11px 0 0 34px; }
-  .tool-evidence summary { width: max-content; color: var(--muted); font-size: 10px; cursor: pointer; }
-  .tool-evidence .rendered-result { margin: 10px 0 0; }
-  .source-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; margin: 12px 0 0 34px; }
-  .source-card { min-width: 0; min-height: 104px; padding: 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--source-card-bg); color: inherit; text-decoration: none; transition: border-color .16s, transform .16s, background .16s; }
-  .source-card:hover { transform: translateY(-1px); border-color: var(--brand-border-strong); background: var(--source-card-hover); }
-  .source-domain { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; min-width: 0; }
-  .source-domain-icon { flex: 0 0 auto; width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; background: var(--brand-soft); color: var(--brand-text); font-size: 9px; font-weight: 750; text-transform: uppercase; }
-  .source-domain span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .source-title { margin-top: 10px; color: var(--text-strong); font-size: 11.5px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .source-date { margin-top: 10px; color: var(--subtle); font-size: 9.5px; }
-  .rendered-result { margin: 11px 0 0 34px; color: var(--text-3); font-size: 11px; line-height: 1.5; }
-  .rendered-result.answer-result { margin: 0; font-size: 14px; line-height: 1.65; }
-  .rendered-result.answer-result h5 { margin: 18px 0 8px; font-size: 15px; }
-  .rendered-result.answer-result p { margin: 8px 0; }
-  .rendered-result.answer-result ul { margin: 8px 0; }
-  .rendered-result.answer-result .result-table-wrap { margin: 10px 0; }
-  .rendered-result h5 { margin: 12px 0 6px; color: var(--text); font-size: 11px; }
-  .rendered-result h5:first-child { margin-top: 0; }
-  .rendered-result p { margin: 5px 0; }
-  .rendered-result ul { margin: 6px 0; padding-left: 18px; }
-  .rendered-result li { margin: 3px 0; }
-  .result-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(130px,1fr)); gap: 6px; }
-  .result-field { padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-2); min-width: 0; }
-  .result-field span { display: block; color: var(--subtle); font-size: 9px; text-transform: uppercase; letter-spacing: .04em; }
-  .result-field b { display: block; margin-top: 3px; color: var(--text-2); font-size: 10.5px; font-weight: 550; overflow-wrap: anywhere; }
-  .result-table-wrap { overflow-x: auto; margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; }
-  .result-table-wrap table { min-width: 520px; }
-  .result-table-wrap th, .result-table-wrap td { padding: 7px 8px; font-size: 9.5px; white-space: nowrap; }
-  .tool-result-error { padding: 9px 10px; border-radius: 8px; color: var(--error-text); background: var(--red-soft); border: 1px solid var(--red-border); white-space: pre-wrap; }
-  @media (max-width: 680px) { .source-grid { grid-template-columns: 1fr; } .tool-category { display: none; } }
-
-  .wallet-portfolio { margin-top: 14px; border: 1px solid var(--brand-border); border-radius: 15px; background: linear-gradient(145deg,var(--portfolio-grad-a),var(--portfolio-grad-b)); overflow: hidden; }
-  .wallet-portfolio-head { padding: 15px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 11px; }
-  .wallet-portfolio-icon { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--brand-soft); color: var(--brand-text); }
-  .wallet-portfolio-title { min-width: 0; flex: 1; }
-  .wallet-portfolio-title strong { display: block; font-size: 12px; }
-  .wallet-portfolio-title a { display: block; margin-top: 2px; color: var(--muted); font: 9.5px ui-monospace,monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none; }
-  .wallet-portfolio-chain { padding: 4px 7px; border-radius: 999px; background: var(--brand-soft); color: var(--brand-text); font-size: 9px; text-transform: capitalize; }
-  .wallet-portfolio-body { padding: 14px 16px 16px; }
-  .portfolio-kpis { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; }
-  .portfolio-kpi { padding: 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--overlay-fill-2); }
-  .portfolio-kpi span { display: block; color: var(--subtle); font-size: 8.5px; text-transform: uppercase; letter-spacing: .04em; }
-  .portfolio-kpi b { display: block; margin-top: 4px; font-size: 13px; font-weight: 620; }
-  .portfolio-section-title { margin: 15px 0 7px; font-size: 10px; font-weight: 650; color: var(--text-2); }
-  .portfolio-table { overflow-x: auto; border: 1px solid var(--border); border-radius: 9px; }
-  .portfolio-table table { min-width: 620px; }
-  .portfolio-table th, .portfolio-table td { font-size: 9.5px; padding: 7px 8px; white-space: nowrap; }
-  .side-long { color: var(--green); } .side-short, .negative { color: var(--red); }
-  .token-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-  .token-chip { border: 1px solid var(--border); border-radius: 8px; background: var(--overlay-fill-2); padding: 6px 8px; font-size: 9.5px; }
-  .token-chip b { margin-right: 5px; color: var(--text-strong); }
-
-  .data-card { margin-top: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); overflow: hidden; }
-  .data-card-head { padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
-  .data-card-title { font-size: 12px; font-weight: 650; }
-  .data-card-badge { color: var(--brand-text); background: var(--brand-soft); padding: 4px 7px; border-radius: 6px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
-  .data-card-body { padding: 15px 16px; }
-  .inline-swap-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
-  .inline-swap-grid .wide { grid-column: 1 / -1; }
-  .inline-swap-card .field input, .inline-swap-card .field select { background: var(--card-2); }
-  .inline-swap-card .relay-quote { margin-top: 12px; }
-  .inline-swap-card .card-actions { flex-wrap: wrap; }
-  .stat-row { display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; font-size: 12px; color: var(--muted); }
-  .stat-row b { color: var(--text); font-weight: 550; text-align: right; }
-  .warning { color: var(--amber); font-size: 11px; line-height: 1.5; margin-top: 10px; padding: 9px 10px; background: var(--amber-soft); border-radius: 8px; }
-  .card-actions { display: flex; gap: 8px; margin-top: 14px; }
-  .primary, .secondary { border-radius: 9px; padding: 8px 12px; font-size: 11px; font-weight: 650; cursor: pointer; }
-  .primary { background: var(--brand-strong); color: var(--on-brand); border: 1px solid transparent; }
-  .primary:hover { background: var(--brand-hover); }
-  .secondary { background: transparent; color: var(--muted); border: 1px solid var(--border); }
-  .secondary:hover { color: var(--text-strong); background: var(--surface-hover); }
-  .primary:disabled { opacity: .45; cursor: default; }
-  .result { margin-top: 10px; font-size: 11px; overflow-wrap: anywhere; }
-  .result.ok { color: var(--green); } .result.err { color: var(--red); }
-  .portfolio-total { font-size: 25px; font-weight: 680; letter-spacing: -.03em; margin-bottom: 12px; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 8px 5px; border-bottom: 1px solid var(--border); font-size: 11px; text-align: left; }
-  th { color: var(--subtle); font-weight: 500; } td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-
-  /* Composer is a real flex row, so it never covers the scrollable thread. */
-  .composer-shell { position: relative; flex: 0 0 auto; z-index: 7; padding: 12px 24px max(14px,env(safe-area-inset-bottom)); border-top: 1px solid var(--faint-line-2); background: linear-gradient(180deg,var(--composer-shell-from),var(--bg) 28%); backdrop-filter: blur(14px); }
-  .composer { max-width: var(--content-width); margin: 0 auto; border: 1px solid var(--composer-border); border-radius: 18px; padding: 10px 10px 8px 14px; background: var(--composer-bg); box-shadow: 0 12px 40px var(--shadow-1),inset 0 1px var(--hover-fill); transition: border-color .16s,box-shadow .16s; }
-  .composer:focus-within { border-color: var(--brand-border-strong); box-shadow: 0 14px 46px var(--shadow-2),0 0 0 3px var(--brand-ring); }
-  .composer textarea { display: block; width: 100%; min-height: 32px; max-height: 160px; overflow-y: auto; resize: none; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 14px; line-height: 1.55; padding: 4px 2px; }
-  .quick-actions { margin-top: 16px; }
-  .quick-actions-title { margin-bottom: 8px; color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .055em; }
-  .followup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-  .followup-action { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 8px 12px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; transition: border-color .15s, background .15s; }
-  .followup-action:hover { border-color: var(--brand); background: var(--surface-2); }
-  .followup-action:disabled { cursor: default; opacity: .46; border-color: var(--border); background: var(--surface); }
-  .route-badge { margin-top: 13px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--subtle); font-size: 9.5px; }
-  .route-badge strong { color: var(--brand-text); background: var(--brand-soft); border-radius: 999px; padding: 4px 8px; font-weight: 650; }
-  .route-capability { border: 1px solid var(--border); border-radius: 999px; padding: 3px 7px; }
-  .context-strip { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
-  .context-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 230px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-3); background: var(--hover-fill); font-size: 10px; }
-  .context-chip b { color: var(--brand-text); font-weight: 650; }
-  .context-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .trust-strip { margin-top: 10px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; background: var(--overlay-fill-3); color: var(--muted); font-size: 10.5px; line-height: 1.45; }
-  .trust-strip strong { color: var(--text-2); }
-  .trust-strip.caution { border-color: var(--amber-border); color: var(--caution-text); }
-  .composer textarea::placeholder { color: var(--subtle); }
-  .composer-tools { display: flex; align-items: center; margin-top: 4px; }
-  .composer-context { display: flex; align-items: center; gap: 6px; color: var(--subtle); font-size: 10px; }
-  .team-toggle { display: flex; align-items: center; gap: 7px; margin-left: 14px; font-size: 10px; color: var(--subtle); cursor: pointer; user-select: none; }
-  .team-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
-  .team-track { position: relative; width: 26px; height: 14px; border-radius: 999px; background: var(--surface-hover); border: 1px solid var(--border); transition: background .15s; }
-  .team-track::after { content: ""; position: absolute; top: 1px; left: 1px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
-  .team-toggle input:checked + .team-track { background: var(--brand-strong); border-color: var(--brand-strong); }
-  .team-toggle input:checked + .team-track::after { transform: translateX(12px); background: var(--on-brand); }
-  .team-toggle input:focus-visible + .team-track { outline: 2px solid var(--brand); outline-offset: 2px; }
-  .team-toggle.on { color: var(--brand); }
-  .team-toggle.pending .team-label::after { content: " · applies to next message"; color: var(--subtle); }
-  .policy-chip { display: inline-flex; align-items: center; gap: 6px; margin-left: 14px; max-width: 34%; padding: 2px 8px 2px 6px; border-radius: 999px; border: 1px solid var(--brand-strong); background: var(--brand-soft); color: var(--brand); font-size: 10px; cursor: pointer; white-space: nowrap; overflow: hidden; }
-  .policy-chip[hidden] { display: none; }
-  .policy-chip .icon { width: 11px; height: 11px; flex: none; }
-  .policy-chip b { font-weight: 600; flex: none; }
-  .policy-chip span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .policy-chip:hover { background: var(--brand-strong); color: var(--on-brand); }
-  .charter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }
-  .charter-grid .field { margin: 0; }
-  .charter-grid .span2 { grid-column: 1 / -1; }
-  .charter-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); cursor: pointer; margin-top: 8px; }
-  .charter-grid input[type="checkbox"] { width: 14px; height: 14px; margin: 0; padding: 0; accent-color: var(--brand-strong); flex: none; }
-  .charter-grid textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 56px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px; font: inherit; font-size: 13px; }
-  .charter-grid textarea:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
-  .charter-chains { display: flex; flex-wrap: wrap; gap: 6px 10px; }
-  .charter-chains label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); padding: 4px 8px; border: 1px solid var(--border); border-radius: 999px; cursor: pointer; }
-  .charter-chains label:has(input:checked) { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
-  .charter-note { font-size: 11px; color: var(--subtle); margin-top: 10px; line-height: 1.45; }
-  .charter-error { font-size: 12px; color: var(--red); margin-top: 8px; min-height: 14px; }
-  .charter-dialog .dialog { width: min(560px, 100%); }
-  @media (max-width: 560px) { .charter-grid { grid-template-columns: 1fr; } }
-  .pay-chip { display: inline-flex; align-items: center; gap: 5px; margin-left: 14px; font-size: 10px; color: var(--subtle); white-space: nowrap; }
-  .pay-chip[hidden] { display: none; }
-  .pay-chip .icon { width: 11px; height: 11px; }
-  .pay-chip.ready { color: var(--green); }
-  .credits-chip { border: 1px solid var(--border); background: transparent; border-radius: 999px; padding: 3px 9px; cursor: pointer; color: var(--subtle); font: inherit; font-size: 10px; }
-  .credits-chip:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
-  .credits-chip.low { color: var(--red); border-color: var(--red); }
-  .credits-chip b { font-weight: 600; color: var(--text); }
-  .account-panel { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 14px; display: grid; gap: 8px; }
-  .account-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
-  .account-row .muted { color: var(--subtle); }
-  .plan-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-size: 11px; font-weight: 600; }
-  .account-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  .keys-section { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
-  .keys-section h3 { margin: 0 0 6px; font-size: 12px; }
-  .key-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; padding: 6px 0; border-bottom: 1px dashed var(--border); }
-  .key-row code { font-size: 11px; color: var(--subtle); }
-  .key-secret { margin-top: 8px; padding: 10px; border-radius: 10px; background: var(--brand-soft); font-size: 12px; word-break: break-all; }
-  .key-secret code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-  .key-create { display: flex; gap: 8px; margin-top: 8px; }
-  .key-create input { flex: 1; }
-  .notice-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-  .signin-status { font-size: 12px; color: var(--subtle); min-height: 16px; margin-top: 8px; }
-  .settings-dialog .dialog { width: min(780px, 100%); max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
-  .settings-dialog .dialog-body { overflow-y: auto; flex: 1; }
-  .tabs { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
-  .tab { background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--subtle); font: inherit; font-size: 12px; padding: 10px 10px; cursor: pointer; white-space: nowrap; }
-  .tab:hover { color: var(--text); }
-  .tab.active { color: var(--text-strong); border-bottom-color: var(--brand); }
-  .tab[hidden] { display: none; }
-  .tab-panel[hidden] { display: none; }
-  .settings-section { margin-top: 16px; }
-  .settings-section:first-child { margin-top: 0; }
-  .settings-section h3 { margin: 0 0 6px; font-size: 12px; }
-  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
-  .stat { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
-  .stat .label { font-size: 10px; color: var(--subtle); text-transform: uppercase; letter-spacing: .04em; }
-  .stat .value { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .usage-chart { width: 100%; height: 130px; display: block; margin-top: 8px; }
-  .usage-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--subtle); margin-top: 6px; }
-  .usage-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
-  .row-list .key-row:last-child { border-bottom: 0; }
-  .charter-summary { border: 1px dashed var(--border); border-radius: 10px; padding: 10px 12px; font-size: 12px; display: flex; justify-content: space-between; gap: 10px; align-items: center; }
-  .danger-zone { border: 1px solid var(--red-border); border-radius: 12px; padding: 12px 14px; margin-top: 14px; }
-  .danger-zone h3 { color: var(--red); }
-  .inline-note { font-size: 11px; color: var(--subtle); }
-  .inbox-badge[hidden] { display: none; }
-  .inbox-badge { position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--brand-grad); color: #04211e; font-size: 9px; font-weight: 700; display: grid; place-items: center; }
-  :root[data-theme="light"] .inbox-badge { color: #fff; }
-  .inbox-item { display: block; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); margin-bottom: 6px; font-size: 12px; }
-  .inbox-item.unread { border-color: var(--brand-border-strong); }
-  .inbox-item b { display: block; margin-bottom: 2px; }
-  .inbox-item .inline-note { display: block; margin-top: 4px; }
-  .inbox-item .body { white-space: pre-wrap; color: var(--text-2); }
-  .policy-chip.unset { border-style: dashed; border-color: var(--border); background: transparent; color: var(--subtle); }
-  .policy-chip.unset:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
-  .send { margin-left: auto; width: 32px; height: 32px; border: 0; border-radius: 9px; background: var(--send-bg); color: var(--send-fg); display: grid; place-items: center; cursor: pointer; }
-  .send:hover { background: var(--send-hover); } .send:disabled { opacity: .3; cursor: default; }
-  .disclaimer { max-width: var(--content-width); margin: 8px auto 0; text-align: center; color: var(--disclaimer); font-size: 9.5px; }
-  .jump-latest { position: absolute; right: max(20px,calc((100% - var(--content-width))/2)); bottom: calc(var(--composer-height) + 12px); z-index: 9; width: 36px; height: 36px; border: 1px solid var(--composer-border); border-radius: 50%; background: var(--jump-bg); color: var(--text); box-shadow: 0 8px 28px var(--shadow-2); display: grid; place-items: center; cursor: pointer; opacity: 1; transform: translateY(0); transition: opacity .16s,transform .16s,background .16s; }
-  .jump-latest:hover { background: var(--surface-hover); }
-  .jump-latest[hidden] { display: none; }
-  .sidebar-backdrop { display: none; }
-
-  /* Wallet and profile dialogs */
-  .overlay { position: fixed; inset: 0; background: var(--overlay-backdrop); backdrop-filter: blur(3px); z-index: 50; display: none; align-items: center; justify-content: center; padding: 20px; }
-  .overlay.open { display: flex; }
-  .dialog { width: min(420px,100%); border: 1px solid var(--border); border-radius: 17px; background: var(--card); box-shadow: 0 24px 70px var(--shadow-3); }
-  .dialog-head { padding: 16px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
-  .dialog-head h2 { margin: 0; font-size: 15px; }
-  .close { border: 0; background: transparent; color: var(--muted); cursor: pointer; border-radius: 7px; width: 28px; height: 28px; font-size: 20px; }
-  .close:hover { background: var(--surface-hover); color: var(--text-strong); }
-  .dialog-body { padding: 17px 18px; }
-  .wallet-option { width: 100%; height: 52px; margin-bottom: 9px; border: 1px solid var(--border); background: var(--surface); border-radius: 11px; display: flex; align-items: center; padding: 0 13px; gap: 12px; cursor: pointer; text-align: left; }
-  .wallet-option:hover { background: var(--surface-hover); }
-  .wallet-logo { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-weight: 800; background: #6e56cf; }
-  .wallet-option span { font-size: 12px; font-weight: 600; }
-  .wallet-option small { display: block; color: var(--subtle); font-size: 10px; font-weight: 400; margin-top: 2px; }
-  .wallet-option:disabled { opacity: .5; cursor: not-allowed; }
-  .privy-auth { margin: 10px 0 2px; padding: 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--overlay-fill); }
-  .privy-auth[hidden] { display: none; }
-  .privy-auth-row { display: flex; gap: 8px; align-items: end; }
-  .privy-auth-row[hidden] { display: none; }
-  .privy-auth-row .field { flex: 1; margin: 0; }
-  .privy-auth-status { margin-top: 8px; min-height: 14px; color: var(--muted); font-size: 10px; }
-  .privy-auth-status.error { color: var(--error-text-2); }
-  .privy-auth-status.ok { color: var(--green); }
-  .manual-wallet { margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--border); }
-  .field { margin-bottom: 13px; }
-  .field label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 6px; }
-  .field input, .field select { width: 100%; height: 39px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 0 10px; color: var(--text); font-size: 12px; }
-  .field-help { color: var(--subtle); font-size: 10px; line-height: 1.5; margin-top: 6px; }
-  .dialog-footer { padding: 13px 18px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
-  .connected-panel { padding: 12px; border: 1px solid var(--green-border); background: var(--green-soft); border-radius: 10px; margin-bottom: 12px; }
-  .connected-panel strong { display: block; font-size: 11px; color: var(--green); margin-bottom: 5px; }
-  .connected-address { font: 10px ui-monospace,monospace; color: var(--muted); overflow-wrap: anywhere; }
-  .swap-dialog { width: min(620px,100%); max-height: min(820px,calc(100vh - 32px)); display: flex; flex-direction: column; }
-  .swap-dialog .dialog-body { overflow-y: auto; }
-  .swap-intro { margin: 0 0 15px; color: var(--muted); font-size: 11px; line-height: 1.55; }
-  .swap-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
-  .swap-span { grid-column: 1 / -1; }
-  .swap-arrow { color: var(--brand); margin-left: 5px; }
-  .swap-status { min-height: 18px; margin: 3px 0 10px; font-size: 11px; color: var(--muted); }
-  .swap-status.error { color: var(--red); }
-  .swap-status.ok { color: var(--green); }
-  .relay-quote { border: 1px solid var(--brand-border); border-radius: 12px; background: var(--overlay-fill-4); padding: 13px; margin: 4px 0 13px; }
-  .relay-quote[hidden] { display: none; }
-  .relay-quote-title { font-size: 11px; font-weight: 700; margin-bottom: 8px; display: flex; justify-content: space-between; }
-  .relay-quote-title span { color: var(--green); font-weight: 600; }
-  .relay-progress { display: grid; gap: 6px; margin-top: 10px; }
-  .relay-progress-row { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 10.5px; }
-  .relay-progress-row.done { color: var(--green); }
-  .relay-progress-row.active { color: var(--brand-text-2); }
-  .swap-safety { padding: 9px 10px; border-radius: 9px; background: var(--amber-soft); color: var(--caution-text-2); font-size: 10px; line-height: 1.5; margin-bottom: 13px; }
-
-  @media(max-width:720px) {
-    .app { grid-template-columns: 1fr; }
-    .sidebar { position: fixed; inset: 0 auto auto 0; width: min(300px,86vw); height: var(--app-height); padding: max(10px,env(safe-area-inset-top)) 10px max(10px,env(safe-area-inset-bottom)); transform: translateX(-105%); transition: transform .22s cubic-bezier(.2,.8,.2,1); box-shadow: 20px 0 50px rgba(0,0,0,.42); }
-    .sidebar.open { transform: translateX(0); }
-    .sidebar-backdrop { position: fixed; inset: 0; z-index: 19; border: 0; background: rgba(0,0,0,.5); backdrop-filter: blur(2px); opacity: 0; pointer-events: none; display: block; transition: opacity .2s; }
-    .sidebar-backdrop.open { opacity: 1; pointer-events: auto; }
-    .mobile-menu { display: grid; }
-    .model-label span { display: none; }
-    .topbar { height: 56px; padding: env(safe-area-inset-top) 12px 0; }
-    .thread { padding: 10px 14px 32px; }
-    .composer-shell { padding: 9px 10px max(9px,env(safe-area-inset-bottom)); }
-    .composer { border-radius: 16px; padding-left: 12px; }
-    .disclaimer { display: none; }
-    .jump-latest { right: 14px; bottom: calc(var(--composer-height) + 10px); }
-    .prompts { grid-template-columns: 1fr; }
-    .welcome { justify-content: flex-start; padding-top: 15vh; }
-    .prompt-card:nth-child(n+3) { display: none; }
-    .message.user .message-body { max-width: 90%; }
-    .portfolio-kpis { grid-template-columns: 1fr 1fr; }
-    .swap-grid { grid-template-columns: 1fr; }
-    .swap-span { grid-column: auto; }
-    .inline-swap-grid { grid-template-columns: 1fr; }
-    .inline-swap-grid .wide { grid-column: auto; }
-  }
-  @media(max-width:420px) {
-    .wallet-button { max-width: 148px; }
-    .wallet-button #walletLabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .composer-context > span { display: none; }
-    .composer-context::after { content: "Live tools"; font-size: 10px; }
-    .activity-summary .count { display: none; }
-  }
-
-  /* ==========================================================================
-     Visual system v2: floating cards on a deep navy ground, teal→blue accent,
-     serif greeting. Tokens are re-pointed here (later wins) so every component
-     above inherits the new palette; layout rules below reshape the shell.
-     ========================================================================== */
-  :root {
-    --bg: #050b14; --sidebar: #0a1220; --card-main: #0a1220; --surface: #0f1a2b; --surface-2: #142033; --surface-hover: #182742;
-    --border: rgba(148,178,214,.12); --text: #e6eef8; --muted: #9db0c6; --subtle: #6d8199; --text-strong: #f5f9ff; --text-2: #dbe6f3; --text-3: #c5d3e3;
-    --brand: #1fd1bf; --brand-2: #2f6bff; --brand-strong: #17b8a8; --brand-hover: #1fd1bf; --brand-soft: rgba(31,209,191,.12); --brand-soft-strong: rgba(31,209,191,.22);
-    --brand-border: rgba(31,209,191,.28); --brand-border-strong: rgba(31,209,191,.5); --brand-ring: rgba(31,209,191,.12);
-    --link: #7fe3d8; --brand-text: #8fe8dd; --brand-text-2: #b9f2ec; --on-brand: #04211e;
-    --brand-grad: linear-gradient(135deg,#1fd1bf 0%,#2f6bff 100%);
-    --card: #0d1727; --card-2: #0a1220; --code-bg: #060d18; --code-text: #c5d3e3;
-    --overlay-fill: rgba(5,11,20,.45); --overlay-fill-2: rgba(5,11,20,.4); --overlay-fill-3: rgba(5,11,20,.42); --overlay-fill-4: rgba(5,11,20,.5); --overlay-backdrop: rgba(2,6,12,.62);
-    --topbar-bg: transparent; --composer-shell-from: rgba(10,18,32,0); --composer-bg: #0f1a2b; --composer-border: rgba(148,178,214,.14); --jump-bg: #142033;
-    --faint-line: rgba(148,178,214,.07); --faint-line-2: rgba(148,178,214,0); --hover-fill: rgba(148,178,214,.05); --hover-border: rgba(148,178,214,.24); --dash-line: rgba(157,176,198,.3);
-    --send-bg: var(--brand-grad); --send-fg: #04211e; --send-hover: var(--brand-grad); --scroll-thumb: #22344f; --disclaimer: #4f637b;
-    --shadow-1: rgba(0,0,0,.35); --shadow-2: rgba(0,0,0,.4); --shadow-3: rgba(0,0,0,.55);
-    --source-card-bg: rgba(10,18,32,.72); --source-card-hover: #142033; --portfolio-grad-a: #12203a; --portfolio-grad-b: #0d1727; --avatar-grad-a: #1fd1bf; --avatar-grad-b: #2f6bff;
-    --shell-radius: 24px; --serif: "Instrument Serif", Georgia, "Times New Roman", serif;
-  }
-  :root[data-theme="light"] {
-    --bg: #edf1f8; --sidebar: #f7f9fd; --card-main: #f9fbff; --surface: #ffffff; --surface-2: #eef3fb; --surface-hover: #e4ebf7;
-    --border: rgba(31,58,105,.1); --text: #16223a; --muted: #55657f; --subtle: #7b899f; --text-strong: #0c1426; --text-2: #26334d; --text-3: #3a4a66;
-    --brand: #2f6bff; --brand-2: #1fd1bf; --brand-strong: #2f6bff; --brand-hover: #245ae6; --brand-soft: rgba(47,107,255,.1); --brand-soft-strong: rgba(47,107,255,.18);
-    --brand-border: rgba(47,107,255,.28); --brand-border-strong: rgba(47,107,255,.5); --brand-ring: rgba(47,107,255,.12);
-    --link: #245ae6; --brand-text: #245ae6; --brand-text-2: #1b48c2; --on-brand: #ffffff;
-    --brand-grad: linear-gradient(135deg,#3b82ff 0%,#2f6bff 100%);
-    --card: #ffffff; --card-2: #f3f6fc; --code-bg: #f0f4fa; --code-text: #26334d;
-    --overlay-fill: rgba(31,58,105,.03); --overlay-fill-2: rgba(31,58,105,.03); --overlay-fill-3: rgba(31,58,105,.035); --overlay-fill-4: rgba(31,58,105,.04); --overlay-backdrop: rgba(22,34,58,.35);
-    --topbar-bg: transparent; --composer-shell-from: rgba(249,251,255,0); --composer-bg: #ffffff; --composer-border: rgba(31,58,105,.12); --jump-bg: #ffffff;
-    --faint-line: rgba(31,58,105,.08); --faint-line-2: rgba(31,58,105,0); --hover-fill: rgba(31,58,105,.04); --hover-border: rgba(31,58,105,.2); --dash-line: rgba(85,101,127,.35);
-    --send-bg: var(--brand-grad); --send-fg: #ffffff; --send-hover: var(--brand-grad); --scroll-thumb: #c9d3e4; --disclaimer: #8b98ad;
-    --shadow-1: rgba(22,34,58,.08); --shadow-2: rgba(22,34,58,.1); --shadow-3: rgba(22,34,58,.16);
-    --source-card-bg: rgba(255,255,255,.85); --source-card-hover: #ffffff; --portfolio-grad-a: #ffffff; --portfolio-grad-b: #f0f4fb; --avatar-grad-a: #3b82ff; --avatar-grad-b: #1fd1bf;
-  }
-  body { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  .app { gap: 14px; padding: 14px; background: var(--bg); grid-template-columns: 272px minmax(0, 1fr); }
-  .sidebar { border: 1px solid var(--border); border-radius: var(--shell-radius); background: var(--sidebar); padding: 18px 14px 14px; box-shadow: 0 20px 60px var(--shadow-1); }
-  .side-brand { height: 44px; padding: 0 6px; margin-bottom: 14px; font-size: 15px; }
-  .mark { width: 34px; height: 34px; border-radius: 50%; background: var(--brand-grad); box-shadow: 0 8px 24px rgba(31,209,191,.25); color: #04211e; }
-  :root[data-theme="light"] .mark { color: #fff; }
-  .new-chat { height: 46px; border: 0; border-radius: 999px; background: var(--brand-grad); color: #04211e; font-weight: 600; font-size: 14px; padding: 0 18px; justify-content: space-between; box-shadow: 0 10px 28px rgba(31,209,191,.22); }
-  :root[data-theme="light"] .new-chat { color: #fff; box-shadow: 0 10px 28px rgba(47,107,255,.25); }
-  .new-chat:hover { background: var(--brand-grad); filter: brightness(1.06); }
-  .new-chat .icon { order: 2; width: 18px; height: 18px; }
-  .side-nav { display: grid; gap: 4px; margin-top: 18px; }
-  .nav-item { display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 14px; border: 1px solid transparent; border-radius: 12px; background: transparent; color: var(--text-2); font-size: 14px; font-weight: 500; cursor: pointer; text-align: left; }
-  .nav-item:hover { background: var(--surface); }
-  .nav-item.active { background: var(--surface); border-color: var(--border); color: var(--text-strong); }
-  .nav-item .icon { width: 18px; height: 18px; color: var(--muted); }
-  .history-heading { margin: 22px 12px 8px; text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 500; color: var(--subtle); }
-  .chat-item { padding: 10px 34px 10px 40px; border-radius: 12px; border: 1px solid transparent; }
-  .chat-item::before { content: ""; position: absolute; left: 13px; top: 12px; width: 16px; height: 16px; background: currentColor; opacity: .75; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a8 8 0 0 1-8 8H8l-5 3 1.5-4.5A8 8 0 1 1 21 12Z'/%3E%3C/svg%3E") center/contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a8 8 0 0 1-8 8H8l-5 3 1.5-4.5A8 8 0 1 1 21 12Z'/%3E%3C/svg%3E") center/contain no-repeat; }
-  .chat-item.active::before { color: var(--brand); opacity: 1; }
-  .chat-item:hover, .chat-item.active { background: var(--surface); border-color: var(--border); }
-  .chat-item-title { font-size: 13.5px; }
-  .sidebar-footer { border-top: 0; padding-top: 10px; }
-  .account-button { border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 10px 12px; }
-  .account-button:hover { background: var(--surface-hover); }
-  .account-avatar { width: 36px; height: 36px; color: #04211e; }
-  :root[data-theme="light"] .account-avatar { color: #fff; }
-  .account-name { font-weight: 600; }
-  .account-tier { color: var(--brand); }
-  .main { border: 1px solid var(--border); border-radius: var(--shell-radius); background: var(--card-main); box-shadow: 0 20px 60px var(--shadow-1); }
-  .main::before, .main::after, .deco { position: absolute; pointer-events: none; z-index: 0; }
-  .main::before { content: ""; right: 0; top: 0; width: min(38vw, 340px); height: min(38vw, 340px); border-radius: 0 var(--shell-radius) 0 100%; background: linear-gradient(200deg, var(--brand-soft-strong), transparent 70%); opacity: .9; }
-  .main::after { content: ""; right: 8%; top: 12%; width: clamp(60px, 7vw, 104px); height: clamp(60px, 7vw, 104px); border-radius: 50%; background: var(--brand-grad); opacity: .85; box-shadow: 0 20px 60px rgba(31,209,191,.25); }
-  .deco { right: 24px; top: 0; bottom: 40%; width: 110px; background-image: radial-gradient(circle, var(--border) 1.2px, transparent 1.6px); background-size: 14px 14px; opacity: .8; mask-image: linear-gradient(180deg, transparent 20%, #000 45%, #000 80%, transparent); -webkit-mask-image: linear-gradient(180deg, transparent 20%, #000 45%, #000 80%, transparent); }
-  .topbar, .conversation, .composer-shell { position: relative; z-index: 1; }
-  .main:not(:has(#welcome))::after { display: none; }
-  .topbar { border-bottom: 0; height: 64px; padding: 0 22px; }
-  .model-label { font-weight: 600; }
-  .top-actions { gap: 10px; }
-  .icon-button, .wallet-button { border-radius: 50%; }
-  .icon-button { width: 38px; height: 38px; background: var(--surface); }
-  .wallet-button { border-radius: 999px; height: 38px; }
-  .avatar-button { width: auto; height: 38px; padding: 0 8px 0 3px; border-radius: 999px; gap: 6px; grid-auto-flow: column; }
-  .avatar-button .account-avatar { width: 30px; height: 30px; font-size: 12px; }
-  .topbar .icon-button.confirm { border-radius: 999px; }
-  .welcome { align-items: flex-start; text-align: left; min-height: 0; padding: 6vh 0 30px; }
-  .welcome-mark { display: none; }
-  .welcome h1 { font-family: var(--serif); font-weight: 400; font-size: clamp(34px, 5vw, 52px); letter-spacing: -.01em; line-height: 1.05; }
-  .welcome h1 em { font-style: normal; color: var(--brand); }
-  .welcome p { margin: 10px 0 26px; font-size: 15px; }
-  .prompts { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-  .prompt-card { min-height: 168px; display: flex; flex-direction: column; border-radius: 18px; padding: 16px; background: var(--surface); border-color: var(--border); transition: transform .15s, border-color .15s; }
-  .prompt-card:hover { transform: translateY(-2px); border-color: var(--brand-border-strong); background: var(--surface-2); }
-  .prompt-tile { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; margin-bottom: 16px; background: var(--brand-soft); color: var(--brand); }
-  .prompt-tile .icon { width: 20px; height: 20px; }
-  .prompt-card[data-tone="blue"] .prompt-tile { background: rgba(47,107,255,.14); color: #6d9bff; }
-  .prompt-card[data-tone="violet"] .prompt-tile { background: rgba(155,135,245,.16); color: #b8a8ff; }
-  .prompt-card[data-tone="amber"] .prompt-tile { background: rgba(251,191,36,.14); color: #fbbf24; }
-  .prompt-card strong { font-size: 14px; line-height: 1.4; margin-bottom: 4px; }
-  .prompt-card > span:not(.prompt-tile):not(.prompt-desc):not(.prompt-source) { display: none; }
-  .prompt-desc { display: block; margin-top: 4px; font-size: 11.5px; line-height: 1.45; color: var(--subtle); }
-  .prompt-source { margin-top: auto; padding-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; color: var(--subtle); }
-  .prompt-source > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .prompt-source .prompt-arrow { margin-top: 0; flex: 0 0 auto; }
-  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 22px; width: 100%; }
-  .suggest-rows { width: 100%; }
-  .chip { border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; padding: 6px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
-  .chip:hover { color: var(--text); border-color: var(--hover-border); }
-  .chip.active { color: var(--text-strong); border-color: var(--brand); background: var(--brand-soft); }
-  .suggest-rows { margin-top: 10px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); overflow: hidden; }
-  .suggest-row { width: 100%; text-align: left; border: 0; border-top: 1px solid var(--border); background: transparent; color: var(--text); font: inherit; font-size: 13.5px; padding: 12px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-  .suggest-row:first-child { border-top: 0; }
-  .suggest-row:hover { background: var(--surface-2); }
-  .suggest-row .icon { width: 14px; height: 14px; color: var(--subtle); flex: none; }
-  .mention-menu { position: absolute; left: 20px; bottom: calc(100% + 8px); width: min(360px, calc(100% - 40px)); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 14px 40px var(--shadow-2); z-index: 8; overflow: hidden; }
-  .mention-menu[hidden] { display: none; }
-  .mention-item { width: 100%; text-align: left; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 13px; padding: 9px 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
-  .mention-item.active, .mention-item:hover { background: var(--surface-2); }
-  .mention-item small { color: var(--subtle); font-size: 11px; }
-  .mention-item b { color: var(--brand); }
-  .composer { position: relative; }
-  .mono-cap { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--subtle); margin: -14px 0 14px; }
-  .prompt-card[data-kind="stocks"] .prompt-tile { background: rgba(47,107,255,.14); color: #6d9bff; }
-  .prompt-arrow { margin-top: auto; width: 18px; height: 18px; color: var(--muted); }
-  .message { padding: 12px 0; }
-  .message.user .message-body { position: relative; background: var(--surface-2); border: 1px solid var(--border); border-radius: 16px; padding: 12px 16px; display: flex; align-items: baseline; gap: 14px; }
-  .message.user .msg-time { flex: none; font-size: 11px; color: var(--subtle); }
-  .message.assistant { grid-template-columns: 40px minmax(0, 1fr); gap: 14px; }
-  .message.assistant .message-body { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 16px 18px; }
-  .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--brand-grad); color: #04211e; box-shadow: 0 8px 22px rgba(31,209,191,.22); }
-  :root[data-theme="light"] .avatar { color: #fff; }
-  .avatar .icon { width: 18px; height: 18px; }
-  .msg-actions { display: flex; align-items: center; gap: 4px; margin-top: 12px; color: var(--subtle); font-size: 11px; }
-  .msg-actions button { width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--subtle); display: grid; place-items: center; cursor: pointer; }
-  .msg-actions button:hover { background: var(--surface-2); color: var(--text); }
-  .msg-actions button.on { color: var(--brand); }
-  .msg-actions .icon { width: 15px; height: 15px; }
-  .msg-actions time { margin-left: auto; }
-  .composer-shell { padding: 10px 24px max(18px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, transparent, var(--card-main) 40%); border-top: 0; }
-  .composer { border-radius: 24px; padding: 14px 14px 12px 20px; box-shadow: 0 18px 50px var(--shadow-2); }
-  .composer textarea { font-size: 15px; min-height: 36px; }
-  .composer-tools { margin-top: 10px; gap: 8px; flex-wrap: wrap; }
-  .composer-plus { width: 38px; height: 38px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface-2); display: grid; place-items: center; color: var(--muted); cursor: pointer; flex: none; }
-  .composer-plus:hover { color: var(--text); border-color: var(--hover-border); }
-  .composer-context, .team-toggle, .policy-chip, .pay-chip, .credits-chip { margin-left: 0; height: 32px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: transparent; font-size: 12px; color: var(--muted); }
-  .composer-context .icon { width: 13px; height: 13px; }
-  .policy-chip { max-width: 40%; }
-  .policy-chip.unset { border-style: solid; }
-  .credits-chip { color: var(--muted); }
-  .send { width: 42px; height: 42px; border-radius: 50%; background: var(--brand-grad); color: var(--send-fg); box-shadow: 0 10px 26px rgba(31,209,191,.3); }
-  :root[data-theme="light"] .send { box-shadow: 0 10px 26px rgba(47,107,255,.3); }
-  .send:hover { filter: brightness(1.06); }
-  .disclaimer { color: var(--disclaimer); }
-  .primary { background: var(--brand-grad); color: #04211e; border: 0; }
-  :root[data-theme="light"] .primary { color: #fff; }
-  .primary:hover { background: var(--brand-grad); filter: brightness(1.06); }
-  .dialog { border-radius: 22px; }
-  .field input, .field select, .charter-grid textarea { border-radius: 12px; }
-  /* "What Orbit can do": the capability catalogue on the home screen (replaced the Explore dialog). */
-  .capabilities { width: 100%; margin-top: 34px; }
-  .cap-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
-  .cap-head h2 { margin: 0; font-family: var(--serif, Georgia, serif); font-weight: 400; font-size: 22px; color: var(--text-strong); }
-  .cap-head p { margin: 0; font-size: 12px; color: var(--subtle); }
-  .cap-group { margin-top: 18px; }
-  .cap-group h3 { margin: 0 0 8px; font-size: 11px; color: var(--subtle); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; display: flex; align-items: center; gap: 8px; }
-  .cap-group h3 .icon { width: 14px; height: 14px; color: var(--brand); }
-  .cap-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-  .cap-item { width: 100%; text-align: left; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 10px 12px; font: inherit; font-size: 13px; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-  .cap-item:hover { border-color: var(--brand-border-strong); background: var(--surface-2); }
-  .cap-item small { color: var(--subtle); font-size: 11px; line-height: 1.35; }
-  .cap-item .cap-q { font-weight: 500; }
-  @media (max-width: 1100px) { .prompts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .prompt-card { min-height: 130px; } .main::after { display: none; } }
-  @media (max-width: 720px) {
-    .app { padding: 0; gap: 0; grid-template-columns: 1fr; }
-    .main { border-radius: 0; border: 0; box-shadow: none; }
-    .topbar { padding-right: 12px; }
-    .top-actions { gap: 6px; }
-    .network-pill { display: none; }
-    .wallet-button { padding: 0 10px; font-size: 12px; }
-    .avatar-button { padding: 0 3px; }
-    .avatar-button .icon { display: none; }
-    .composer-shell { padding: 8px 10px max(12px, env(safe-area-inset-bottom)); }
-    .composer { padding: 12px 12px 10px 14px; }
-    .composer-tools { gap: 6px; }
-    .composer-context { display: none; }
-    .composer-plus, .send { width: 36px; height: 36px; }
-    .team-toggle, .credits-chip, .policy-chip { height: 30px; padding: 0 10px; font-size: 11px; }
-    .policy-chip { max-width: calc(100% - 52px); }
-    .credits-chip { max-width: 40%; }
-    .msg-actions time { display: none; }
-    .message.user .message-body { max-width: 92%; }
-    .welcome h1 { font-size: 32px; }
-    .prompt-card { padding: 12px; min-height: 0; }
-    .prompt-tile { width: 36px; height: 36px; margin-bottom: 10px; }
-    .prompt-card strong { font-size: 13px; }
-    .prompt-arrow { display: none; }
-    .sidebar { border-radius: 0 var(--shell-radius) var(--shell-radius) 0; }
-    .prompts { grid-template-columns: 1fr 1fr; }
-    .prompt-card:nth-child(n+3) { display: flex; }
-    .prompt-card { min-height: 120px; }
-    .welcome { padding-top: 4vh; }
-    .welcome h1 { font-size: 34px; }
-    .main::before, .deco { display: none; }
-    .cap-grid { grid-template-columns: 1fr; }
-    .cap-head { flex-direction: column; gap: 2px; }
-    .composer { border-radius: 20px; }
-  }
-
-  /* ---- v3: minimal home (flat panes, one accent, composer as the hero) ---- */
-  :root { --bg: #0b0c0f; --sidebar: #0f1114; --card-main: #0f1114; --surface: #15181d; --surface-2: #1b1f26; --surface-hover: #21262e;
-    --border: rgba(255,255,255,.08); --text: #e6e8ec; --muted: #9aa3b2; --subtle: #6b7280; --text-strong: #ffffff; --text-2: #d3d7de; --text-3: #b7bcc6;
-    --brand: #5b8cff; --brand-2: #5b8cff; --brand-strong: #4f80f5; --brand-hover: #6d9aff; --brand-soft: rgba(91,140,255,.12); --brand-soft-strong: rgba(91,140,255,.2);
-    --brand-border: rgba(91,140,255,.3); --brand-border-strong: rgba(91,140,255,.5); --brand-ring: rgba(91,140,255,.14); --brand-grad: #5b8cff;
-    --link: #8fb0ff; --brand-text: #8fb0ff; --brand-text-2: #b3c8ff; --on-brand: #0b0c0f; --send-fg: #0b0c0f; --card: #15181d; --card-2: #1b1f26;
-    --composer-bg: #15181d; --composer-border: rgba(255,255,255,.1); --shadow-1: rgba(0,0,0,0); --shadow-2: rgba(0,0,0,.35); --shadow-3: rgba(0,0,0,.5); --shell-radius: 0px; }
-  :root[data-theme="light"] { --bg: #ffffff; --sidebar: #fafafa; --card-main: #ffffff; --surface: #ffffff; --surface-2: #f4f5f7; --surface-hover: #eef0f3;
-    --border: rgba(17,24,39,.09); --text: #111827; --muted: #4b5563; --subtle: #6b7280; --text-strong: #0b1220; --text-2: #1f2937; --text-3: #374151;
-    --brand: #2f6bff; --brand-2: #2f6bff; --brand-strong: #2f6bff; --brand-hover: #245ae6; --brand-soft: rgba(47,107,255,.08); --brand-soft-strong: rgba(47,107,255,.16);
-    --brand-border: rgba(47,107,255,.28); --brand-border-strong: rgba(47,107,255,.5); --brand-ring: rgba(47,107,255,.12); --brand-grad: #2f6bff;
-    --link: #245ae6; --brand-text: #245ae6; --brand-text-2: #1b48c2; --on-brand: #ffffff; --send-fg: #ffffff; --card: #ffffff; --card-2: #f4f5f7;
-    --composer-bg: #ffffff; --composer-border: rgba(17,24,39,.12); --shadow-1: rgba(0,0,0,0); --shadow-2: rgba(17,24,39,.08); --shadow-3: rgba(17,24,39,.14); --shell-radius: 0px; }
-  .app { gap: 0; padding: 0; background: var(--bg); }
-  .sidebar { border: 0; border-right: 1px solid var(--border); border-radius: 0; box-shadow: none; padding: 16px 12px 12px; position: relative; z-index: 2; }
-  .main { border: 0; border-radius: 0; box-shadow: none; background: var(--card-main); }
-  .main::before, .main::after, .deco { display: none !important; }
-  .mark { border-radius: 10px; background: var(--brand); box-shadow: none; color: var(--on-brand); }
-  .new-chat { background: var(--surface); color: var(--text); border: 1px solid var(--border); box-shadow: none; height: 40px; font-weight: 500; }
-  .new-chat:hover { background: var(--surface-2); filter: none; }
-  .nav-item { height: 40px; }
-  .account-button { box-shadow: none; }
-  .account-tier { color: var(--subtle); }
-  .topbar { height: 56px; }
-  .icon-button, .wallet-button, .avatar-button { box-shadow: none; }
-  .composer { box-shadow: none; border-radius: 16px; }
-  .composer:focus-within { border-color: var(--brand-border-strong); box-shadow: 0 0 0 3px var(--brand-ring); }
-  .composer-shell { background: var(--card-main); }
-  .composer-context { display: none; }
-  .team-toggle, .policy-chip, .credits-chip { font-size: 11px; }
-  .policy-chip, .policy-chip.unset { border: 0; background: transparent; color: var(--subtle); padding: 2px 6px; max-width: 40%; }
-  .policy-chip:hover, .policy-chip.unset:hover { background: var(--surface-2); color: var(--text); }
-  .credits-chip { border: 0; background: transparent; margin-left: auto; margin-right: 8px; }
-  .send { border-radius: 50%; background: var(--brand); color: var(--on-brand); }
-  .send:hover { background: var(--brand-hover); }
-  /* the hero */
-  .welcome { align-items: center; text-align: center; padding: 0; min-height: 0; }
-  .welcome-mark { display: grid; width: 56px; height: 56px; border-radius: 18px; background: var(--brand-soft); color: var(--brand); box-shadow: none; margin-bottom: 18px; }
-  .welcome-mark .icon { width: 26px; height: 26px; }
-  .welcome .tagline { font-family: var(--serif); font-weight: 400; font-size: clamp(34px, 4.6vw, 48px); letter-spacing: -.01em; line-height: 1.08; color: var(--text-strong); margin: 0; }
-  .welcome .tagline-sub { max-width: 520px; margin: 12px auto 0; color: var(--muted); font-size: 15px; line-height: 1.55; }
-  body.home .main { display: flex; flex-direction: column; }
-  body.home .conversation { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; }
-  body.home .conversation::before { content: ""; position: absolute; inset: 0; background: radial-gradient(60% 55% at 50% 60%, var(--brand-soft), transparent 70%); pointer-events: none; }
-  body.home .thread { padding: 24px 24px 18px; }
-  body.home .composer-shell { flex: 0 1 auto; overflow-y: auto; padding-bottom: 28px; }
-  body.home .jump-latest { display: none; }
-  .home-below { display: none; max-width: var(--content-width); margin: 14px auto 0; }
-  body.home .home-below { display: block; }
-  .home-below .mono-cap { margin: 0 0 10px; }
-  .home-below .prompts { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-  .home-below .prompt-card { min-height: 108px; padding: 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); transform: none; }
-  .home-below .prompt-card:hover { transform: none; background: var(--surface-2); border-color: var(--hover-border); }
-  .home-below .prompt-tile { width: 24px; height: 24px; margin-bottom: 14px; border-radius: 0; background: transparent !important; color: var(--muted) !important; }
-  .home-below .prompt-tile .icon { width: 18px; height: 18px; }
-  .home-below .prompt-card strong { font-size: 13.5px; font-weight: 500; line-height: 1.4; margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-  .home-below .prompt-desc, .home-below .prompt-source .prompt-arrow { display: none; }
-  .home-below .prompt-source { margin-top: auto; padding-top: 8px; font-size: 10.5px; }
-  .home-below .prompt-source:empty { display: none; }
-  .explore { margin-top: 22px; }
-  .explore summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--muted); font-size: 13px; padding: 8px; border-radius: 10px; }
-  .explore summary::-webkit-details-marker { display: none; }
-  .explore summary:hover { color: var(--text); background: var(--surface-2); }
-  .explore summary .icon { width: 14px; height: 14px; transition: transform .15s; }
-  .explore[open] summary .icon { transform: rotate(180deg); }
-  .explore-body { padding-top: 6px; }
-  .explore .chips { margin-top: 8px; }
-  .capabilities { margin-top: 26px; }
-  .cap-head h2 { font-size: 18px; }
-  .cap-item { background: var(--surface); }
-  .disclaimer { color: var(--subtle); }
-  :root[data-theme="light"] .new-chat { color: var(--text); box-shadow: none; }
-  :root[data-theme="light"] .send, .send { box-shadow: none; }
-  .composer-tools { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-  .send { position: static; margin: 0 0 0 4px; width: 36px; height: 36px; box-shadow: none; flex: none; }
-  .composer-plus { width: 34px; height: 34px; }
-  /* the home scrolls as one page: hero, composer, cards, explore */
-  body.home .main { overflow-y: auto; }
-  body.home .conversation { flex: 0 0 auto; overflow: visible; min-height: 36vh; justify-content: flex-end; }
-  body.home .composer-shell { flex: 0 0 auto; overflow: visible; position: static; }
-  body.home .topbar { position: sticky; top: 0; background: var(--card-main); z-index: 3; }
-  @media (max-width: 720px) {
-    .home-below .prompts { grid-template-columns: 1fr 1fr; }
-    .welcome .tagline { font-size: 30px; }
-    body.home .conversation { justify-content: center; }
-  }
-</style>
-</head
+<link rel="stylesheet" href="/ui/theme.css?v=1">
+<link rel="stylesheet" href="/ui/chat.css?v=1">
+<link rel="stylesheet" href="/ui/product.css?v=1">
+</head>
 <body>
 <div class="app">
   <aside class="sidebar" id="sidebar">
@@ -785,13 +20,15 @@
     <nav class="side-nav" aria-label="Primary">
       <button class="nav-item active" id="navHome" type="button"><svg class="icon" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9Z"/></svg>Home</button>
       <button class="nav-item" id="navLibrary" type="button"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M8 6V4h8v2"/></svg>History</button>
+      <button class="nav-item" id="navTasks" type="button"><svg class="icon" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3V8Z"/><path d="M10 19h4"/></svg>Alerts &amp; tasks</button>
+      <button class="nav-item" id="navSettings" type="button"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg>Settings</button>
     </nav>
     <div class="history-heading">Recent</div>
     <div class="history" id="chatList"></div>
     <div class="sidebar-footer">
       <button class="account-button" id="profileBtn">
         <span class="account-avatar" id="profileAvatar">A</span>
-        <span class="account-copy"><span class="account-name" id="profileName">Web3 User</span><span class="account-tier" id="profileRisk">Balanced risk</span></span>
+        <span class="account-copy"><span class="account-name" id="profileName">Your account</span><span class="account-tier" id="profileRisk">Balanced risk</span></span>
         <svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
       </button>
     </div>
@@ -802,8 +39,8 @@
     <header class="topbar">
       <div class="model-label">
         <button class="mobile-menu" id="mobileMenu" aria-label="Open menu" aria-expanded="false"><svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-        <span>Web3 Copilot</span>
-        <div class="network-pill"><i class="network-dot" id="healthDot"></i>Solana</div>
+        <span>Workspace</span>
+        <div class="network-pill"><i class="network-dot" id="healthDot"></i><span id="healthLabel">Connecting</span></div>
       </div>
       <div class="top-actions">
         <button class="icon-button" id="deleteChatBtn" type="button" hidden aria-label="Delete this conversation" title="Delete this conversation"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
@@ -819,8 +56,8 @@
       <div class="thread" id="messages">
         <div class="welcome" id="welcome">
           <div class="welcome-mark" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M5 15.5 9.5 11l3 3L19 7.5"/><path d="M19 12v7H5V5h8"/></svg></div>
-          <h1 class="tagline">Research. Trade. Stay ahead.</h1>
-          <p class="tagline-sub">Ask about any token, wallet or protocol. Orbit checks the data first, then answers.</p>
+          <h1 class="tagline">A clearer view of the market.</h1>
+          <p class="tagline-sub">Research assets, understand your portfolio, and review your next move.</p>
         </div>
       </div>
     </section>
@@ -830,35 +67,36 @@
     <div class="composer-shell">
       <form class="composer" id="composer">
         <div class="mention-menu" id="mentionMenu" hidden role="listbox"></div>
-        <textarea id="messageInput" rows="1" maxlength="2000" placeholder="Ask about a token, wallet, protocol or trade — type $ to mention a token"></textarea>
+        <textarea aria-label="Message Orbit" id="messageInput" rows="1" maxlength="2000" placeholder="Ask about markets, assets, or your portfolio…"></textarea>
         <div class="composer-tools">
           <button class="composer-plus" id="composerPlus" type="button" aria-label="Connect a wallet" title="Connect a wallet"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
           <span class="composer-context"><svg class="icon" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg><span>Live tools</span></span>
-          <label class="team-toggle" id="teamToggle" title="Team desk: a Coordinator fans each request out to Market Research, Execution and Risk. Slower and costs more per turn."><input id="teamMode" type="checkbox" role="switch" aria-label="Team desk mode" /><span class="team-track" aria-hidden="true"></span><span class="team-label">Team desk</span></label>
+          <label class="team-toggle" id="teamToggle" title="Adds research and risk perspectives. Takes longer and uses more credits."><input id="teamMode" type="checkbox" role="switch" aria-label="In-depth analysis" /><span class="team-track" aria-hidden="true"></span><span class="team-label">In-depth</span></label>
           <span class="pay-chip" id="payChip" hidden title=""><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 14h3"/></svg><span id="payChipText"></span></span>
-          <button class="pay-chip credits-chip" id="creditsChip" type="button" hidden title="Your credit balance. Each turn costs 1-5 credits depending on what it does."><b id="creditsCount">0</b>&nbsp;credits · <span id="creditsPlan">Trial</span></button>
-          <button class="policy-chip" id="policyChip" type="button" hidden title=""><svg class="icon" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5l-8-3Z"/></svg><b>Risk charter</b><span id="policyText"></span></button>
+          <button class="pay-chip credits-chip" id="creditsChip" type="button" hidden title="View your plan and credit balance."><b id="creditsCount">0</b>&nbsp;credits · <span id="creditsPlan">Trial</span></button>
+          <button class="policy-chip" id="policyChip" type="button" hidden title=""><svg class="icon" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5l-8-3Z"/></svg><b>Trade preferences</b><span id="policyText"></span></button>
           <button class="send" id="sendBtn" type="submit" aria-label="Send"><svg class="icon" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7M12 19V5"/></svg></button>
         </div>
       </form>
       <div class="home-below" id="homeBelow">
-        <div class="mono-cap" id="highlightsCaption" hidden></div>
-        <div class="prompts" id="homePrompts">
-          <button class="prompt-card" data-action="portfolio" data-tone="teal"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/></svg></span><strong>Analyze my portfolio</strong><span>Holdings, allocation and concentration risk</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
-          <button class="prompt-card" data-msg="Check my SOL balance and list my SPL token balances. Do not prepare any trade." data-tone="blue"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2"/></svg></span><strong>Check my balances</strong><span>SOL and token balances from your connected wallet</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
-          <button class="prompt-card" data-msg="Find the verified Jupiter token information and safety warnings for USDC mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v. Do not trade." data-tone="violet"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg></span><strong>Check a token's safety</strong><span>Verification, holders and risk warnings before you buy</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
-          <button class="prompt-card" data-action="relay" data-tone="amber"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h13l-3-3M20 17H7l3 3"/></svg></span><strong>Swap across chains</strong><span>A reviewed route, fees and output before you sign</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+        <div class="home-shortcuts" aria-label="Start a conversation">
+          <button type="button" data-msg="How is the crypto market today?">Market overview <span aria-hidden="true">↗</span></button>
+          <button type="button" data-action="portfolio">My portfolio <span aria-hidden="true">↗</span></button>
+          <button type="button" data-action="research">Research an asset <span aria-hidden="true">↗</span></button>
+          <button type="button" data-action="relay">Swap assets <span aria-hidden="true">↗</span></button>
         </div>
+        <div class="mono-cap" id="highlightsCaption" hidden></div>
+        <div class="prompts" id="homePrompts" hidden></div>
         <details class="explore" id="exploreMore">
-          <summary><span>Explore what Orbit can do</span><svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></summary>
+          <summary><span>Explore examples</span><svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></summary>
           <div class="explore-body">
             <div class="chips" id="homeChips" hidden></div>
             <div class="suggest-rows" id="homeRows" hidden></div>
-            <section class="capabilities" id="homeCapabilities" aria-label="What Orbit can do"></section>
+            <section class="capabilities" id="homeCapabilities" aria-label="Start with a question"></section>
           </div>
         </details>
       </div>
-      <div class="disclaimer">Orbit can make mistakes. Verify wallet addresses, quotes, and transaction details before signing.</div>
+      <div class="disclaimer">Review sources and transaction details before making a decision.</div>
     </div>
   </main>
 </div>
@@ -869,19 +107,19 @@
     <div class="dialog-body" id="walletDialogBody">
       <div id="connectedPanel" class="connected-panel" hidden><strong id="connectedProvider">Connected</strong><div class="connected-address" id="connectedAddress"></div></div>
       <div id="walletOptions">
-        <button class="wallet-option" id="connectPrivyBtn" type="button"><span class="wallet-logo" style="background:#fff;color:#111">P</span><span>Privy embedded wallet<small id="privyOptionHelp">Email sign-in with Ethereum and Solana wallets</small></span></button>
+        <button class="wallet-option" id="connectPrivyBtn" type="button"><span class="wallet-logo" style="background:#fff;color:#111">P</span><span>Email wallet<small id="privyOptionHelp">Email sign-in with Ethereum and Solana wallets</small></span></button>
         <button class="wallet-option" id="connectCoinbaseBtn" type="button"><span class="wallet-logo" style="background:#0052ff;color:#fff">C</span><span>Coinbase Wallet<small id="coinbaseOptionHelp">Smart Wallet, extension, or mobile</small></span></button>
-        <button class="wallet-option" id="connectReownBtn" type="button"><span class="wallet-logo" style="background:#2457ff">W</span><span>WalletConnect by Reown<small id="reownOptionHelp">Connect an external EVM wallet</small></span></button>
+        <button class="wallet-option" id="connectReownBtn" type="button"><span class="wallet-logo" style="background:#2457ff">W</span><span>WalletConnect<small id="reownOptionHelp">Connect a compatible Ethereum wallet</small></span></button>
         <div class="privy-auth" id="privyAuth" hidden>
           <div class="privy-auth-row" id="privyEmailRow"><div class="field"><label for="privyEmail">Email address</label><input id="privyEmail" type="email" autocomplete="email" placeholder="you@example.com" /></div><button class="primary" id="privySendCodeBtn" type="button">Send code</button></div>
           <div class="privy-auth-row" id="privyCodeRow" hidden><div class="field"><label for="privyCode">Verification code</label><input id="privyCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="123456" /></div><button class="primary" id="privyVerifyBtn" type="button">Verify</button></div>
           <div class="privy-auth-status" id="privyStatus"></div>
         </div>
-        <button class="wallet-option" id="connectPhantomBtn"><span class="wallet-logo">P</span><span>Phantom<small>Connect using the Phantom extension</small></span></button>
+        <button class="wallet-option" id="connectPhantomBtn"><span class="wallet-logo">P</span><span>Phantom<small>Connect your Solana wallet</small></span></button>
         <button class="wallet-option" id="connectMetaMaskBtn"><span class="wallet-logo" style="background:#e2761b">M</span><span>MetaMask<small>Connect to Solana through MetaMask</small></span></button>
       </div>
       <div class="manual-wallet">
-        <div class="field"><label for="walletAddress">Or use a public wallet address</label><input id="walletAddress" placeholder="Enter a Solana wallet address" spellcheck="false" /><div class="field-help">Read-only access. Your private keys never leave your wallet.</div></div>
+        <div class="field"><label for="walletAddress">Or use a public wallet address</label><input id="walletAddress" placeholder="Enter a Solana wallet address" spellcheck="false" /><div class="field-help">View balances and activity without connecting a wallet.</div></div>
         <button class="secondary" id="useAddressBtn" type="button">Use address</button>
         <button class="secondary" id="disconnectWalletBtn" type="button" hidden>Disconnect</button>
       </div>
@@ -893,9 +131,9 @@
   <div class="dialog">
     <div class="dialog-head"><h2 id="signinTitle">Sign in</h2><button class="close" data-close="signinDialog" aria-label="Close">×</button></div>
     <div class="dialog-body">
-      <div class="field-help" id="signinIntro">We'll email you a one-time sign-in link. No password to remember.</div>
+      <div class="field-help" id="signinIntro">Enter your email to receive a secure sign-in link.</div>
       <div class="field" style="margin-top:10px"><label for="signinEmail">Email address</label><input id="signinEmail" type="email" autocomplete="email" placeholder="you@example.com" /></div>
-      <div class="signin-status" id="signinStatus"></div>
+      <div class="signin-status" id="signinStatus" role="status" aria-live="polite"></div>
     </div>
     <div class="dialog-footer"><button class="secondary" data-close="signinDialog">Cancel</button><button class="primary" id="signinSendBtn" type="button">Send sign-in link</button></div>
   </div>
@@ -911,19 +149,19 @@
 
 <div class="overlay charter-dialog" id="charterDialog" role="dialog" aria-modal="true" aria-labelledby="charterTitle">
   <div class="dialog">
-    <div class="dialog-head"><h2 id="charterTitle">Risk charter</h2><button class="close" data-close="charterDialog" aria-label="Close">×</button></div>
+    <div class="dialog-head"><h2 id="charterTitle">Trade preferences</h2><button class="close" data-close="charterDialog" aria-label="Close">×</button></div>
     <div class="dialog-body">
       <div class="charter-grid">
-        <div class="field"><label for="charterMaxUsd">Max per trade (USD)</label><input id="charterMaxUsd" type="number" min="1" step="1" inputmode="decimal" placeholder="e.g. 10" /><div class="field-help" id="charterMaxUsdHelp">Built-in cap applies.</div></div>
-        <div class="field"><label for="charterMaxPct">Max % of portfolio per position</label><input id="charterMaxPct" type="number" min="0.1" max="100" step="0.1" inputmode="decimal" placeholder="e.g. 1" /><div class="field-help">Checked against your wallet's total value.</div></div>
-        <div class="field"><label for="charterMaxBps">Max slippage (bps)</label><input id="charterMaxBps" type="number" min="1" step="1" inputmode="numeric" placeholder="e.g. 50" /><div class="field-help" id="charterMaxBpsHelp">Built-in cap applies.</div></div>
+        <div class="field"><label for="charterMaxUsd">Trade amount limit (USD)</label><input id="charterMaxUsd" type="number" min="1" step="1" inputmode="decimal" placeholder="e.g. 10" /><div class="field-help" id="charterMaxUsdHelp">Subject to the platform limit.</div></div>
+        <div class="field"><label for="charterMaxPct">Position limit (% of portfolio)</label><input id="charterMaxPct" type="number" min="0.1" max="100" step="0.1" inputmode="decimal" placeholder="e.g. 1" /><div class="field-help">Checked against your wallet's total value.</div></div>
+        <div class="field"><label for="charterMaxBps">Slippage limit (basis points)</label><input id="charterMaxBps" type="number" min="1" step="1" inputmode="numeric" placeholder="e.g. 50" /><div class="field-help" id="charterMaxBpsHelp">100 basis points = 1%. Subject to the platform limit.</div></div>
         <div class="field"><label>Token requirement</label><label class="charter-check"><input id="charterVerified" type="checkbox" /> Only Jupiter-verified tokens</label></div>
-        <div class="field span2"><label>Allowed chains <span style="color:var(--subtle);font-weight:400">Leave all unchecked to allow any chain.</span></label><div class="charter-chains" id="charterChains"></div></div>
-        <div class="field span2"><label for="charterNotes">Anything else, in plain words</label><textarea id="charterNotes" rows="2" maxlength="300" placeholder="e.g. no memecoins during a market-wide selloff"></textarea><div class="field-help">Rules above are checked exactly on every quote. Notes are interpreted by the Risk agent and can be ambiguous — prefer the fields when one fits.</div></div>
+        <div class="field span2"><label>Preferred networks <span style="color:var(--subtle);font-weight:400">Select none to allow all networks.</span></label><div class="charter-chains" id="charterChains"></div></div>
+        <div class="field span2"><label for="charterNotes">Additional guidance</label><textarea id="charterNotes" rows="2" maxlength="300" placeholder="For example, avoid low-liquidity tokens"></textarea><div class="field-help">Use the fields for specific limits. Additional guidance helps shape the analysis.</div></div>
       </div>
-      <div class="charter-error" id="charterError"></div>
+      <div class="charter-error" id="charterError" role="alert"></div>
     </div>
-    <div class="dialog-footer"><button class="secondary" id="charterClearBtn" type="button" hidden>Clear charter</button><button class="secondary" data-close="charterDialog" type="button">Cancel</button><button class="primary" id="charterSaveBtn" type="button">Save charter</button></div>
+    <div class="dialog-footer"><button class="secondary" id="charterClearBtn" type="button" hidden>Clear preferences</button><button class="secondary" data-close="charterDialog" type="button">Cancel</button><button class="primary" id="charterSaveBtn" type="button">Save preferences</button></div>
   </div>
 </div>
 
@@ -945,13 +183,13 @@
         <div class="account-panel" id="accountPanel">
           <div class="account-row"><span id="accountEmail" class="muted">Not signed in</span><span class="plan-badge" id="accountPlan">Trial</span></div>
           <div class="account-row"><span>Credits</span><b id="accountCredits">0</b></div>
-          <div class="account-row"><span>Linked wallets</span><span id="accountWallets" class="muted">none</span></div>
+          <div class="account-row"><span>Linked wallets</span><span id="accountWallets" class="muted">No wallets linked</span></div>
           <div class="account-actions">
             <button class="primary" id="signinBtn" type="button">Sign in with email</button>
             <button class="secondary" id="plansBtn" type="button">Plans &amp; credits</button>
             <button class="secondary" id="signoutBtn" type="button" hidden>Sign out</button>
           </div>
-          <div class="field-help" id="accountHelp">Sign in to keep conversation history, connect wallets, review trades and get 100 free credits every month.</div>
+          <div class="field-help" id="accountHelp">Sign in to access your history, connect wallets, and receive 100 monthly credits.</div>
         </div>
         <div class="settings-section" id="teamInvitesSection" hidden><h3>Team invitations</h3><div class="row-list" id="teamInvites"></div></div>
         <div class="settings-section" id="sessionsSection" hidden>
@@ -966,7 +204,7 @@
         <div class="account-actions" style="margin-top:10px">
           <button class="primary" id="buyCreditsBtn" type="button">Buy credits</button>
           <button class="secondary" id="changePlanBtn" type="button">Change plan</button>
-          <button class="secondary" id="billingPortalBtn" type="button" hidden>Manage subscription &amp; invoices</button>
+          <button class="secondary" id="billingPortalBtn" type="button" hidden>Manage billing</button>
         </div>
         <div class="settings-section"><h3>Usage · last 30 days</h3><svg class="usage-chart" id="usageChart" viewBox="0 0 600 130" preserveAspectRatio="none" role="img" aria-label="Credits spent per day"></svg><div class="usage-legend" id="usageLegend"></div></div>
         <div class="settings-section"><h3>Invoices</h3><div class="row-list" id="invoicesList"><div class="field-help">Loading…</div></div></div>
@@ -975,18 +213,18 @@
       <section class="tab-panel" data-panel="keys" hidden>
         <div class="keys-section" id="apiKeysSection" style="margin-top:0;border-top:0;padding-top:0">
           <h3>API keys</h3>
-          <div class="field-help" id="apiKeysHelp">Use a key as <code>Authorization: Bearer …</code> on <code>/chat</code> and as the MCP bearer for Claude or ChatGPT. Keys never sign or move funds.</div>
+          <div class="field-help" id="apiKeysHelp">Connect Orbit to your tools with an API key. Keys provide data access and cannot sign transactions.</div>
           <div id="apiKeysList"></div>
-          <div class="key-create"><input id="apiKeyName" placeholder="Key name (e.g. Claude Desktop)" maxlength="60" /><button class="secondary" id="createApiKeyBtn" type="button">Create key</button></div>
+          <div class="key-create"><input id="apiKeyName" aria-label="API key name" placeholder="Key name (e.g. Claude Desktop)" maxlength="60" /><button class="secondary" id="createApiKeyBtn" type="button">Create key</button></div>
           <div class="key-secret" id="apiKeySecret" hidden></div>
         </div>
-        <div class="settings-section"><h3>Usage per key · last 30 days</h3><div class="row-list" id="apiKeyUsage"><div class="field-help">No key usage yet.</div></div></div>
+        <div class="settings-section"><h3>Usage per key · last 30 days</h3><div class="row-list" id="apiKeyUsage"><div class="field-help">API usage will appear here.</div></div></div>
       </section>
 
       <section class="tab-panel" data-panel="preferences" hidden>
-        <div class="field"><label for="displayNameInput">Display name</label><input id="displayNameInput" placeholder="Web3 User" /></div>
+        <div class="field"><label for="displayNameInput">Display name</label><input id="displayNameInput" placeholder="Your account" /></div>
         <div class="field"><label for="riskProfileSelect">Risk preference</label><select id="riskProfileSelect"><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="aggressive">Aggressive</option></select></div>
-        <div class="field"><label>Risk charter</label><div class="charter-summary"><span id="charterSummaryText">No risk charter set — trades run in advisory mode.</span><button class="secondary" id="charterEditBtn" type="button">Edit</button></div><div class="field-help">Saved to your account and applied to every new conversation.</div></div>
+        <div class="field"><label>Trade preferences</label><div class="charter-summary"><span id="charterSummaryText">No custom trade preferences.</span><button class="secondary" id="charterEditBtn" type="button">Edit</button></div><div class="field-help">Saved to your account and applied to every new conversation.</div></div>
         <div class="field"><label for="defaultWalletInput">Default wallet address</label><input id="defaultWalletInput" placeholder="Optional public address" spellcheck="false" /></div>
         <div class="field"><label for="themeSelect">Appearance</label><select id="themeSelect"><option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
         <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:8px"><input id="prefAutoScroll" type="checkbox" checked /> Auto-scroll to the latest message</label>
@@ -994,15 +232,15 @@
       </section>
 
       <section class="tab-panel" data-panel="tasks" hidden>
-        <div class="field-help">Reminders, price alerts and a morning brief that run for you in the background. You can also just type: <i>remind me tomorrow at 9am to check SOL</i> · <i>alert me when SOL drops below $90</i> · <i>send me a morning brief at 8am</i>.</div>
-        <div class="settings-section"><h3>Inbox <span class="plan-badge" id="inboxBadge" hidden>0</span></h3><div class="row-list" id="inboxList"><div class="field-help">Nothing yet.</div></div><div class="account-actions" style="margin-top:8px"><button class="secondary" id="inboxReadAllBtn" type="button">Mark all read</button></div></div>
-        <div class="settings-section"><h3>Your tasks <span class="inline-note" id="tasksLimit"></span></h3><div class="row-list" id="tasksList"><div class="field-help">No tasks yet.</div></div></div>
+        <div class="field-help">Stay informed with price alerts, reminders, and a daily market brief. Create a task below or ask in chat.</div>
+        <div class="settings-section"><h3>Inbox <span class="plan-badge" id="inboxBadge" hidden>0</span></h3><div class="row-list" id="inboxList"><div class="field-help">Your alerts and reminders will appear here.</div></div><div class="account-actions" style="margin-top:8px"><button class="secondary" id="inboxReadAllBtn" type="button">Mark all read</button></div></div>
+        <div class="settings-section"><h3>Your tasks <span class="inline-note" id="tasksLimit"></span></h3><div class="row-list" id="tasksList"><div class="field-help">Create a reminder or price alert to get started.</div></div></div>
         <div class="settings-section">
           <h3>New task</h3>
-          <div class="field"><label for="taskKind">Kind</label><select id="taskKind"><option value="reminder">Reminder</option><option value="price_alert">Price alert</option><option value="brief">Morning brief (1 credit per delivery)</option></select></div>
+          <div class="field"><label for="taskKind">Task type</label><select id="taskKind"><option value="reminder">Reminder</option><option value="price_alert">Price alert</option><option value="brief">Morning brief (1 credit per delivery)</option></select></div>
           <div class="field" data-task-field="reminder"><label for="taskMessage">Remind me to</label><input id="taskMessage" placeholder="check SOL and rebalance" maxlength="140" /></div>
-          <div class="field" data-task-field="price_alert"><label>When</label><div class="key-create"><input id="taskSymbol" placeholder="SOL" style="width:90px" maxlength="10" /><select id="taskOp" style="width:auto"><option value="<">drops below</option><option value=">">rises above</option></select><input id="taskPrice" type="number" step="any" placeholder="90" style="width:120px" /></div><label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:8px;margin-top:6px"><input id="taskRepeat" type="checkbox" /> Keep alerting every time it crosses</label></div>
-          <div class="field" data-task-field="reminder"><label for="taskWhenKind">Schedule</label><select id="taskWhenKind"><option value="at">Once, at a date and time</option><option value="in">In a number of minutes</option><option value="daily">Every day at a time</option><option value="weekly">Every week on a day</option></select></div>
+          <div class="field" data-task-field="price_alert"><label>When</label><div class="key-create"><input id="taskSymbol" aria-label="Asset symbol" placeholder="SOL" style="width:90px" maxlength="10" /><select id="taskOp" aria-label="Price condition" style="width:auto"><option value="<">drops below</option><option value=">">rises above</option></select><input id="taskPrice" aria-label="Target price in USD" type="number" step="any" placeholder="90" style="width:120px" /></div><label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:8px;margin-top:6px"><input id="taskRepeat" type="checkbox" /> Repeat while the price condition is met</label></div>
+          <div class="field" data-task-field="reminder"><label for="taskWhenKind">Schedule</label><select id="taskWhenKind"><option value="at">Once</option><option value="in">After a delay</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select></div>
           <div class="field" data-task-field="reminder" data-when="at"><label for="taskAt">Date and time</label><input id="taskAt" type="datetime-local" /></div>
           <div class="field" data-task-field="reminder" data-when="in" hidden><label for="taskInMinutes">Minutes from now</label><input id="taskInMinutes" type="number" min="1" value="60" style="width:120px" /></div>
           <div class="field" data-task-field="reminder brief" data-when="daily weekly"><label for="taskTime">Time</label><input id="taskTime" type="time" value="08:00" style="width:140px" /></div>
@@ -1021,15 +259,15 @@
       </section>
 
       <section class="tab-panel" data-panel="data" hidden>
-        <div class="settings-section"><h3>Export</h3><div class="field-help">Download everything Orbit holds about you — profile, wallets, API keys (names only), credit ledger and conversations — as one JSON file.</div><div class="account-actions" style="margin-top:8px"><button class="secondary" id="exportDataBtn" type="button">Export my data</button></div></div>
-        <div class="settings-section"><h3>Conversations</h3><div class="danger-link" style="margin-top:0;padding-top:0;border-top:0"><button class="secondary danger" id="deleteAllChatsBtn" type="button">Delete all conversations</button><div class="field-help">Removes every conversation on your account from the server and from this device. Cannot be undone.</div></div></div>
+        <div class="settings-section"><h3>Export</h3><div class="field-help">Download your profile, wallet links, API key names, credit history, and conversations as a JSON file.</div><div class="account-actions" style="margin-top:8px"><button class="secondary" id="exportDataBtn" type="button">Export my data</button></div></div>
+        <div class="settings-section"><h3>Conversations</h3><div class="danger-link" style="margin-top:0;padding-top:0;border-top:0"><button class="secondary danger" id="deleteAllChatsBtn" type="button">Delete all conversations</button><div class="field-help">Permanently delete your conversations from your account and this device. This cannot be undone.</div></div></div>
         <div class="danger-zone" id="deleteAccountZone" hidden>
           <h3>Delete account</h3>
           <div class="field-help">Deletes your profile, linked wallets, API keys, sessions, team links and conversations. The credit ledger is kept as an anonymous financial record. Type your email to confirm.</div>
-          <div class="key-create"><input id="deleteAccountEmail" placeholder="your@email" autocomplete="off" /><button class="secondary danger" id="deleteAccountBtn" type="button" disabled>Delete account</button></div>
+          <div class="key-create"><input id="deleteAccountEmail" aria-label="Confirm your email" placeholder="you@example.com" autocomplete="off" /><button class="secondary danger" id="deleteAccountBtn" type="button" disabled>Delete account</button></div>
           <div class="inline-note" id="deleteAccountStatus"></div>
         </div>
-        <div style="margin-top:14px"><a href="/ui/admin.html" style="color:var(--text);font-size:12px">Open provider admin dashboard →</a></div>
+        <div style="margin-top:14px"><a href="/ui/admin.html" style="color:var(--text);font-size:12px">Administration →</a></div>
       </section>
 
       <section class="tab-panel" data-panel="members" hidden>
@@ -1037,7 +275,7 @@
         <div class="settings-section" id="teamOwnerTools" hidden>
           <h3>Members</h3>
           <div class="row-list" id="teamMembers"></div>
-          <div class="key-create"><input id="teamInviteEmail" type="email" placeholder="teammate@company.com" /><button class="secondary" id="teamInviteBtn" type="button">Invite</button></div>
+          <div class="key-create"><input id="teamInviteEmail" aria-label="Team member email" type="email" placeholder="teammate@company.com" /><button class="secondary" id="teamInviteBtn" type="button">Invite</button></div>
           <div class="inline-note" id="teamStatus"></div>
         </div>
         <div class="settings-section" id="teamMemberTools" hidden>
@@ -1051,28 +289,28 @@
 
 <div class="overlay" id="relayDialog" role="dialog" aria-modal="true" aria-labelledby="relayTitle">
   <div class="dialog swap-dialog">
-    <div class="dialog-head"><h2 id="relayTitle">Buy or swap across chains <span class="swap-arrow">⇄</span></h2><button class="close" data-close="relayDialog" aria-label="Close">×</button></div>
+    <div class="dialog-head"><h2 id="relayTitle">Swap assets</h2><button class="close" data-close="relayDialog" aria-label="Close">×</button></div>
     <div class="dialog-body">
-      <p class="swap-intro">Relay finds a route across supported EVM and Solana chains. A wallet prompt appears only after you review the fresh quote and choose to sign.</p>
+      <p class="swap-intro">Choose your assets and networks. Review the quote before approving in your wallet.</p>
       <div class="swap-grid">
-        <div class="field"><label for="relayFromChain">From chain</label><select id="relayFromChain"></select></div>
-        <div class="field"><label for="relayToChain">To chain</label><select id="relayToChain"></select></div>
-        <div class="field swap-span"><label for="relayFromToken">Token you pay (contract or mint)</label><input id="relayFromToken" spellcheck="false" /></div>
+        <div class="field"><label for="relayFromChain">From network</label><select id="relayFromChain"></select></div>
+        <div class="field"><label for="relayToChain">To network</label><select id="relayToChain"></select></div>
+        <div class="field swap-span"><label for="relayFromToken">You pay · token address</label><input id="relayFromToken" spellcheck="false" /></div>
         <div class="field"><label for="relayAmount">Amount</label><input id="relayAmount" inputmode="decimal" placeholder="0.01" /></div>
-        <div class="field"><label for="relayToToken">Token you receive (contract or mint)</label><input id="relayToToken" spellcheck="false" /></div>
-        <div class="field swap-span"><label for="relayRecipient">Destination recipient</label><input id="relayRecipient" spellcheck="false" placeholder="Wallet receiving the output" /><div class="field-help">Required when swapping between different wallet types, such as EVM → Solana.</div></div>
+        <div class="field"><label for="relayToToken">You receive · token address</label><input id="relayToToken" spellcheck="false" /></div>
+        <div class="field swap-span"><label for="relayRecipient">Receiving wallet</label><input id="relayRecipient" spellcheck="false" placeholder="Wallet receiving the output" /><div class="field-help">Required when swapping between different wallet types, such as EVM → Solana.</div></div>
       </div>
-      <div class="swap-safety">For meme coins, paste the exact verified contract or mint. Similar symbols can represent malicious tokens. Check liquidity, holders, and sellability before signing.</div>
-      <div id="relayStatus" class="swap-status">Loading Relay-supported chains…</div>
+      <div class="swap-safety">Verify token addresses and quoted amounts before signing. Different tokens can share the same name.</div>
+      <div id="relayStatus" class="swap-status">Loading networks…</div>
       <section id="relayQuote" class="relay-quote" hidden></section>
-      <div class="card-actions"><button class="primary" id="relayQuoteBtn" type="button">Get fresh quote</button><button class="primary" id="relayExecuteBtn" type="button" hidden>Review &amp; sign</button><button class="secondary" data-close="relayDialog" type="button">Cancel</button></div>
+      <div class="card-actions"><button class="primary" id="relayQuoteBtn" type="button">Get quote</button><button class="primary" id="relayExecuteBtn" type="button" hidden>Review &amp; sign</button><button class="secondary" data-close="relayDialog" type="button">Cancel</button></div>
     </div>
   </div>
 </div>
 
-<script defer src="/ui/privy.js?v=7"></script>
+<script defer src="/ui/privy.js?v=8"></script>
 <script defer src="/ui/coinbase.js?v=2"></script>
-<script defer src="/ui/reown.js?v=1"></script>
+<script defer src="/ui/reown.js?v=2"></script>
 <script defer src="/ui/relay.js?v=8"></script>
 <script defer src="/ui/executors.js?v=1"></script>
 <script defer src="/ui/x402.js?v=1"></script>
@@ -1099,13 +337,13 @@ teamToggle.addEventListener("change",()=>{teamModePending=teamToggle.checked;$("
 // text (chip) plus the structured fields (card). Fields are enforced exactly
 // on every quote; only free-text notes are interpreted by the Risk agent.
 let policySet=false, charterFields=null, charterLimits=null;
-function syncPolicy(charter,fields){const chip=$("#policyChip");const text=(charter||"").trim();policySet=Boolean(text);charterFields=fields||null;chip.hidden=false;chip.classList.toggle("unset",!policySet);$("#policyText").textContent=policySet?text:"not set";chip.title=policySet?`Your risk charter: ${text}\nClick to review or change it.`:"No risk charter yet: trades run in advisory mode. Click to choose your rules.";}
+function syncPolicy(charter,fields){const chip=$("#policyChip");const text=(charter||"").trim();policySet=Boolean(text);charterFields=fields||null;chip.hidden=false;chip.classList.toggle("unset",!policySet);$("#policyText").textContent=policySet?text:"Set limits";chip.title=policySet?`Your trade preferences: ${text}\nReview or edit preferences.`:"Set your preferred trade size, slippage, and networks.";}
 async function openCharterDialog(){
   if(!charterLimits){try{charterLimits=await (await fetch("/chat/risk-charter/limits")).json();}catch{charterLimits={max_trade_usd:null,max_slippage_bps:null,chains:[]};}}
   const f=charterFields||{};
   $("#charterMaxUsd").value=f.max_trade_usd??"";$("#charterMaxPct").value=f.max_position_pct??"";$("#charterMaxBps").value=f.max_slippage_bps??"";$("#charterVerified").checked=Boolean(f.verified_only);$("#charterNotes").value=f.notes||"";
-  if(charterLimits.max_trade_usd){$("#charterMaxUsd").max=charterLimits.max_trade_usd;$("#charterMaxUsdHelp").textContent=`Cannot exceed the built-in cap of $${charterLimits.max_trade_usd}.`;}
-  if(charterLimits.max_slippage_bps){$("#charterMaxBps").max=charterLimits.max_slippage_bps;$("#charterMaxBpsHelp").textContent=`Cannot exceed the built-in cap of ${charterLimits.max_slippage_bps} bps.`;}
+  if(charterLimits.max_trade_usd){$("#charterMaxUsd").max=charterLimits.max_trade_usd;$("#charterMaxUsdHelp").textContent=`Platform maximum: $${charterLimits.max_trade_usd}.`;}
+  if(charterLimits.max_slippage_bps){$("#charterMaxBps").max=charterLimits.max_slippage_bps;$("#charterMaxBpsHelp").textContent=`100 basis points = 1%. Platform maximum: ${charterLimits.max_slippage_bps} bps.`;}
   const allowed=new Set(f.allowed_chains||[]);
   $("#charterChains").innerHTML=(charterLimits.chains||[]).map(c=>`<label><input type="checkbox" value="${escapeHtml(c)}" ${allowed.has(c)?"checked":""}/> ${escapeHtml(c)}</label>`).join("");
   $("#charterClearBtn").hidden=!policySet;$("#charterError").textContent="";
@@ -1218,8 +456,13 @@ function scrollToBottom(force = false) {
   });
 }
 function hideWelcome() { $("#welcome")?.remove(); }
-function openDialog(id) { $(`#${id}`).classList.add("open"); }
-function closeDialog(id) { $(`#${id}`).classList.remove("open"); }
+const dialogStack=[];
+const dialogReturnFocus=new Map();
+function dialogFocusables(dialog){return [...dialog.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]')].filter(el=>el.getClientRects().length&&!el.closest('[hidden]'));}
+function syncDialogLayers(){const top=dialogStack.at(-1);$(".app").inert=Boolean(top);document.querySelectorAll(".overlay").forEach(el=>{el.inert=el.id!==top;el.style.zIndex=String(50+Math.max(0,dialogStack.indexOf(el.id)));});}
+function openDialog(id){const dialog=$(`#${id}`);if(dialogStack.includes(id))return;dialogReturnFocus.set(id,document.activeElement);dialogStack.push(id);dialog.classList.add("open");syncDialogLayers();requestAnimationFrame(()=>{if(dialogStack.at(-1)===id)dialogFocusables(dialog)[0]?.focus();});}
+function closeDialog(id){const dialog=$(`#${id}`);dialog.classList.remove("open");const index=dialogStack.indexOf(id);if(index>=0)dialogStack.splice(index,1);syncDialogLayers();const target=dialogReturnFocus.get(id);dialogReturnFocus.delete(id);if(target?.isConnected&&!target.closest('[inert]'))target.focus();else if(dialogStack.length)dialogFocusables($(`#${dialogStack.at(-1)}`))[0]?.focus();}
+document.addEventListener("keydown",event=>{const top=dialogStack.at(-1);if(!top)return;if(event.key==="Escape"){event.preventDefault();closeDialog(top);return;}if(event.key!=="Tab")return;const items=dialogFocusables($(`#${top}`));if(!items.length){event.preventDefault();return;}const first=items[0],last=items.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}});
 
 const THEME_KEY = "orbit_theme_v1";
 function themePreference() { const value = readStorage(THEME_KEY, "system"); return ["system", "light", "dark"].includes(value) ? value : "system"; }
@@ -1239,7 +482,7 @@ function initProfile() {
   $("#riskProfileSelect").value = profile.riskProfile || "balanced";
   $("#defaultWalletInput").value = profile.defaultWallet || "";
   $("#prefAutoScroll").checked = readStorage(AUTO_SCROLL_KEY, true);
-  $("#profileName").textContent = profile.name || "Web3 User";
+  $("#profileName").textContent = profile.name || "Your account";
   $("#profileRisk").textContent = `${(profile.riskProfile || "balanced")[0].toUpperCase()}${(profile.riskProfile || "balanced").slice(1)} risk`;
   $("#profileAvatar").textContent = (profile.name || "W").trim()[0].toUpperCase();
   walletInput.value = profile.defaultWallet || "";
@@ -1265,7 +508,7 @@ function updateChat(session, text) {
 function renderChatList() {
   chatListEl.innerHTML = "";
   const valid = chatRegistry.filter(chat => chat?.id && !chat.id.startsWith("draft-"));
-  if (!valid.length) { chatListEl.innerHTML = '<div class="history-empty">Your conversations will appear here.</div>'; return; }
+  if (!valid.length) { chatListEl.innerHTML = '<div class="history-empty">Your recent chats appear here.</div>'; return; }
   valid.forEach(chat => {
     const item = document.createElement("button"); item.className = `chat-item${chat.id === sessionId ? " active" : ""}`;
     item.innerHTML = `<span class="chat-item-title">${escapeHtml(chat.title || "New chat")}</span><span class="chat-item-time">${formatRelativeTime(chat.updatedAt)}</span><span class="delete-chat" title="Delete chat" role="button" aria-label="Delete chat">×</span>`;
@@ -1313,7 +556,10 @@ async function switchSession(id) {
   chatTurnEpoch++;sessionId = id; sessionRevision=0;sessionStorage.setItem("orbit_session_id", id); renderChatList(); await hydrateHistory();
   closeSidebar();
 }
-function setSidebar(open) { $("#sidebar").classList.toggle("open",open);$("#sidebarBackdrop").classList.toggle("open",open);$("#mobileMenu").setAttribute("aria-expanded",String(open)); }
+function syncSidebarAccessibility(){const mobile=matchMedia("(max-width:720px)").matches;const open=$("#sidebar").classList.contains("open");$("#sidebar").inert=mobile&&!open;$(".main").inert=mobile&&open;}
+function setSidebar(open){const wasOpen=$("#sidebar").classList.contains("open");$("#sidebar").classList.toggle("open",open);$("#sidebarBackdrop").classList.toggle("open",open);$("#mobileMenu").setAttribute("aria-expanded",String(open));syncSidebarAccessibility();if(matchMedia("(max-width:720px)").matches){if(open)$("#newChatBtn").focus();else if(wasOpen)$("#mobileMenu").focus();}}
+matchMedia("(max-width:720px)").addEventListener("change",syncSidebarAccessibility);
+syncSidebarAccessibility();
 function closeSidebar() { setSidebar(false); }
 async function deleteChat(id) {
   try { await fetch(`/chat/history/${encodeURIComponent(id)}`, { method: "DELETE" }); } catch {}
@@ -1323,9 +569,9 @@ async function deleteChat(id) {
 const HIGHLIGHT_ICONS={crypto:'<svg class="icon" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/></svg>',stocks:'<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15l3-3 3 2 4-5"/></svg>',action:'<svg class="icon" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/></svg>'};
 let highlights=null;
 async function loadHighlights(){try{const res=await fetch("/home/highlights");if(!res.ok)throw new Error();highlights=await res.json();}catch{highlights=null;}renderHighlights();}
-function renderHighlights(){const grid=$("#homePrompts");const cap=$("#highlightsCaption");if(!grid||!highlights||!(highlights.cards||[]).length)return;
+function renderHighlights(){const grid=$("#homePrompts");const cap=$("#highlightsCaption");if(!grid)return;grid.hidden=!highlights||!(highlights.cards||[]).length;if(grid.hidden){if(cap)cap.hidden=true;return;}
   grid.innerHTML=highlights.cards.map(c=>{const attrs=c.action?`data-action="${escapeHtml(c.action)}"`:`data-msg="${escapeHtml(c.prompt||c.title)}"`;return `<button class="prompt-card" ${attrs} data-tone="${escapeHtml(c.tone||"teal")}" data-kind="${escapeHtml(c.kind||"action")}"><span class="prompt-tile">${HIGHLIGHT_ICONS[c.kind]||HIGHLIGHT_ICONS.action}</span><strong>${escapeHtml(c.title)}</strong><span class="prompt-desc">${escapeHtml(c.summary||"")}</span><span class="prompt-source"><span>${escapeHtml(c.source||(c.kind==="action"?"Orbit":""))}</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></button>`;}).join("");
-  if(cap){const when=highlights.as_of?new Date(highlights.as_of):null;cap.hidden=false;cap.textContent=highlights.source==="news"?`Today · crypto & stocks · as of ${when?when.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"now"}`:highlights.source==="market"?`Live market · as of ${when?when.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"now"}`:"";}}
+  if(cap){const when=highlights.as_of?new Date(highlights.as_of):null;cap.hidden=false;cap.textContent=highlights.source==="news"?`Market updates · ${when?when.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"now"}`:highlights.source==="market"?`Market updates · ${when?when.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"now"}`:"";}}
 let homeSuggestions=null,activeChip="trending";
 async function loadSuggestions(){try{const res=await fetch("/home/suggestions");if(!res.ok)throw new Error();homeSuggestions=(await res.json()).categories||[];}catch{homeSuggestions=null;}renderHomeSuggestions();}
 function renderHomeSuggestions(){const chips=$("#homeChips"),rows=$("#homeRows");if(!chips||!rows||!homeSuggestions||!homeSuggestions.length)return;
@@ -1344,45 +590,45 @@ function startNewChat() {
   if (busy) return;
   chatTurnEpoch++;sessionId = null;sessionRevision=0; sessionStorage.removeItem("orbit_session_id"); messagesEl.innerHTML = welcomeMarkup; fillGreeting(); renderHighlights(); renderHomeSuggestions(); renderCapabilities(); setNav("navHome"); renderChatList(); syncTeamMode(false); syncPolicy(null,null); autoFollow=true;conversationEl.scrollTop=0;closeSidebar();input.focus();
 }
-// What Orbit can do: the capability catalogue rendered on the home screen. One
+// Start with a question: the capability catalogue rendered on the home screen. One
 // example prompt per capability, phrased the way people actually ask.
 const CAPABILITIES=[
  ["Market","<svg class=\"icon\" viewBox=\"0 0 24 24\"><path d=\"M4 19V5M4 19h16M8 15l3-4 3 2 5-6\"/></svg>",[
-  ["How's the crypto market today?","Overview card: BTC / ETH / SOL, sentiment, movers, trending"],
-  ["What are the trending narratives right now?","The market-wide story from the news, plus on-chain metas"],
+  ["How's the crypto market today?","Major assets, market sentiment, and price changes"],
+  ["What are the trending narratives right now?","The themes shaping markets today"],
   ["Trending tokens on Solana","Live pools and launches with volume and liquidity"],
-  ["Best USDC yield on Base","DefiLlama pools ranked by APY, dust filtered"],
-  ["How much revenue does Aave make?","Fees and revenue: 24h, 30d, all-time, with methodology"],
+  ["Best USDC yield on Base","Compare available yields and pool sizes"],
+  ["How much revenue does Aave make?","Revenue trends and their sources"],
   ["Top gainers on Base in the last 24h","Ranked movers per chain"]]],
  ["Research","<svg class=\"icon\" viewBox=\"0 0 24 24\"><circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"m20 20-3.5-3.5\"/></svg>",[
-  ["Deep dive on JUP","10-dimension due diligence with confidence and flip variable"],
-  ["Is BONK safe to ape into?","Jupiter identity + Shield safety dossier"],
-  ["Who are the top holders of PEPE?","Holder concentration, chain-correct"],
+  ["Deep dive on JUP","Fundamentals, activity, and key risks"],
+  ["What are the risks of buying BONK?","Token verification and security indicators"],
+  ["Who are the top holders of PEPE?","Ownership distribution and concentration"],
   ["Why is SOL moving today?","Price, volume and the news driver, with sources"],
-  ["What is crypto twitter saying about BONK?","KOL and social sentiment"],
+  ["What is crypto twitter saying about BONK?","Social discussion and market sentiment"],
   ["What events could move the market this week?","Unlocks, listings, macro dates"]]],
  ["Knowledge base","<svg class=\"icon\" viewBox=\"0 0 24 24\"><path d=\"M4 5h7a2 2 0 0 1 2 2v12a1 1 0 0 0-1-1H4V5Zm16 0h-7a2 2 0 0 0-2 2v12a1 1 0 0 1 1-1h8V5Z\"/></svg>",[
   ["How does Aave V3's E-mode change the liquidation threshold?","Answers from protocol docs, cited"],
-  ["Has Aave ever been hacked?","Every recorded DeFi incident, with dates and losses"],
+  ["Has Aave ever been hacked?","Reported incidents, dates, and losses"],
   ["What backs USDe and how does it keep its peg?","Stablecoin peg, mechanism and chains"],
-  ["Who are Kamino's competitors on Solana?","The protocol graph: competitors, integrations, forks"],
+  ["Who are Kamino's competitors on Solana?","Related projects and integrations"],
   ["What did the Lido community vote on recently?","Snapshot proposals and forum threads"],
   ["Who are the investors backing EigenLayer?","Funding rounds and investors"]]],
  ["Wallets","<svg class=\"icon\" viewBox=\"0 0 24 24\"><rect x=\"3\" y=\"6\" width=\"18\" height=\"13\" rx=\"2\"/><path d=\"M16 12h5M3 10h18\"/></svg>",[
   ["Analyze my portfolio","Holdings, allocation and concentration risk"],
-  ["What if my portfolio drops 20%?","Deterministic price-shock scenario"],
-  ["Wallet health check","Balances, pricing gaps, gas readiness"]]],
+  ["What if my portfolio drops 20%?","Estimate the impact on your holdings"],
+  ["Wallet health check","Balances, data coverage, and network fees"]]],
  ["Trading","<svg class=\"icon\" viewBox=\"0 0 24 24\"><path d=\"M4 7h13l-3-3M20 17H7l3 3\"/></svg>",[
-  ["What would happen if I sold 0.05 SOL for USDC?","Read-only simulation with a live Jupiter quote"],
-  ["Swap 0.01 SOL to USDC on Solana with 50 bps slippage","Quote → review → confirm from your wallet"],
-  ["Start a cross-chain swap","Bridge and swap across chains with a reviewed Relay quote"],
-  ["Set my risk charter","Rules the Risk agent enforces before any quote"]]],
+  ["What would happen if I sold 0.05 SOL for USDC?","Estimate the outcome without making a trade"],
+  ["Swap 0.01 SOL to USDC on Solana with 50 bps slippage","Review a quote before approving in your wallet"],
+  ["Start a cross-chain swap","Compare a route between networks"],
+  ["Set my risk charter","Set your preferred trade limits"]]],
  ["Alerts & tasks","<svg class=\"icon\" viewBox=\"0 0 24 24\"><path d=\"M6 16V11a6 6 0 0 1 12 0v5l2 2H4l2-2Zm4 3a2 2 0 0 0 4 0\"/></svg>",[
   ["Alert me when SOL drops below $100","Price alerts land in your inbox"],
   ["Remind me in 3 hours to check SOL","Reminders run in the background"],
-  ["Show my tasks","Everything scheduled, one place to cancel"]]]];
+  ["Show my tasks","Manage reminders, alerts, and briefs"]]]];
 function renderCapabilities(){const host=$("#homeCapabilities");if(!host)return;
-  host.innerHTML=`<div class="cap-head"><h2>What Orbit can do</h2><p>Tap any example, or ask in your own words.</p></div>`+CAPABILITIES.map(([group,icon,items])=>`<div class="cap-group"><h3>${icon}${escapeHtml(group)}</h3><div class="cap-grid">${items.map(([q,d])=>`<button class="cap-item" type="button" data-q="${escapeHtml(q)}"><span class="cap-q">${escapeHtml(q)}</span><small>${escapeHtml(d)}</small></button>`).join("")}</div></div>`).join("");}
+  host.innerHTML=`<div class="cap-head"><h2>Start with a question</h2><p>Choose an example to begin.</p></div>`+CAPABILITIES.map(([group,icon,items])=>`<div class="cap-group"><h3>${icon}${escapeHtml(group)}</h3><div class="cap-grid">${items.map(([q,d])=>`<button class="cap-item" type="button" data-q="${escapeHtml(q)}"><span class="cap-q">${escapeHtml(q==="Set my risk charter"?"Set trade preferences":q)}</span><small>${escapeHtml(d)}</small></button>`).join("")}</div></div>`).join("");}
 document.addEventListener("click",event=>{const item=event.target.closest(".cap-item");if(!item)return;const q=item.dataset.q;
   if(q==="Set my risk charter"){openCharterDialog();return;}
   if(q==="Analyze my portfolio"){analyzePortfolio();return;}
@@ -1391,7 +637,7 @@ renderCapabilities();
 const welcomeMarkup = messagesEl.innerHTML;
 // Home state: the welcome hero is on screen -> the composer sits under it and the
 // cards / explore panel show; in a conversation they hide and the composer docks.
-function syncHomeState(){document.body.classList.toggle("home",Boolean($("#welcome")));}
+function syncHomeState(){const home=Boolean($("#welcome"));document.body.classList.toggle("home",home);$("#navHome").classList.toggle("active",home);$("#navHome").setAttribute("aria-current",home?"page":"false");}
 new MutationObserver(syncHomeState).observe(messagesEl,{childList:true});syncHomeState();
 
 
@@ -1603,7 +849,7 @@ function renderRelayPlanCard(draft={},revision=sessionRevision){
   connect.addEventListener("click",()=>openDialog("walletDialog"));retry.addEventListener("click",loadQuote);$(".relay-plan-dismiss",card).addEventListener("click",()=>card.remove());void loadQuote();return card;
 }
 function renderInlineRelaySwap(draft={}){
-  const card=document.createElement("section");card.className="data-card inline-swap-card";card.innerHTML=`<div class="data-card-head"><span class="data-card-title">Cross-chain swap</span><span class="data-card-badge">Relay · Chat route</span></div><div class="data-card-body"><div class="inline-swap-grid"><div class="field"><label>From chain</label><select class="inline-from-chain"></select></div><div class="field"><label>To chain</label><select class="inline-to-chain"></select></div><div class="field"><label>Amount</label><input class="inline-amount" inputmode="decimal" placeholder="0.01" value="${escapeHtml(draft.amount||"")}" /></div><div class="field"><label>Maximum slippage</label><input class="inline-slippage" inputmode="numeric" type="number" min="0" max="10000" placeholder="Auto" value="${escapeHtml(draft.slippage_bps??"")}" /></div><div class="field"><label>Token you pay</label><input class="inline-from-token" spellcheck="false" placeholder="Symbol, contract, or mint" value="${escapeHtml(draft.input_token||"")}" /></div><div class="field"><label>Token you receive</label><input class="inline-to-token" spellcheck="false" placeholder="Symbol, contract, or mint" value="${escapeHtml(draft.output_token||"")}" /></div><div class="field wide"><label>Destination recipient</label><input class="inline-recipient" spellcheck="false" placeholder="Required for EVM ↔ Solana" value="${escapeHtml(draft.recipient||"")}" /></div></div><div class="swap-safety">Verify meme-coin contracts, liquidity, holders, and sellability. A ticker alone is accepted only when Relay finds one unambiguous token on the selected chain.</div><div class="swap-status inline-status">Loading Relay-supported chains…</div><section class="relay-quote inline-quote" hidden></section><div class="card-actions"><button class="primary inline-quote-btn" type="button">Get fresh quote</button><button class="primary inline-execute-btn" type="button" hidden>Review &amp; sign</button><button class="secondary inline-dismiss-btn" type="button">Dismiss</button></div></div>`;
+  const card=document.createElement("section");card.className="data-card inline-swap-card";card.innerHTML=`<div class="data-card-head"><span class="data-card-title">Cross-chain swap</span><span class="data-card-badge">Relay · Chat route</span></div><div class="data-card-body"><div class="inline-swap-grid"><div class="field"><label>From network</label><select class="inline-from-chain"></select></div><div class="field"><label>To network</label><select class="inline-to-chain"></select></div><div class="field"><label>Amount</label><input class="inline-amount" inputmode="decimal" placeholder="0.01" value="${escapeHtml(draft.amount||"")}" /></div><div class="field"><label>Maximum slippage</label><input class="inline-slippage" inputmode="numeric" type="number" min="0" max="10000" placeholder="Auto" value="${escapeHtml(draft.slippage_bps??"")}" /></div><div class="field"><label>Token you pay</label><input class="inline-from-token" spellcheck="false" placeholder="Symbol, contract, or mint" value="${escapeHtml(draft.input_token||"")}" /></div><div class="field"><label>Token you receive</label><input class="inline-to-token" spellcheck="false" placeholder="Symbol, contract, or mint" value="${escapeHtml(draft.output_token||"")}" /></div><div class="field wide"><label>Receiving wallet</label><input class="inline-recipient" spellcheck="false" placeholder="Required for EVM ↔ Solana" value="${escapeHtml(draft.recipient||"")}" /></div></div><div class="swap-safety">Verify meme-coin contracts, liquidity, holders, and sellability. A ticker alone is accepted only when Relay finds one unambiguous token on the selected chain.</div><div class="swap-status inline-status">Loading networks…</div><section class="relay-quote inline-quote" hidden></section><div class="card-actions"><button class="primary inline-quote-btn" type="button">Get quote</button><button class="primary inline-execute-btn" type="button" hidden>Review &amp; sign</button><button class="secondary inline-dismiss-btn" type="button">Dismiss</button></div></div>`;
   const fromSelect=$(".inline-from-chain",card),toSelect=$(".inline-to-chain",card),amountInput=$(".inline-amount",card),slippageInput=$(".inline-slippage",card),fromToken=$(".inline-from-token",card),toToken=$(".inline-to-token",card),recipient=$(".inline-recipient",card),status=$(".inline-status",card),quoteEl=$(".inline-quote",card),quoteBtn=$(".inline-quote-btn",card),executeBtn=$(".inline-execute-btn",card);let state=null;
   const setStatus=(message,type="")=>{status.textContent=message;status.className=`swap-status inline-status ${type}`.trim();};
   const invalidate=()=>{state=null;quoteEl.hidden=true;executeBtn.hidden=true;};
@@ -1611,7 +857,7 @@ function renderInlineRelaySwap(draft={}){
   const setNativeIfEmpty=(input,select)=>{const chain=relayChain(select.value);if(!input.value.trim())input.value=chain?.nativeSymbol||chain?.nativeCurrency||"";};
   const renderQuote=()=>{const quote=state.quote,d=quote.details||{},input=d.currencyIn||{},output=d.currencyOut||{},fees=quote.fees||{},source=relayChain(fromSelect.value),destination=relayChain(toSelect.value);quoteEl.hidden=false;quoteEl.innerHTML=`<div class="relay-quote-title">Fresh Relay quote <span>Review required</span></div><div class="stat-row"><span>You pay</span><b>${escapeHtml(input.amountFormatted||amountInput.value)} ${escapeHtml(input.currency?.symbol||"")}</b></div><div class="stat-row"><span>Estimated output</span><b>${escapeHtml(output.amountFormatted||output.amount||"—")} ${escapeHtml(output.currency?.symbol||"")}</b></div><div class="stat-row"><span>Minimum output</span><b>${escapeHtml(output.minimumAmount||"—")}</b></div><div class="stat-row"><span>Maximum slippage</span><b>${slippageInput.value?`${escapeHtml(slippageInput.value)} bps`:"Relay automatic"}</b></div><div class="stat-row"><span>Route</span><b>${escapeHtml(source?.name||"")} → ${escapeHtml(destination?.name||"")}</b></div><div class="stat-row"><span>Estimated time</span><b>${d.timeEstimate?`${Math.max(1,Math.ceil(d.timeEstimate/60))} min`:"—"}</b></div><div class="stat-row"><span>Gas / Relay fee</span><b>${escapeHtml(formatRelayFee(fees.gas))} / ${escapeHtml(formatRelayFee(fees.relayer))}</b></div><div class="stat-row"><span>Total impact</span><b>${d.totalImpact?.percent?`${escapeHtml(d.totalImpact.percent)}%`:"—"}</b></div><div class="relay-progress">${(quote.steps||[]).map(step=>`<div class="relay-progress-row"><span>○</span><span>${escapeHtml(step.action||step.description)}</span></div>`).join("")}</div>`;executeBtn.hidden=false;};
   const renderProgress=progress=>{const rows=(progress.steps||[]).map(step=>{const done=step.items?.every(item=>item.status==="complete"),active=progress.currentStep?.id===step.id;return`<div class="relay-progress-row ${done?"done":active?"active":""}"><span>${done?"✓":active?"●":"○"}</span><span>${escapeHtml(step.action||step.description)}</span></div>`;}).join("");const hashes=(progress.txHashes||[]).map(tx=>`<div class="stat-row"><span>Transaction</span><b>${relayExplorerLink(tx.txHash,tx.chainId)}</b></div>`).join("");const target=$(".relay-progress",quoteEl);if(target)target.innerHTML=rows+hashes;};
-  quoteBtn.addEventListener("click",async()=>{const from=relayChain(fromSelect.value),to=relayChain(toSelect.value),amount=amountInput.value.trim(),slippage=slippageInput.value.trim(),inputToken=fromToken.value.trim(),outputToken=toToken.value.trim(),destination=recipient.value.trim();if(!from||!to||!amount||Number(amount)<=0||!inputToken||!outputToken){setStatus("Add both chains, both tokens, and a positive amount.","error");return;}if(slippage&&(Number(slippage)<0||Number(slippage)>10000)){setStatus("Slippage must be between 0 and 10,000 bps.","error");return;}if(from.vmType!==to.vmType&&!destination){setStatus("Add the destination wallet address for this EVM ↔ Solana route.","error");return;}quoteBtn.disabled=true;quoteBtn.textContent="Resolving route…";invalidate();try{const currency=await window.OrbitRelay.resolveCurrency(from.id,inputToken),toCurrency=await window.OrbitRelay.resolveCurrency(to.id,outputToken);setStatus("Connecting the source wallet and requesting a fresh quote…");state=await window.OrbitRelay.getFreshQuote({chainId:from.id,toChainId:to.id,currency,toCurrency,amount,recipient:destination||undefined,slippageBps:slippage?Number(slippage):undefined});renderQuote();setStatus("Review output, fees, impact, and route before signing.","ok");}catch(error){setStatus(relayError(error),"error");}finally{quoteBtn.disabled=false;quoteBtn.textContent="Get fresh quote";}});
+  quoteBtn.addEventListener("click",async()=>{const from=relayChain(fromSelect.value),to=relayChain(toSelect.value),amount=amountInput.value.trim(),slippage=slippageInput.value.trim(),inputToken=fromToken.value.trim(),outputToken=toToken.value.trim(),destination=recipient.value.trim();if(!from||!to||!amount||Number(amount)<=0||!inputToken||!outputToken){setStatus("Add both chains, both tokens, and a positive amount.","error");return;}if(slippage&&(Number(slippage)<0||Number(slippage)>10000)){setStatus("Slippage must be between 0 and 10,000 bps.","error");return;}if(from.vmType!==to.vmType&&!destination){setStatus("Add the destination wallet address for this EVM ↔ Solana route.","error");return;}quoteBtn.disabled=true;quoteBtn.textContent="Resolving route…";invalidate();try{const currency=await window.OrbitRelay.resolveCurrency(from.id,inputToken),toCurrency=await window.OrbitRelay.resolveCurrency(to.id,outputToken);setStatus("Connecting the source wallet and requesting a fresh quote…");state=await window.OrbitRelay.getFreshQuote({chainId:from.id,toChainId:to.id,currency,toCurrency,amount,recipient:destination||undefined,slippageBps:slippage?Number(slippage):undefined});renderQuote();setStatus("Review output, fees, impact, and route before signing.","ok");}catch(error){setStatus(relayError(error),"error");}finally{quoteBtn.disabled=false;quoteBtn.textContent="Get quote";}});
   executeBtn.addEventListener("click",async()=>{if(!state)return;if(Date.now()-state.createdAt>45000){setStatus("This quote is stale. Request another quote and review it again.","error");invalidate();return;}executeBtn.disabled=true;executeBtn.textContent="Check wallet…";setStatus("Confirm the displayed approvals and transaction in your wallet.");try{await window.OrbitExecutors.executeRelay(state.quote,state.wallet,progress=>{renderProgress(progress);if(progress.error)setStatus(relayError(progress.error),"error");});setStatus("Cross-chain swap completed.","ok");executeBtn.hidden=true;}catch(error){setStatus(relayError(error),"error");executeBtn.disabled=false;executeBtn.textContent="Review & sign";}});
   $(".inline-dismiss-btn",card).addEventListener("click",()=>card.remove());[fromSelect,toSelect,amountInput,slippageInput,fromToken,toToken,recipient].forEach(field=>field.addEventListener("change",invalidate));
   (async()=>{try{await ensureRelayChains();const options=chainOptions();fromSelect.innerHTML=options;toSelect.innerHTML=options;const source=findRelayChain(draft.source_chain)||relayChains.find(chain=>chain.id===window.OrbitRelay.constants.SOLANA_CHAIN_ID),destination=findRelayChain(draft.destination_chain)||relayChains.find(chain=>chain.id===8453);if(source)fromSelect.value=String(source.id);if(destination)toSelect.value=String(destination.id);setNativeIfEmpty(fromToken,fromSelect);setNativeIfEmpty(toToken,toSelect);setStatus("Route parsed from chat. Review the fields and request a fresh quote.","ok");}catch(error){setStatus(relayError(error),"error");}})();
@@ -1705,7 +951,7 @@ function renderPortfolioCard(snapshot) {
 async function analyzePortfolio(){const address=walletInput.value.trim();if(!address){openDialog("walletDialog");return;}addUserMessage("Analyze my portfolio");const typing=addTyping();busy=true;
   try{const res=await fetch(`/portfolio/${encodeURIComponent(address)}`);const data=await res.json();if(!res.ok)finishAgentMessage(typing,{error:normalizeError(data,res.status)});else{const body=$(".message-body",typing);body.innerHTML="";body.appendChild(renderPortfolioCard(data));}}
   catch(error){finishAgentMessage(typing,{error:error.message});}finally{busy=false;scrollToBottom();}}
-document.addEventListener("click",event=>{const prompt=event.target.closest(".prompt-card");if(!prompt)return;if(prompt.dataset.action==="portfolio")analyzePortfolio();else if(prompt.dataset.action==="relay")sendMessage("Start a cross-chain swap");else if(prompt.dataset.msg)sendMessage(prompt.dataset.msg);});
+document.addEventListener("click",event=>{const prompt=event.target.closest(".prompt-card, .home-shortcuts button");if(!prompt)return;if(prompt.dataset.action==="portfolio")analyzePortfolio();else if(prompt.dataset.action==="relay")sendMessage("Start a cross-chain swap");else if(prompt.dataset.action==="research"){input.value="Research ";input.focus();}else if(prompt.dataset.msg)sendMessage(prompt.dataset.msg);});
 
 function relayChain(id){return relayChains.find(chain=>chain.id===Number(id));}
 function relayError(error){
@@ -1744,7 +990,7 @@ async function requestRelayQuote(){
   const button=$("#relayQuoteBtn");button.disabled=true;button.textContent="Finding route…";invalidateRelayQuote();setRelayStatus("Connecting the source wallet and requesting a fresh Relay quote…");
   try{relayQuoteState=await window.OrbitRelay.getFreshQuote({chainId:from.id,toChainId:to.id,currency,toCurrency,amount,recipient:recipient||undefined});renderRelayQuote(relayQuoteState);setRelayStatus("Review every value below. Nothing has been signed.","ok");}
   catch(error){setRelayStatus(relayError(error),"error");}
-  finally{button.disabled=false;button.textContent="Get fresh quote";}
+  finally{button.disabled=false;button.textContent="Get quote";}
 }
 async function executeRelayQuote(){
   if(!relayQuoteState)return;if(Date.now()-relayQuoteState.createdAt>45000){setRelayStatus("This quote is stale. Get a fresh quote and review the changed output before signing.","error");invalidateRelayQuote();return;}
@@ -1760,19 +1006,19 @@ function setWalletConnected(address,label,addresses=[]){walletInput.value=addres
 function setWalletDisconnected(){activeProvider=null;metamaskWallet=null;metamaskAccount=null;window.OrbitSolanaWallet=null;window.OrbitWalletContext={provider:null};syncPayChip();walletInput.disabled=false;walletInput.value=profile.defaultWallet||"";$("#connectedPanel").hidden=true;$("#walletOptions").hidden=false;$("#privyAuth").hidden=true;$("#disconnectWalletBtn").hidden=true;if(walletInput.value)setReadOnlyWallet(walletInput.value);else{$("#walletButton").classList.remove("connected");$("#walletLabel").textContent="Connect wallet";}}
 function getPhantomProvider(){return window.solana?.isPhantom?window.solana:null;}
 function setPrivyStatus(message,type=""){const el=$("#privyStatus");el.textContent=message;el.className=`privy-auth-status ${type}`.trim();}
-function applyPrivyState(state,close=false){const button=$("#connectPrivyBtn"),help=$("#privyOptionHelp");button.disabled=!state.configured;help.textContent=state.configured?"Email sign-in with Ethereum and Solana wallets":"Set PRIVY_APP_ID and PRIVY_CLIENT_ID to enable";if(!state.authenticated)return;activeProvider="privy";const primary=state.solanaAddress||state.evmAddress;const addresses=[state.solanaAddress&&`SOL ${shortAddress(state.solanaAddress)}`,state.evmAddress&&`EVM ${shortAddress(state.evmAddress)}`].filter(Boolean);if(primary)setWalletConnected(primary,"Privy",addresses);if(close)closeDialog("walletDialog");}
-function showPrivyError(error){$("#privyAuth").hidden=false;$("#privyEmailRow").hidden=true;$("#privyCodeRow").hidden=true;$("#privyOptionHelp").textContent="Privy configuration needs attention";setPrivyStatus(typeof error==="string"?error:relayError(error),"error");}
-async function connectPrivy(){try{const state=await window.OrbitPrivy.initialize();if(!state.configured){throw new Error("Privy is not configured for this deployment.");}if(state.authenticated){applyPrivyState(state,true);return;}$("#privyEmailRow").hidden=false;$("#privyAuth").hidden=false;$("#privyEmail").focus();}catch(error){showPrivyError(error);}}
+function applyPrivyState(state,close=false){const button=$("#connectPrivyBtn"),help=$("#privyOptionHelp");button.disabled=!state.configured;help.textContent=state.configured?"Email sign-in with Ethereum and Solana wallets":"Currently unavailable";if(!state.authenticated)return;activeProvider="privy";const primary=state.solanaAddress||state.evmAddress;const addresses=[state.solanaAddress&&`SOL ${shortAddress(state.solanaAddress)}`,state.evmAddress&&`EVM ${shortAddress(state.evmAddress)}`].filter(Boolean);if(primary)setWalletConnected(primary,"Privy",addresses);if(close)closeDialog("walletDialog");}
+function showPrivyError(error){console.warn("Email wallet unavailable",error);$("#privyAuth").hidden=true;$("#privyEmailRow").hidden=true;$("#privyCodeRow").hidden=true;$("#privyOptionHelp").textContent="Unavailable right now. Try another wallet.";}
+async function connectPrivy(){try{const state=await window.OrbitPrivy.initialize();if(!state.configured){throw new Error("Email wallets are currently unavailable. Choose another wallet to continue.");}if(state.authenticated){applyPrivyState(state,true);return;}$("#privyEmailRow").hidden=false;$("#privyAuth").hidden=false;$("#privyEmail").focus();}catch(error){showPrivyError(error);}}
 function applyCoinbaseState(state,close=false){if(!state?.connected||!state.address||!state.authenticated){if(activeProvider==="coinbase")setWalletDisconnected();return;}activeProvider="coinbase";setWalletConnected(state.address,"Coinbase Wallet · Signed in");if(close)closeDialog("walletDialog");}
 async function connectCoinbase(){const button=$("#connectCoinbaseBtn"),help=$("#coinbaseOptionHelp"),previous=activeProvider;button.disabled=true;help.textContent="Connect, then sign the gas-free login message…";activeProvider="coinbase";try{const state=await window.OrbitCoinbase.connect();applyCoinbaseState(state,true);help.textContent="Smart Wallet, extension, or mobile";}catch(error){activeProvider=previous;help.textContent=relayError(error);console.error(error);}finally{button.disabled=false;}}
-function applyReownState(state,close=false){const button=$("#connectReownBtn"),help=$("#reownOptionHelp");button.disabled=!state.configured;help.textContent=state.configured?"Connect an external EVM wallet":"Set REOWN_PROJECT_ID to enable";if(!state.connected||!state.address)return;activeProvider="reown";setWalletConnected(state.address,"Reown WalletConnect");if(close)closeDialog("walletDialog");}
+function applyReownState(state,close=false){const button=$("#connectReownBtn"),help=$("#reownOptionHelp");button.disabled=!state.configured;help.textContent=state.configured?"Connect a compatible Ethereum wallet":"Currently unavailable";if(!state.connected||!state.address)return;activeProvider="reown";setWalletConnected(state.address,"Reown WalletConnect");if(close)closeDialog("walletDialog");}
 async function connectReown(){try{await window.OrbitReown.connect();applyReownState(window.OrbitReown.getState(),true);}catch(error){$("#reownOptionHelp").textContent=relayError(error);}}
 async function sendPrivyCode(){const button=$("#privySendCodeBtn");button.disabled=true;setPrivyStatus("Sending a secure one-time code…");try{await window.OrbitPrivy.sendEmailCode($("#privyEmail").value);$("#privyCodeRow").hidden=false;setPrivyStatus("Code sent. Enter it to create or reconnect your wallets.","ok");$("#privyCode").focus();}catch(error){setPrivyStatus(relayError(error),"error");}finally{button.disabled=false;}}
 async function verifyPrivyCode(){const button=$("#privyVerifyBtn");button.disabled=true;setPrivyStatus("Verifying and preparing your embedded wallets…");try{const state=await window.OrbitPrivy.verifyEmailCode($("#privyEmail").value,$("#privyCode").value);applyPrivyState(state,true);}catch(error){setPrivyStatus(relayError(error),"error");}finally{button.disabled=false;}}
 async function connectPhantom(){const provider=getPhantomProvider();if(!provider){$("#connectedProvider").textContent="Phantom was not found";window.open("https://phantom.app/","_blank","noopener");return;}try{const response=await provider.connect();activeProvider="phantom";setWalletConnected(response.publicKey.toString(),"Phantom");closeDialog("walletDialog");}catch(error){console.error(error);}}
 async function connectMetaMask(){const btn=$("#connectMetaMaskBtn");btn.disabled=true;try{const{createSolanaClient}=await import("https://esm.sh/@metamask/connect-solana@2");const client=await createSolanaClient({dapp:{name:"Orbit",url:location.origin},api:{supportedNetworks:{mainnet:`${location.origin}/rpc/solana`}}});const wallet=client.getWallet();const{accounts}=await wallet.features["standard:connect"].connect();if(!accounts?.length)throw new Error("No account returned");metamaskWallet=client;metamaskAccount=accounts[0];window.OrbitSolanaWallet={address:accounts[0].address,signAndSendTransaction:signAndSendMetaMaskSolanaTransaction};activeProvider="metamask";setWalletConnected(accounts[0].address,"MetaMask");closeDialog("walletDialog");}catch(error){$("#walletLabel").textContent="Connection failed";console.error(error);}finally{btn.disabled=false;}}
 async function disconnectWallet(){try{if(activeProvider==="privy")await window.OrbitPrivy.logout();else if(activeProvider==="coinbase")await window.OrbitCoinbase.disconnect();else if(activeProvider==="reown")await window.OrbitReown.disconnect();else if(activeProvider==="phantom")await getPhantomProvider()?.disconnect();else if(activeProvider==="metamask")await metamaskWallet?.disconnect();}catch{}setWalletDisconnected();}
-$("#walletButton").addEventListener("click",()=>{if(account&&!account.authenticated){openSignin("Sign in to connect a wallet, review trades and keep your history.");return;}openDialog("walletDialog");});
+$("#walletButton").addEventListener("click",()=>{if(account&&!account.authenticated){openSignin("Sign in to connect your wallet and access your history.");return;}openDialog("walletDialog");});
 $("#relayQuoteBtn").addEventListener("click",requestRelayQuote);
 $("#relayExecuteBtn").addEventListener("click",executeRelayQuote);
 $("#relayFromChain").addEventListener("change",()=>setRelayNativeToken("#relayFromToken","#relayFromChain"));
@@ -1798,12 +1044,12 @@ function renderAccount(){
   const signedIn=Boolean(account?.authenticated);const user=account?.user||{};
   $("#accountEmail").textContent=signedIn?user.email:"Not signed in";$("#accountEmail").classList.toggle("muted",!signedIn);
   $("#accountPlan").textContent=account?.plan?.name||"Trial";
-  $("#accountWallets").textContent=signedIn&&account.wallets?.length?account.wallets.map(w=>`${w.address.slice(0,6)}…${w.address.slice(-4)}`).join(", "):"none";
+  $("#accountWallets").textContent=signedIn&&account.wallets?.length?account.wallets.map(w=>`${w.address.slice(0,6)}…${w.address.slice(-4)}`).join(", "):"No wallets linked";
   $("#signinBtn").hidden=signedIn;$("#signoutBtn").hidden=!signedIn;
-  $("#accountHelp").textContent=signedIn?`${account.plan?.monthly_credits?.toLocaleString()||0} credits are added every month on the ${account.plan?.name} plan.`:"Sign in to keep conversation history, connect wallets, review trades and get 100 free credits every month.";
+  $("#accountHelp").textContent=signedIn?`${account.plan?.monthly_credits?.toLocaleString()||0} credits are added every month on the ${account.plan?.name} plan.`:"Sign in to access your history, connect wallets, and receive 100 monthly credits.";
   if(signedIn){const prefs=user.preferences||{};profile={name:user.display_name||profile.name||"",riskProfile:prefs.risk_profile||profile.riskProfile||"balanced",defaultWallet:prefs.default_wallet??profile.defaultWallet??""};writeStorage(PROFILE_KEY,profile);initProfile();$("#profileName").textContent=profile.name||user.email;}
   const keys=$("#apiKeysSection");keys.hidden=!signedIn;
-  if(signedIn){if(account.plan?.entitlements?.api_keys){$("#apiKeysHelp").textContent="Use a key as Authorization: Bearer … on /chat and as the MCP bearer for Claude or ChatGPT. Keys never sign or move funds.";$("#createApiKeyBtn").disabled=false;loadApiKeys();}else{$("#apiKeysHelp").textContent="API keys and MCP access for Claude / ChatGPT are included in Pro and Max.";$("#apiKeysList").innerHTML="";$("#createApiKeyBtn").disabled=true;}}
+  if(signedIn){if(account.plan?.entitlements?.api_keys){$("#apiKeysHelp").textContent="Connect Orbit to your tools with an API key. Keys cannot sign transactions.";$("#createApiKeyBtn").disabled=false;loadApiKeys();}else{$("#apiKeysHelp").textContent="API keys and MCP access for Claude / ChatGPT are included in Pro and Max.";$("#apiKeysList").innerHTML="";$("#createApiKeyBtn").disabled=true;}}
   $("#profileRisk").textContent=signedIn?`${account.plan?.name} · ${Number(account.credits?.balance??0).toLocaleString()} credits`:`Trial · ${Number(account?.credits?.balance??0)} credits left`;
   const notif=account?.notifications||{};$("#notifLowCredit").checked=notif.low_credit_alert!==false;$("#notifThreshold").value=notif.low_credit_threshold??20;$("#notifReceipts").checked=notif.receipts!==false;$("#notifUpdates").checked=Boolean(notif.product_updates);
   $("#sessionsSection").hidden=!signedIn;$("#deleteAccountZone").hidden=!signedIn;
@@ -1811,34 +1057,41 @@ function renderAccount(){
   const invites=signedIn?(team.invites||[]):[];$("#teamInvitesSection").hidden=!invites.length;
   $("#teamInvites").innerHTML=invites.map(i=>`<div class="key-row"><span>${escapeHtml(i.owner_name||i.owner_email)} invited you to their team (${escapeHtml(i.role)})</span><button class="primary" type="button" data-accept="${escapeHtml(i.owner_id)}">Join</button></div>`).join("");
   $("#teamInvites").querySelectorAll("[data-accept]").forEach(b=>b.addEventListener("click",async()=>{b.disabled=true;try{const res=await fetch("/me/team/accept",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({owner_id:b.dataset.accept})});if(!res.ok)throw new Error(normalizeError(await res.json(),res.status));await loadAccount();openSettings("members");}catch(error){b.disabled=false;b.textContent=error.message;}}));
-  const fields=signedIn?(user.preferences||{}).risk_charter_fields:null;$("#charterSummaryText").textContent=fields?summarizeCharter(fields):"No risk charter set — trades run in advisory mode.";
+  const fields=signedIn?(user.preferences||{}).risk_charter_fields:null;$("#charterSummaryText").textContent=fields?summarizeCharter(fields):"No custom trade preferences.";
+  if($("#profileDialog").classList.contains("open"))settingsTab($("#settingsTabs .tab.active")?.dataset.tab||"account");
 }
-function summarizeCharter(f){const parts=[];if(f.max_trade_usd!=null)parts.push(`max $${Number(f.max_trade_usd).toLocaleString()} per trade`);if(f.max_slippage_bps!=null)parts.push(`max ${f.max_slippage_bps} bps slippage`);if(f.verified_only)parts.push("verified tokens only");if(f.max_price_impact_pct!=null)parts.push(`max ${f.max_price_impact_pct}% price impact`);if(Array.isArray(f.chains)&&f.chains.length)parts.push(`chains: ${f.chains.join(", ")}`);if(f.notes)parts.push(f.notes);return parts.join(" · ")||"Custom charter";}
+function summarizeCharter(f){const parts=[];if(f.max_trade_usd!=null)parts.push(`max $${Number(f.max_trade_usd).toLocaleString()} per trade`);if(f.max_slippage_bps!=null)parts.push(`max ${f.max_slippage_bps} bps slippage`);if(f.verified_only)parts.push("verified tokens only");if(f.max_price_impact_pct!=null)parts.push(`max ${f.max_price_impact_pct}% price impact`);if(f.max_position_pct!=null)parts.push(`position limit ${f.max_position_pct}%`);if(Array.isArray(f.allowed_chains)&&f.allowed_chains.length)parts.push(`networks: ${f.allowed_chains.join(", ")}`);if(f.notes)parts.push(f.notes);return parts.join(" · ")||"Custom trade preferences";}
 function openSettings(tab){openDialog("profileDialog");settingsTab(tab||"account");}
-function settingsTab(name){document.querySelectorAll("#settingsTabs .tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===name));document.querySelectorAll("#profileDialog .tab-panel").forEach(p=>{p.hidden=p.dataset.panel!==name;});loadSettingsTab(name);}
-async function loadSettingsTab(name){if(!account?.authenticated)return;if(name==="tasks"){loadInbox();loadTasks();}if(name==="account")loadSessions();if(name==="billing"){renderBillingStats();loadUsage();loadInvoices();}if(name==="keys"){loadApiKeys();loadUsage();}if(name==="members")loadTeam();}
+function settingsTab(name){document.querySelectorAll("#settingsTabs .tab").forEach(t=>{const selected=t.dataset.tab===name;t.classList.toggle("active",selected);t.setAttribute("aria-selected",String(selected));t.tabIndex=selected?0:-1;});document.querySelectorAll("#profileDialog .tab-panel").forEach(p=>{p.hidden=p.dataset.panel!==name;});$("#profileDialog .dialog-body").scrollTop=0;$("#saveProfileBtn").hidden=!["preferences","notifications"].includes(name);loadSettingsTab(name);}
+$("#settingsTabs").setAttribute("role","tablist");
+function syncSettingsOrientation(){$("#settingsTabs").setAttribute("aria-orientation",matchMedia("(max-width:720px)").matches?"horizontal":"vertical");}
+matchMedia("(max-width:720px)").addEventListener("change",syncSettingsOrientation);syncSettingsOrientation();
+document.querySelectorAll("#settingsTabs .tab").forEach(t=>{t.id=t.id||`settings-${t.dataset.tab}`;t.setAttribute("role","tab");t.setAttribute("aria-controls",`panel-${t.dataset.tab}`);const panel=$(`[data-panel="${t.dataset.tab}"]`);panel.id=`panel-${t.dataset.tab}`;panel.setAttribute("role","tabpanel");panel.setAttribute("aria-labelledby",t.id);});
+$("#settingsTabs").addEventListener("keydown",event=>{if(!["ArrowDown","ArrowUp","ArrowRight","ArrowLeft","Home","End"].includes(event.key))return;const tabs=[...document.querySelectorAll("#settingsTabs .tab")].filter(t=>!t.hidden);const i=tabs.indexOf(document.activeElement);if(i<0)return;event.preventDefault();const next=event.key==="Home"?0:event.key==="End"?tabs.length-1:(i+(["ArrowDown","ArrowRight"].includes(event.key)?1:-1)+tabs.length)%tabs.length;settingsTab(tabs[next].dataset.tab);tabs[next].focus();});
+async function loadSettingsTab(name){const panel=$(`[data-panel="${name}"]`);const gated=!account?.authenticated&&["billing","keys","tasks","notifications"].includes(name);panel.classList.toggle("requires-signin",gated);const existingNotice=panel.querySelector(".settings-signin");if(existingNotice)existingNotice.hidden=!gated;if(gated&&!panel.querySelector(".settings-signin")){const notice=document.createElement("div");notice.className="settings-signin";notice.innerHTML='<h3>Make it your workspace</h3><p>Sign in to manage your plan, tasks, and account preferences.</p><button class="primary" type="button">Sign in</button>';notice.querySelector("button").addEventListener("click",()=>openSignin());panel.prepend(notice);}if(gated){$("#saveProfileBtn").hidden=true;return;}if(!account?.authenticated)return;if(name==="tasks"){loadInbox();loadTasks();}if(name==="account")loadSessions();if(name==="billing"){renderBillingStats();loadUsage();loadInvoices();}if(name==="keys"){loadApiKeys();loadUsage();}if(name==="members")loadTeam();}
 document.querySelectorAll("#settingsTabs .tab").forEach(t=>t.addEventListener("click",()=>settingsTab(t.dataset.tab)));
 $("#charterEditBtn").addEventListener("click",()=>{closeDialog("profileDialog");openCharterDialog();});
 $("#buyCreditsBtn").addEventListener("click",openPlans);$("#changePlanBtn").addEventListener("click",openPlans);
 $("#billingPortalBtn").addEventListener("click",async()=>{try{const res=await fetch("/billing/portal",{method:"POST"});const d=await res.json();if(!res.ok)throw new Error(normalizeError(d,res.status));location.href=d.url;}catch(error){$("#invoicesList").insertAdjacentHTML("afterbegin",`<div class="field-help" style="color:var(--red)">${escapeHtml(error.message)}</div>`);}});
-function renderBillingStats(){const plan=account?.plan||{};const billing=account?.billing||{};$("#billingStats").innerHTML=`<div class="stat"><div class="label">Plan</div><div class="value">${escapeHtml(plan.name||"—")}</div><div class="inline-note">${plan.price_usd_month?`$${plan.price_usd_month}/mo · ${(plan.monthly_credits||0).toLocaleString()} credits/mo`:`${(plan.monthly_credits||0).toLocaleString()} credits/mo`}</div></div><div class="stat"><div class="label">Credits</div><div class="value">${Number(account?.credits?.balance??0).toLocaleString()}</div><div class="inline-note">${account?.team?.role==="member"?"shared team pool":"available now"}</div></div><div class="stat"><div class="label">Subscription</div><div class="value" style="font-size:14px">${escapeHtml(billing.subscription_status||(plan.price_usd_month?"—":"none"))}</div><div class="inline-note">${billing.configured?"billed by Stripe":"billing not configured"}</div></div>`;$("#billingPortalBtn").hidden=!(billing.configured&&billing.has_billing_account);}
+function renderBillingStats(){const plan=account?.plan||{};const billing=account?.billing||{};$("#billingStats").innerHTML=`<div class="stat"><div class="label">Plan</div><div class="value">${escapeHtml(plan.name||"—")}</div><div class="inline-note">${plan.price_usd_month?`$${plan.price_usd_month}/mo · ${(plan.monthly_credits||0).toLocaleString()} credits/mo`:`${(plan.monthly_credits||0).toLocaleString()} credits/mo`}</div></div><div class="stat"><div class="label">Credits</div><div class="value">${Number(account?.credits?.balance??0).toLocaleString()}</div><div class="inline-note">${account?.team?.role==="member"?"shared team pool":"available now"}</div></div><div class="stat"><div class="label">Subscription</div><div class="value" style="font-size:14px">${escapeHtml(billing.subscription_status||(plan.price_usd_month?"—":"none"))}</div><div class="inline-note">${billing.configured?"billed by Stripe":"Billing is currently unavailable"}</div></div>`;$("#billingPortalBtn").hidden=!(billing.configured&&billing.has_billing_account);}
+const USAGE_LABELS={chat:"Chat",tool_turn:"Research",deep_dive:"Detailed research",trade:"Trade quotes",team_desk:"In-depth analysis"};
 const USAGE_COLORS={chat:"#7c7cf0",tool_turn:"#4fb6a4",deep_dive:"#e0a542",trade:"#e06c6c",team_desk:"#b078d8"};
 async function loadUsage(){try{const data=await (await fetch("/me/usage?days=30")).json();renderUsageChart(data);renderKeyUsage(data);}catch{$("#usageLegend").textContent="Usage is unavailable right now.";}}
-function renderUsageChart(data){const svg=$("#usageChart");const days=data.by_day||[];const W=600,H=130,pad=4,bottom=18;const max=Math.max(1,...days.map(d=>d.charged));const bw=(W-pad*2)/Math.max(1,days.length);let out="";days.forEach((d,i)=>{let y=H-bottom;const x=pad+i*bw+1;for(const [kind,amount] of Object.entries(d.by_kind||{})){const h=(amount/max)*(H-bottom-6);y-=h;out+=`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1,bw-2).toFixed(1)}" height="${h.toFixed(1)}" fill="${USAGE_COLORS[kind]||"#999"}"><title>${d.date}: ${amount} (${kind})</title></rect>`;}if(i===days.length-1||(i%7===0&&i<days.length-3))out+=`<text x="${(x+bw/2).toFixed(1)}" y="${H-4}" font-size="9" text-anchor="middle" fill="currentColor" opacity=".6">${d.date.slice(5)}</text>`;});out+=`<line x1="${pad}" y1="${H-bottom+.5}" x2="${W-pad}" y2="${H-bottom+.5}" stroke="currentColor" opacity=".2"/>`;svg.innerHTML=out;
-  const kinds=Object.entries(data.by_kind||{});$("#usageLegend").innerHTML=(kinds.length?kinds.map(([k,v])=>`<span><i style="background:${USAGE_COLORS[k]||"#999"}"></i>${k.replace("_"," ")} · ${v}</span>`).join(""):"<span>No credits spent in the last 30 days.</span>")+`<span style="margin-left:auto"><b>${data.total||0}</b> credits · ${data.turns||0} turns</span>`;}
+function renderUsageChart(data){const svg=$("#usageChart");const days=data.by_day||[];svg.toggleAttribute("hidden",!days.length);const W=600,H=130,pad=4,bottom=18;const max=Math.max(1,...days.map(d=>d.charged));const bw=(W-pad*2)/Math.max(1,days.length);let out="";days.forEach((d,i)=>{let y=H-bottom;const x=pad+i*bw+1;for(const [kind,amount] of Object.entries(d.by_kind||{})){const h=(amount/max)*(H-bottom-6);y-=h;out+=`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1,bw-2).toFixed(1)}" height="${h.toFixed(1)}" fill="${USAGE_COLORS[kind]||"#999"}"><title>${d.date}: ${amount} (${kind})</title></rect>`;}if(i===days.length-1||(i%7===0&&i<days.length-3))out+=`<text x="${(x+bw/2).toFixed(1)}" y="${H-4}" font-size="9" text-anchor="middle" fill="currentColor" opacity=".6">${d.date.slice(5)}</text>`;});out+=`<line x1="${pad}" y1="${H-bottom+.5}" x2="${W-pad}" y2="${H-bottom+.5}" stroke="currentColor" opacity=".2"/>`;svg.innerHTML=out;
+  const kinds=Object.entries(data.by_kind||{});$("#usageLegend").innerHTML=(kinds.length?kinds.map(([k,v])=>`<span><i style="background:${USAGE_COLORS[k]||"#999"}"></i>${escapeHtml(USAGE_LABELS[k]||k.replaceAll("_"," "))} · ${v}</span>`).join(""):"<span>Your credit usage will appear here.</span>")+`<span style="margin-left:auto"><b>${data.total||0}</b> credits · ${data.turns||0} messages</span>`;}
 function renderKeyUsage(data){const rows=data.by_api_key||[];$("#apiKeyUsage").innerHTML=rows.length?rows.map(r=>`<div class="key-row"><span>${escapeHtml(r.name)}</span><b>${r.charged} credits</b></div>`).join(""):'<div class="field-help">No key usage in the last 30 days.</div>';}
-async function loadInvoices(){const list=$("#invoicesList");try{const data=await (await fetch("/me/invoices")).json();const rows=data.invoices||[];list.innerHTML=rows.length?rows.map(inv=>`<div class="key-row"><span>${inv.created?new Date(inv.created*1000).toLocaleDateString():""} · ${escapeHtml(inv.description||"Orbit")} <code>${escapeHtml(inv.number||inv.id||"")}</code></span><span>${inv.amount_paid!=null?`$${(inv.amount_paid/100).toFixed(2)}`:""} <span class="muted">${escapeHtml(inv.status||"")}</span> ${inv.hosted_invoice_url?`<a href="${inv.hosted_invoice_url}" target="_blank" rel="noopener">view</a>`:""}</span></div>`).join(""):`<div class="field-help">${data.configured===false?"Invoices appear here once billing is configured.":"No invoices yet."}</div>`;}catch{list.innerHTML='<div class="field-help">Invoices are unavailable right now.</div>';}}
+async function loadInvoices(){const list=$("#invoicesList");try{const data=await (await fetch("/me/invoices")).json();const rows=data.invoices||[];list.innerHTML=rows.length?rows.map(inv=>`<div class="key-row"><span>${inv.created?new Date(inv.created*1000).toLocaleDateString():""} · ${escapeHtml(inv.description||"Orbit")} <code>${escapeHtml(inv.number||inv.id||"")}</code></span><span>${inv.amount_paid!=null?`$${(inv.amount_paid/100).toFixed(2)}`:""} <span class="muted">${escapeHtml(inv.status||"")}</span> ${inv.hosted_invoice_url?`<a href="${inv.hosted_invoice_url}" target="_blank" rel="noopener">view</a>`:""}</span></div>`).join(""):`<div class="field-help">${data.configured===false?"Invoices will appear here after your first purchase.":"No invoices yet."}</div>`;}catch{list.innerHTML='<div class="field-help">Invoices are unavailable right now.</div>';}}
 async function loadSessions(){const list=$("#sessionsList");try{const data=await (await fetch("/me/sessions")).json();list.innerHTML=(data.sessions||[]).map(sess=>`<div class="key-row"><span>${escapeHtml(describeAgent(sess.user_agent))}${sess.current?' <span class="plan-badge">this device</span>':""}<br><span class="inline-note">${sess.ip?escapeHtml(sess.ip)+" · ":""}signed in ${sess.created_at?new Date(sess.created_at).toLocaleString():""}</span></span></div>`).join("")||'<div class="field-help">No active sessions.</div>';}catch{list.innerHTML="";}}
 function describeAgent(ua){ua=ua||"";const browser=/Edg\//.test(ua)?"Edge":/Chrome\//.test(ua)?"Chrome":/Safari\//.test(ua)&&!/Chrome/.test(ua)?"Safari":/Firefox\//.test(ua)?"Firefox":"Browser";const os=/iPhone|iPad/.test(ua)?"iOS":/Android/.test(ua)?"Android":/Mac OS X/.test(ua)?"macOS":/Windows/.test(ua)?"Windows":/Linux/.test(ua)?"Linux":"";return `${browser}${os?" on "+os:""}`;}
 // ---- Tasks & inbox ----
 const TZ=-new Date().getTimezoneOffset();
 function fmtLocal(iso){if(!iso)return "—";const d=new Date(iso);return d.toLocaleString([],{weekday:"short",day:"numeric",month:"short",hour:"numeric",minute:"2-digit"});}
 async function refreshInboxBadge(){if(!account?.authenticated){$("#inboxBtn").hidden=true;return;}try{const d=await (await fetch("/me/inbox")).json();const n=Number(d.unread||0);$("#inboxBtn").hidden=false;$("#inboxBadgeTop").hidden=!n;$("#inboxBadgeTop").textContent=n>99?"99+":String(n);$("#inboxBadge").hidden=!n;$("#inboxBadge").textContent=String(n);}catch{}}
-async function loadInbox(){const list=$("#inboxList");try{const d=await (await fetch("/me/inbox")).json();list.innerHTML=(d.items||[]).length?d.items.map(i=>`<div class="inbox-item ${i.read_at?"":"unread"}"><b>${escapeHtml(i.title)}</b><span class="body">${renderInline?escapeHtml(i.body):escapeHtml(i.body)}</span><span class="inline-note">${escapeHtml(fmtLocal(i.created_at))} · ${escapeHtml(i.kind)}</span></div>`).join(""):'<div class="field-help">Nothing yet — alerts, reminders and briefs land here.</div>';refreshInboxBadge();}catch{list.innerHTML='<div class="field-help">Inbox unavailable.</div>';}}
+async function loadInbox(){const list=$("#inboxList");try{const d=await (await fetch("/me/inbox")).json();list.innerHTML=(d.items||[]).length?d.items.map(i=>`<div class="inbox-item ${i.read_at?"":"unread"}"><b>${escapeHtml(i.title)}</b><span class="body">${renderInline?escapeHtml(i.body):escapeHtml(i.body)}</span><span class="inline-note">${escapeHtml(fmtLocal(i.created_at))} · ${escapeHtml(i.kind)}</span></div>`).join(""):'<div class="field-help">Your alerts, reminders, and briefs will appear here.</div>';refreshInboxBadge();}catch{list.innerHTML='<div class="field-help">Inbox unavailable.</div>';}}
 $("#inboxReadAllBtn").addEventListener("click",async()=>{await fetch("/me/inbox/read",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});loadInbox();});
 $("#inboxBtn").addEventListener("click",()=>openSettings("tasks"));
 async function loadTasks(){const list=$("#tasksList");try{const d=await (await fetch("/me/tasks")).json();$("#tasksLimit").textContent=`· ${d.tasks.filter(t=>t.status==="active").length}/${d.limit} active`;
-  list.innerHTML=(d.tasks||[]).length?d.tasks.map((t,i)=>`<div class="key-row"><span><b>${i+1}. ${escapeHtml(t.title)}</b> <span class="muted">· ${escapeHtml(t.schedule_text)} · ${escapeHtml(t.status)}${t.channel==="email"?" · email":""}</span><br><span class="inline-note">next ${escapeHtml(fmtLocal(t.next_run_at))}${t.last_result?" · last: "+escapeHtml(t.last_result):""}${t.fire_count?" · fired "+t.fire_count+"×":""}</span></span><span style="display:flex;gap:4px;flex:none">${t.status!=="done"?`<button class="secondary" type="button" data-task-toggle="${t.id}" data-status="${t.status}">${t.status==="active"?"Pause":"Resume"}</button>`:""}${t.kind!=="price_alert"&&t.status!=="done"?`<button class="secondary" type="button" data-task-run="${t.id}" title="Send now">Run</button>`:""}<button class="secondary danger" type="button" data-task-del="${t.id}">Delete</button></span></div>`).join(""):'<div class="field-help">No tasks yet.</div>';
+  list.innerHTML=(d.tasks||[]).length?d.tasks.map((t,i)=>`<div class="key-row"><span><b>${i+1}. ${escapeHtml(t.title)}</b> <span class="muted">· ${escapeHtml(t.schedule_text)} · ${escapeHtml(t.status)}${t.channel==="email"?" · email":""}</span><br><span class="inline-note">next ${escapeHtml(fmtLocal(t.next_run_at))}${t.last_result?" · last: "+escapeHtml(t.last_result):""}${t.fire_count?" · delivered "+t.fire_count+" times":""}</span></span><span style="display:flex;gap:4px;flex:none">${t.status!=="done"?`<button class="secondary" type="button" data-task-toggle="${t.id}" data-status="${t.status}">${t.status==="active"?"Pause":"Resume"}</button>`:""}${t.kind!=="price_alert"&&t.status!=="done"?`<button class="secondary" type="button" data-task-run="${t.id}" title="Run this task now">Run now</button>`:""}<button class="secondary danger" type="button" data-task-del="${t.id}">Delete</button></span></div>`).join(""):'<div class="field-help">Create a reminder or price alert to get started.</div>';
   list.querySelectorAll("[data-task-toggle]").forEach(b=>b.addEventListener("click",async()=>{b.disabled=true;await fetch(`/me/tasks/${b.dataset.taskToggle}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:b.dataset.status==="active"?"paused":"active"})});loadTasks();}));
   list.querySelectorAll("[data-task-run]").forEach(b=>b.addEventListener("click",async()=>{b.disabled=true;b.textContent="…";await fetch(`/me/tasks/${b.dataset.taskRun}/run`,{method:"POST"});loadTasks();loadInbox();}));
   list.querySelectorAll("[data-task-del]").forEach(b=>b.addEventListener("click",async()=>{if(b.dataset.armed!=="1"){b.dataset.armed="1";b.textContent="Sure?";setTimeout(()=>{b.dataset.armed="";b.textContent="Delete";},4000);return;}await fetch(`/me/tasks/${b.dataset.taskDel}`,{method:"DELETE"});loadTasks();}));
@@ -1866,7 +1119,7 @@ async function loadTeam(){const team=account?.team||{};$("#teamOwnerTools").hidd
 $("#teamInviteBtn").addEventListener("click",async()=>{const email=$("#teamInviteEmail").value.trim();const status=$("#teamStatus");if(!email){status.textContent="Enter an email address.";return;}$("#teamInviteBtn").disabled=true;try{const res=await fetch("/me/team/invites",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,role:"member"})});const d=await res.json();if(!res.ok)throw new Error(normalizeError(d,res.status));status.textContent=`Invited ${d.email}. They accept by signing in with that email.`;$("#teamInviteEmail").value="";await loadAccount();loadTeam();}catch(error){status.textContent=error.message;}finally{$("#teamInviteBtn").disabled=false;}});
 $("#teamLeaveBtn").addEventListener("click",async()=>{const b=$("#teamLeaveBtn");if(b.dataset.armed!=="1"){b.dataset.armed="1";b.textContent="Click again to leave";setTimeout(()=>{b.dataset.armed="";b.textContent="Leave team";},5000);return;}b.disabled=true;await fetch("/me/team/leave",{method:"POST"});await loadAccount();b.disabled=false;b.dataset.armed="";b.textContent="Leave team";settingsTab("account");});
 $("#teamInviteEmail").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#teamInviteBtn").click();}});
-function openSignin(reason){$("#signinIntro").textContent=reason||"We'll email you a one-time sign-in link. No password to remember.";$("#signinStatus").textContent="";openDialog("signinDialog");setTimeout(()=>$("#signinEmail").focus(),50);}
+function openSignin(reason){$("#signinIntro").textContent=reason||"Enter your email to receive a secure sign-in link.";$("#signinStatus").textContent="";openDialog("signinDialog");setTimeout(()=>$("#signinEmail").focus(),50);}
 async function startSignin(){const email=$("#signinEmail").value.trim();const status=$("#signinStatus");if(!email){status.textContent="Enter your email address.";return;}$("#signinSendBtn").disabled=true;status.textContent="Sending…";
   try{const res=await fetch("/auth/email/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});const data=await res.json();if(!res.ok)throw new Error(normalizeError(data,res.status));
     if(data.dev_link){status.textContent="Development mode: signing you in…";const token=data.dev_link.split("signin=")[1];await verifySignin(token);}
@@ -1880,10 +1133,10 @@ function attachAccountNotice(el,detail,status){const body=$(".message-body",el);
   body.appendChild(box);}
 async function openPlans(){openDialog("plansDialog");const body=$("#plansBody");body.innerHTML='<div class="field-help">Loading…</div>';
   try{const data=await (await fetch("/billing/plans")).json();const current=account?.plan?.id;const signedIn=Boolean(account?.authenticated);
-    const planCards=data.plans.map(p=>`<div class="account-panel"><div class="account-row"><b>${escapeHtml(p.name)}</b><span class="plan-badge">${p.price_usd_month?`$${p.price_usd_month}/mo`:"Free"}</span></div><div class="account-row"><span>${p.monthly_credits.toLocaleString()} credits / month</span>${current===p.id?'<span class="muted">Current plan</span>':(p.price_usd_month&&p.purchasable&&data.configured?`<button class="secondary" type="button" data-checkout="subscription" data-item="${p.id}">Choose ${escapeHtml(p.name)}</button>`:(p.price_usd_month?'<span class="muted">Checkout not configured</span>':''))}</div><div class="field-help">${p.features.map(escapeHtml).join(" · ")}</div></div>`).join("");
+    const planCards=data.plans.map(p=>`<div class="account-panel"><div class="account-row"><b>${escapeHtml(p.name)}</b><span class="plan-badge">${p.price_usd_month?`$${p.price_usd_month}/mo`:"Free"}</span></div><div class="account-row"><span>${p.monthly_credits.toLocaleString()} credits / month</span>${current===p.id?'<span class="muted">Current plan</span>':(p.price_usd_month&&p.purchasable&&data.configured?`<button class="secondary" type="button" data-checkout="subscription" data-item="${p.id}">Choose ${escapeHtml(p.name)}</button>`:(p.price_usd_month?'<span class="muted">Currently unavailable</span>':''))}</div><div class="field-help">${p.features.map(escapeHtml).join(" · ")}</div></div>`).join("");
     const packCards=(data.packs||[]).map(k=>`<div class="account-row" style="padding:6px 0;border-bottom:1px dashed var(--border)"><span><b>${k.credits.toLocaleString()} credits</b> <span class="muted">· ${escapeHtml(k.name)}</span></span>${k.purchasable&&data.configured?`<button class="secondary" type="button" data-checkout="pack" data-item="${k.id}">Buy · $${k.price_usd}</button>`:`<span class="muted">$${k.price_usd} · soon</span>`}</div>`).join("");
     const methods=(data.payment_methods||[]).map(m=>m==="crypto"?"USDC":"card").join(" or ");
-    body.innerHTML=planCards+`<div class="keys-section"><h3>Credit packs</h3><div class="field-help">One-time top-ups that never expire. ${data.configured?`Pay by ${methods} on Stripe's hosted checkout.`:"Checkout arrives once Stripe keys are configured."}</div>${packCards}</div>`+(signedIn&&account?.billing?.has_billing_account?'<div class="account-actions" style="margin-top:12px"><button class="secondary" type="button" id="portalBtn">Manage subscription &amp; invoices</button></div>':'')+'<div class="field-help" style="margin-top:10px">Orbit never sees your card or wallet: payment pages are hosted by Stripe.</div>';
+    body.innerHTML=planCards+`<div class="keys-section"><h3>Credit packs</h3><div class="field-help">One-time top-ups that never expire. ${data.configured?`Pay by ${methods} on Stripe's hosted checkout.`:"Purchases are currently unavailable. Please try again later."}</div>${packCards}</div>`+(signedIn&&account?.billing?.has_billing_account?'<div class="account-actions" style="margin-top:12px"><button class="secondary" type="button" id="portalBtn">Manage billing</button></div>':'')+'<div class="field-help" style="margin-top:10px">Orbit never sees your card or wallet: payment pages are hosted by Stripe.</div>';
     body.querySelectorAll("[data-checkout]").forEach(b=>b.addEventListener("click",()=>startCheckout(b.dataset.checkout,b.dataset.item,b)));
     $("#portalBtn")?.addEventListener("click",async()=>{try{const res=await fetch("/billing/portal",{method:"POST"});const d=await res.json();if(!res.ok)throw new Error(normalizeError(d,res.status));location.href=d.url;}catch(error){body.insertAdjacentHTML("beforeend",`<div class="field-help" style="color:var(--red)">${escapeHtml(error.message)}</div>`);}});
   }catch{body.innerHTML='<div class="field-help">Plans are unavailable right now.</div>';}}
@@ -1907,15 +1160,17 @@ $("#createApiKeyBtn").addEventListener("click",createApiKey);
   const token=new URLSearchParams(location.search).get("signin");if(token){history.replaceState(null,"",location.pathname);try{await verifySignin(token);}catch(error){await loadAccount();openSignin(error.message);}return;}await loadAccount();})();
 document.querySelectorAll("[data-close]").forEach(button=>button.addEventListener("click",()=>closeDialog(button.dataset.close)));
 document.querySelectorAll(".overlay").forEach(overlay=>overlay.addEventListener("click",event=>{if(event.target===overlay)closeDialog(overlay.id);}));
-document.addEventListener("keydown",event=>{if(event.key==="Escape"){document.querySelectorAll(".overlay.open").forEach(dialog=>dialog.classList.remove("open"));closeSidebar();}});
+document.addEventListener("keydown",event=>{if(event.key==="Escape"){closeSidebar();}});
 $("#newChatBtn").addEventListener("click",startNewChat);
 $("#navHome").addEventListener("click",startNewChat);
+$("#navTasks").addEventListener("click",()=>{closeSidebar();openSettings("tasks");});
+$("#navSettings").addEventListener("click",()=>{closeSidebar();openSettings("preferences");});
 $("#navLibrary").addEventListener("click",()=>{setNav("navLibrary");if(window.matchMedia("(max-width:720px)").matches)setSidebar(true);const first=$("#chatList .chat-item");if(first)first.focus();});
 $("#topAvatarBtn").addEventListener("click",()=>openSettings("account"));
-$("#composerPlus").addEventListener("click",()=>{if(account&&!account.authenticated){openSignin("Sign in to connect a wallet, review trades and keep your history.");return;}openDialog("walletDialog");});
+$("#composerPlus").addEventListener("click",()=>{if(account&&!account.authenticated){openSignin("Sign in to connect your wallet and access your history.");return;}openDialog("walletDialog");});
 fillGreeting();$("#mobileMenu").addEventListener("click",()=>setSidebar(!$("#sidebar").classList.contains("open")));$("#sidebarBackdrop").addEventListener("click",closeSidebar);
 
-async function checkHealth(){try{const res=await fetch("/health");$("#healthDot").classList.toggle("online",res.ok);}catch{$("#healthDot").classList.remove("online");}}
+async function checkHealth(){let online=false;try{online=(await fetch("/health")).ok;}catch{}$("#healthDot").classList.toggle("online",online);$("#healthLabel").textContent=online?"Online":"Offline";}
 syncViewportLayout();initProfile();renderChatList();hydrateHistory();checkHealth();setInterval(checkHealth,15000);
 window.addEventListener("orbit:privy-state",event=>applyPrivyState(event.detail));
 window.addEventListener("orbit:privy-error",event=>showPrivyError(event.detail?.message||"Privy initialization failed."));

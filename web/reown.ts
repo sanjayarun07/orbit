@@ -18,7 +18,7 @@ async function initialize() {
   if (initialization) return initialization;
   initialization = (async () => {
     const response = await fetch("/config/public", {headers: {Accept: "application/json"}});
-    if (!response.ok) throw new Error("Could not load Reown configuration.");
+    if (!response.ok) throw new Error("WalletConnect could not load. Please try again.");
     const config = await response.json() as PublicConfig;
     if (!config.reown?.enabled || !config.reown.project_id) { emit(); return state(); }
     const networks = [mainnet, arbitrum, base, optimism, polygon, avalanche, bsc] as [AppKitNetwork, ...AppKitNetwork[]];
@@ -35,7 +35,7 @@ async function initialize() {
 }
 async function connect() {
   const current = await initialize();
-  if (!current.configured || !modal) throw new Error("Set REOWN_PROJECT_ID to enable WalletConnect.");
+  if (!current.configured || !modal) throw new Error("WalletConnect is currently unavailable. Choose another wallet to continue.");
   if (!modal.getIsConnectedState()) await modal.open({view: "Connect"});
   return state();
 }
