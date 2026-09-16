@@ -398,6 +398,84 @@ const CASES = {
     };
   },
 
+  /** The inline chat swap card, edited mid-claim without leaving the field.
+   *
+   * `eventType` is the point. The card used to invalidate only on `change`,
+   * which a text or number field withholds until blur, so a quote stayed
+   * "current" while the user typed over it and the freshness callback passed.
+   * Dispatching `input` is what a real keystroke does; the `change` variant is
+   * kept as the case that always worked, so a regression can be told apart
+   * from the card simply never quoting.
+   */
+  async inline_card_edit_during_claim(eventType = "input") {
+    const { dom, sandbox, useRealExecutors } = load();
+    useRealExecutors();
+    const tick = async (turns = 12) => { for (let i = 0; i < turns; i++) await new Promise(r => setImmediate(r)); };
+
+    sandbox.window.OrbitRelay.getFreshQuote = async (args) => {
+      sandbox.recorded.relayQuoteArgs = args;
+      return { quote: { details: {}, fees: {}, steps: [{ requestId: "r".repeat(24) }] }, wallet: {}, createdAt: Date.now() };
+    };
+    const approvals = [];
+    sandbox.window.OrbitRelay.executeQuote = async (quote) => { approvals.push(quote); return {}; };
+
+    let releaseClaim;
+    const claimHeld = new Promise(resolve => { releaseClaim = resolve; });
+    sandbox.fetch = async (url) => {
+      if (String(url).includes("/executions/relay/")) {
+        await claimHeld;
+        return { ok: true, status: 200, json: async () => ({ execution_claimed: true }) };
+      }
+      if (String(url).includes("/config/public")) {
+        return { ok: true, status: 200, json: async () => ({ deployment: { execution_enabled: true }, x402: null }) };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    };
+    // Without this the card is the research-mode notice, not a swap card, and
+    // every assertion below passes for the wrong reason. Found exactly that way.
+    await sandbox.loadX402Config();
+
+    const card = sandbox.renderInlineRelaySwap({ amount: "0.01" });
+    // The card populates its own selects and defaults asynchronously. Fill the
+    // fields only after that has finished, or its setup overwrites them and the
+    // case quietly never quotes at all.
+    await tick();
+    const field = (selector) => card.querySelector(selector);
+    field(".inline-from-chain").value = "792703809";
+    field(".inline-to-chain").value = "8453";
+    field(".inline-from-token").value = "SOL";
+    field(".inline-to-token").value = "USDC";
+    field(".inline-amount").value = "0.01";
+    field(".inline-slippage").value = "50";
+    field(".inline-recipient").value = "0x1111111111111111111111111111111111111111";
+
+    field(".inline-quote-btn").dispatch("click");
+    await tick();
+    // askedSlippage is the proof the card really quoted. `hidden` is not: the
+    // stub defaults it to false, so asserting on it would be trivially true.
+    const quoted = { askedSlippage: sandbox.recorded.relayQuoteArgs?.slippageBps ?? null };
+
+    field(".inline-execute-btn").dispatch("click");
+    await tick(3);                       // far enough to be waiting on the claim
+    if (eventType !== "none") {
+      field(".inline-slippage").value = "1";
+      field(".inline-slippage").dispatch(eventType);   // no blur, just a keystroke
+    }
+    releaseClaim();
+    await tick();
+
+    return { ...quoted, eventType, walletApprovals: approvals.length, status: field(".inline-status").textContent };
+  },
+
+  async inline_card_edit_during_claim_on_change() {
+    return CASES.inline_card_edit_during_claim("change");
+  },
+
+  /** The inline card must still be able to sign when nothing is edited. */
+  async inline_card_signs_when_nothing_changes() {
+    return CASES.inline_card_edit_during_claim("none");
+  },
+
   /** The claim path must still reach the wallet when nothing changed. */
   async execution_reaches_the_wallet_when_nothing_changes() {
     const { dom, sandbox, setScriptVar, useRealExecutors } = load();

@@ -153,3 +153,31 @@ def test_the_execution_claim_still_reaches_the_wallet_when_nothing_changes():
     result = run_case("execution_reaches_the_wallet_when_nothing_changes")
     assert result["walletApprovals"] == 1, "an unchanged quote never reached the wallet"
     assert "completed" in result["status"]
+
+
+def test_typing_in_the_inline_card_invalidates_its_quote_without_blurring():
+    """The reviewed gap. The inline card listened only for `change`, which a
+    text or number field withholds until it loses focus, so editing slippage
+    while an execution claim was pending left the revision untouched and the
+    freshness callback passed. `input` is what a real keystroke fires.
+    """
+    result = run_case("inline_card_edit_during_claim")
+    assert result["askedSlippage"] == 50, "the card never quoted; the case proves nothing"
+    assert result["walletApprovals"] == 0, "a stale quote reached the wallet after an unblurred edit"
+    assert "superseded" in result["status"]
+
+
+def test_the_inline_card_still_invalidates_on_change_for_its_selects():
+    """`change` is the only event a select emits, so it has to keep working."""
+    result = run_case("inline_card_edit_during_claim_on_change")
+    assert result["askedSlippage"] == 50
+    assert result["walletApprovals"] == 0
+
+
+def test_the_inline_card_still_signs_when_nothing_is_edited():
+    """The control. The two tests above would pass on a card that can never
+    sign at all, which is the failure mode this whole file keeps finding."""
+    result = run_case("inline_card_signs_when_nothing_changes")
+    assert result["askedSlippage"] == 50
+    assert result["walletApprovals"] == 1, "an untouched quote never reached the wallet"
+    assert "completed" in result["status"]
