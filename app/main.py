@@ -28,7 +28,8 @@ from app.reconciliation import reconciliation_worker
 from app import relay_tracking
 from fastapi.staticfiles import StaticFiles
 
-from app import execution_policy, task_scheduling
+from app import deployment, execution_policy, task_scheduling
+from app.deployment import ExecutionDisabledError
 from app.service_errors import ServiceError, safe_detail as _safe_detail
 from app.execution import execute_confirmed_plan, prepare_wallet_transaction, submit_wallet_transaction
 from app.graph import resolve_intent_node
@@ -112,6 +113,16 @@ async def _warm_knowledge() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Before anything starts serving: refuse to run an unsafe configuration.
+    # Raising here aborts startup, which is the point -- a production instance
+    # with development conveniences left on should never accept a request.
+    for warning in deployment.enforce():
+        logger.warning("startup configuration warning: %s", warning)
+    logger.info(
+        "deployment mode=%s execution_enabled=%s custodial_signing=%s environment=%s",
+        deployment.deployment_mode(), deployment.execution_enabled(),
+        deployment.custodial_signing_enabled(), settings.environment,
+    )
     discovery = asyncio.create_task(asyncio.to_thread(discover_mcp_tools))
     reconciliation = asyncio.create_task(reconciliation_worker())
     relay_reconciliation = asyncio.create_task(relay_tracking.worker())
@@ -145,6 +156,19 @@ app = FastAPI(title="Orbit Web3 Copilot", version="0.3.0", lifespan=lifespan)
 @app.exception_handler(ServiceError)
 async def service_error_response(request: Request, exc: ServiceError):
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
+
+
+@app.exception_handler(ExecutionDisabledError)
+async def execution_disabled_response(request: Request, exc: ExecutionDisabledError):
+    """403 with the reason intact, for every transport and every provider.
+
+    A handler rather than a per-route except so a money-moving route added
+    later is covered by the gate without anyone remembering to wrap it.
+    """
+    return JSONResponse(
+        status_code=403,
+        content={"detail": str(exc), "deployment_mode": deployment.deployment_mode()},
+    )
 
 
 
@@ -303,7 +327,15 @@ async def readyz(response: Response):
     if failed:
         response.status_code = 503
     return {"status": status, "failed": failed, "degraded": degraded, "checks": checks,
-            "live_trading": settings.live_trading, "version": _release_version()}
+            "live_trading": settings.live_trading, "version": _release_version(),
+            "environment": settings.environment,
+            "deployment": deployment.public_status(),
+            # Warnings only: anything fatal stopped the process at startup, so a
+            # running instance can never report one here.
+            "config_warnings": [
+                {"code": p.code, "setting": p.setting, "message": p.message}
+                for p in deployment.audit() if p.severity != deployment.FATAL
+            ]}
 
 
 def _release_version() -> str:
@@ -426,9 +458,23 @@ async def auth_logout(request: Request, response: Response):
     return {"authenticated": False}
 
 
+def _require_execution_mode() -> None:
+    """Refuse a money-moving route before it reads any state.
+
+    A dependency rather than a check inside the handler for two reasons: it runs
+    ahead of the ownership lookup, so a research deployment never touches the
+    plan store just to say no; and it is visible in the route signature, so the
+    authorization matrix can see which routes carry it.
+    """
+    deployment.require_execution_enabled("Trade execution")
+
+
 @app.post("/execution/lifi/quote")
-async def lifi_quote(payload: LifiQuoteRequest):
+async def lifi_quote(payload: LifiQuoteRequest, _mode: None = Depends(_require_execution_mode)):
     """Create a backup quote only; signing/submission remains wallet-controlled."""
+    # A LI.FI quote carries a ready-to-sign `transactionRequest`, so it is a
+    # money-moving entry point in the same sense the Jupiter routes are. That
+    # was the asymmetry: LIVE_TRADING gated Jupiter and left this one open.
     params = {
         "fromChain": payload.from_chain, "toChain": payload.to_chain,
         "fromToken": payload.from_token, "toToken": payload.to_token,
@@ -548,11 +594,16 @@ async def public_config():
             "custody": "self_custody",
             "supports": ["smart_wallet", "extension", "mobile"],
         },
+        # Research mode reports every provider off, so the browser hides what
+        # the server would refuse. Relay signs entirely in the browser against
+        # its own API, so this is what stops it in the shipped UI -- the server
+        # cannot refuse a swap it is never asked about. See docs.
         "execution_providers": {
-            "jupiter": True,
-            "relay": True,
-            "lifi_backup": settings.lifi_enabled,
+            "jupiter": deployment.execution_enabled(),
+            "relay": deployment.execution_enabled(),
+            "lifi_backup": settings.lifi_enabled and deployment.execution_enabled(),
         },
+        "deployment": deployment.public_status(),
         "x402": x402_gate.public_config(),
         "accounts": {
             "enabled": True,
@@ -1650,7 +1701,8 @@ async def _require_plan_access(plan_id: str, request: Request) -> None:
 
 
 @app.post("/trade-plans/{plan_id}/confirm")
-async def confirm(plan_id: str, body: ConfirmRequest, request: Request):
+async def confirm(plan_id: str, body: ConfirmRequest, request: Request,
+                  _mode: None = Depends(_require_execution_mode)):
     await _require_plan_access(plan_id, request)
     try:
         return await execute_confirmed_plan(plan_id, body.confirmation_text)
@@ -1659,7 +1711,8 @@ async def confirm(plan_id: str, body: ConfirmRequest, request: Request):
 
 
 @app.post("/trade-plans/{plan_id}/wallet-transaction")
-async def wallet_transaction(plan_id: str, body: ConfirmRequest, request: Request):
+async def wallet_transaction(plan_id: str, body: ConfirmRequest, request: Request,
+                             _mode: None = Depends(_require_execution_mode)):
     await _require_plan_access(plan_id, request)
     try:
         return await prepare_wallet_transaction(plan_id, body.confirmation_text)
@@ -1668,7 +1721,8 @@ async def wallet_transaction(plan_id: str, body: ConfirmRequest, request: Reques
 
 
 @app.post("/trade-plans/{plan_id}/submit-wallet-transaction")
-async def submit_signed_wallet_transaction(plan_id: str, body: SignedTransactionRequest, request: Request):
+async def submit_signed_wallet_transaction(plan_id: str, body: SignedTransactionRequest, request: Request,
+                                           _mode: None = Depends(_require_execution_mode)):
     await _require_plan_access(plan_id, request)
     try:
         return await submit_wallet_transaction(

@@ -45,10 +45,17 @@ def test_public_config_exposes_only_browser_safe_wallet_policy(monkeypatch):
 def test_public_config_exposes_reown_identifier_and_lifi_availability(monkeypatch):
     monkeypatch.setattr(settings, "reown_project_id", "reown-public-project")
     monkeypatch.setattr(settings, "lifi_enabled", True)
+    # Provider availability is now two conditions, not one: the provider has to
+    # be configured AND the deployment has to be allowed to move money at all.
+    monkeypatch.setattr(settings, "deployment_mode", "execution")
     payload = TestClient(app).get("/config/public").json()
     assert payload["reown"] == {"enabled": True, "project_id": "reown-public-project"}
     assert payload["execution_providers"]["lifi_backup"] is True
     assert "api_key" not in str(payload).lower()
+
+    monkeypatch.setattr(settings, "deployment_mode", "research")
+    research = TestClient(app).get("/config/public").json()
+    assert research["execution_providers"]["lifi_backup"] is False
 
 
 def test_coinbase_wallet_is_a_browser_safe_first_class_option():

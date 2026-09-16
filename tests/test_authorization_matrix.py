@@ -182,8 +182,18 @@ def test_user_routes_reject_an_unauthenticated_caller():
 def test_another_caller_cannot_touch_someone_elses_trade_plan(monkeypatch):
     """confirmation_text is "CONFIRM {plan_id}", so before plan ownership
     existed, anyone who obtained a plan id held every secret the execution
-    endpoints checked."""
+    endpoints checked.
+
+    Run in execution mode deliberately. In the default research deployment
+    these routes refuse everyone with 403 before ownership is consulted, which
+    would make this pass for the wrong reason -- ownership has to be what stops
+    the intruder, on a deployment where execution is genuinely available.
+    """
     import asyncio
+
+    from app.settings import settings as app_settings
+    monkeypatch.setattr(app_settings, "deployment_mode", "execution")
+    monkeypatch.setattr(app_settings, "live_trading", True)
 
     from app import plans
     from app.models import SwapProposal, TokenInfo, TradePlan

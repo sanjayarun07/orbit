@@ -1,5 +1,65 @@
 # Production release gates
 
+## Deployment modes
+
+Two independent switches, because they answer different questions.
+
+`DEPLOYMENT_MODE` decides whether this deployment may move money **at all**.
+`research` (the default) refuses every money-moving entry point across every
+provider; `execution` allows them, still subject to the per-trade policy below.
+Leaving it unset infers the mode from the older `LIVE_TRADING` flag, so an
+existing deployment keeps behaving as it did. Setting `DEPLOYMENT_MODE=research`
+together with `LIVE_TRADING=true` is a contradiction and refuses to start rather
+than picking a silent winner.
+
+`ALLOW_CUSTODIAL_SIGNING` decides whether the **server** may hold a key and sign
+on a user's behalf. Off by default, so the server-signing route refuses even on
+an execution deployment. A wallet-only product should leave it off and should
+not configure `SOLANA_PRIVATE_KEY` at all; doing both with live trading on is a
+startup failure until the operator states the intent explicitly.
+
+| Entry point | research | execution | execution + custodial |
+|---|---|---|---|
+| `POST /trade-plans/{id}/confirm` (server signs) | 403 | 403 | allowed |
+| `POST /trade-plans/{id}/wallet-transaction` | 403 | allowed | allowed |
+| `POST /trade-plans/{id}/submit-wallet-transaction` | 403 | allowed | allowed |
+| `POST /execution/lifi/quote` | 403 | allowed | allowed |
+| Relay swap (browser SDK) | hidden in the UI | offered | offered |
+
+The refusal is a FastAPI dependency, so it runs before the ownership lookup: a
+research deployment never reads the plan store to say no, and a route added
+later is covered by declaring `Depends(_require_execution_mode)`.
+
+**Accepted limitation, stated plainly.** Relay quotes and signs entirely in the
+browser against Relay's own API; the server is never asked, so it cannot refuse.
+Research mode reports every provider as unavailable in `GET /config/public` and
+the shipped UI hides the swap dialog and swap cards on that signal. That is a
+product-surface block, not a cryptographic one. Someone driving the Relay SDK
+themselves is not stopped by this deployment's mode. The Jupiter and LI.FI
+routes are genuinely server-enforced.
+
+## Startup configuration audit
+
+`ENVIRONMENT=production` turns development conveniences into refusals to start.
+Every problem is collected and reported at once so the whole list is fixed in
+one deploy. Fatal in production:
+
+| Setting | Why it is fatal |
+|---|---|
+| `DEV_EXPOSE_MAGIC_LINKS=true` | The sign-in link is returned in the HTTP response whenever email delivery fails, so anyone who knows an address could sign in as them. |
+| `ALLOW_MEMORY_FALLBACK=true` | A missing datastore falls back to per-process memory, so retained history, trade plans and turn locks stop being shared between workers instead of failing visibly. |
+| `DATABASE_URL` unset | No durable store for accounts, plans or history. |
+| `REDIS_URL` unset | No shared store for sessions, turn locks or retention. |
+| `MCP_API_KEY` unset | `/mcp` accepts unauthenticated tool calls. |
+| `PUBLIC_BASE_URL` not a public HTTPS origin | Sign-in and MCP hand-off links are built from it. |
+| `OPENAI_API_KEY` unset | Every chat turn fails. |
+
+Warnings are logged and returned from `GET /readyz` as `config_warnings`, but do
+not block startup: a missing `ADMIN_API_KEY` (admin routes fail closed with 503),
+a missing `RESEND_API_KEY` (wallet sign-in still works), and x402 enabled against
+a testnet. Anything fatal stops the process, so a running instance can never
+report one.
+
 ## Configuration and durable state
 
 Use PostgreSQL and Redis with `ALLOW_MEMORY_FALLBACK=false`. Memory mode is

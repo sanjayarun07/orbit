@@ -259,6 +259,19 @@ class Settings(BaseSettings):
     # Readiness probe (/readyz): per-check timeout, so a wedged datastore
     # fails the probe fast instead of hanging the load balancer's check.
     readiness_check_timeout_seconds: float = 3.0
+    # --- Deployment mode (app/deployment.py) ---------------------------------
+    # ENVIRONMENT drives the startup configuration audit: "production" turns
+    # development conveniences (exposed magic links, memory fallback, an
+    # unauthenticated /mcp) into refusals to start.
+    environment: str = "development"
+    # "research" refuses every money-moving entry point across all providers
+    # (Jupiter, Relay, LI.FI); "execution" allows them under the trade policy
+    # below. Unset infers the mode from live_trading, so existing deployments
+    # keep their behaviour; declaring both contradictorily fails at startup.
+    deployment_mode: str | None = None
+    # May the SERVER hold a key and sign for the user? Separate from the mode
+    # on purpose: a wallet-only product should never sign on anyone's behalf.
+    allow_custodial_signing: bool = False
     live_trading: bool = False
     max_trade_usd: float = 25.0
     max_slippage_bps: int = 100

@@ -4,6 +4,7 @@ import base58
 from solders.keypair import Keypair
 from solders.transaction import VersionedTransaction
 
+from app.deployment import require_custodial_signing, require_execution_enabled
 from app.plans import (
     claim_plan_submission,
     get_plan,
@@ -46,6 +47,9 @@ def _reviewed_message_diff(expected, signed) -> list[str]:
 
 
 async def execute_confirmed_plan(plan_id: str, confirmation_text: str) -> dict:
+    # Checked before the plan is even loaded: a research deployment, or one
+    # that does not hold keys for its users, refuses without touching state.
+    require_custodial_signing()
     plan = await get_plan(plan_id)
     if plan.status != "pending_confirmation":
         raise ValueError(f"Plan cannot execute in status {plan.status}")
@@ -73,6 +77,7 @@ async def execute_confirmed_plan(plan_id: str, confirmation_text: str) -> dict:
 
 async def prepare_wallet_transaction(plan_id: str, confirmation_text: str) -> dict:
     """Return the exact simulated transaction for explicit browser-wallet approval."""
+    require_execution_enabled("Preparing a transaction for wallet approval")
     plan = await get_plan(plan_id)
     if plan.status != "pending_confirmation":
         raise ValueError(f"Plan cannot execute in status {plan.status}")
@@ -93,6 +98,7 @@ async def submit_wallet_transaction(
     plan_id: str, confirmation_text: str, signed_transaction: str
 ) -> dict:
     """Broadcast only a valid wallet signature over the plan-bound message."""
+    require_execution_enabled("Submitting a signed transaction")
     plan = await get_plan(plan_id)
     if plan.status != "pending_confirmation":
         raise ValueError(f"Plan cannot execute in status {plan.status}")
