@@ -688,6 +688,93 @@
     .cap-head { flex-direction: column; gap: 2px; }
     .composer { border-radius: 20px; }
   }
+
+  /* ---- v3: minimal home (flat panes, one accent, composer as the hero) ---- */
+  :root { --bg: #0b0c0f; --sidebar: #0f1114; --card-main: #0f1114; --surface: #15181d; --surface-2: #1b1f26; --surface-hover: #21262e;
+    --border: rgba(255,255,255,.08); --text: #e6e8ec; --muted: #9aa3b2; --subtle: #6b7280; --text-strong: #ffffff; --text-2: #d3d7de; --text-3: #b7bcc6;
+    --brand: #5b8cff; --brand-2: #5b8cff; --brand-strong: #4f80f5; --brand-hover: #6d9aff; --brand-soft: rgba(91,140,255,.12); --brand-soft-strong: rgba(91,140,255,.2);
+    --brand-border: rgba(91,140,255,.3); --brand-border-strong: rgba(91,140,255,.5); --brand-ring: rgba(91,140,255,.14); --brand-grad: #5b8cff;
+    --link: #8fb0ff; --brand-text: #8fb0ff; --brand-text-2: #b3c8ff; --on-brand: #0b0c0f; --send-fg: #0b0c0f; --card: #15181d; --card-2: #1b1f26;
+    --composer-bg: #15181d; --composer-border: rgba(255,255,255,.1); --shadow-1: rgba(0,0,0,0); --shadow-2: rgba(0,0,0,.35); --shadow-3: rgba(0,0,0,.5); --shell-radius: 0px; }
+  :root[data-theme="light"] { --bg: #ffffff; --sidebar: #fafafa; --card-main: #ffffff; --surface: #ffffff; --surface-2: #f4f5f7; --surface-hover: #eef0f3;
+    --border: rgba(17,24,39,.09); --text: #111827; --muted: #4b5563; --subtle: #6b7280; --text-strong: #0b1220; --text-2: #1f2937; --text-3: #374151;
+    --brand: #2f6bff; --brand-2: #2f6bff; --brand-strong: #2f6bff; --brand-hover: #245ae6; --brand-soft: rgba(47,107,255,.08); --brand-soft-strong: rgba(47,107,255,.16);
+    --brand-border: rgba(47,107,255,.28); --brand-border-strong: rgba(47,107,255,.5); --brand-ring: rgba(47,107,255,.12); --brand-grad: #2f6bff;
+    --link: #245ae6; --brand-text: #245ae6; --brand-text-2: #1b48c2; --on-brand: #ffffff; --send-fg: #ffffff; --card: #ffffff; --card-2: #f4f5f7;
+    --composer-bg: #ffffff; --composer-border: rgba(17,24,39,.12); --shadow-1: rgba(0,0,0,0); --shadow-2: rgba(17,24,39,.08); --shadow-3: rgba(17,24,39,.14); --shell-radius: 0px; }
+  .app { gap: 0; padding: 0; background: var(--bg); }
+  .sidebar { border: 0; border-right: 1px solid var(--border); border-radius: 0; box-shadow: none; padding: 16px 12px 12px; position: relative; z-index: 2; }
+  .main { border: 0; border-radius: 0; box-shadow: none; background: var(--card-main); }
+  .main::before, .main::after, .deco { display: none !important; }
+  .mark { border-radius: 10px; background: var(--brand); box-shadow: none; color: var(--on-brand); }
+  .new-chat { background: var(--surface); color: var(--text); border: 1px solid var(--border); box-shadow: none; height: 40px; font-weight: 500; }
+  .new-chat:hover { background: var(--surface-2); filter: none; }
+  .nav-item { height: 40px; }
+  .account-button { box-shadow: none; }
+  .account-tier { color: var(--subtle); }
+  .topbar { height: 56px; }
+  .icon-button, .wallet-button, .avatar-button { box-shadow: none; }
+  .composer { box-shadow: none; border-radius: 16px; }
+  .composer:focus-within { border-color: var(--brand-border-strong); box-shadow: 0 0 0 3px var(--brand-ring); }
+  .composer-shell { background: var(--card-main); }
+  .composer-context { display: none; }
+  .team-toggle, .policy-chip, .credits-chip { font-size: 11px; }
+  .policy-chip, .policy-chip.unset { border: 0; background: transparent; color: var(--subtle); padding: 2px 6px; max-width: 40%; }
+  .policy-chip:hover, .policy-chip.unset:hover { background: var(--surface-2); color: var(--text); }
+  .credits-chip { border: 0; background: transparent; margin-left: auto; margin-right: 8px; }
+  .send { border-radius: 50%; background: var(--brand); color: var(--on-brand); }
+  .send:hover { background: var(--brand-hover); }
+  /* the hero */
+  .welcome { align-items: center; text-align: center; padding: 0; min-height: 0; }
+  .welcome-mark { display: grid; width: 56px; height: 56px; border-radius: 18px; background: var(--brand-soft); color: var(--brand); box-shadow: none; margin-bottom: 18px; }
+  .welcome-mark .icon { width: 26px; height: 26px; }
+  .welcome .tagline { font-family: var(--serif); font-weight: 400; font-size: clamp(34px, 4.6vw, 48px); letter-spacing: -.01em; line-height: 1.08; color: var(--text-strong); margin: 0; }
+  .welcome .tagline-sub { max-width: 520px; margin: 12px auto 0; color: var(--muted); font-size: 15px; line-height: 1.55; }
+  body.home .main { display: flex; flex-direction: column; }
+  body.home .conversation { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; }
+  body.home .conversation::before { content: ""; position: absolute; inset: 0; background: radial-gradient(60% 55% at 50% 60%, var(--brand-soft), transparent 70%); pointer-events: none; }
+  body.home .thread { padding: 24px 24px 18px; }
+  body.home .composer-shell { flex: 0 1 auto; overflow-y: auto; padding-bottom: 28px; }
+  body.home .jump-latest { display: none; }
+  .home-below { display: none; max-width: var(--content-width); margin: 14px auto 0; }
+  body.home .home-below { display: block; }
+  .home-below .mono-cap { margin: 0 0 10px; }
+  .home-below .prompts { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .home-below .prompt-card { min-height: 108px; padding: 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); transform: none; }
+  .home-below .prompt-card:hover { transform: none; background: var(--surface-2); border-color: var(--hover-border); }
+  .home-below .prompt-tile { width: 24px; height: 24px; margin-bottom: 14px; border-radius: 0; background: transparent !important; color: var(--muted) !important; }
+  .home-below .prompt-tile .icon { width: 18px; height: 18px; }
+  .home-below .prompt-card strong { font-size: 13.5px; font-weight: 500; line-height: 1.4; margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .home-below .prompt-desc, .home-below .prompt-source .prompt-arrow { display: none; }
+  .home-below .prompt-source { margin-top: auto; padding-top: 8px; font-size: 10.5px; }
+  .home-below .prompt-source:empty { display: none; }
+  .explore { margin-top: 22px; }
+  .explore summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--muted); font-size: 13px; padding: 8px; border-radius: 10px; }
+  .explore summary::-webkit-details-marker { display: none; }
+  .explore summary:hover { color: var(--text); background: var(--surface-2); }
+  .explore summary .icon { width: 14px; height: 14px; transition: transform .15s; }
+  .explore[open] summary .icon { transform: rotate(180deg); }
+  .explore-body { padding-top: 6px; }
+  .explore .chips { margin-top: 8px; }
+  .capabilities { margin-top: 26px; }
+  .cap-head h2 { font-size: 18px; }
+  .cap-item { background: var(--surface); }
+  .disclaimer { color: var(--subtle); }
+  :root[data-theme="light"] .new-chat { color: var(--text); box-shadow: none; }
+  :root[data-theme="light"] .send, .send { box-shadow: none; }
+  .composer-tools { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .send { position: static; margin: 0 0 0 4px; width: 36px; height: 36px; box-shadow: none; flex: none; }
+  .composer-plus { width: 34px; height: 34px; }
+  /* the home scrolls as one page: hero, composer, cards, explore */
+  body.home .main { overflow-y: auto; }
+  body.home .conversation { flex: 0 0 auto; overflow: visible; min-height: 36vh; justify-content: flex-end; }
+  body.home .composer-shell { flex: 0 0 auto; overflow: visible; position: static; }
+  body.home .topbar { position: sticky; top: 0; background: var(--card-main); z-index: 3; }
+  @media (max-width: 720px) {
+    .home-below .prompts { grid-template-columns: 1fr 1fr; }
+    .welcome .tagline { font-size: 30px; }
+    body.home .conversation { justify-content: center; }
+  }
 </style>
 </head
 <body>
@@ -731,19 +818,9 @@
     <section class="conversation" id="conversation">
       <div class="thread" id="messages">
         <div class="welcome" id="welcome">
-          <div class="welcome-mark"></div>
-          <h1><span id="greetingWord">Good morning</span><span id="greetingSep">, </span><em id="greetingName">there</em></h1>
-          <p>Research, trade and stay ahead of the market, from one place.</p>
-          <div class="mono-cap" id="highlightsCaption" hidden></div>
-          <div class="prompts">
-            <button class="prompt-card" data-action="portfolio" data-tone="teal"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/></svg></span><strong>Analyze my portfolio</strong><span>Holdings, allocation and concentration risk</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
-            <button class="prompt-card" data-msg="Check my SOL balance and list my SPL token balances. Do not prepare any trade." data-tone="blue"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2"/></svg></span><strong>Check my balances</strong><span>SOL and token balances from your connected wallet</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
-            <button class="prompt-card" data-msg="Find the verified Jupiter token information and safety warnings for USDC mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v. Do not trade." data-tone="violet"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg></span><strong>Check a token's safety</strong><span>Verification, holders and risk warnings before you buy</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
-            <button class="prompt-card" data-action="relay" data-tone="amber"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h13l-3-3M20 17H7l3 3"/></svg></span><strong>Swap across chains</strong><span>A reviewed route, fees and output before you sign</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
-          </div>
-          <div class="chips" id="homeChips" hidden></div>
-          <div class="suggest-rows" id="homeRows" hidden></div>
-          <section class="capabilities" id="homeCapabilities" aria-label="What Orbit can do"></section>
+          <div class="welcome-mark" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M5 15.5 9.5 11l3 3L19 7.5"/><path d="M19 12v7H5V5h8"/></svg></div>
+          <h1 class="tagline">Research. Trade. Stay ahead.</h1>
+          <p class="tagline-sub">Ask about any token, wallet or protocol. Orbit checks the data first, then answers.</p>
         </div>
       </div>
     </section>
@@ -764,6 +841,23 @@
           <button class="send" id="sendBtn" type="submit" aria-label="Send"><svg class="icon" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7M12 19V5"/></svg></button>
         </div>
       </form>
+      <div class="home-below" id="homeBelow">
+        <div class="mono-cap" id="highlightsCaption" hidden></div>
+        <div class="prompts" id="homePrompts">
+          <button class="prompt-card" data-action="portfolio" data-tone="teal"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/></svg></span><strong>Analyze my portfolio</strong><span>Holdings, allocation and concentration risk</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+          <button class="prompt-card" data-msg="Check my SOL balance and list my SPL token balances. Do not prepare any trade." data-tone="blue"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2"/></svg></span><strong>Check my balances</strong><span>SOL and token balances from your connected wallet</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+          <button class="prompt-card" data-msg="Find the verified Jupiter token information and safety warnings for USDC mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v. Do not trade." data-tone="violet"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg></span><strong>Check a token's safety</strong><span>Verification, holders and risk warnings before you buy</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+          <button class="prompt-card" data-action="relay" data-tone="amber"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h13l-3-3M20 17H7l3 3"/></svg></span><strong>Swap across chains</strong><span>A reviewed route, fees and output before you sign</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+        </div>
+        <details class="explore" id="exploreMore">
+          <summary><span>Explore what Orbit can do</span><svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></summary>
+          <div class="explore-body">
+            <div class="chips" id="homeChips" hidden></div>
+            <div class="suggest-rows" id="homeRows" hidden></div>
+            <section class="capabilities" id="homeCapabilities" aria-label="What Orbit can do"></section>
+          </div>
+        </details>
+      </div>
       <div class="disclaimer">Orbit can make mistakes. Verify wallet addresses, quotes, and transaction details before signing.</div>
     </div>
   </main>
@@ -1229,7 +1323,7 @@ async function deleteChat(id) {
 const HIGHLIGHT_ICONS={crypto:'<svg class="icon" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/></svg>',stocks:'<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 15l3-3 3 2 4-5"/></svg>',action:'<svg class="icon" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/></svg>'};
 let highlights=null;
 async function loadHighlights(){try{const res=await fetch("/home/highlights");if(!res.ok)throw new Error();highlights=await res.json();}catch{highlights=null;}renderHighlights();}
-function renderHighlights(){const grid=$("#welcome .prompts");const cap=$("#highlightsCaption");if(!grid||!highlights||!(highlights.cards||[]).length)return;
+function renderHighlights(){const grid=$("#homePrompts");const cap=$("#highlightsCaption");if(!grid||!highlights||!(highlights.cards||[]).length)return;
   grid.innerHTML=highlights.cards.map(c=>{const attrs=c.action?`data-action="${escapeHtml(c.action)}"`:`data-msg="${escapeHtml(c.prompt||c.title)}"`;return `<button class="prompt-card" ${attrs} data-tone="${escapeHtml(c.tone||"teal")}" data-kind="${escapeHtml(c.kind||"action")}"><span class="prompt-tile">${HIGHLIGHT_ICONS[c.kind]||HIGHLIGHT_ICONS.action}</span><strong>${escapeHtml(c.title)}</strong><span class="prompt-desc">${escapeHtml(c.summary||"")}</span><span class="prompt-source"><span>${escapeHtml(c.source||(c.kind==="action"?"Orbit":""))}</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></button>`;}).join("");
   if(cap){const when=highlights.as_of?new Date(highlights.as_of):null;cap.hidden=false;cap.textContent=highlights.source==="news"?`Today · crypto & stocks · as of ${when?when.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"now"}`:highlights.source==="market"?`Live market · as of ${when?when.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"now"}`:"";}}
 let homeSuggestions=null,activeChip="trending";
@@ -1295,6 +1389,11 @@ document.addEventListener("click",event=>{const item=event.target.closest(".cap-
   sendMessage(q);});
 renderCapabilities();
 const welcomeMarkup = messagesEl.innerHTML;
+// Home state: the welcome hero is on screen -> the composer sits under it and the
+// cards / explore panel show; in a conversation they hide and the composer docks.
+function syncHomeState(){document.body.classList.toggle("home",Boolean($("#welcome")));}
+new MutationObserver(syncHomeState).observe(messagesEl,{childList:true});syncHomeState();
+
 
 function addUserMessage(text) {
   hideWelcome(); const el = document.createElement("article"); el.className = "message user";
