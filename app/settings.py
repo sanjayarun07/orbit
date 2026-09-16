@@ -169,6 +169,7 @@ class Settings(BaseSettings):
     honeypot_base_url: str = "https://api.honeypot.is/v2"
     honeypot_requests_per_minute: int = 30
     defillama_base_url: str = "https://api.llama.fi"
+    defillama_yields_base_url: str = "https://yields.llama.fi"
     defillama_requests_per_minute: int = 60
     goldrush_api_key: str | None = None
     goldrush_base_url: str = "https://api.covalenthq.com/v1"

@@ -677,5 +677,89 @@
     "expected_intent": "research",
     "router": true,
     "notes": "home news tile follow-up: a headline explainer is web research, never a token lookup on 'Bitcoin' (2026-09-16 live)"
+  },
+  {
+    "id": "fees-named-protocol",
+    "query": "how much revenue does Aave make",
+    "expected_tools": [
+      "defillama_fees_revenue"
+    ],
+    "forbidden_tools": [
+      "defillama_chain_tvl",
+      "jupiter",
+      "portfolio_snapshot"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "free DefiLlama dimensions API; was a web-search fall-through"
+  },
+  {
+    "id": "fees-leaderboard",
+    "query": "top DeFi protocols by fees this month",
+    "expected_tools": [
+      "defillama_fees_revenue"
+    ],
+    "forbidden_tools": [
+      "jupiter"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "no protocol named -> leaderboard"
+  },
+  {
+    "id": "yields-asset-chain",
+    "query": "best USDC yield on Base",
+    "expected_tools": [
+      "defillama_yields"
+    ],
+    "forbidden_tools": [
+      "jupiter",
+      "relay",
+      "dexscreener_pair_search"
+    ],
+    "expected_intent": "research",
+    "router": false,
+    "notes": "DefiLlama pools filtered by asset + chain; Layer-1 abstains (no anchored rule), the speech model + tool backstop pick it in chat mode"
+  },
+  {
+    "id": "yields-staking",
+    "query": "what APY does stETH pay right now",
+    "expected_tools": [
+      "defillama_yields"
+    ],
+    "forbidden_tools": [
+      "jupiter",
+      "knowledge_base_search"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "live number: yields tool, never the KB"
+  },
+  {
+    "id": "kb-stablecoin-backing",
+    "query": "what backs USDe and how does it keep its peg",
+    "expected_tools": [
+      "knowledge_base_search"
+    ],
+    "forbidden_tools": [
+      "jupiter",
+      "dexscreener_pair_search"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "stablecoin mechanism from the market-wide DefiLlama stablecoins set"
+  },
+  {
+    "id": "kb-global-incident",
+    "query": "what happened in the Ronin bridge hack",
+    "expected_tools": [
+      "knowledge_base_search"
+    ],
+    "forbidden_tools": [
+      "jupiter"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "incident outside the protocol registry: global hacks list"
   }
 ]

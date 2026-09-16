@@ -556,3 +556,103 @@ def test_failed_source_retries_after_an_hour_not_a_week():
     asyncio.run(store.record_source_state("coingecko", aave.id, True, 1, None))
     store.source_state[("coingecko", aave.id)]["last_run_at"] = datetime.now(timezone.utc) - timedelta(hours=2)
     assert not asyncio.run(ingest.due(gecko, aave, store))             # succeeded two hours ago: wait the week
+
+
+# --- market-wide sources: hacks and stablecoins ---------------------------------
+
+HACKS_GLOBAL = [
+    {"date": "1773273600", "name": "Aave", "classification": "Oracle Manipulation", "technique": "Oracle Misconfiguration", "amount": "862000", "chain": "['Ethereum']", "bridgeHack": "False", "targetType": "DeFi Protocol", "source": "", "returnedFunds": "862000", "language": "Solidity"},
+    {"date": "1648425600", "name": "Ronin Network", "classification": "Infrastructure", "technique": "Compromised validator keys", "amount": "624000000", "chain": "['Ronin']", "bridgeHack": "True", "targetType": "Bridge", "source": "https://example.com/ronin", "returnedFunds": "None", "language": "None"},
+    {"date": "bad", "name": "Nothing", "amount": "1"},
+]
+STABLES = [
+    {"name": "Ethena USDe", "symbol": "USDe", "pegType": "peggedUSD", "pegMechanism": "crypto-backed", "chains": ["Ethereum", "Arbitrum", "Base"], "gecko_id": "ethena-usde", "priceSource": "coingecko", "circulating": {"peggedUSD": 5_900_000_000.0}},
+    {"name": "USD Coin", "symbol": "USDC", "pegType": "peggedUSD", "pegMechanism": "fiat-backed", "chains": ["Ethereum", "Solana", "Base"], "gecko_id": "usd-coin", "circulating": {"peggedUSD": 60_000_000_000.0}},
+    {"name": "Dust Dollar", "symbol": "DUSD", "pegType": "peggedUSD", "pegMechanism": "algorithmic", "chains": ["BSC"], "circulating": {"peggedUSD": 12_000.0}},
+]
+
+
+def test_global_hacks_attach_to_registry_protocols_or_stand_alone():
+    from app.knowledge.connectors.llama_global import GlobalHacksConnector
+
+    asyncio.run(registry.bootstrap(limit=10))
+    store = asyncio.run(kb_store.get_store())
+    resolver = ent.EntityResolver(asyncio.run(store.list_entities()))
+    protocols = {p.id: p for p in asyncio.run(store.list_protocols())}
+    docs = GlobalHacksConnector.build(HACKS_GLOBAL, resolver, protocols)
+    assert len(docs) == 2                                    # the malformed row is dropped
+    aave, ronin = docs
+    assert aave.protocol_id == "protocol:aave" and aave.url == "https://defillama.com/hacks#aave-2026-03-12"   # same url as the per-protocol path: no duplicate
+    assert ronin.protocol_id is None and ronin.title == "Ronin Network exploit — 2022-03-28" and "$624.0M lost" in ronin.content and "**Bridge hack**" in ronin.content
+    assert ronin.metadata["chains"] == ["Ronin"] and ronin.metadata["returned_usd"] is None
+    for d in docs:
+        asyncio.run(ingest.ingest_document(d))
+    entities = {e.id: e for e in asyncio.run(store.list_entities())}
+    assert entities["incident:ronin-network:2022-03-28"].entity_type == "incident" and "Ronin Network" in entities["incident:ronin-network:2022-03-28"].aliases
+    assert any(r.relation == "HAD_INCIDENT" for r in asyncio.run(store.neighbors("protocol:aave")))
+    assert [r.target_entity_id for r in asyncio.run(store.neighbors("incident:ronin-network:2022-03-28", relation="DEPLOYED_ON"))] == ["chain:ronin"]
+    # Standalone incidents are searchable without any protocol scope.
+    hits, plan = asyncio.run(retrieval.search("what happened in the Ronin bridge hack", limit=3))
+    assert hits and hits[0].document_title.startswith("Ronin Network exploit")
+
+
+def test_stablecoins_become_entities_with_peg_chain_and_issuer_edges():
+    from app.knowledge.connectors.llama_global import StablecoinsConnector
+
+    asyncio.run(registry.bootstrap(limit=10))
+    store = asyncio.run(kb_store.get_store())
+    asyncio.run(store.upsert_protocol(Protocol(id="protocol:ethena", slug="ethena", name="Ethena", symbol="ENA", category="Basis Trading", chains=["ethereum"], tvl_usd=6e9)))
+    from app.knowledge.registry import entities_for
+    for e in entities_for(asyncio.run(store.get_protocol("protocol:ethena")))[0]:
+        asyncio.run(store.upsert_entity(e))
+    resolver = ent.EntityResolver(asyncio.run(store.list_entities()))
+    docs = StablecoinsConnector.build(STABLES, resolver)
+    assert [d.metadata["symbol"] for d in docs] == ["USDE", "USDC"]         # dust dollar filtered out
+    usde, usdc = docs
+    assert usde.protocol_id == "protocol:ethena" and "**Issuer**: Ethena" in usde.content and "crypto-backed" in usde.content
+    assert usdc.protocol_id is None and "fiat-backed stablecoin" in usdc.content and "redeemable for one unit of US dollar" in usdc.content
+    for d in docs:
+        asyncio.run(ingest.ingest_document(d))
+    entities = {e.id: e for e in asyncio.run(store.list_entities())}
+    assert entities["stablecoin:ethena-usde"].symbol == "USDE" and entities["stablecoin:ethena-usde"].metadata["peg_mechanism"] == "crypto-backed"
+    edges = {(r.relation, r.target_entity_id) for r in asyncio.run(store.neighbors("stablecoin:ethena-usde", direction="out"))}
+    assert ("PEGGED_TO", "asset:us-dollar") in edges and ("ISSUED_BY", "protocol:ethena") in edges and ("DEPLOYED_ON", "chain:base") in edges
+    assert ("ISSUED_BY", "protocol:ethena") not in {(r.relation, r.target_entity_id) for r in asyncio.run(store.neighbors("stablecoin:usd-coin", direction="out"))}
+    # "USDe" written as the coin spells it is a mention; a lowercase url fragment is not.
+    resolver = asyncio.run(kb_tool.resolver(force=True))
+    assert [m.entity.id for m in resolver.mentions("what backs USDe and is it safe")] == ["stablecoin:ethena-usde"]
+    assert not [m for m in resolver.mentions("see https://x.com/usde-thread") if m.entity.id == "stablecoin:ethena-usde"]
+    assert kb_tool.matches("what backs USDe?")
+
+
+def test_global_connectors_run_once_per_pass_under_the_global_key():
+    from app.knowledge.models import GLOBAL_PROTOCOL_ID
+
+    asyncio.run(registry.bootstrap(limit=10))
+    store = asyncio.run(kb_store.get_store())
+
+    class Stub:
+        name = "stub_global"
+        source_type = "incident"
+        scope = "global"
+        refresh_every = timedelta(hours=1)
+        calls = 0
+
+        def applies(self, protocol):
+            return protocol.id == GLOBAL_PROTOCOL_ID
+
+        def discover(self, protocol):
+            return [SourceRef(url="https://example.com/global", kind="bundle")]
+
+        def fetch(self, protocol, ref):
+            return None
+
+        def documents(self, protocol, ref):
+            Stub.calls += 1
+            return [NormalizedDocument(source="stub", source_type="incident", url="https://example.com/g1", protocol_id=None, title="Global one",
+                                       content="# Global one\n\nA market-wide note about an exploit that is long enough to be chunked and indexed properly by the pipeline.", content_hash="h1")]
+
+    results = asyncio.run(ingest.run_global(store, connectors=[Stub()]))
+    assert len(results) == 1 and results[0].protocol_id == GLOBAL_PROTOCOL_ID and results[0].documents_seen == 1 and Stub.calls == 1
+    assert asyncio.run(ingest.run_global(store, connectors=[Stub()])) == []       # not due again within the hour
+    assert asyncio.run(store.get_source_state("stub_global", GLOBAL_PROTOCOL_ID))["documents"] == 1

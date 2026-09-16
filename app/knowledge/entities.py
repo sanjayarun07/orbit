@@ -189,16 +189,20 @@ class EntityResolver:
                 continue
             entity = self._by_id[eid]
             if len(name) <= 5 or name in _COMMON_WORDS:
-                # Short or dictionary-word names ("Mode", "Base", "Core", "Flow") only count
-                # as a mention when capitalised and standalone -- "E-mode" is not Mode L2.
-                pattern = r"(?<![A-Za-z0-9$#-])" + re.escape(entity.canonical_name if name == entity.canonical_name.lower() else name.capitalize()) + r"(?![a-z0-9-])"
-                if not re.search(pattern, text):
+                # Short or dictionary-word names ("Mode", "Base", "Core", "Flow", "USDe")
+                # only count as a mention when written as the entity spells them and
+                # standalone -- "E-mode" is not Mode L2, "usde" in a URL is not USDe.
+                spellings = {a for a in entity.aliases if a.lower() == name and not a.islower()}
+                if name == entity.canonical_name.lower():
+                    spellings.add(entity.canonical_name)
+                if not spellings:
+                    spellings.add(name.capitalize())
+                if not any(re.search(r"(?<![A-Za-z0-9$#-])" + re.escape(s) + r"(?![a-z0-9-])", text) for s in spellings):
                     continue
             elif not re.search(r"(?<![a-z0-9])" + re.escape(name) + r"(?![a-z0-9])", lowered):
                 continue
-            if True:
-                method = "canonical_name" if name == self._by_id[eid].canonical_name.lower() else "alias"
-                resolution = Resolution(self._by_id[eid], CONFIDENCE[method], method)
-                if eid not in found or found[eid].confidence < resolution.confidence:
-                    found[eid] = resolution
+            method = "canonical_name" if name == entity.canonical_name.lower() else "alias"
+            resolution = Resolution(entity, CONFIDENCE[method], method)
+            if eid not in found or found[eid].confidence < resolution.confidence:
+                found[eid] = resolution
         return list(found.values())

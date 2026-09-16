@@ -202,6 +202,12 @@ SCENARIOS = [
     ], "research"),
     S("market event calendar card", [dict(message="what events could move the market this week?", check=_all(_intent("research"), _tools_any("market_event_calendar"), _contains("Market events")))], "research"),
     S("social sentiment tool", [dict(message="what is crypto twitter saying about BONK", check=_all(_intent("research"), _tools_any("x_kol_sentiment"), _contains("sentiment")))], "research"),
+    S("fees, yields and stablecoins (free DefiLlama)", [
+        dict(message="how much revenue does Aave make", check=_all(_intent("research"), _tools_any("defillama_fees_revenue"), _contains("Aave"))),
+        dict(message="best USDC yield on Base", check=_all(_intent("research"), _tools_any("defillama_yields"), _contains("APY"))),
+        dict(message="what backs USDe and how does it keep its peg", check=_all(_intent("research"), _tools_any("knowledge_base_search"), _contains("USDe"))),
+        API("GET", "/admin/research/gaps?days=30", check=lambda st, d, t, c: [] if isinstance(d.get("topics"), list) else [f"gaps={d}"]),
+    ], "research"),
     S("knowledge base: docs, incidents, funding, graph", [
         dict(message="How does Aave V3's E-mode change the liquidation threshold?", check=_all(_intent("research"), _tools_any("knowledge_base_search"), _contains("[1]"))),
         dict(message="has Aave ever been hacked?", check=_all(_intent("research"), _tools_any("knowledge_base_search"), _tools_none("perplexity_web_search"))),

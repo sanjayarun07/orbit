@@ -14,10 +14,10 @@ import logging
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from app.knowledge.connectors import CoinGeckoConnector, DefiLlamaConnector, DiscourseConnector, DocsConnector, GitHubConnector, SnapshotConnector
+from app.knowledge.connectors import CoinGeckoConnector, DefiLlamaConnector, DiscourseConnector, DocsConnector, GitHubConnector, GlobalHacksConnector, SnapshotConnector, StablecoinsConnector
 from app.knowledge.embeddings import get_embedder
 from app.knowledge.entities import EntityResolver
-from app.knowledge.models import Chunk, Entity, IngestionResult, NormalizedDocument, Protocol, Relationship
+from app.knowledge.models import GLOBAL_PROTOCOL_ID, Chunk, Entity, IngestionResult, NormalizedDocument, Protocol, Relationship
 from app.knowledge.normalize import chunk_markdown
 from app.knowledge.store import get_store
 from app.settings import settings
@@ -32,11 +32,35 @@ def default_connectors() -> list:
     return [DefiLlamaConnector(), DocsConnector(page_budget=settings.knowledge_docs_page_budget), GitHubConnector(), SnapshotConnector(), DiscourseConnector(), CoinGeckoConnector()]
 
 
+GLOBAL = Protocol(id=GLOBAL_PROTOCOL_ID, slug=GLOBAL_PROTOCOL_ID, name="DeFi (market-wide)")
+
+
+async def global_connectors(store) -> list:
+    """Market-wide sources, built with the current registry so each document
+    can attach itself to a protocol by name."""
+    resolver = await _resolver(store)
+    protocols = {p.id: p for p in await store.list_protocols(limit=5000)}
+    return [GlobalHacksConnector(resolver, protocols), StablecoinsConnector(resolver)]
+
+
+async def run_global(store=None, connectors: list | None = None, only_due: bool = True) -> list[IngestionResult]:
+    """One pass over the global connectors (each runs once, not per protocol)."""
+    store = store or await get_store()
+    results: list[IngestionResult] = []
+    for connector in connectors if connectors is not None else await global_connectors(store):
+        if only_due and not await due(connector, GLOBAL, store):
+            continue
+        result = await run_source(connector, GLOBAL, store)
+        results.append(result)
+        logger.info("knowledge: global/%s seen=%d changed=%d chunks=%d errors=%d", connector.name, result.documents_seen, result.documents_changed, result.chunks_written, len(result.errors))
+    return results
+
+
 async def apply_facts(doc: NormalizedDocument, store, resolver: EntityResolver) -> int:
     """Structured facts a connector attached to a document (see models.py):
     create or resolve the target entity, then write the edge with the
     document as provenance. Returns edges written."""
-    facts = [f for f in (doc.metadata.get("facts") or []) if isinstance(f, dict) and f.get("relation") and doc.protocol_id and doc.id]
+    facts = [f for f in (doc.metadata.get("facts") or []) if isinstance(f, dict) and f.get("target") and doc.id]
     written = 0
     for fact in facts:
         target = fact.get("target") or {}
@@ -52,15 +76,16 @@ async def apply_facts(doc: NormalizedDocument, store, resolver: EntityResolver) 
             target_id = resolution.entity.id
         else:
             continue
-        if target_id == doc.protocol_id:
-            continue
+        origin = fact.get("source") or doc.protocol_id
+        if not fact.get("relation") or not origin or target_id == origin:
+            continue   # entity-only fact, or nothing to hang the edge on
         valid_from = fact.get("valid_from")
         if isinstance(valid_from, str):
             try:
                 valid_from = datetime.fromisoformat(valid_from[:10]).replace(tzinfo=timezone.utc)
             except ValueError:
                 valid_from = None
-        source, dest = (target_id, doc.protocol_id) if fact.get("direction") == "in" else (doc.protocol_id, target_id)
+        source, dest = (target_id, origin) if fact.get("direction") == "in" else (origin, target_id)
         rel = Relationship(source, str(fact["relation"]), dest, confidence=float(fact.get("confidence") or 0.9), source_document_id=doc.id,
                            valid_from=valid_from, observed_at=datetime.now(timezone.utc), metadata={**(fact.get("metadata") or {}), "method": "structured"})
         written += int(await store.upsert_relationship(rel))
@@ -195,6 +220,7 @@ async def run_all(parallel: int = 3, limit: int | None = None, only_due: bool = 
                 logger.info("knowledge: %s/%s seen=%d changed=%d chunks=%d errors=%d", protocol.slug, connector.name, result.documents_seen, result.documents_changed, result.chunks_written, len(result.errors))
 
     await asyncio.gather(*(one(p) for p in protocols))
+    results.extend(await run_global(store, only_due=only_due))
     if derive:
         from app.knowledge.derive import derive_all
 
@@ -236,6 +262,8 @@ async def tick(limit: int = 5, connectors: list | None = None) -> list[Ingestion
                     break
                 if connector.applies(protocol) and await due(connector, protocol, store):
                     results.append(await run_source(connector, protocol, store))
+        if len(results) < limit:
+            results.extend(await run_global(store))
         _status["last_run"] = datetime.now(timezone.utc).isoformat()
         _status["runs"] = ([r.__dict__ for r in results] + _status["runs"])[:50]
         return results

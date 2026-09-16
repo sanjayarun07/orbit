@@ -130,6 +130,37 @@ resolves or creates the target entity and writes the edge with the document
 as provenance (`method = structured`). A fact whose named target does not
 resolve is dropped, never invented.
 
+### Market-wide sources
+
+Two connectors run once per pass rather than per protocol (`scope = "global"`,
+source state under the `global` key):
+
+- **Hacks** (`/hacks`, 1,269 incidents): one `incident` document each. When
+  the target name resolves to a registry protocol at ≥ 0.9 the document is
+  the same one the per-protocol path writes (same URL, no duplicate) and
+  gets the `HAD_INCIDENT` edge; otherwise it stands alone with an
+  `incident:` entity and `DEPLOYED_ON` chain edges, so Ronin, Wormhole and
+  FTX are answerable without being protocols.
+- **Stablecoins** (`/stablecoins`, those above $1M circulating): a document
+  per coin with peg, mechanism (fiat-backed / crypto-backed / algorithmic),
+  chains and a dated supply snapshot; a `stablecoin:` entity with
+  `PEGGED_TO`, `DEPLOYED_ON` and, when the name resolves, `ISSUED_BY`.
+
+### Live tools next door
+
+Fees/revenue (`defillama_fees_revenue`) and yields (`defillama_yields`) are
+provider tools, not documents: numbers that move stay live. Both cache the
+4-11 MB DefiLlama payloads process-wide.
+
+### The fall-through log
+
+`app/research_gaps.py` records every research turn that only web search could
+answer, tagged by the data topic it needed (treasury, ETF flows, unlocks, RWA,
+bridge volume, funding rates, …) and what would answer it. `GET
+/admin/research/gaps?days=30` and the admin Knowledge panel show the counts:
+the business case for DefiLlama's API tier, or for the next free connector,
+in numbers rather than guesses.
+
 ### Derived edges
 
 After a pass (`scripts/kb_ingest.py`, or `POST /admin/knowledge/derive`):

@@ -46,6 +46,7 @@
      <h3 class="ops-h">Graph <span class="muted" id="kbGraphTitle"></span></h3>
      <div id="kbGraph" class="ops-list muted">Pick a protocol's <b>graph</b> to see its edges.</div>
      <h3 class="ops-h">Recent ingestion runs</h3><div id="kbRuns" class="ops-list"></div>
+     <h3 class="ops-h">Data gaps · 30d <span class="muted">research answered only by web search</span></h3><div id="kbGaps" class="ops-list"></div>
     </div>
    </div>
   </div>
@@ -121,6 +122,10 @@ async function kbGraph(id,name){const box=$("#kbGraph");$("#kbGraphTitle").textC
 async function kbSearch(){const out=$("#kbHits");const q=$("#kbQuery").value.trim();if(!q)return;out.innerHTML='<div class="muted">Searching…</div>';try{const d=await api(`/knowledge/search?q=${encodeURIComponent(q)}&limit=6`);
   const ents=(d.entities||[]).map(e=>`<span class="pill" title="${esc(e.method)} ${(e.confidence*100).toFixed(0)}%">${esc(e.name)}</span>`).join("");const exp=(d.graph_expanded||[]).map(x=>esc(x.replace("protocol:",""))).join(", ");
   out.innerHTML=`<div class="ops-row muted"><span>${ents||"no entity recognised"}</span><span>${exp?`expanded: ${exp}`:""}</span></div>`+(d.hits.length?d.hits.map((h,i)=>`<div class="ops-row" style="align-items:flex-start"><span><b>[${i+1}]</b> ${esc(h.protocol||"")} · <a href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.title)}</a>${h.heading?` <span class="muted">› ${esc(h.heading)}</span>`:""}<div class="muted" style="font-size:12px;margin-top:2px">${esc(h.content.slice(0,220))}…</div></span><span class="muted" style="white-space:nowrap">${h.score.toFixed(3)} · ${(h.sources||[]).join("+")}</span></div>`).join(""):'<div class="muted">No passages.</div>')}catch(e){out.innerHTML=`<div class="error">${esc(e.message)}</div>`}}
+async function loadGaps(){const out=$("#kbGaps");try{const d=await api("/admin/research/gaps?days=30");
+  out.innerHTML=d.topics.length?d.topics.map(t=>`<div class="ops-row" style="align-items:flex-start"><span><b>${esc(t.topic.replace(/_/g," "))}</b> <span class="muted">${esc(t.needs)}</span><div class="muted" style="font-size:12px;margin-top:2px">${t.samples.slice(0,2).map(s=>"“"+esc(s.request.slice(0,90))+"”").join(" · ")}</div></span><b>${t.count}</b></div>`).join("")+`<div class="ops-row muted"><span>total</span><span>${d.total}</span></div>`:'<div class="muted">No fall-throughs recorded yet.</div>';
+ }catch(e){out.innerHTML=`<div class="error">${esc(e.message)}</div>`}}
+const _loadKb=loadKb;loadKb=async function(){await _loadKb();loadGaps();};
 $("#kbRefresh").onclick=loadKb;$("#kbSearch").onclick=kbSearch;$("#kbQuery").addEventListener("keydown",e=>{if(e.key==="Enter")kbSearch()});
 $("#kbDerive").onclick=async()=>{const b=$("#kbDerive");b.disabled=true;try{const r=await api("/admin/knowledge/derive",{method:"POST"});b.textContent=`+${r.competitors} competitors · +${r.integrations} integrations`;loadKb()}catch(e){b.textContent=e.message.slice(0,40)}finally{setTimeout(()=>{b.disabled=false;b.textContent="Derive edges"},4000)}};
 const _load=load;load=async function(){await _load();loadOps();searchUsers();loadKb();};

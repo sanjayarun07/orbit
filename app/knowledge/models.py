@@ -8,9 +8,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 SOURCE_TYPES = ("protocol_docs", "github", "governance", "defillama", "incident", "funding", "token", "subgraph", "news")
-ENTITY_TYPES = ("protocol", "token", "chain", "contract", "dao", "person", "exchange", "category", "organization", "incident")
+ENTITY_TYPES = ("protocol", "token", "chain", "contract", "dao", "person", "exchange", "category", "organization", "incident", "asset")
 RELATIONS = ("DEPLOYED_ON", "TOKEN_OF", "GOVERNED_BY", "INTEGRATES_WITH", "COMPETITOR_OF", "SUPPORTS_ASSET", "IN_CATEGORY", "AUDITED_BY", "FORK_OF",
-             "USES_ORACLE", "FUNDED_BY", "PART_OF", "HAD_INCIDENT")
+             "USES_ORACLE", "FUNDED_BY", "PART_OF", "HAD_INCIDENT", "ISSUED_BY", "PEGGED_TO")
 
 # Structured facts ride along in NormalizedDocument.metadata["facts"]: the
 # connector states them, ingestion resolves/creates the target entity and
@@ -19,6 +19,11 @@ RELATIONS = ("DEPLOYED_ON", "TOKEN_OF", "GOVERNED_BY", "INTEGRATES_WITH", "COMPE
 #    "confidence": 0.95, "valid_from": "2023-03-28", "direction": "out" | "in", "metadata": {...}}
 # A target without an id is resolved by name against the entity index
 # (protocols, chains) and dropped when it does not resolve at >= 0.9.
+# Optional "source": "<entity id>" makes the edge start somewhere other than
+# the document's protocol (a stablecoin entity, say); a fact with a target but
+# no relation only creates/updates the target entity.
+
+GLOBAL_PROTOCOL_ID = "global"   # source-state key for connectors that cover the whole market, not one protocol
 
 
 def utcnow() -> datetime:

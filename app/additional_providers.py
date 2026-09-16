@@ -334,6 +334,45 @@ def _named_defi_subject(request: str) -> set[str]:
     return {word.lower() for word in re.findall(r"[A-Za-z0-9-]+", request) if word.lower() not in _DEFI_IGNORED_WORDS}
 
 
+_LLAMA_CACHE: dict[str, tuple[float, Any]] = {}
+_LLAMA_CACHE_TTL = {"fees": 300.0, "pools": 600.0}
+
+
+def _llama_cached(key: str, url: str, ttl: float, extract):
+    """The dimensions and pools payloads are 4-11 MB: fetch once per TTL for
+    the whole process, whatever the request wording."""
+    import time as _time
+
+    now = _time.monotonic()
+    hit = _LLAMA_CACHE.get(key)
+    if hit and now - hit[0] < ttl:
+        return hit[1]
+    with httpx.Client(timeout=max(30.0, settings.provider_request_timeout_seconds)) as client:
+        response = client.get(url)
+        response.raise_for_status()
+        value = extract(response.json())
+    _LLAMA_CACHE[key] = (now, value)
+    return value
+
+
+def _llama_overview(kind: str, data_type: str | None = None) -> list[dict]:
+    url = f"{settings.defillama_base_url}/overview/{kind}?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true" + (f"&dataType={data_type}" if data_type else "")
+    return _llama_cached(f"{kind}:{data_type or 'fees'}", url, _LLAMA_CACHE_TTL["fees"], lambda d: [r for r in (d.get("protocols") or []) if isinstance(r, dict)])
+
+
+def _llama_pools() -> list[dict]:
+    return _llama_cached("pools", f"{settings.defillama_yields_base_url}/pools", _LLAMA_CACHE_TTL["pools"], lambda d: [p for p in (d.get("data") or []) if isinstance(p, dict)])
+
+
+def _requested_chain(request: str) -> str | None:
+    for chain in ("ethereum", "solana", "base", "arbitrum", "optimism", "polygon", "bsc", "avalanche", "hyperliquid", "sui", "aptos", "tron", "linea", "scroll", "berachain", "sonic", "mantle", "blast"):
+        if re.search(rf"\b{chain}\b", request, re.I):
+            return chain
+    if re.search(r"\bbnb\b", request, re.I):
+        return "bsc"
+    return None
+
+
 class DefiLlamaProvider:
     name = "defillama"
 
@@ -375,7 +414,92 @@ class DefiLlamaProvider:
         lines.extend(["", "Source: [DeFiLlama API](https://defillama.com/docs/api)"])
         return compact_tool_result("\n".join(lines))
 
+    # ---------------------------------------------------------------- fees / revenue
+    def fees(self, request: str) -> str:
+        """Fees and revenue per protocol from DefiLlama's dimensions API: a named
+        protocol's 24h / 7d / 30d / all-time figures with methodology, or the
+        top ten by 24h fees when no protocol is named."""
+        fees_rows = _llama_overview("fees")
+        revenue_rows = {row.get("name"): row for row in _llama_overview("fees", data_type="dailyRevenue")}
+        subject = _named_defi_subject(request) - {"fees", "fee", "revenue", "revenues", "earnings", "earn", "income", "make", "makes", "much", "how", "does", "generate", "generates", "collect", "collects"}
+        matches = [row for row in fees_rows if subject and subject & set(re.findall(r"[a-z0-9-]+", str(row.get("name") or "").lower()))] if subject else []
+        chain = _requested_chain(request)
+        candidates = matches or fees_rows
+        if chain and not matches:
+            candidates = [row for row in candidates if chain in {str(c).lower() for c in (row.get("chains") or [])}]
+        selected = sorted(candidates, key=lambda row: float(row.get("total24h") or 0), reverse=True)[: (5 if matches else 10)]
+        if not selected:
+            raise RuntimeError("DeFiLlama has no fee data for that request")
+        lines = ["# Protocol fees and revenue", f"**Provider**: DeFiLlama · **Checked**: {_utc()}", "",
+                 "| Protocol | Category | Fees 24h | Fees 30d | Revenue 24h | Revenue 30d | Fees all-time |", "|---|---|---:|---:|---:|---:|---:|"]
+        for row in selected:
+            rev = revenue_rows.get(row.get("name")) or {}
+            lines.append(f"| {row.get('name') or '—'} | {row.get('category') or '—'} | {_money(row.get('total24h'))} | {_money(row.get('total30d'))} | "
+                         f"{_money(rev.get('total24h'))} | {_money(rev.get('total30d'))} | {_money(row.get('totalAllTime'))} |")
+        if matches:
+            method = (selected[0].get("methodology") or {}) if isinstance(selected[0].get("methodology"), dict) else {}
+            notes = [f"- **{k}**: {v}" for k, v in method.items() if isinstance(v, str) and v][:5]
+            if notes:
+                lines += ["", "Methodology (DefiLlama):", *notes]
+        lines += ["", "Fees are what users pay the protocol; revenue is the share kept by the protocol or its token holders. Source: [DeFiLlama fees](https://defillama.com/fees)"]
+        return compact_tool_result("\n".join(lines))
+
+    # ---------------------------------------------------------------- yields
+    def yields(self, request: str) -> str:
+        """Best yields from DefiLlama's pools dataset, filtered by the asset,
+        chain and protocol named in the request; pools under $1M TVL are skipped
+        unless nothing else matches."""
+        pools = _llama_pools()
+        symbols = {s for s in re.findall(r"\$?\b([A-Za-z]{2,6})\b", request) if s.isupper() and s not in {"TVL", "APY", "APR", "DEFI", "USD", "ETF", "AI"}}
+        symbols |= {w.upper() for w in re.findall(r"\b(usdc|usdt|dai|usde|eth|weth|steth|wsteth|sol|jitosol|btc|wbtc|cbbtc|usds|pyusd|frax|ghо|gho|lusd|susde)\b", request, re.I)}
+        chain = _requested_chain(request)
+        subject = _named_defi_subject(request) - {"yield", "yields", "apy", "apr", "best", "rate", "rates", "highest", "safest", "earn", "lend", "lending", "stake", "staking", "farm", "farming", "pools", "pool", "stable", "stablecoin", "stablecoins"} - {s.lower() for s in symbols}
+        wants_stable = bool(re.search(r"\bstable(?:coin)?s?\b", request, re.I))
+        rows = [p for p in pools if isinstance(p, dict) and p.get("apy") is not None]
+        if symbols:
+            rows = [p for p in rows if any(s in {t.upper() for t in re.split(r"[-/ ]", str(p.get("symbol") or ""))} for s in symbols)]
+        if chain:
+            rows = [p for p in rows if str(p.get("chain") or "").lower() == chain]
+        if subject:
+            # A named protocol narrows the pools; leftover words ("pay", "safest") must not empty them.
+            by_project = [p for p in rows if subject & set(re.findall(r"[a-z0-9-]+", str(p.get("project") or "").lower()))]
+            rows = by_project or rows
+        if wants_stable:
+            rows = [p for p in rows if p.get("stablecoin")]
+        liquid = [p for p in rows if float(p.get("tvlUsd") or 0) >= 1_000_000]
+        rows = liquid or [p for p in rows if float(p.get("tvlUsd") or 0) >= 100_000]
+        rows = [p for p in rows if 0 <= float(p.get("apy") or 0) <= 500]   # 4-digit APYs are dust pools or errors
+        selected = sorted(rows, key=lambda p: float(p.get("apy") or 0), reverse=True)[:8]
+        if not selected:
+            raise RuntimeError("DeFiLlama has no yield pools matching that request")
+        what = " ".join(x for x in [", ".join(sorted(symbols)) if symbols else "", f"on {chain.title()}" if chain else "", "stablecoin" if wants_stable else ""] if x).strip()
+        lines = [f"# Yields{': ' + what if what else ''}", f"**Provider**: DeFiLlama · **Checked**: {_utc()} · pools ≥ $1M TVL, APY ≤ 500%", "",
+                 "| Pool | Project | Chain | APY | Base / reward | TVL | Notes |", "|---|---|---|---:|---:|---:|---|"]
+        for p in selected:
+            notes = ", ".join(x for x in ["stablecoin" if p.get("stablecoin") else "", f"IL risk: {p.get('ilRisk')}" if p.get("ilRisk") and p.get("ilRisk") != "no" else "", f"{p.get('exposure')} exposure" if p.get("exposure") else ""] if x)
+            base, reward = p.get("apyBase"), p.get("apyReward")
+            lines.append(f"| {p.get('symbol') or '—'} | {p.get('project') or '—'} | {p.get('chain') or '—'} | {float(p.get('apy') or 0):.2f}% | "
+                         f"{(f'{float(base):.2f}%' if base is not None else '—')} / {(f'{float(reward):.2f}%' if reward is not None else '—')} | {_money(p.get('tvlUsd'))} | {notes or '—'} |")
+        lines += ["", "APY = base + reward incentives; reward APY depends on token prices and can end. Source: [DeFiLlama yields](https://defillama.com/yields)"]
+        return compact_tool_result("\n".join(lines))
+
     def register(self, router: ProviderRouter) -> None:
+        router.register(ProviderTool(
+            "defillama_fees_revenue", self.name, ("defi_data",), self.fees,
+            matches=lambda request: bool(re.search(r"\b(?:fees?|revenues?|earnings|protocol income|(?:how much|what) (?:does|do|did) \w+ (?:make|earn|generate|collect))\b", request, re.I))
+                and not re.search(r"\b(?:gas|network|transaction|tx|withdrawal|trading|swap|maker|taker|priority) fees?\b", request, re.I),
+            keywords=("fees", "revenue", "earnings", "protocol"), quota_per_minute=settings.defillama_requests_per_minute,
+            cache_ttl_seconds=300, priority=10,
+            description="Fees and revenue a DeFi protocol generates (24h, 30d, all-time) from DefiLlama, e.g. 'how much revenue does Aave make' or 'top protocols by fees'",
+        ))
+        router.register(ProviderTool(
+            "defillama_yields", self.name, ("defi_data",), self.yields,
+            matches=lambda request: bool(re.search(r"\b(?:apy|apr|yields?|yield farming|best (?:rate|return)s?|lending rates?|staking rates?|where (?:can|should) i (?:earn|lend|stake)|earn (?:on|with) (?:my )?[A-Za-z]+)\b", request, re.I))
+                and not re.search(r"\b(?:bond|treasury|t-bill|savings account|dividend)\b", request, re.I),
+            keywords=("yield", "apy", "apr", "lending", "staking", "pools"), quota_per_minute=settings.defillama_requests_per_minute,
+            cache_ttl_seconds=600, priority=10,
+            description="Best DeFi yields (APY) for an asset, chain or protocol from DefiLlama's pools, e.g. 'best USDC yield on Base' or 'stETH staking APY'",
+        ))
         router.register(ProviderTool(
             # Chain TVL only when there's no leftover named subject (e.g. "Aave")
             # after removing generic DeFi/TVL words and chain names -- a

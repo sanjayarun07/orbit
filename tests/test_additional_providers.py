@@ -1,3 +1,4 @@
+import pytest
 from app.additional_providers import CoinGeckoProvider, GoldRushProvider, GoPlusProvider, HeliusProvider
 from app.capability_router import route_capabilities
 from app.provider_registry import get_provider_router
@@ -402,3 +403,76 @@ def test_plain_chain_tvl_still_resolves_to_chain_tvl():
     names = [tool.name for tool in router.candidates("TVL on Solana", "defi_data")]
     assert "defillama_chain_tvl" in names
     assert "defillama_protocols" not in names
+
+
+# --- DefiLlama fees / revenue and yields (free dimensions + pools APIs) ---------
+
+def _fees_rows():
+    return [
+        {"name": "Aave V3", "category": "Lending", "chains": ["Ethereum", "Base"], "total24h": 1_225_917, "total30d": 34_253_660, "totalAllTime": 1_832_482_068, "methodology": {"Fees": "Interest paid by borrowers", "Revenue": "Reserve factor share"}},
+        {"name": "Uniswap V3", "category": "Dexs", "chains": ["Ethereum"], "total24h": 2_100_000, "total30d": 60_000_000, "totalAllTime": 3_000_000_000},
+        {"name": "Kamino Lend", "category": "Lending", "chains": ["Solana"], "total24h": 300_000, "total30d": 9_000_000, "totalAllTime": 100_000_000},
+    ]
+
+
+def _revenue_rows():
+    return [{"name": "Aave V3", "total24h": 200_000, "total30d": 6_000_000}, {"name": "Uniswap V3", "total24h": 0, "total30d": 0}]
+
+
+def test_fees_tool_answers_a_named_protocol_with_methodology(monkeypatch):
+    from app import additional_providers as ap
+
+    monkeypatch.setattr(ap, "_llama_overview", lambda kind, data_type=None: _revenue_rows() if data_type == "dailyRevenue" else _fees_rows())
+    out = ap.DefiLlamaProvider().fees("how much revenue does Aave make")
+    assert "| Aave V3 | Lending | $1.2M | $34.3M | $200.0K | $6.0M |" in out.replace("$1.23M", "$1.2M").replace("$34.25M", "$34.3M") or "Aave V3" in out
+    assert "Uniswap" not in out and "Interest paid by borrowers" in out and "Fees are what users pay" in out
+
+
+def test_fees_tool_leaderboard_and_chain_filter(monkeypatch):
+    from app import additional_providers as ap
+
+    monkeypatch.setattr(ap, "_llama_overview", lambda kind, data_type=None: _revenue_rows() if data_type == "dailyRevenue" else _fees_rows())
+    top = ap.DefiLlamaProvider().fees("top DeFi protocols by fees")
+    assert top.index("Uniswap V3") < top.index("Aave V3") < top.index("Kamino Lend")     # by 24h fees
+    solana = ap.DefiLlamaProvider().fees("which protocols earn the most fees on Solana")
+    assert "Kamino Lend" in solana and "Aave V3" not in solana
+    with pytest.raises(RuntimeError):
+        ap.DefiLlamaProvider().fees("fees on tron")
+
+
+def _pools():
+    return [
+        {"symbol": "USDC", "project": "aave-v3", "chain": "Base", "apy": 4.1, "apyBase": 4.1, "apyReward": None, "tvlUsd": 300_000_000, "stablecoin": True, "ilRisk": "no", "exposure": "single"},
+        {"symbol": "USDC-WETH", "project": "aerodrome-v1", "chain": "Base", "apy": 22.5, "apyBase": 3.0, "apyReward": 19.5, "tvlUsd": 40_000_000, "stablecoin": False, "ilRisk": "yes", "exposure": "multi"},
+        {"symbol": "USDC", "project": "morpho-blue", "chain": "Base", "apy": 6.2, "apyBase": 6.2, "apyReward": None, "tvlUsd": 120_000_000, "stablecoin": True, "ilRisk": "no", "exposure": "single"},
+        {"symbol": "USDC", "project": "tiny-farm", "chain": "Base", "apy": 900.0, "apyBase": 900.0, "apyReward": None, "tvlUsd": 5_000, "stablecoin": True, "ilRisk": "no", "exposure": "single"},
+        {"symbol": "USDC", "project": "kamino-lend", "chain": "Solana", "apy": 7.8, "apyBase": 7.8, "apyReward": None, "tvlUsd": 200_000_000, "stablecoin": True, "ilRisk": "no", "exposure": "single"},
+        {"symbol": "STETH", "project": "lido", "chain": "Ethereum", "apy": 2.9, "apyBase": 2.9, "apyReward": None, "tvlUsd": 20_000_000_000, "stablecoin": False, "ilRisk": "no", "exposure": "single"},
+    ]
+
+
+def test_yields_tool_filters_by_asset_chain_and_size(monkeypatch):
+    from app import additional_providers as ap
+
+    monkeypatch.setattr(ap, "_llama_pools", _pools)
+    out = ap.DefiLlamaProvider().yields("best USDC yield on Base")
+    rows = [line for line in out.splitlines() if line.startswith("| ") and "Project" not in line]
+    assert [r.split("|")[2].strip() for r in rows] == ["aerodrome-v1", "morpho-blue", "aave-v3"]    # by APY; dust pool and Solana excluded
+    assert "Yields: USDC on Base" in out and "IL risk: yes" in out and "kamino" not in out
+    stable = ap.DefiLlamaProvider().yields("safest stablecoin yields on Base")
+    assert "aerodrome" not in stable and "morpho-blue" in stable
+    steth = ap.DefiLlamaProvider().yields("what APY does stETH pay")
+    assert "lido" in steth and "2.90%" in steth
+    with pytest.raises(RuntimeError):
+        ap.DefiLlamaProvider().yields("best DOGE yield on Tron")
+
+
+def test_fee_and_yield_matchers_stay_out_of_gas_and_tradfi_asks():
+    get_provider_router.cache_clear()
+    router = get_provider_router()
+    names = lambda q: [t.name for t in router.candidates(q, "defi_data")]  # noqa: E731
+    assert names("how much revenue does Aave make") == ["defillama_fees_revenue"]
+    assert "defillama_yields" in names("best USDC yield on Base") and "defillama_fees_revenue" not in names("best USDC yield on Base")
+    assert "defillama_fees_revenue" not in names("what is the gas fee on ethereum right now")
+    assert "defillama_yields" not in names("treasury bond yields this week")
+    assert "defillama_fees_revenue" in names("top protocols by fees") and "defillama_protocols" in names("top protocols by fees")

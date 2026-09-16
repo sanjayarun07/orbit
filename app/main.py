@@ -47,7 +47,7 @@ from app.lifi import get_quote as get_lifi_quote, get_status as get_lifi_status
 from app.mcp_tools import close_mcp_gateway, discover_mcp_tools, get_mcp_registry
 from app.metrics import increment, snapshot
 from app.wash_trading import nansen_enrich, pipeline as wash_trading_pipeline, schema as wash_trading_schema
-from app import accounts, api_keys, billing, billing_plans, credits, emailer, event_calendar, feedback, home_highlights, mcp_server, notifications, tasks, tasks_nl, tool_outcomes, x402_gate
+from app import accounts, api_keys, billing, billing_plans, credits, emailer, event_calendar, feedback, home_highlights, mcp_server, notifications, research_gaps, tasks, tasks_nl, tool_outcomes, x402_gate
 from app.knowledge import ingest as kb_ingest, registry as kb_registry, retrieval as kb_retrieval
 from app.knowledge import store as kb_store, tool as kb_tool
 from app.identity import Identity, current_identity, require_user, resolve_identity, service_identity
@@ -947,6 +947,12 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             await tool_outcomes.record_turn(trajectory, validation)
         except Exception:
             logger.warning("tool outcome recording failed", exc_info=True)
+        # The fall-through log: a research turn that only web search could answer
+        # is a data gap; tagged by topic so paid-source decisions are counted.
+        try:
+            await research_gaps.record(body.message, run.intent, tool_outcomes.tools_in(trajectory), account_id=identity.account_id if identity else None, session_id=session_id)
+        except Exception:
+            logger.warning("research gap recording failed", exc_info=True)
         trade_readiness = build_trade_readiness(plan)
         gas_advisory = build_gas_advisory(run.cross_chain_swap)
         next_context = advance_session_context(
@@ -1563,6 +1569,15 @@ async def admin_knowledge_protocols(request: Request, limit: int = 100):
         out.append({"id": p.id, "slug": p.slug, "name": p.name, "symbol": p.symbol, "category": p.category, "tvl_usd": p.tvl_usd, "chains": p.chains,
                     "docs_url": kb_registry.guess_docs_url(p), "github_org": p.github_org, "governance_url": p.governance_url, "forum_url": p.forum_url, "defillama_slug": p.defillama_slug})
     return {"protocols": out}
+
+
+@app.get("/admin/research/gaps")
+async def admin_research_gaps(request: Request, days: int = 30):
+    """The fall-through log: research questions only web search could answer,
+    counted by the data topic they needed. The business case for a paid
+    source, or the next free connector, in numbers."""
+    _require_admin(request)
+    return await research_gaps.summary(days=max(1, min(days, 365)))
 
 
 @app.get("/admin/knowledge/overview")
