@@ -120,3 +120,30 @@ def test_browser_wallet_may_refresh_only_the_recent_blockhash(monkeypatch):
     assert result["signature"] == str(VersionedTransaction.from_bytes(base64.b64decode(refreshed)).signatures[0])
     assert result["status"] == "submitted"
     assert marked == [plan]
+
+
+def test_quote_node_turns_a_provider_rate_limit_into_a_retry_reply(monkeypatch):
+    """Live (e2e sweep): Jupiter answered 429 on /swap while building the
+    plan and the chat turn became a 500. A provider error is a plain reply:
+    nothing was signed or submitted."""
+    import asyncio
+
+    import httpx
+
+    from app.nodes import trading
+
+    async def rate_limited(wallet, proposal):
+        request = httpx.Request("POST", "https://api.jup.ag/swap/v1/swap")
+        raise httpx.HTTPStatusError("429", request=request, response=httpx.Response(429, request=request))
+
+    monkeypatch.setattr(trading, "create_trade_plan", rate_limited)
+    state = {"proposal": object(), "execution_provider": "jupiter", "wallet_address": "wallet"}
+    out = asyncio.run(trading.quote_and_simulate_node(state))
+    assert out.get("trade_plan") is None and "rate-limiting" in out["error"] and "Nothing was submitted" in out["error"]
+
+    async def down(wallet, proposal):
+        raise httpx.ConnectError("boom")
+
+    monkeypatch.setattr(trading, "create_trade_plan", down)
+    out = asyncio.run(trading.quote_and_simulate_node(state))
+    assert "unavailable" in out["error"] and "ConnectError" in out["error"]

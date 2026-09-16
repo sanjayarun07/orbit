@@ -4,6 +4,9 @@ from app.tracing import trace
 import asyncio
 import logging
 import re
+
+import httpx
+
 from app.capability_router import extract_cross_chain_draft, is_trade_modifier
 from app.nodes.research import _sanitize_react_answer
 from app.models import CrossChainSwapDraft, RiskAssessment, SwapProposal, TradePlan
@@ -203,6 +206,13 @@ async def quote_and_simulate_node(state: AgentState) -> dict:
         if len(detail) > 400 or "<!DOCTYPE" in detail or "jsonrpc" in detail.lower():
             detail = "The trade provider could not prepare a safe quote. Please retry shortly."
         return {"error": detail}
+    except httpx.HTTPError as exc:
+        # A provider outage or rate limit (Jupiter 429 on /swap) is a "try again"
+        # reply, never a 500: nothing was signed or submitted.
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status == 429:
+            return {"error": "Jupiter is rate-limiting quotes right now. Nothing was submitted; please try again in a moment."}
+        return {"error": f"The trade provider is unavailable ({status or exc.__class__.__name__}). Nothing was submitted; please try again shortly."}
 
 
 def _trade_summary(plan: TradePlan) -> str:

@@ -84,9 +84,10 @@ def S(name, steps, group):
     return {"name": name, "steps": steps, "group": group}
 
 
-def API(method, path, body=None, check=None, expect_status=200):
-    """A non-chat step: call an endpoint and check its JSON."""
-    return {"api": (method, path, body), "check": check or (lambda st, d, t, c: []), "expect_status": expect_status}
+def API(method, path, body=None, check=None, expect_status=200, admin=False):
+    """A non-chat step: call an endpoint and check its JSON. `admin=True` sends
+    the ADMIN_API_KEY from the environment (the step is skipped without it)."""
+    return {"api": (method, path, body), "check": check or (lambda st, d, t, c: []), "expect_status": expect_status, "admin": admin}
 
 
 def _has_key(*keys):
@@ -206,7 +207,7 @@ SCENARIOS = [
         dict(message="how much revenue does Aave make", check=_all(_intent("research"), _tools_any("defillama_fees_revenue"), _contains("Aave"))),
         dict(message="best USDC yield on Base", check=_all(_intent("research"), _tools_any("defillama_yields"), _contains("APY"))),
         dict(message="what backs USDe and how does it keep its peg", check=_all(_intent("research"), _tools_any("knowledge_base_search"), _contains("USDe"))),
-        API("GET", "/admin/research/gaps?days=30", check=lambda st, d, t, c: [] if isinstance(d.get("topics"), list) else [f"gaps={d}"]),
+        API("GET", "/admin/research/gaps?days=30", admin=True, check=lambda st, d, t, c: [] if isinstance(d.get("topics"), list) else [f"gaps={d}"]),
     ], "research"),
     S("knowledge base: docs, incidents, funding, graph", [
         dict(message="How does Aave V3's E-mode change the liquidation threshold?", check=_all(_intent("research"), _tools_any("knowledge_base_search"), _contains("[1]"))),
@@ -259,7 +260,13 @@ def run(base: str) -> dict:
             if "api" in step:
                 method, path, body = step["api"]
                 path = path(ctx) if callable(path) else path
-                status, data = _request(base, method, path, body, 60)
+                headers = None
+                if step.get("admin"):
+                    admin_key = os.environ.get("ADMIN_API_KEY")
+                    if not admin_key:
+                        continue   # admin-only check: nothing to assert without the key
+                    headers = {"authorization": f"Bearer {admin_key}"}
+                status, data = _request(base, method, path, body, 60, headers)
                 data = data if isinstance(data, dict) else {}
                 expected = step.get("expect_status", 200)
                 if status != expected:
