@@ -10,6 +10,7 @@ from .lexicon import CHAIN_ALIASES, CHAIN_PATTERN
 TOKEN = r"(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})"
 CHAIN = rf"(?:{CHAIN_PATTERN})"
 AMOUNT = r"((?:[0-9]+(?:\.[0-9]+)?)|(?:\.[0-9]+))"
+_NOT_A_TOKEN = {"bp", "bps", "basis", "point", "points", "slippage", "percent", "pct", "x", "of", "min", "mins", "minutes", "hours", "days"}
 # Native gas tokens that identify exactly one supported chain. Multi-chain
 # assets (ETH, USDC, USDT, BTC, ...) are deliberately excluded: assigning them
 # a chain here would silently override an explicit or still-unstated chain.
@@ -54,9 +55,16 @@ def parse_execution_draft(request: str, chains: tuple[str, ...]) -> ExecutionDra
         modifier_amount = re.search(rf"\b(?:amount(?:\s+to)?|make\s+it|use|set(?:\s+it)?(?:\s+to)?)\s+{AMOUNT}\s*({TOKEN})\b", request, re.I)
         if modifier_amount:
             candidate = modifier_amount.group(2)
-            if candidate.lower() not in {"bp", "bps", "basis", "point", "points", "slippage"}:
+            if candidate.lower() not in _NOT_A_TOKEN:
                 swap_amount, source_token = modifier_amount.group(1), candidate
                 swap_amount = "0" + swap_amount if swap_amount.startswith(".") else swap_amount
+    if swap_amount is None:
+        # A message that opens with the amount and no verb: ".01sol", "0.5 ETH
+        # to USDC on Base with 50 bps". Common in follow-ups that amend a quote.
+        bare = re.match(rf"^\s*{AMOUNT}\s*({TOKEN})\b(?=\s*$|\s+(?:on|from|to|into|for|with|max(?:imum)?)\b)", request, re.I)
+        if bare and bare.group(2).lower() not in _NOT_A_TOKEN:
+            swap_amount, source_token = bare.group(1), bare.group(2)
+            swap_amount = "0" + swap_amount if swap_amount.startswith(".") else swap_amount
 
     recipient = re.search(r"\b(?:recipient|receive at|send to(?:\s+address)?)\s*[:=]?\s*(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})\b", request, re.I)
     slippage = re.search(r"\b(?:max(?:imum)?\s+)?(\d{1,5})\s*(?:bps?|basis\s+points?)\b", request, re.I)

@@ -9,6 +9,8 @@ import json
 import re
 
 from app.context_entities import WalletReference, extract_token_reference, extract_wallet_reference
+from app.routing.controls import is_wallet_connected_ack
+from app.routing.speech import is_parameter_fragment
 from app.models import (
     ContextCapsule,
     CrossChainSwapDraft,
@@ -341,6 +343,11 @@ def advance_session_context(
         context["active_workflow"] = None
     elif intent == "general" and not is_trade_confirmation(request) and not is_trade_modifier(request):
         # Explanations and clarification turns cannot keep an unrelated draft
-        # available for a later fragment to mutate.
-        context["active_workflow"] = None
+        # available for a later fragment to mutate -- except that a quote
+        # awaiting approval survives a stray wallet acknowledgement
+        # ("connected") or a parameter fragment the router could not place:
+        # the user is still working on that swap.
+        active = context.get("active_workflow") or {}
+        if not (active.get("status") == "pending_approval" and (is_wallet_connected_ack(request) or is_parameter_fragment(request))):
+            context["active_workflow"] = None
     return context

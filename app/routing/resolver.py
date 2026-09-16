@@ -195,7 +195,10 @@ async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> d
     active = (state.get("session_context") or {}).get("active_workflow") or {}
     action = state.get("quick_action") or {}
     modifier = is_trade_modifier(request) and not has_competing_speech(request)
-    continuation = modifier or (active.get("status") == "collecting_details" and is_parameter_fragment(request))
+    # A parameter fragment (".01sol", "50bps", "on base") continues the active
+    # trade whether it is still collecting details or already has a quote
+    # awaiting approval: amending a quote is the everyday case.
+    continuation = modifier or (active.get("status") in {"collecting_details", "pending_approval"} and is_parameter_fragment(request))
     metadata = {"method": "rules", "confidence": candidate.confidence if candidate else 0.0,
                 "reason": candidate.reason if candidate else None}
     entity_source = "session_entity" if contextual != request else None
