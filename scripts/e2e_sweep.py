@@ -194,6 +194,8 @@ SCENARIOS = [
         API("GET", "/tokens/search?q=sol", check=lambda st, d, t, c: [] if d.get("tokens") and d["tokens"][0]["symbol"] == "SOL" else [f"tokens={d.get('tokens')}"]),
         API("GET", "/calendar?days=7", check=lambda st, d, t, c: [] if isinstance(d.get("events"), list) else ["no events list"]),
     ], "home"),
+    S("home tile follow-up is news research", [dict(message="Tell me more about this and why it matters for the market: Bitcoin ETFs lose $450M as CLARITY Act stalls",
+                                                     check=_all(_intent("research"), _tools_any("perplexity_web_search", "web_search"), _tools_none("dexscreener_pair_search")))], "home"),
     S("why is X moving (crypto + stock)", [
         dict(message="why is SOL down today?", check=_all(_intent("research"), _tools_any("market_data", "perplexity_web_search"), _contains("Why is Solana"))),
         dict(message="why is NVDA stock up?", check=_all(_intent("research"), _contains("Why is NVDA"))),

@@ -271,7 +271,10 @@ def dexscreener_pair_search(request: str) -> str:
             f"{_money((pair.get('liquidity') or {}).get('usd'))} | {f'{float(change):+.1f}%' if change is not None else '—'} |"
         )
     if not pairs:
-        lines.append("| No matching liquid pairs found | — | — | — | — | — |")
+        # An empty table is not an answer: raising lets the provider router try
+        # the next tool (web research for a headline that merely mentions a coin)
+        # instead of reporting "1 successful" with nothing in it.
+        raise RuntimeError(f"DEX Screener found no liquid pairs for {subject!r}")
     lines.extend([
         "",
         "Search results can include duplicate symbols and unofficial contracts. Verify chain and contract address before trading.",

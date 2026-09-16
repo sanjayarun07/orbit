@@ -89,3 +89,20 @@ def test_endpoint_is_public_and_cached(monkeypatch):
     first = client.get("/home/highlights")
     assert first.status_code == 200 and first.json()["source"] == "news"
     assert client.get("/home/highlights").json() == first.json()
+
+
+def test_tile_prompt_routes_to_web_research_not_a_token_lookup():
+    """Live regression: the tile prompt "Tell me more about this and why it
+    matters for the market: Bitcoin ETFs lose $450M as CLARITY Act stalls" was
+    answered by DEX pair search (an empty table) because "Bitcoin" read as a
+    token. It is a headline explainer: anchored to web research."""
+    from app.routing import intent_router, resolver
+
+    prompt = "Tell me more about this and why it matters for the market: Bitcoin ETFs lose $450M as CLARITY Act stalls"
+    route = intent_router.route_capabilities(prompt)
+    assert route is not None and route.reason == "news_explainer" and route.intent == "research" and route.capabilities == ("web_research",)
+    assert "news_explainer" in resolver._ANCHORED_REASONS
+    for other in ("explain this headline: SOL hits new high", "what does this mean: Fed holds rates"):
+        assert intent_router.route_capabilities(other).reason == "news_explainer", other
+    # Plain token asks are untouched.
+    assert (intent_router.route_capabilities("price of BONK") or type("r", (), {"reason": None})).reason != "news_explainer"

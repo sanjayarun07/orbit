@@ -662,5 +662,20 @@
     "expected_intent": "research",
     "router": true,
     "notes": "live number: the KB matcher must decline ('right now')"
+  },
+  {
+    "id": "news-tile-explainer",
+    "query": "Tell me more about this and why it matters for the market: Bitcoin ETFs lose $450M as CLARITY Act stalls",
+    "expected_tools": [
+      "perplexity_web_search"
+    ],
+    "forbidden_tools": [
+      "dexscreener_pair_search",
+      "jupiter",
+      "relay"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "home news tile follow-up: a headline explainer is web research, never a token lookup on 'Bitcoin' (2026-09-16 live)"
   }
 ]

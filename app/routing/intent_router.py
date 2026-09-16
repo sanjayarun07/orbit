@@ -60,6 +60,13 @@ def plan_execution_route(request: str, chains: tuple[str, ...]) -> CapabilityRou
     )
 
 
+NEWS_EXPLAINER = re.compile(
+    r"^\s*(?:tell me (?:more )?about (?:this|that|it|the (?:news|headline|story))|explain (?:this|the) (?:news|headline|story)|"
+    r"why does this matter|what does this mean|why is this (?:news|important))\b[^:\n]{0,80}:\s*\S",
+    re.I,
+)
+
+
 def _knowledge_ask(request: str) -> bool:
     """A 'what is / how does / who competes with' ask naming a protocol in the
     knowledge registry. Deterministic evidence, so it anchors like an address."""
@@ -125,6 +132,12 @@ def route_capabilities(request: str) -> CapabilityRoute | None:
     if lx.OWN_WALLET.search(request) and not lx.ADDRESS.search(request):
         return _route("portfolio", ("portfolio", "wallet_intelligence"), chains, reason="own_wallet")
 
+    # A headline explainer ("Tell me more about this and why it matters for the
+    # market: Bitcoin ETFs lose $450M as CLARITY Act stalls") -- the home tiles
+    # generate this shape -- is a news question: web research, never a token
+    # lookup on words like "Bitcoin" that happen to appear in the headline.
+    if NEWS_EXPLAINER.match(request):
+        return _route("research", ("web_research",), chains, reason="news_explainer")
     if _knowledge_ask(request):
         return _route("research", ("knowledge", "web_research"), chains, reason="knowledge_base")
     if lx.ADDRESS.search(request) and lx.TOKEN.search(request) and not lx.WALLET_OWNER.search(request):
