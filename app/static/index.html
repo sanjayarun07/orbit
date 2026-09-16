@@ -1063,11 +1063,24 @@ async function chatFetch(url,init){
   if(!window.OrbitX402)throw new Error("Payments are required here but the payment module did not load. Reload the page.");
   return window.OrbitX402.fetchWithPayment(x402Config.network,url,init);
 }
-async function sendMessage(text,quickAction=null,extra={}) {
-  if (busy || !text.trim()) return;retireQuickActions();chatTurnEpoch++;retirePendingTradeCards();busy=true; sendBtn.disabled=true; addUserMessage(text); const typing=addTyping();
+async function sendMessage(text,quickAction=null,extra={},retryTyping=null) {
+  if (busy || !text.trim()) return;retireQuickActions();chatTurnEpoch++;retirePendingTradeCards();busy=true; sendBtn.disabled=true;
+  const typing=retryTyping||(addUserMessage(text),addTyping());
   const requestSession=sessionId || undefined;
   try { const res=await chatFetch("/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:text,tz_offset_min:-new Date().getTimezoneOffset(),wallet_address:walletInput.value.trim() || null,session_id:requestSession,context_revision:requestSession?sessionRevision:null,quick_action:quickAction,team_mode:teamModePending,...extra})}); const data=await res.json();
-    if(!res.ok){ finishAgentMessage(typing,{error:normalizeError(data,res.status)}); if(res.status===402||res.status===401) attachAccountNotice(typing,data?.detail,res.status); }
+    if(!res.ok){
+      // The session this tab remembers belongs to an account we're no longer
+      // authenticated as (a lapsed sign-in, or a different account signed in
+      // since) -- never shown as a raw error: start a fresh conversation and
+      // resend the same message once, so the question still gets answered.
+      if(res.status===404&&requestSession&&data?.detail==="Conversation not found"&&!retryTyping){
+        sessionId=null;sessionRevision=0;sessionStorage.removeItem("orbit_session_id");
+        busy=false;sendBtn.disabled=false;
+        await sendMessage(text,quickAction,extra,typing);
+        return;
+      }
+      finishAgentMessage(typing,{error:normalizeError(data,res.status)}); if(res.status===402||res.status===401) attachAccountNotice(typing,data?.detail,res.status);
+    }
     else { if(data.credits){account=account||{};account.credits={balance:data.credits.balance};renderCredits();} if(account?.authenticated)refreshInboxBadge(); sessionId=data.session_id;sessionRevision=Number(data.session_revision||0); sessionStorage.setItem("orbit_session_id",sessionId); updateChat(sessionId,text); syncTeamMode(data.team_mode); syncPolicy(data.risk_charter,data.risk_charter_fields); finishAgentMessage(typing,data); }
   } catch(error){finishAgentMessage(typing,{error:`Could not reach the assistant: ${error.message}`});}
   finally {busy=false;sendBtn.disabled=false;input.focus();renderChatList();}
