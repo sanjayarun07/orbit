@@ -17,6 +17,7 @@ from app.call_budget import charge_and_check
 from app.metrics import increment
 from app.provider_analytics import emit_provider_event
 from app.routing.tool_semantic import tool_embedding_router
+from app.routing.tool_selector import select_tool
 from app.settings import settings
 
 
@@ -346,7 +347,8 @@ class ProviderRouter:
         selected, regex_matched = self._select_candidates(
             request, capability, chains, provider, allow_semantic_fallback
         )
-        return self._rank(selected, regex_matched, request, chains)
+        ranked = self._rank(selected, regex_matched, request, chains)
+        return select_tool(request, ranked, chains)
 
     def matched_capabilities(self, request: str, chains: tuple[str, ...] = ()) -> set[str]:
         """Capabilities of every enabled tool whose OWN narrow `matches` gate
@@ -396,7 +398,8 @@ class ProviderRouter:
             regex_matched |= matched
             for tool in selected:
                 union.setdefault(tool.name, tool)
-        return self._rank(list(union.values()), regex_matched, request, chains)
+        ranked = self._rank(list(union.values()), regex_matched, request, chains)
+        return select_tool(request, ranked, chains)
 
     def _cache_get(self, capability: str, request: str) -> str | None:
         normalized = self._normalized(request)

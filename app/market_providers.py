@@ -44,6 +44,8 @@ TRENDING_TOKENS = re.compile(
     r"\b(?:trending|hot|hottest|top|latest|newest|popular|biggest|boosted|promoted)"
     r"(?:\s+(?:trending|hot|new|latest|top|meme|solana|base|bsc|active|popular|newest|biggest|boosted|promoted))*"
     r"\s+(?:tokens?|coins?|gems?|memecoins?)\b"
+    # Predicate order too ("tokens are getting promoted", not just "promoted tokens").
+    r"|\b(?:tokens?|coins?|gems?|memecoins?)\b[^.?!\n]{0,25}?\b(?:trending|hot|boosted|promoted)\b"
     r"|\b(?:pump\.?\s?fun|pumpfun|letsbonk|bonk\.?fun|moonshot)\b",
     re.IGNORECASE,
 )
@@ -53,7 +55,8 @@ _TOKEN_WORD = re.compile(r"\b(?:tokens?|coins?|gems?|memecoins?)\b", re.IGNORECA
 # boosts cannot answer -- CoinGecko markets sorted by 24h volume can.
 VOLUME_RANKED = re.compile(
     r"\b(?:by|highest|most|largest|biggest|top)\b[^.?!\n]{0,30}?\b(?:24\s*-?\s*h(?:ou)?rs?|daily|trading)?\s*volumes?\b"
-    r"|\bvolume\s+(?:leaders?|ranking|rank)\b|\bmost\s+traded\b",
+    r"|\bvolume\s+(?:leaders?|ranking|rank)\b|\bmost\s+traded\b|\bturnover\b"
+    r"|\b(?:by|most|top|highest)\b[^.?!\n]{0,20}?\btraded\b",
     re.IGNORECASE,
 )
 _TREND_WORD = re.compile(r"\b(?:trending|trends?|narratives?|metas?|hot)\b", re.IGNORECASE)

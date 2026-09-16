@@ -259,3 +259,23 @@ def test_bitquery_top_holders_is_registered_under_token_discovery_and_security()
     catalog = {row["name"]: row for row in router.catalog()}
     assert set(catalog["bitquery_token_top_holders"]["capabilities"]) == {"token_discovery", "token_security"}
     assert catalog["bitquery_token_top_holders"]["chains"] == ["solana"]
+
+
+def test_volume_and_boosts_regexes_recognize_everyday_phrasing():
+    """Both patterns claimed coverage (docstring/comments) that the code did
+    not actually implement: VOLUME_RANKED never had a standalone "turnover"
+    branch, and TRENDING_TOKENS only matched "promoted tokens" (adjective
+    before the noun), not "tokens are getting promoted" (predicate order,
+    at least as common in real phrasing). Found live 2026-09-16 stress-
+    testing slang/jargon prompts against the router."""
+    from app.market_providers import TRENDING_TOKENS, VOLUME_RANKED
+    for volume in (
+        "which tokens got the most turnover today", "top coins today by $ traded",
+        "highest volume coins", "most traded tokens today", "trending tokens by volume in 24hrs",
+    ):
+        assert VOLUME_RANKED.search(volume), volume
+    for boosts in ("which tokens are getting promoted on dex screener", "tokens that are trending right now", "boosted tokens on solana"):
+        assert TRENDING_TOKENS.search(boosts), boosts
+    # The suppression in dexscreener_boosted_tokens's matcher (TRENDING_TOKENS
+    # and not VOLUME_RANKED) must still hold: a pure boosts ask is not a volume ask.
+    assert not VOLUME_RANKED.search("which tokens are getting promoted on dex screener")

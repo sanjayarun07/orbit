@@ -58,7 +58,7 @@ WALLET = re.compile(r"\b(?:wallet|address|portfolio|holdings|balances?|pnl|trans
 WALLET_OWNER = re.compile(r"\b(?:wallet|portfolio|balances?|pnl|transactions?|counterparties)\b", re.I)
 ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}|(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])")
 TOKEN = re.compile(r"\b(?:tokens?|coins?|mints?|contracts?|memecoins?|meme\s+coins?|holders?|liquidity)\b", re.I)
-SECURITY = re.compile(r"\b(?:safe|safety|security|risk|rug|scam|honeypot|sellability|audit)\b", re.I)
+SECURITY = re.compile(r"\b(?:safe(?:ty)?|secur(?:e|ity)|risky?|rugs?(?:\s?pulls?)?|scams?|honey\s?pots?|sellab\w*|audits?)\b", re.I)
 # Crypto-specific security jargon (or a $TICKER paired with a security word) is
 # unambiguous even without a "token/coin/contract" word nearby. Plain "safe" or
 # "risk" alone stay excluded here since they are common in non-crypto questions.

@@ -38,12 +38,16 @@ CASES_PATH = Path(__file__).with_name("cases.json")
 
 # ---------------------------------------------------------------- router mode
 
-def _ranked_tools(query: str, semantic: bool):
+def _ranked_tools(query: str, semantic: bool, llm_select: bool = False):
     """(intent, caps, chains, [tool_name ranked]) from the deterministic layer,
-    or None when Layer-1 abstains (the embedding/LLM classifier would decide)."""
+    or None when Layer-1 abstains (the embedding/LLM classifier would decide).
+    llm_select additionally applies app.routing.tool_selector's model
+    arbitration on top of the same ranked union production uses, so this can
+    be A/B'd against the deterministic-only ranking without a live server."""
     from app.capability_router import route_capabilities
     from app.provider_registry import get_provider_router
     from app.nodes.research import _BACKSTOP_CAPABILITIES, _DIRECT_CAPABILITY_ORDER
+    from app.routing.tool_selector import select_tool
 
     route = route_capabilities(query)
     if route is None:
@@ -64,6 +68,8 @@ def _ranked_tools(query: str, semantic: bool):
         for tool in router.candidates(query, cap, chains, allow_semantic_fallback=semantic):
             union.setdefault(tool.name, tool)
     ranked = sorted(union.values(), key=lambda t: router._score(t, query, chains), reverse=True)
+    if llm_select:
+        ranked = select_tool(query, ranked, chains)
     return route.intent, caps, chains, [t.name for t in ranked]
 
 
@@ -81,7 +87,7 @@ def _warm_knowledge_snapshot() -> None:
         print(f"knowledge snapshot unavailable ({exc}); kb-* cases will abstain")
 
 
-def run_router_mode(cases, k: int, semantic: bool):
+def run_router_mode(cases, k: int, semantic: bool, llm_select: bool = False):
     rows, agg = [], {"top1": 0, "recall_sum": 0.0, "mrr_sum": 0.0, "forbidden": 0, "n": 0, "abstain": 0}
     _warm_knowledge_snapshot()
     for c in cases:
@@ -90,7 +96,7 @@ def run_router_mode(cases, k: int, semantic: bool):
         agg["n"] += 1
         expected = set(c.get("expected_tools") or [])
         forbidden = set(c.get("forbidden_tools") or [])
-        result = _ranked_tools(c["query"], semantic)
+        result = _ranked_tools(c["query"], semantic, llm_select)
         if result is None:
             agg["abstain"] += 1
             rows.append((c["id"], "ABSTAIN", "-", "-", "-", "-"))
@@ -113,7 +119,7 @@ def run_router_mode(cases, k: int, semantic: bool):
                      ranked[0] if ranked else "-", f"{recall:.2f}", f"{mrr:.2f}",
                      "FORBIDDEN" if forbidden_hit else ""))
     n = max(1, agg["n"] - agg["abstain"])
-    print("\n=== ROUTER MODE (deterministic, semantic_fallback=%s) ===" % semantic)
+    print("\n=== ROUTER MODE (deterministic, semantic_fallback=%s, llm_select=%s) ===" % (semantic, llm_select))
     print(f"{'case':28} {'verdict':8} {'top-1 tool':32} {'recall':>6} {'mrr':>5} note")
     for r in rows:
         print(f"{r[0]:28} {r[1]:8} {str(r[2]):32} {r[3]:>6} {r[4]:>5} {r[5]}")
@@ -272,14 +278,18 @@ def main():
     ap.add_argument("--mode", choices=["router", "chat", "resolve", "both"], default="router")
     ap.add_argument("--k", type=int, default=8)
     ap.add_argument("--semantic", action="store_true", help="router mode: allow embedding fallback in candidates")
+    ap.add_argument("--llm-select", action="store_true", help="router mode: apply app.routing.tool_selector's model arbitration on top of the deterministic ranking (forces settings.llm_tool_selection_enabled=True for this run)")
     ap.add_argument("--base", default="http://localhost:8000/chat")
     ap.add_argument("--out", default=str(Path(__file__).with_name("results.json")))
     args = ap.parse_args()
 
     cases = json.loads(CASES_PATH.read_text())
+    if args.llm_select:
+        from app.settings import settings
+        settings.llm_tool_selection_enabled = True
     out = {}
     if args.mode in ("router", "both"):
-        out["router"] = run_router_mode(cases, args.k, args.semantic)
+        out["router"] = run_router_mode(cases, args.k, args.semantic, args.llm_select)
     if args.mode == "resolve":
         out["resolve"] = run_resolve_mode(cases)
     if args.mode in ("chat", "both"):

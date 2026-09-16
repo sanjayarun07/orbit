@@ -508,3 +508,22 @@ def test_a_volume_ranking_is_not_answered_with_paid_boosts():
     assert not VOLUME_RANKED.search("what is the 24h volume of SOL")
     names = [tool.name for tool in get_provider_router().candidates("trending tokens on solana", "token_discovery")]
     assert "dexscreener_boosted_tokens" in names and "coingecko_top_volume" not in names
+
+
+def test_security_word_gates_recognize_plurals():
+    """_SECURITY (goplus_token_security/honeypot_token_security's matcher) only
+    matched "rug"/"scam"/"honeypot" singular. Layer-1's SECURITY_STRONG rule
+    already routed "check this coin for rugs" to the token_security capability,
+    but neither EVM security TOOL's own gate fired within it, so the request
+    fell through to a generic market-overview tool instead of a real security
+    check. Found live 2026-09-16; verified against a real Base contract after
+    the fix (GoPlus returned a real security assessment, not an empty one)."""
+    from app.additional_providers import _SECURITY
+    for text in ("check this coin for rugs", "any honeypots here", "is this a scam", "security audits done", "rug pulls on this one"):
+        assert _SECURITY.search(text), text
+
+
+def test_solana_safety_words_recognize_plurals():
+    from app.provider_registry import _SAFETY_WORDS
+    for text in ("check this coin for rugs", "any honeypots here", "is this a scam"):
+        assert _SAFETY_WORDS.search(text), text

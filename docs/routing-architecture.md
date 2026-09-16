@@ -157,3 +157,41 @@ can rank by volume). Every spec also feeds the semantic fallback's description,
 so no tool is invisible to it. `tests/test_tool_catalog.py` fails the build
 when a registered tool has no spec. `python scripts/tool_catalog_doc.py`
 renders docs/tool-catalog.md.
+
+## Model tool arbitration (pilot, flag-gated)
+
+`app/routing/tool_selector.py` adds one more, OPTIONAL step after the
+deterministic ranking: `settings.llm_tool_selection_enabled` (default
+`False`). When on, and at least `tool_selector_min_candidates` tools already
+passed their own regex gate plus chain/health/quota, a small model reads
+their `app.tool_catalog` specs (what answers, what never does) and picks the
+best fit for the exact wording -- a REORDER only, never a new tool: a bad
+pick costs one extra failed attempt, the router falls through to the next
+candidate exactly as it always has. `settings.tool_selector_model` (falls
+back to `intent_model`, then `model`) can point at a different, cheaper/
+faster model than the answer model, via LiteLLM -- including a hosted Qwen
+once one is configured, without touching anything else.
+
+2026-09-16 pilot result on the router-mode eval (`--semantic`, the
+production-default candidate set): 46/48 -> 48/48 top-1, MRR 0.976 -> 1.000,
+0 forbidden either way, one case's label corrected (the model's pick was
+more precise than the original 2025-era label, not a regression -- see
+`price-liq-base` in cases.json). Run it yourself:
+
+    .venv/bin/python scripts/routing_eval/harness.py --mode router --semantic
+    .venv/bin/python scripts/routing_eval/harness.py --mode router --semantic --llm-select
+
+Stress-testing ~35 slang/jargon phrasings the same day found the layer this
+does NOT fix: a request whose wording never gets any tool's regex gate (or
+even the right CAPABILITY bucket) to fire in the first place has nothing for
+`tool_selector` to arbitrate among -- e.g. "how much money is locked in aave"
+(TVL) or "any new gems just listed" (read as an exchange-listing question,
+not new-token discovery) reach zero or the wrong capability entirely.
+Widened two tool-level gates found broken this way (`VOLUME_RANKED`'s
+"turnover" branch, the three token-security word lists missing plurals of
+"rug"/"scam"/"honeypot" -- confirmed live, a real security check was
+silently skipped). The remaining gap argues for extending model-first
+routing to capability/tool RECALL (today only the speech-act layer is
+model-first; capability routing for a "research" intent is still Layer-1
+regex, `app/routing/intent_router.py`), not for more regex -- a larger
+change than this pilot, tracked as a follow-up, not started.

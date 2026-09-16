@@ -100,14 +100,16 @@
     "expected_tools": [
       "birdeye_token_overview",
       "coingecko_token_by_contract",
-      "dexscreener_pair_search"
+      "dexscreener_pair_search",
+      "dexscreener_token_pairs"
     ],
     "forbidden_tools": [
       "jupiter",
       "relay"
     ],
     "expected_intent": "research",
-    "router": true
+    "router": true,
+    "notes": "2026-09-16: dexscreener_token_pairs (chain+address lookup) added -- the LLM tool-selection pilot picked it over dexscreener_pair_search (symbol search) for this exact-address request, which is the more precise match; the original label predated the tool catalogue."
   },
   {
     "id": "hyperliquid-funding",
@@ -775,5 +777,181 @@
     "expected_intent": "research",
     "router": true,
     "notes": "a volume RANKING -- paid DEX Screener boosts are attention, not volume (user transcript 2026-09-16)"
+  },
+  {
+    "id": "slang-vol-1",
+    "query": "which tokens got the most turnover today",
+    "expected_tools": [
+      "coingecko_top_volume"
+    ],
+    "forbidden_tools": [
+      "dexscreener_boosted_tokens"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "slang stress 2026-09-16: 'turnover' as a volume synonym"
+  },
+  {
+    "id": "slang-vol-2",
+    "query": "most traded coins rn",
+    "expected_tools": [
+      "coingecko_top_volume"
+    ],
+    "forbidden_tools": [
+      "dexscreener_boosted_tokens"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "slang stress: 'most traded ... rn'"
+  },
+  {
+    "id": "slang-vol-3",
+    "query": "top coins today by $ traded",
+    "expected_tools": [
+      "coingecko_top_volume"
+    ],
+    "forbidden_tools": [
+      "dexscreener_boosted_tokens"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "slang stress: '$ traded' as a volume synonym"
+  },
+  {
+    "id": "slang-boosts-1",
+    "query": "which tokens are getting promoted on dex screener",
+    "expected_tools": [
+      "dexscreener_boosted_tokens"
+    ],
+    "forbidden_tools": [
+      "coingecko_top_volume"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "slang stress: 'promoted' as a boosts synonym"
+  },
+  {
+    "id": "slang-newlist-1",
+    "query": "what just dropped on pump.fun",
+    "expected_tools": [
+      "geckoterminal_pools"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "slang stress: 'just dropped' as a new-listing synonym"
+  },
+  {
+    "id": "slang-newlist-2",
+    "query": "fresh launches on solana today",
+    "expected_tools": [
+      "geckoterminal_pools"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "slang stress: 'fresh launches'"
+  },
+  {
+    "id": "slang-narrative-1",
+    "query": "what's the hot narrative rn",
+    "expected_tools": [
+      "dexscreener_trending_metas"
+    ],
+    "forbidden_tools": [
+      "dexscreener_boosted_tokens"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "slang stress: narratives vs a token list"
+  },
+  {
+    "id": "slang-perps-1",
+    "query": "hyperliquid oi right now",
+    "expected_tools": [
+      "goldrush_hyperliquid_market"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "slang stress: 'oi' = open interest"
+  },
+  {
+    "id": "slang-social-1",
+    "query": "what are crypto twitter kols saying about sol",
+    "expected_tools": [
+      "x_kol_sentiment"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "slang stress: KOL/social sentiment"
+  },
+  {
+    "id": "slang-pricechange-1",
+    "query": "what coins spiked hardest today",
+    "expected_tools": [
+      "coingecko_gainers_losers"
+    ],
+    "forbidden_tools": [
+      "coingecko_top_volume"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "slang stress: 'spiked' as a price-change synonym"
+  },
+  {
+    "id": "slang-security-1",
+    "query": "is this token safe to ape on base 0x1234567890abcdef1234567890abcdef12345678",
+    "expected_tools": [
+      "goplus_token_security"
+    ],
+    "forbidden_tools": [
+      "birdeye_token_overview"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "slang stress: 'safe to ape' as a security question"
+  },
+  {
+    "id": "slang-balances-vs-tx-1",
+    "query": "what's this wallet holding on base 0x1234567890abcdef1234567890abcdef12345678",
+    "expected_tools": [
+      "goldrush_wallet_balances"
+    ],
+    "forbidden_tools": [
+      "goldrush_wallet_transactions"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "slang stress: 'holding' -> balances, not transactions"
+  },
+  {
+    "id": "slang-balances-vs-tx-2",
+    "query": "recent activity for this wallet on ethereum 0x1234567890abcdef1234567890abcdef12345678",
+    "expected_tools": [
+      "goldrush_wallet_transactions"
+    ],
+    "forbidden_tools": [
+      "goldrush_wallet_balances"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "slang stress: 'recent activity' -> transactions, not balances"
+  },
+  {
+    "id": "slang-liquidity-vs-holders-1",
+    "query": "deepest liquidity pairs on solana",
+    "expected_tools": [
+      "dexscreener_pair_search",
+      "geckoterminal_pools"
+    ],
+    "forbidden_tools": [
+      "bitquery_token_top_holders",
+      "solana_rpc_token_top_holders"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "slang stress: a liquidity ranking pulled in holders tools via the semantic fallback; tests whether tool arbitration filters them back out"
   }
 ]

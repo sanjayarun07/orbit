@@ -42,7 +42,7 @@ _GOLDRUSH_CHAINS = {
 # GoldRush chains that support the balances_v2 endpoint on a non-EVM
 # (base58) address -- today just Solana. Transactions stays EVM-only.
 _GOLDRUSH_NON_EVM_CHAINS = {"solana"}
-_SECURITY = re.compile(r"\b(?:safe|safety|security|risk|rug|scam|honeypot|sellability|audit)\b", re.I)
+_SECURITY = re.compile(r"\b(?:safe(?:ty)?|secur(?:e|ity)|risky?|rugs?(?:\s?pulls?)?|scams?|honey\s?pots?|sellab\w*|audits?)\b", re.I)
 _WALLET_ACTIVITY = re.compile(r"\b(?:wallet|transactions?|activity|history|transfers?)\b", re.I)
 # CoinGecko's curated "ecosystem" category per chain -- the closest free,
 # keyless proxy for "tokens native to/associated with this chain" their

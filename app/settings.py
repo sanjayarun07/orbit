@@ -110,6 +110,23 @@ class Settings(BaseSettings):
     tool_embedding_timeout_seconds: float = 8.0
     tool_embedding_cache_entries: int = 512
     tool_embedding_cost_usd: float = 0.0
+    # Model tool arbitration (app/routing/tool_selector.py): OFF by default
+    # (flag-gated pilot). When several tools already pass the regex gate and
+    # the chain/health/quota filters, this reads their app.tool_catalog specs
+    # (what the API returns, what it can never answer) and picks among THEM --
+    # it never introduces a tool that didn't already independently qualify, so
+    # a bad pick only costs one extra attempt before the router falls through
+    # to the next candidate exactly as it does today. Point tool_selector_model
+    # at a hosted small/cheap model (falls back to intent_model, then model)
+    # -- e.g. a Qwen served via OpenRouter/DashScope/Together/Fireworks through
+    # LiteLLM -- to pilot it without touching the answer model.
+    llm_tool_selection_enabled: bool = False
+    tool_selector_model: str | None = None
+    tool_selector_timeout_seconds: float = 6.0
+    tool_selector_min_candidates: int = 2       # fewer than this: nothing to arbitrate, skip the call
+    tool_selector_max_candidates: int = 6        # shown to the model; the rest keep their deterministic order behind them
+    tool_selector_cache_entries: int = 512
+    tool_selector_cost_usd: float = 0.0
     perplexity_api_key: str | None = None
     perplexity_agent_url: str = "https://api.perplexity.ai/v1/agent"
     perplexity_model: str = "perplexity/sonar"
