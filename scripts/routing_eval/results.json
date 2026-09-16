@@ -4,9 +4,9 @@
   "metrics": {
    "cases": 48,
    "abstain": 0,
-   "top1": 0.9583333333333334,
+   "top1": 0.9791666666666666,
    "recall_at_k": 0.9583333333333334,
-   "mrr": 0.9756944444444445,
+   "mrr": 0.9861111111111112,
    "forbidden_at_1": 0.0
   },
   "rows": [
@@ -77,7 +77,7 @@
    [
     "trending-sol",
     "OK",
-    "geckoterminal_pools",
+    "dexscreener_boosted_tokens",
     "0.67",
     "1.00",
     ""
@@ -85,7 +85,7 @@
    [
     "new-pairs-base",
     "OK",
-    "geckoterminal_pools",
+    "dexscreener_latest_profiles",
     "1.00",
     "1.00",
     ""
@@ -140,10 +140,10 @@
    ],
    [
     "hyperliquid-positions",
-    "MISS",
-    "goldrush_hyperliquid_market",
+    "OK",
+    "goldrush_hyperliquid_positions",
     "1.00",
-    "0.50",
+    "1.00",
     ""
    ],
    [

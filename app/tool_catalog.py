@@ -281,9 +281,16 @@ TOOL_SPECS: dict[str, ToolSpec] = {spec.name: spec for spec in [
     # ---------------------------------------------------------------- knowledge / research
     _spec("knowledge_base_search", "Orbit knowledge service", ["hybrid FTS + pgvector retrieval over protocol docs, GitHub, governance, incidents, stablecoins"], ["query"],
           ["passages with citations", "entities", "relations"], {"docs", "projects"}, not_for={"volume", "price_change", "boosts", "balances", "transactions"},
-          coverage="200 protocols in the registry plus incidents and stablecoins", freshness="ingested; hours to days",
-          answers=["how does Aave E-mode work", "who competes with Uniswap", "what is a liquidity pool"],
-          not_answers=["Aave TVL (live number)", "trending tokens"], summary="Cited passages from protocol docs, GitHub and governance for explanatory questions"),
+          coverage="200 protocols in the registry, PLUS a dedicated ingested history of past security incidents/hacks, governance "
+                    "votes and proposals, and investor/funder and stablecoin-backing records for those protocols -- these are real, "
+                    "indexed categories here, not just docs/mechanism explainers",
+          freshness="ingested; hours to days -- the right tool for a protocol's documented PAST (an incident that already "
+                     "happened, a vote already taken, funding already raised), never for something breaking right now",
+          answers=["how does Aave E-mode work", "who competes with Uniswap", "what is a liquidity pool",
+                    "has Aave ever been hacked", "who are the investors backing EigenLayer", "what did the Lido community vote on recently"],
+          not_answers=["Aave TVL (live number)", "trending tokens", "did X get hacked today (breaking news, not yet ingested)"],
+          summary="Cited passages from protocol docs, GitHub, governance AND a dedicated ingested history of past incidents and "
+                   "investor/funding records -- not just mechanism explainers, and not for live numbers or breaking news"),
     _spec("rootdata_project_search", "RootData", ["POST /open/ser_inv (projects)", "POST /open/get_item"], ["query"],
           ["project", "category", "funding", "investors", "team", "socials"], {"projects", "vcs"}, not_for={"volume", "price_change", "boosts", "security"},
           coverage="RootData's project database", freshness="days", answers=["background on Berachain", "who invested in EigenLayer"],
