@@ -14,6 +14,7 @@ Design rules
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -59,6 +60,11 @@ def _api_create_customer(email: str, user_id: str) -> str:
 def _api_create_checkout(params: dict) -> dict:
     session = _stripe().checkout.Session.create(**params)
     return {"id": session["id"], "url": session["url"]}
+
+
+def _api_cancel_subscription(subscription_id: str) -> dict:
+    subscription = _stripe().Subscription.cancel(subscription_id)
+    return {"id": subscription["id"], "status": subscription["status"]}
 
 
 def _api_create_portal(customer_id: str, return_url: str) -> str:
@@ -161,6 +167,42 @@ async def create_checkout(user: dict, kind: str, item_id: str, base_url: str) ->
         raise ValueError("kind must be 'subscription' or 'pack'")
     session = _api_create_checkout(params)
     return {"url": session["url"], "session_id": session["id"]}
+
+
+class SubscriptionCancelFailed(Exception):
+    """Stripe would not confirm the cancellation; the caller must not proceed."""
+
+
+async def cancel_subscription_for(user: dict) -> dict:
+    """Cancel this account's subscription before its billing link is destroyed.
+
+    Deleting the account first would strip the Stripe customer and subscription
+    ids while the subscription kept renewing, leaving a charge nobody at Orbit
+    could map back to a person. Raises rather than swallowing a failure: it is
+    recoverable (the operator retries, or cancels in Stripe), and deleting
+    anyway is not.
+    """
+    subscription_id = user.get("stripe_subscription_id")
+    if not subscription_id:
+        return {"status": "none"}
+    if not configured():
+        # No Stripe credentials here, but the account claims a subscription --
+        # refuse rather than silently orphan a live one.
+        raise SubscriptionCancelFailed(
+            "This account has a subscription but Stripe is not configured, so it cannot be cancelled."
+        )
+    try:
+        result = await asyncio.to_thread(_api_cancel_subscription, subscription_id)
+    except BillingNotConfigured:
+        raise
+    except Exception as exc:
+        already_gone = "No such subscription" in str(exc) or "resource_missing" in str(exc)
+        if already_gone:
+            return {"status": "already_cancelled", "subscription": subscription_id}
+        raise SubscriptionCancelFailed(
+            "The subscription could not be cancelled, so the account was not deleted. Try again shortly."
+        ) from exc
+    return {"status": "cancelled", "subscription": result["id"], "stripe_status": result["status"]}
 
 
 async def list_invoices(user: dict) -> list[dict]:
@@ -333,15 +375,23 @@ async def _on_checkout_completed(event_id: str, session: dict) -> dict:
 
 
 def _plan_from_subscription(subscription: dict) -> str | None:
-    metadata = subscription.get("metadata") or {}
-    if metadata.get("plan_id") in PLANS:
-        return metadata["plan_id"]
+    """The plan this subscription is actually being charged for.
+
+    Price first, metadata only as a fallback. Metadata is written once at
+    checkout and never updated, so after an upgrade or downgrade it still names
+    the plan the customer used to be on -- trusting it first meant a
+    Max-priced subscription kept Pro entitlements indefinitely. The price on
+    the subscription's items is what Stripe bills, so it is what we grant.
+    """
     items = ((subscription.get("items") or {}).get("data")) or []
     for item in items:
         price = (item.get("price") or {}).get("id")
         for plan in PLANS.values():
             if price and price == plan.stripe_price_id():
                 return plan.id
+    metadata = subscription.get("metadata") or {}
+    if metadata.get("plan_id") in PLANS:
+        return metadata["plan_id"]
     return None
 
 
@@ -410,6 +460,15 @@ async def _on_subscription_deleted(event_id: str, subscription: dict) -> dict:
     user = await _user_for(subscription)
     if user is None:
         return {"status": "no_user"}
+    # Stripe events arrive late and out of order. A customer who cancelled and
+    # resubscribed has two subscription ids, and the old one's deletion must
+    # not downgrade the new one -- it applies to the subscription it names, or
+    # to nothing.
+    deleted_id = subscription.get("id")
+    current_id = user.get("stripe_subscription_id")
+    if current_id and deleted_id and current_id != deleted_id:
+        return {"status": "ignored", "reason": "a different subscription is active",
+                "active_subscription": current_id, "event_subscription": deleted_id}
     await accounts.update_user(user["id"], plan_id="free", subscription_status="canceled", stripe_subscription_id=None)
     return {"status": "downgraded", "plan_id": "free"}
 

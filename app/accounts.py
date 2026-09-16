@@ -32,7 +32,7 @@ _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 # rows are so the two paths behave identically.
 _users: dict[str, dict] = {}
 _users_by_email: dict[str, str] = {}
-_wallets: dict[tuple[str, str], tuple[str, str]] = {}  # (chain, address_lower) -> (user_id, address)
+_wallets: dict[tuple[str, str], tuple[str, str, str]] = {}  # (chain, address_lower) -> (user_id, address, wallet_type)
 _magic_tokens: dict[str, tuple[float, dict]] = {}
 _user_sessions: dict[str, tuple[float, dict]] = {}
 _chat_sessions: dict[str, dict[str, str]] = {}  # user_id -> {session_id: last_used}
@@ -217,34 +217,55 @@ def is_evm_chain(chain: str) -> bool:
     return chain != "solana"
 
 
-async def link_wallet(user_id: str, chain: str, address: str) -> None:
+EOA = "eoa"
+CONTRACT = "contract"
+
+
+def spans_evm_networks(chain: str, wallet_type: str) -> bool:
+    """Is this identity the same on every EVM network, or only on its own?
+
+    An EOA address is derived from a secp256k1 key, so the holder controls it
+    identically on Ethereum, Base, Arbitrum and the rest -- one account owns it
+    everywhere. A contract wallet's address is derived from its deployer and
+    nonce, not from a key: the same address on two networks can be two entirely
+    different contracts with two different controllers. Treating those as one
+    identity meant authenticating against a contract you control on one network
+    could resume an account linked to somebody else's contract on another.
+    """
+    return is_evm_chain(chain) and wallet_type != CONTRACT
+
+
+async def link_wallet(user_id: str, chain: str, address: str, wallet_type: str = EOA) -> None:
     # The stored chain is provenance -- the network this wallet first signed in
-    # from, which is what Settings displays. Identity is resolved by
-    # find_wallet_owner, so a second network for an address already linked to
-    # this account adds nothing and would only show as a duplicate row.
-    if is_evm_chain(chain):
-        existing = await find_wallet_owner(chain, address)
+    # from, which is what Settings displays. For an EOA, identity is resolved by
+    # find_wallet_owner across networks, so a second network for an address
+    # already linked to this account adds nothing and would only show as a
+    # duplicate row. A contract wallet is network-scoped, so each network it is
+    # verified on is a separate, real link.
+    if spans_evm_networks(chain, wallet_type):
+        existing = await find_wallet_owner(chain, address, wallet_type)
         if existing is not None and existing["id"] == user_id:
             return
     pool = await get_pg_pool()
     if pool is not None:
         await pool.execute(
             """
-            INSERT INTO user_wallets (user_id, chain, address) VALUES ($1, $2, $3)
-            ON CONFLICT (chain, address) DO UPDATE SET user_id = EXCLUDED.user_id, linked_at = NOW()
+            INSERT INTO user_wallets (user_id, chain, address, wallet_type) VALUES ($1, $2, $3, $4)
+            ON CONFLICT (chain, address) DO UPDATE SET user_id = EXCLUDED.user_id, wallet_type = EXCLUDED.wallet_type, linked_at = NOW()
             """,
-            user_id, chain, address,
+            user_id, chain, address, wallet_type,
         )
         return
-    _wallets[(chain, address.lower())] = (user_id, address)
+    _wallets[(chain, address.lower())] = (user_id, address, wallet_type)
 
 
 async def list_wallets(user_id: str) -> list[dict]:
     pool = await get_pg_pool()
     if pool is not None:
-        rows = await pool.fetch("SELECT chain, address, linked_at FROM user_wallets WHERE user_id = $1 ORDER BY linked_at", user_id)
-        return [{"chain": r["chain"], "address": r["address"], "linked_at": r["linked_at"].isoformat()} for r in rows]
-    return [{"chain": chain, "address": address, "linked_at": None} for (chain, _), (owner, address) in _wallets.items() if owner == user_id]
+        rows = await pool.fetch("SELECT chain, address, wallet_type, linked_at FROM user_wallets WHERE user_id = $1 ORDER BY linked_at", user_id)
+        return [{"chain": r["chain"], "address": r["address"], "wallet_type": r["wallet_type"], "linked_at": r["linked_at"].isoformat()} for r in rows]
+    return [{"chain": chain, "address": address, "wallet_type": kind, "linked_at": None}
+            for (chain, _), (owner, address, kind) in _wallets.items() if owner == user_id]
 
 
 async def get_user_by_wallet(chain: str, address: str) -> dict | None:
@@ -262,7 +283,7 @@ async def get_user_by_wallet(chain: str, address: str) -> dict | None:
     return dict(_users[owner[0]]) if owner and owner[0] in _users else None
 
 
-async def find_wallet_owner(chain: str, address: str) -> dict | None:
+async def find_wallet_owner(chain: str, address: str, wallet_type: str = EOA) -> dict | None:
     """The account this wallet signs in as -- the identity lookup.
 
     Differs from get_user_by_wallet, which matches one exact (chain, address)
@@ -275,29 +296,37 @@ async def find_wallet_owner(chain: str, address: str) -> dict | None:
     """
     pool = await get_pg_pool()
     if pool is not None:
-        if is_evm_chain(chain):
+        if spans_evm_networks(chain, wallet_type):
+            # An EOA: one key, every EVM network. Match other EOA rows only --
+            # a contract row on another network is a different controller.
             row = await pool.fetchrow(
                 "SELECT u.* FROM users u JOIN user_wallets w ON w.user_id = u.id "
-                "WHERE w.chain <> 'solana' AND w.address = $1 ORDER BY w.linked_at LIMIT 1",
+                "WHERE w.chain <> 'solana' AND w.wallet_type <> 'contract' AND w.address = $1 "
+                "ORDER BY w.linked_at LIMIT 1",
                 address,
             )
         else:
+            # Solana, or a contract wallet: this exact network only.
             row = await pool.fetchrow(
                 "SELECT u.* FROM users u JOIN user_wallets w ON w.user_id = u.id "
-                "WHERE w.chain = 'solana' AND w.address = $1 LIMIT 1",
-                address,
+                "WHERE w.chain = $1 AND w.address = $2 LIMIT 1",
+                chain, address,
             )
         return _row_to_user(row) if row else None
-    for (stored_chain, stored_address), (owner_id, _) in _wallets.items():
+    for (stored_chain, stored_address), entry in _wallets.items():
+        owner_id, _, stored_type = entry
         if stored_address != address.lower():
             continue
-        if is_evm_chain(chain) != is_evm_chain(stored_chain):
+        if spans_evm_networks(chain, wallet_type):
+            if not is_evm_chain(stored_chain) or stored_type == CONTRACT:
+                continue
+        elif stored_chain != chain:
             continue
         return dict(_users[owner_id]) if owner_id in _users else None
     return None
 
 
-async def create_wallet_user(chain: str, address: str) -> dict:
+async def create_wallet_user(chain: str, address: str, wallet_type: str = EOA) -> dict:
     """A brand-new account with no email, for a wallet no one has linked yet.
     Callers that need "find-or-create" must check find_wallet_owner first (not
     get_user_by_wallet, which matches one exact chain label and so misses the
@@ -318,16 +347,16 @@ async def create_wallet_user(chain: str, address: str) -> dict:
     else:
         _users[user["id"]] = user
         stored = dict(user)
-    await link_wallet(stored["id"], chain, address)
+    await link_wallet(stored["id"], chain, address, wallet_type)
     return stored
 
 
-async def sign_in_with_wallet(chain: str, address: str, ip: str | None = None, user_agent: str | None = None) -> tuple[dict, str, bool]:
+async def sign_in_with_wallet(chain: str, address: str, ip: str | None = None, user_agent: str | None = None, wallet_type: str = EOA) -> tuple[dict, str, bool]:
     """A verified wallet signature -> (user, session token, created). The
     wallet's existing owner, if any, always wins -- this never creates a
     second account for a wallet that's already linked to one."""
-    existing = await find_wallet_owner(chain, address)
-    user = existing or await create_wallet_user(chain, address)
+    existing = await find_wallet_owner(chain, address, wallet_type)
+    user = existing or await create_wallet_user(chain, address, wallet_type)
     session = await create_user_session(user["id"], ip, user_agent)
     return user, session, existing is None
 
@@ -588,7 +617,7 @@ async def delete_user(user_id: str) -> None:
     user = _users.pop(user_id, None)
     if user:
         _users_by_email.pop(user["email"], None)
-    for key in [k for k, (owner, _) in _wallets.items() if owner == user_id]:
+    for key in [k for k, entry in _wallets.items() if entry[0] == user_id]:
         _wallets.pop(key, None)
     _chat_sessions.pop(user_id, None)
     for key in [k for k, m in _team_members.items() if k[0] == user_id or m.get("user_id") == user_id]:

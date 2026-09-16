@@ -367,7 +367,8 @@ def _wallet_chain_label(chain: str) -> str:
     return _EVM_CHAIN_NAMES.get(chain_id, f"evm-{chain_id}")
 
 
-async def _finish_wallet_signin(chain: str, address: str, request: Request, response: Response) -> dict:
+async def _finish_wallet_signin(chain: str, address: str, request: Request, response: Response,
+                                wallet_type: str = accounts.EOA) -> dict:
     """After a signature is verified: a wallet already linked to an account
     always signs the caller in as that account's owner (a verified signature
     can only ever come from the real key-holder, so this never lets one
@@ -379,16 +380,27 @@ async def _finish_wallet_signin(chain: str, address: str, request: Request, resp
     # identity on every network, so switching networks in the wallet -- or
     # arriving through the Coinbase entry point, which labels the chain "evm"
     # rather than "ethereum" -- resumes the same account instead of making one.
-    existing_owner = await accounts.find_wallet_owner(chain, address)
+    # An API key must never become a browser session. A restricted key that
+    # could link its holder's own wallet to the key owner's account would come
+    # back out as a full cookie session, with which it could mint an
+    # unrestricted key -- and the wallet link would outlive the original key.
+    # Wallet sign-in is a browser flow; a key has no business in it at all.
+    bearer = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if bearer.startswith(api_keys.KEY_PREFIX):
+        raise HTTPException(403, "Wallet sign-in is a browser flow. An API key cannot link a wallet or open a session.")
+
+    existing_owner = await accounts.find_wallet_owner(chain, address, wallet_type)
     if existing_owner is not None:
         user, created = existing_owner, False
     else:
         current = await resolve_identity(request)
-        if current.signed_in:
-            await accounts.link_wallet(current.user["id"], chain, address)
+        # `signed_in` is true for an API-key identity too, so the cookie-session
+        # check is the one that matters here, not a convenience.
+        if current.signed_in and current.api_key is None:
+            await accounts.link_wallet(current.user["id"], chain, address, wallet_type)
             user, created = current.user, False
         else:
-            user = await accounts.create_wallet_user(chain, address)
+            user = await accounts.create_wallet_user(chain, address, wallet_type)
             created = True
     token = await accounts.create_user_session(user["id"], ip=_client_identity(request), user_agent=request.headers.get("user-agent"))
     _set_user_cookie(response, request, token)
@@ -413,14 +425,14 @@ async def coinbase_auth_challenge(body: WalletAuthChallengeRequest, request: Req
 @app.post("/auth/coinbase/verify")
 async def coinbase_auth_verify(body: WalletAuthVerifyRequest, response: Response, request: Request):
     try:
-        await verify_challenge(body.address, body.nonce, body.signature)
+        _token, verified = await verify_challenge(body.address, body.nonce, body.signature)
     except (ValueError, TypeError) as exc:
         raise HTTPException(401, _safe_detail(exc, "Wallet authentication failed")) from exc
     # The verified challenge doesn't carry its chain_id back out, and an EOA
     # signature verifies the same regardless of which EVM chain the wallet
     # happened to be on -- "evm" is an honest label here, not a guess at a
     # specific chain (the general /auth/wallet/* pair does track it).
-    return await _finish_wallet_signin("evm", body.address.lower(), request, response)
+    return await _finish_wallet_signin("evm", body.address.lower(), request, response, verified["wallet_type"])
 
 
 @app.post("/auth/wallet/challenge")
@@ -441,14 +453,16 @@ async def wallet_auth_challenge(body: WalletChallengeRequest, request: Request):
 async def wallet_auth_verify(body: WalletVerifyRequest, response: Response, request: Request):
     chain = _wallet_chain_label(body.chain)
     address = body.address if chain == "solana" else body.address.lower()
+    wallet_type = accounts.EOA
     try:
         if chain == "solana":
             await verify_solana_challenge(address, body.nonce, body.signature)
         else:
-            await verify_challenge(address, body.nonce, body.signature)
+            _token, verified = await verify_challenge(address, body.nonce, body.signature)
+            wallet_type = verified["wallet_type"]
     except (ValueError, TypeError) as exc:
         raise HTTPException(401, _safe_detail(exc, "Wallet authentication failed")) from exc
-    return await _finish_wallet_signin(chain, address, request, response)
+    return await _finish_wallet_signin(chain, address, request, response, wallet_type)
 
 
 @app.post("/auth/logout")
@@ -1213,6 +1227,15 @@ async def delete_my_account(body: DeleteAccountRequest, request: Request, respon
     accepted.discard("")
     if confirm not in accepted:
         raise HTTPException(400, "Type your account email (or a linked wallet address) exactly to confirm deletion")
+    # Cancel billing BEFORE the account is destroyed. Deleting first strips the
+    # Stripe customer and subscription ids while the subscription keeps
+    # renewing, leaving a recurring charge nobody can map back to a person.
+    # A failure here is recoverable, so it stops the deletion rather than being
+    # swallowed -- the user can retry, and their data is still intact.
+    try:
+        await billing.cancel_subscription_for(user)
+    except billing.SubscriptionCancelFailed as exc:
+        raise HTTPException(409, str(exc)) from exc
     for session_id in await accounts.list_chat_sessions(user["id"]):
         await clear_history(session_id)
     for key in await api_keys.list_for_user(user["id"]):
@@ -1403,7 +1426,7 @@ async def create_my_task(body: TaskCreate, identity: Identity = Depends(require_
 
 @app.patch("/me/tasks/{task_id}")
 async def update_my_task(task_id: str, body: TaskUpdate, identity: Identity = Depends(require_user)):
-    task = await task_scheduling.update_task(task_id, identity.user["id"], **body.model_dump(exclude_none=True))
+    task = await task_scheduling.update_task(task_id, identity.user["id"], user=identity.user, **body.model_dump(exclude_none=True))
     return tasks.public(task)
 
 

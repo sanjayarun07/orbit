@@ -131,6 +131,13 @@ CREATE TABLE IF NOT EXISTS user_wallets (
     PRIMARY KEY (chain, address)
 );
 CREATE INDEX IF NOT EXISTS user_wallets_user ON user_wallets (user_id);
+-- An EOA address is the same key on every EVM network, so one account owns it
+-- everywhere. A contract wallet's address is not key-derived: the same address
+-- on two networks can be two different contracts with two different owners, so
+-- those identities are scoped to the network they were verified on. Rows
+-- linked before this column existed default to 'eoa', which is what they were
+-- treated as; a pre-existing smart-wallet link keeps its old, broader scope.
+ALTER TABLE user_wallets ADD COLUMN IF NOT EXISTS wallet_type TEXT NOT NULL DEFAULT 'eoa';
 CREATE TABLE IF NOT EXISTS credit_ledger (
     id UUID PRIMARY KEY,
     account_id TEXT NOT NULL,

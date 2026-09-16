@@ -55,8 +55,6 @@ async def execute_confirmed_plan(plan_id: str, confirmation_text: str) -> dict:
         raise ValueError(f"Plan cannot execute in status {plan.status}")
     if confirmation_text != plan.confirmation_text:
         raise ValueError("Confirmation text does not match")
-    if not settings.live_trading:
-        raise ValueError("LIVE_TRADING is disabled")
     if not settings.solana_private_key:
         raise ValueError("SOLANA_PRIVATE_KEY is not configured")
 
@@ -83,8 +81,6 @@ async def prepare_wallet_transaction(plan_id: str, confirmation_text: str) -> di
         raise ValueError(f"Plan cannot execute in status {plan.status}")
     if confirmation_text != plan.confirmation_text:
         raise ValueError("Confirmation text does not match")
-    if not settings.live_trading:
-        raise ValueError("LIVE_TRADING is disabled")
     transaction = await get_prepared_transaction(plan)
     return {
         "plan_id": plan.plan_id,
@@ -104,8 +100,6 @@ async def submit_wallet_transaction(
         raise ValueError(f"Plan cannot execute in status {plan.status}")
     if confirmation_text != plan.confirmation_text:
         raise ValueError("Confirmation text does not match")
-    if not settings.live_trading:
-        raise ValueError("LIVE_TRADING is disabled")
 
     try:
         expected = VersionedTransaction.from_bytes(

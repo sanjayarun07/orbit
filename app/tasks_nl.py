@@ -121,7 +121,7 @@ async def handle(message: str, user: dict, tz_offset_min: int = 0) -> str | None
             else:
                 status = "paused" if verb == "pause" else "active"
                 if task["status"] != status:
-                    await task_scheduling.update_task(task["id"], user["id"], status=status)
+                    await task_scheduling.update_task(task["id"], user["id"], user=user, status=status)
                     count += 1
         return f"Done — {count} task{'s' if count != 1 else ''} {'deleted' if verb in ('delete', 'cancel', 'stop') else verb + 'd'}."
     m = _MUTATE.match(text)
@@ -136,7 +136,7 @@ async def handle(message: str, user: dict, tz_offset_min: int = 0) -> str | None
             await task_scheduling.delete_task(task["id"], user["id"])
             return f"Deleted task {index + 1}: **{task['title']}**."
         status = "paused" if verb == "pause" else "active"
-        await task_scheduling.update_task(task["id"], user["id"], status=status)
+        await task_scheduling.update_task(task["id"], user["id"], user=user, status=status)
         return f"Task {index + 1} **{task['title']}** is now {status}."
     m = _BRIEF.match(text)
     if m:

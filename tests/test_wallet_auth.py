@@ -117,7 +117,10 @@ def test_a_new_solana_wallet_signs_in_with_no_email_at_all():
     body = verified.json()
     assert body["authenticated"] is True and body["created"] is True
     assert body["user"]["email"] is None
-    assert body["wallets"] == [{"chain": "solana", "address": address, "linked_at": body["wallets"][0]["linked_at"]}]
+    # wallet_type is part of the payload now: EOA identities span every EVM
+    # network, contract-wallet identities do not, so the link records which.
+    assert body["wallets"] == [{"chain": "solana", "address": address, "wallet_type": "eoa",
+                                "linked_at": body["wallets"][0]["linked_at"]}]
     assert "HttpOnly" in verified.headers["set-cookie"]
     assert client.get("/me").json()["user"]["id"] == body["user"]["id"]
 

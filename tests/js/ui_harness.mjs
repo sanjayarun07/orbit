@@ -476,6 +476,75 @@ const CASES = {
     return CASES.inline_card_edit_during_claim("none");
   },
 
+  /** The risk charter is a hard limit and must bind on EVERY swap surface.
+   *
+   * The inline card never called charterQuoteVeto, so a trade the dialog and
+   * the chat card would both refuse went straight through it. `surface` picks
+   * which card to drive so the two are held to the same rule by one case.
+   */
+  async charter_blocks_an_over_limit_swap(surface = "inline") {
+    const { dom, sandbox, setScriptVar, useRealExecutors } = load();
+    useRealExecutors();
+    setScriptVar("relayChains", [SOLANA, BASE]);
+    // $10 and 10 bps, against a $1000 trade at 50 bps.
+    setScriptVar("charterFields", { max_trade_usd: 10, max_slippage_bps: 10 });
+
+    sandbox.window.OrbitRelay.getFreshQuote = async (args) => {
+      sandbox.recorded.relayQuoteArgs = args;
+      return {
+        quote: { details: { currencyIn: { amountUsd: 1000 } }, fees: {}, steps: [{ requestId: "r".repeat(24) }] },
+        wallet: {}, createdAt: Date.now(),
+      };
+    };
+    const approvals = [];
+    sandbox.window.OrbitRelay.executeQuote = async (quote) => { approvals.push(quote); return {}; };
+    sandbox.fetch = async (url) => String(url).includes("/config/public")
+      ? { ok: true, status: 200, json: async () => ({ deployment: { execution_enabled: true }, x402: null }) }
+      : { ok: true, status: 200, json: async () => ({ execution_claimed: true }) };
+    await sandbox.loadX402Config();
+
+    let status;
+    if (surface === "dialog") {
+      dom.query("#relayFromChain").value = "792703809";
+      dom.query("#relayToChain").value = "8453";
+      dom.query("#relayFromToken").value = "SOL";
+      dom.query("#relayToToken").value = "USDC";
+      dom.query("#relayAmount").value = "1000";
+      dom.query("#relayRecipient").value = "0x1111111111111111111111111111111111111111";
+      dom.query("#relaySlippage").value = "50";
+      await sandbox.requestRelayQuote();
+      await sandbox.executeRelayQuote();
+      status = dom.query("#relayStatus").textContent;
+    } else {
+      const tick = async (n = 12) => { for (let i = 0; i < n; i++) await new Promise(r => setImmediate(r)); };
+      const card = sandbox.renderInlineRelaySwap({ amount: "1000" });
+      await tick();
+      const field = (selector) => card.querySelector(selector);
+      field(".inline-from-chain").value = "792703809";
+      field(".inline-to-chain").value = "8453";
+      field(".inline-from-token").value = "SOL";
+      field(".inline-to-token").value = "USDC";
+      field(".inline-amount").value = "1000";
+      field(".inline-slippage").value = "50";
+      field(".inline-recipient").value = "0x1111111111111111111111111111111111111111";
+      field(".inline-quote-btn").dispatch("click");
+      await tick();
+      field(".inline-execute-btn").dispatch("click");
+      await tick();
+      status = field(".inline-status").textContent;
+    }
+    return {
+      surface,
+      quotedUsd: sandbox.recorded.relayQuoteArgs ? 1000 : null,
+      walletApprovals: approvals.length,
+      status,
+    };
+  },
+
+  async charter_blocks_an_over_limit_swap_dialog() {
+    return CASES.charter_blocks_an_over_limit_swap("dialog");
+  },
+
   /** The claim path must still reach the wallet when nothing changed. */
   async execution_reaches_the_wallet_when_nothing_changes() {
     const { dom, sandbox, setScriptVar, useRealExecutors } = load();

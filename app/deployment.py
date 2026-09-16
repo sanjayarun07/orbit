@@ -144,6 +144,17 @@ def audit(config: Settings | None = None) -> list[ConfigProblem]:
             "DEPLOYMENT_MODE=research and LIVE_TRADING=true contradict each other. "
             "Research mode refuses every money-moving route, so say which you mean.",
         )
+    elif declared == EXECUTION and not config.live_trading:
+        # The other half of the same contradiction, and the more dangerous one:
+        # it used to pass the audit and report execution enabled in
+        # /config/public while the legacy flag still refused every Jupiter
+        # route. A deployment must not advertise what it will not do.
+        add(
+            "mode-contradicts-live-trading", FATAL, "DEPLOYMENT_MODE",
+            "DEPLOYMENT_MODE=execution and LIVE_TRADING=false contradict each other. "
+            "Execution mode advertises that this deployment can move funds, so set "
+            "LIVE_TRADING=true, or use DEPLOYMENT_MODE=research.",
+        )
     elif not declared and production:
         add(
             "mode-not-declared", WARNING, "DEPLOYMENT_MODE",

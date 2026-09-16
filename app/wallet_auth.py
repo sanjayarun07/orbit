@@ -119,6 +119,11 @@ async def verify_challenge(address: str, nonce: str, signature: str) -> tuple[st
     normalized_signature = signature if signature.startswith("0x") else f"0x{signature}"
     signature_size = (len(normalized_signature) - 2) // 2
     valid = False
+    # Which path proved control is not a detail: an EOA signature proves the
+    # holder has a key that works identically on every EVM network, while a
+    # contract signature only proves control of one contract on ONE network.
+    # The caller needs to know which, or it cannot scope the identity correctly.
+    wallet_type = "eoa"
     if signature_size == 65:
         try:
             recovered = Account.recover_message(
@@ -135,10 +140,14 @@ async def verify_challenge(address: str, nonce: str, signature: str) -> tuple[st
             normalized_signature,
             int(value.get("chain_id", 1)),
         )
+        if valid:
+            wallet_type = "contract"
     if not valid:
         raise ValueError("Wallet signature does not match the requested address")
     token = secrets.token_urlsafe(32)
-    session = {"address": address, "provider": "coinbase", "authenticated_at": datetime.now(timezone.utc).isoformat()}
+    session = {"address": address, "provider": "coinbase", "wallet_type": wallet_type,
+               "chain_id": int(value.get("chain_id", 1)),
+               "authenticated_at": datetime.now(timezone.utc).isoformat()}
     if redis is not None:
         await redis.setex(f"wallet_auth_session:{token}", SESSION_TTL, json.dumps(session))
     else:

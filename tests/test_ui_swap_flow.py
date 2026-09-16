@@ -181,3 +181,21 @@ def test_the_inline_card_still_signs_when_nothing_is_edited():
     assert result["askedSlippage"] == 50
     assert result["walletApprovals"] == 1, "an untouched quote never reached the wallet"
     assert "completed" in result["status"]
+
+
+def test_the_inline_swap_card_enforces_the_risk_charter():
+    """The reviewed finding: the inline card's quote path never called the
+    charter veto, so a $1,000 trade at 50 bps reached the wallet handler on an
+    account whose charter allowed $10 and 10 bps -- limits the dialog and the
+    chat card both honoured."""
+    result = run_case("charter_blocks_an_over_limit_swap")
+    assert result["quotedUsd"] == 1000, "the card never quoted; the case proves nothing"
+    assert result["walletApprovals"] == 0, "an over-limit swap reached the wallet handler"
+    assert "risk charter" in result["status"]
+
+
+def test_the_swap_dialog_enforces_the_risk_charter_too():
+    """Same limits, same refusal, other surface. One rule or it is not a rule."""
+    result = run_case("charter_blocks_an_over_limit_swap_dialog")
+    assert result["walletApprovals"] == 0
+    assert "risk charter" in result["status"]

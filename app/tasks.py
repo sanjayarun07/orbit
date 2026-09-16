@@ -161,14 +161,28 @@ async def get_task(task_id: str) -> dict | None:
     return dict(task) if task else None
 
 
+async def assert_can_activate(user: dict, exclude_task_id: str | None = None) -> None:
+    """The plan's active-task limit, checked wherever a task BECOMES active.
+
+    Creation was the only place this ran, so pausing tasks and resuming them
+    walked straight past it: a Free account could hold any number of paused
+    tasks and switch them all on. The limit is about how many tasks run, not
+    how many were created, so it belongs at every transition into "active".
+    """
+    plan = get_plan(user.get("plan_id"))
+    limit = TASK_LIMITS.get(plan.id, 3)
+    active = [
+        t for t in await list_tasks(user["id"], include_done=False)
+        if t["status"] == "active" and t["id"] != exclude_task_id
+    ]
+    if len(active) >= limit:
+        raise ValueError(f"The {plan.name} plan allows {limit} active tasks; pause or delete one first")
+
+
 async def create_task(user: dict, kind: str, spec: dict, schedule: dict, channel: str = "inapp", tz_offset_min: int = 0, title: str | None = None) -> dict:
     if kind not in KINDS:
         raise ValueError(f"Unknown task kind {kind!r}")
-    plan = get_plan(user.get("plan_id"))
-    limit = TASK_LIMITS.get(plan.id, 3)
-    active = [t for t in await list_tasks(user["id"], include_done=False) if t["status"] == "active"]
-    if len(active) >= limit:
-        raise ValueError(f"The {plan.name} plan allows {limit} active tasks; pause or delete one first")
+    await assert_can_activate(user)
     when = next_run(schedule, tz_offset_min)
     if when is None:
         raise ValueError("That schedule has no future run (is the time in the past?)")

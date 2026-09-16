@@ -8,9 +8,15 @@ Two independent switches, because they answer different questions.
 `research` (the default) refuses every money-moving entry point across every
 provider; `execution` allows them, still subject to the per-trade policy below.
 Leaving it unset infers the mode from the older `LIVE_TRADING` flag, so an
-existing deployment keeps behaving as it did. Setting `DEPLOYMENT_MODE=research`
-together with `LIVE_TRADING=true` is a contradiction and refuses to start rather
-than picking a silent winner.
+existing deployment keeps behaving as it did.
+
+`DEPLOYMENT_MODE` is the *only* execution policy. `LIVE_TRADING` feeds into it
+when the mode is unset and is otherwise checked for agreement at startup: both
+`research` with live trading on and `execution` with live trading off are fatal
+configuration errors. The second was the dangerous one -- it passed the audit
+and reported execution enabled in `GET /config/public` while the Jupiter routes
+still refused every call, so the deployment advertised what it would not do. The
+trade routes no longer consult the legacy flag at all.
 
 `ALLOW_CUSTODIAL_SIGNING` decides whether the **server** may hold a key and sign
 on a user's behalf. Off by default, so the server-signing route refuses even on
@@ -76,8 +82,9 @@ report one.
 
 Use PostgreSQL and Redis with `ALLOW_MEMORY_FALLBACK=false`. Memory mode is
 development-only: restart recovery cannot be guaranteed without PostgreSQL.
-Keep `LIVE_TRADING=false` until wallet, RPC, persistence and provider integration
-tests have passed in the target deployment. Keep `EXPOSE_TOOL_TRAJECTORY=false`.
+Stay on `DEPLOYMENT_MODE=research` (with `LIVE_TRADING=false`, which must agree
+with it) until wallet, RPC, persistence and provider integration tests have
+passed in the target deployment. Keep `EXPOSE_TOOL_TRAJECTORY=false`.
 Back up trade_plans and relay_executions; do not purge unsettled records.
 
 Jupiter signatures are now stored atomically with the submission claim before
@@ -282,11 +289,29 @@ should follow the account.
 
 ## Wallet account identity
 
-**One EVM address is one account on every EVM network.** An EVM address is the
-same secp256k1 key on Ethereum, Base, Arbitrum and the rest, so identity is
-resolved by `accounts.find_wallet_owner`, which matches the address across every
+**One EVM address is one account on every EVM network -- if it is an EOA.** An
+externally owned address is the same secp256k1 key everywhere, so identity is
+resolved by `accounts.find_wallet_owner`, which matches EOA rows across every
 non-Solana chain label. Solana is a different curve and a different address
-space, so it stays separate and is matched exactly.
+space, so it is matched exactly.
+
+**A contract wallet is scoped to the network it was verified on.** A contract
+address is derived from its deployer and nonce, not from a key, so the same
+address on Base and Ethereum can be two different contracts with two different
+controllers. Treating those as one identity meant authenticating against a
+contract you control on one network could resume an account linked to somebody
+else's contract on another. `wallet_auth.verify_challenge` now reports whether
+an EOA recovery or the ERC-1271/6492 validator proved the signature, that type
+is stored on the link, and EOA lookups exclude contract rows so the
+cross-network match cannot be reached from the other side either. Rows linked
+before this column existed default to `eoa`, which is how they were already
+being treated; a pre-existing smart-wallet link keeps its old, broader scope.
+
+**An API key cannot become a browser session.** Wallet sign-in is a browser
+flow, and `/auth/wallet/verify` and `/auth/coinbase/verify` refuse any request
+carrying an API key. Without that, a read-only key could link its holder's own
+wallet to the key owner's account, receive a full session cookie, and mint an
+unrestricted key -- and the wallet link would outlive the key it came from.
 
 This was a real defect, not a hypothetical. Identity used to be the exact
 `(chain, address)` pair, so the same wallet produced a different account
@@ -308,3 +333,39 @@ replay (a Solana nonce offered to the EVM verifier), address binding, sign-out
 revoking the token server-side rather than only clearing the cookie, deletion
 releasing the wallet so it can start over, and every account surface answering
 without a 500 for an account whose email is `null`.
+
+## Billing lifecycle
+
+**Deleting an account cancels its subscription first.** Deleting the user row
+strips the Stripe customer and subscription ids while the subscription keeps
+renewing, leaving a recurring charge nobody can map back to a person. If the
+cancellation fails the deletion stops with HTTP 409 and the account is left
+intact: that is recoverable, and deleting anyway is not.
+
+**Stripe events apply only to the subscription they name.** Events arrive late
+and out of order, so a customer who cancelled and resubscribed has two
+subscription ids. `customer.subscription.deleted` for the old one used to
+downgrade the new one to Free; it is now ignored when a different subscription
+is active.
+
+**Entitlements come from the price being charged, not from checkout metadata.**
+Metadata is written once at checkout and never updated, so after an upgrade it
+still names the old plan -- a Max-priced subscription kept Pro entitlements
+indefinitely. The subscription's price is read first and metadata is only a
+fallback when no configured price matches.
+
+## Plan limits
+
+A limit on how many tasks *run* has to bind wherever a task becomes active, not
+only where one is created. Creation was the only check, so pausing tasks and
+resuming them walked straight past it. `tasks.assert_can_activate` now runs on
+both paths and excludes the task being changed, so a task at the limit can
+still be edited.
+
+## Risk charter
+
+The user's charter is a hard limit and binds on every swap surface. The inline
+chat swap card never called the veto, so a trade the dialog and the chat card
+both refused went through it. All three now check at quote time and again
+immediately before signing, since the charter can be tightened while a quote
+sits on screen.
