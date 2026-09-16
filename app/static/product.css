@@ -120,7 +120,9 @@ body.home .home-below { display: block; animation: orbit-enter var(--motion-ente
 .stat { border-radius: 9px; padding: 16px; }
 .stat .label { text-transform: none; letter-spacing: 0; font-size: 11px; }
 .stat .value { margin-top: 8px; font-size: 24px; }
-.charter-summary, .key-row { border-style: solid; }
+.charter-summary { border-style: solid; }
+/* Only the bottom edge has a width and colour; a shorthand border-style here would paint the other three sides at the 3px medium default. */
+.key-row { border-bottom-style: solid; }
 .key-row { padding: 12px 0; }
 .key-create { flex-wrap: wrap; }
 .key-create input { min-width: 100px; }
