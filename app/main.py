@@ -750,6 +750,10 @@ async def execute_chat_turn(body: ChatRequest, identity: Identity | str) -> Agen
     if isinstance(identity, str):
         identity = current_identity.get() or service_identity(identity)
     session_id = body.session_id or str(uuid4())
+    if body.session_id:
+        # A conversation is private to the account that first used it while
+        # signed in; nobody else may read, extend or delete it by knowing its id.
+        await _require_session_access(session_id, identity)
     if body.wallet_address and not identity.signed_in and identity.kind != "service":
         raise HTTPException(401, {"error": "sign_in_required", "message": "Sign in with your email to use a wallet, trade, or keep history."})
     if identity.api_key is not None and not identity.has_scope("chat"):
@@ -793,6 +797,19 @@ async def execute_chat_turn(body: ChatRequest, identity: Identity | str) -> Agen
         except Exception:
             logger.warning("chat session ownership update failed", exc_info=True)
     return response
+
+
+async def _require_session_access(session_id: str, identity: Identity | None, claim: bool = False) -> None:
+    """Ownership gate for every operation on a conversation. An owned
+    conversation is reachable only by its owner; an unowned one stays open
+    (anonymous ids are random and never mapped) and, with `claim`, becomes
+    the signed-in caller's. A miss is a 404 so ids cannot be probed."""
+    owner = await accounts.chat_session_owner(session_id)
+    user_id = identity.user["id"] if identity is not None and identity.signed_in and identity.user else None
+    if owner is not None and owner != user_id:
+        raise HTTPException(404, "Conversation not found")
+    if owner is None and claim and user_id:
+        await accounts.touch_chat_session(user_id, session_id)
 
 
 async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: str) -> AgentResponse:
@@ -1728,6 +1745,7 @@ async def chat_feedback(body: FeedbackRequest, request: Request):
     change), which feeds ProviderRouter's ranking -- see app/tool_outcomes.py."""
     identity = await resolve_identity(request)
     try:
+        await _require_session_access(body.session_id, identity)
         result = await feedback.rate(body.session_id, body.session_revision, body.rating, body.comment, identity.account_id)
     except feedback.TurnNotFound as exc:
         raise HTTPException(404, str(exc)) from exc
@@ -1750,6 +1768,7 @@ async def risk_charter_limits():
 
 @app.get("/chat/history/{session_id}")
 async def chat_history(session_id: str, identity: Identity = Depends(require_user)):
+    await _require_session_access(session_id, identity, claim=True)
     messages = await get_messages(session_id)
     if not settings.expose_tool_trajectory:
         messages = [dict(item, trajectory=public_activity(item.get("trajectory"))) for item in messages]
@@ -1761,6 +1780,7 @@ async def chat_history(session_id: str, identity: Identity = Depends(require_use
 
 @app.delete("/chat/history/{session_id}")
 async def clear_chat_history(session_id: str, identity: Identity = Depends(require_user)):
+    await _require_session_access(session_id, identity)
     try:
         lease = await acquire_session_turn(session_id)
     except asyncio.TimeoutError as exc:
@@ -1861,7 +1881,8 @@ async def track_relay_execution(request_id: str, request: Request):
 
 
 @app.get("/executions/relay/session/{session_id}/{revision}")
-async def relay_execution_for_turn(session_id: str, revision: int):
+async def relay_execution_for_turn(session_id: str, revision: int, request: Request):
+    await _require_session_access(session_id, await resolve_identity(request))
     return await relay_tracking.for_turn(session_id, revision)
 
 

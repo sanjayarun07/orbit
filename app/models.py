@@ -280,7 +280,9 @@ class RiskAssessment(BaseModel):
     `verdict` is always "ok" and `summary` is informational only.
     """
 
-    verdict: Literal["ok", "blocked"]
+    # "unresolved": a rule the charter sets could not be evaluated (no portfolio
+    # value, unknown notional); treated like blocked -- the card is withheld.
+    verdict: Literal["ok", "blocked", "unresolved"]
     summary: str
     charter_applied: bool = False
 

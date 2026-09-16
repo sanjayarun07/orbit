@@ -162,6 +162,20 @@ async def cross_chain_swap_node(state: AgentState) -> dict:
         }
 
     draft = CrossChainSwapDraft(**values)
+    # The same charter gate the Jupiter path applies, on the fields a draft can
+    # be checked against (chains, slippage, verified-only). Notional is checked
+    # by the browser against the live Relay quote before anything is signed.
+    fields = (state.get("session_context") or {}).get("risk_charter_fields") or {}
+    if (state.get("session_context") or {}).get("risk_charter") and fields:
+        violations, unresolved = _charter_draft_violations(fields, draft)
+        if violations or unresolved:
+            detail = "; ".join(violations + [f"could not check {u}" for u in unresolved]) + "."
+            return {
+                "answer": f"🚫 Blocked by your risk charter: {detail} No quote was prepared; adjust the trade or your charter and try again.",
+                "trajectory": None,
+                "cross_chain_swap": None,
+                "risk_assessment": RiskAssessment(verdict="blocked", summary=detail, charter_applied=True),
+            }
     slippage = f" with max {draft.slippage_bps} bps slippage" if draft.slippage_bps is not None else ""
     return {
         "answer": (
@@ -231,20 +245,58 @@ def _trade_summary(plan: TradePlan) -> str:
     )
 
 
-def _charter_field_violations(fields: dict, plan, total_usd: float | None) -> list[str]:
-    """Deterministic checks of the structured charter against the real quote.
-    A rule that cannot be evaluated (unknown notional, no portfolio value) is
-    not a violation -- the charter can only make things stricter, never guess."""
+def _charter_draft_violations(fields: dict, draft: CrossChainSwapDraft) -> tuple[list[str], list[str]]:
+    """The charter against a Relay draft (no quote yet): chains, slippage and
+    the verified-only rule. Returns (violations, unresolved)."""
     violations: list[str] = []
+    unresolved: list[str] = []
+    chains = [c.lower() for c in (fields.get("allowed_chains") or [])]
+    if chains:
+        for label, chain in (("source", draft.source_chain), ("destination", draft.destination_chain)):
+            if chain and chain.lower() not in chains:
+                violations.append(f"the {label} chain is {chain} but your charter allows only " + ", ".join(chains))
+    bps = fields.get("max_slippage_bps")
+    if bps is not None:
+        if draft.slippage_bps is None:
+            unresolved.append(f"slippage (none was requested; your max is {bps} bps, so state one at or below it)")
+        elif draft.slippage_bps > bps:
+            violations.append(f"slippage is {draft.slippage_bps} bps but your max is {bps} bps")
+    if fields.get("verified_only"):
+        # Relay tokens are not in Jupiter's verified registry; the rule cannot pass here.
+        violations.append("your charter allows only Jupiter-verified tokens, which cannot be confirmed for a cross-chain swap")
+    return violations, unresolved
+
+
+def _charter_field_violations(fields: dict, plan, total_usd: float | None, holdings: list[dict] | None = None) -> tuple[list[str], list[str]]:
+    """Deterministic checks of the structured charter against the real quote.
+    Returns (violations, unresolved). A rule that cannot be evaluated -- no
+    USD notional, no portfolio value -- is reported as unresolved rather than
+    silently passed: the charter can only make things stricter, never guess.
+    The position limit is post-trade: what you already hold of the output
+    token plus this trade, as a share of the portfolio."""
+    violations: list[str] = []
+    unresolved: list[str] = []
     notional = plan.input_value_usd
     cap = fields.get("max_trade_usd")
-    if cap is not None and notional is not None and notional > cap:
-        violations.append(f"the trade is ${notional:,.2f} but your max per trade is ${cap:,.2f}")
+    if cap is not None:
+        if notional is None:
+            unresolved.append(f"max per trade (${cap:,.2f}): the trade's USD value is unknown")
+        elif notional > cap:
+            violations.append(f"the trade is ${notional:,.2f} but your max per trade is ${cap:,.2f}")
     pct = fields.get("max_position_pct")
-    if pct is not None and notional is not None and total_usd:
-        share = notional / total_usd * 100
-        if share > pct:
-            violations.append(f"the trade is {share:.1f}% of your ${total_usd:,.2f} portfolio but your max per position is {pct:g}%")
+    if pct is not None:
+        if notional is None or not total_usd:
+            unresolved.append(f"max position {pct:g}%: your portfolio value is unavailable right now")
+        else:
+            existing = 0.0
+            for holding in holdings or []:
+                if holding.get("mint") == plan.output_token.mint and holding.get("usd_value") is not None:
+                    existing = float(holding["usd_value"])
+                    break
+            share = (existing + notional) / total_usd * 100
+            if share > pct:
+                held = f" (you already hold ${existing:,.2f} of {plan.output_token.symbol})" if existing else ""
+                violations.append(f"after this trade {plan.output_token.symbol} would be {share:.1f}% of your ${total_usd:,.2f} portfolio{held} but your max per position is {pct:g}%")
     bps = fields.get("max_slippage_bps")
     if bps is not None and plan.proposal.slippage_bps > bps:
         violations.append(f"slippage is {plan.proposal.slippage_bps} bps but your max is {bps} bps")
@@ -253,7 +305,7 @@ def _charter_field_violations(fields: dict, plan, total_usd: float | None) -> li
     chains = fields.get("allowed_chains") or []
     if chains and "solana" not in chains:
         violations.append("this is a Solana swap but your charter allows only " + ", ".join(chains))
-    return violations
+    return violations, unresolved
 
 
 @trace(name="charter_risk", as_type="agent")
@@ -274,11 +326,13 @@ async def charter_risk_node(state: AgentState) -> dict:
 
     portfolio_context = "unknown"
     total_usd: float | None = None
+    holdings: list[dict] = []
     try:
-        # Bounded: a slow snapshot must degrade the "% of portfolio" rule to
-        # "unknown" (not a violation), never block or time out the quote.
+        # Bounded: a slow snapshot leaves the "% of portfolio" rule unresolved
+        # (reported as such, never silently passed) rather than timing out the quote.
         snapshot = await asyncio.wait_for(build_portfolio_snapshot(state["wallet_address"]), timeout=settings.risk_snapshot_timeout_seconds)
         total = snapshot.get("total_usd_value")
+        holdings = list(snapshot.get("holdings") or [])
         if total is not None:
             total_usd = float(total)
             portfolio_context = f"Total wallet value: ${total_usd:.2f}" + (" (partial snapshot)" if snapshot.get("partial") else "")
@@ -286,14 +340,18 @@ async def charter_risk_node(state: AgentState) -> dict:
         logger.warning("charter_risk: portfolio snapshot unavailable", exc_info=True)
 
     if charter and fields:
-        violations = _charter_field_violations(fields, plan, total_usd)
-        if violations:
+        violations, unresolved = _charter_field_violations(fields, plan, total_usd, holdings)
+        if violations or unresolved:
+            # A rule the charter set but that cannot be evaluated blocks too: the
+            # user asked for a limit, and "unknown" is not "within the limit".
             await mark_plan_superseded(plan.plan_id)
-            detail = "; ".join(violations) + "."
+            detail = "; ".join(violations + [f"could not check {u}" for u in unresolved]) + "."
+            what = "Blocked by your risk charter" if violations else "Your risk charter could not be verified"
+            hint = "adjust the trade or your charter and try again" if violations else "try again in a moment, or relax that rule"
             return {
                 "trade_plan": None,
-                "answer": f"🚫 Blocked by your risk charter: {detail} No confirmation card was created; adjust the trade or your charter and try again.",
-                "risk_assessment": RiskAssessment(verdict="blocked", summary=detail, charter_applied=True),
+                "answer": f"🚫 {what}: {detail} No confirmation card was created; {hint}.",
+                "risk_assessment": RiskAssessment(verdict="blocked" if violations else "unresolved", summary=detail, charter_applied=True),
             }
         if not fields.get("notes"):
             # Every rule was checked exactly; nothing is left for the model to interpret.

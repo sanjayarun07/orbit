@@ -397,18 +397,39 @@ async def sign_in_with_token(token: str, ip: str | None = None, user_agent: str 
 # Conversations that belong to a user (export / delete-all / delete account)
 # ----------------------------------------------------------------------------
 
-async def touch_chat_session(user_id: str, session_id: str) -> None:
+async def chat_session_owner(session_id: str) -> str | None:
+    """The user a conversation belongs to, or None when nobody has claimed it
+    (anonymous conversations are not mapped)."""
     pool = await get_pg_pool()
     if pool is not None:
-        await pool.execute(
+        return await pool.fetchval("SELECT user_id FROM user_chat_sessions WHERE session_id = $1", session_id)
+    for user_id, sessions in _chat_sessions.items():
+        if session_id in sessions:
+            return user_id
+    return None
+
+
+async def touch_chat_session(user_id: str, session_id: str) -> bool:
+    """Claim an unowned conversation for `user_id` or refresh one they own.
+    Never transfers ownership: returns False (and writes nothing) when the
+    conversation belongs to someone else."""
+    pool = await get_pg_pool()
+    if pool is not None:
+        row = await pool.fetchrow(
             """
             INSERT INTO user_chat_sessions (user_id, session_id, last_used) VALUES ($1, $2, NOW())
-            ON CONFLICT (session_id) DO UPDATE SET user_id = EXCLUDED.user_id, last_used = NOW()
+            ON CONFLICT (session_id) DO UPDATE SET last_used = NOW()
+              WHERE user_chat_sessions.user_id = EXCLUDED.user_id
+            RETURNING user_id
             """,
             user_id, session_id,
         )
-        return
+        return row is not None
+    owner = await chat_session_owner(session_id)
+    if owner is not None and owner != user_id:
+        return False
     _chat_sessions.setdefault(user_id, {})[session_id] = _now()
+    return True
 
 
 async def list_chat_sessions(user_id: str) -> list[str]:

@@ -79,22 +79,33 @@ def test_pricing_timeout_returns_an_unpriced_partial_snapshot(rpc, monkeypatch):
 
 
 def test_risk_node_does_not_wait_on_a_slow_snapshot(monkeypatch):
+    """A slow snapshot must not stall the quote -- and a "% of portfolio" rule
+    that cannot be evaluated is reported as unresolved and withholds the card,
+    never silently passed (review 2026-09-16)."""
+    import time
     from types import SimpleNamespace
     from app.nodes import runtime, trading
 
     monkeypatch.setattr(settings, "risk_snapshot_timeout_seconds", 0.05)
+    superseded = []
 
     async def slow(_w):
         await asyncio.sleep(1)
         return {"total_usd_value": 100.0}
 
     async def fake_call_lm(_program, **kw):
-        assert kw["portfolio_context"] == "unknown"
-        return SimpleNamespace(verdict="ok", summary="fine", blocked_reason=None)
+        raise AssertionError("the model must not be consulted when a structured rule is unresolved")
+
+    async def mark(plan_id):
+        superseded.append(plan_id)
 
     monkeypatch.setattr(trading, "build_portfolio_snapshot", slow)
+    monkeypatch.setattr(trading, "mark_plan_superseded", mark)
     monkeypatch.setattr(runtime, "_call_lm", fake_call_lm)
-    plan = SimpleNamespace(plan_id="p", input_token=SimpleNamespace(symbol="SOL", decimals=9), output_token=SimpleNamespace(symbol="USDC", verified=True),
+    plan = SimpleNamespace(plan_id="p", input_token=SimpleNamespace(symbol="SOL", decimals=9), output_token=SimpleNamespace(mint="USDCmint", symbol="USDC", verified=True),
                            proposal=SimpleNamespace(amount_atomic=1, slippage_bps=50), input_value_usd=5.0, quote={}, warnings=[])
+    started = time.perf_counter()
     out = asyncio.run(trading.charter_risk_node({"trade_plan": plan, "wallet_address": "w", "session_context": {"risk_charter": "max $10 per trade", "risk_charter_fields": {"max_position_pct": 1.0, "notes": "x"}}}))
-    assert out["risk_assessment"].verdict == "ok"  # % rule unevaluable -> not a violation; quote not blocked
+    assert time.perf_counter() - started < 0.8                       # the 1 s snapshot was abandoned at the timeout
+    assert out["risk_assessment"].verdict == "unresolved" and out["trade_plan"] is None and superseded == ["p"]
+    assert "portfolio value is unavailable" in out["answer"]

@@ -398,12 +398,49 @@ async def compose_brief(task: dict) -> str:
     return "\n".join(lines)
 
 
+_claim_lock = asyncio.Lock()
+
+
+async def claim_task(task: dict) -> dict | None:
+    """Atomically take the scheduled occurrence `task['next_run_at']` for this
+    run. Two workers (or a worker and "run now") racing on the same task get
+    exactly one winner: the claim clears `next_run_at`, so the loser's claim
+    matches nothing and it skips. The occurrence key is returned on the task
+    as `occurrence` and later stamps the charge and the reschedule."""
+    occurrence = task.get("next_run_at")
+    pool = await get_pg_pool()
+    if pool is not None:
+        row = await pool.fetchrow(
+            "UPDATE user_tasks SET next_run_at = NULL, last_result = 'running' WHERE id = $1 AND status IN ('active', 'paused') AND next_run_at IS NOT DISTINCT FROM $2 RETURNING *",
+            task["id"], _parse_dt(occurrence),
+        )
+        if row is None:
+            return None
+        claimed = _row(row)
+    else:
+        async with _claim_lock:
+            current = _tasks.get(task["id"])
+            if current is None or current["status"] not in ("active", "paused") or current.get("next_run_at") != occurrence:
+                return None
+            current["next_run_at"] = None
+            current["last_result"] = "running"
+            claimed = dict(current)
+    claimed["occurrence"] = occurrence or f"manual:{_now().isoformat()}"
+    return claimed
+
+
 async def run_task(task: dict) -> dict:
-    """Evaluate one due task, deliver if it fired, and reschedule or finish."""
+    """Evaluate one due task, deliver if it fired, and reschedule or finish.
+    The occurrence is claimed first; a task another worker already took is
+    reported as skipped and never delivered or charged twice."""
     user = await accounts.get_user(task["user_id"])
     if user is None:
         await delete_task(task["id"], task["user_id"])
         return {"id": task["id"], "status": "deleted"}
+    claimed = await claim_task(task)
+    if claimed is None:
+        return {"id": task["id"], "fired": False, "result": "skipped: already running", "status": task.get("status", "active")}
+    task = claimed
     fired, result, body = await evaluate(task)
     now = _now()
     updates: dict = {"last_run_at": now, "last_result": result}
@@ -415,7 +452,9 @@ async def run_task(task: dict) -> dict:
                 updates["last_result"] = "skipped: out of credits"
                 fired = False
             else:
-                await credits.append(account_id, -charge, "task:brief", "task_run", f"{task['id']}:{now.isoformat()}", {"kind": "brief"})
+                # Keyed by the scheduled occurrence, not the wall clock: the ledger's
+                # unique reference makes a repeated run of the same occurrence free.
+                await credits.append(account_id, -charge, "task:brief", "task_run", f"{task['id']}:{task['occurrence']}", {"kind": "brief"})
     if fired and body:
         await notify(user["id"], task["title"], body, kind=task["kind"], task_id=task["id"])
         if task.get("channel") == "email":
