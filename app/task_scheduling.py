@@ -36,12 +36,12 @@ async def update_task(task_id: str, user_id: str, user: dict | None = None, **fi
             # Counting the active tasks and activating one are two operations,
             # so they are done under the same per-account mutex creation uses --
             # otherwise two concurrent resumptions each see the last free slot.
-            async with tasks.account_task_gate(user_id):
+            async with tasks.account_task_gate(user_id) as db:
                 try:
-                    await tasks.assert_can_activate(user, exclude_task_id=task_id)
+                    await tasks.assert_can_activate(user, exclude_task_id=task_id, db=db)
                 except ValueError as exc:
                     raise ServiceError(403, str(exc)) from exc
-                task = await tasks.update_task(task_id, user_id, **fields)
+                task = await tasks.update_task(task_id, user_id, db=db, **fields)
                 if task is None:
                     raise ServiceError(404, "Task not found")
                 return task

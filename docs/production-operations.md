@@ -360,6 +360,17 @@ is treated as stale. Guarding only the deletion handler was not enough -- an
 out-of-order `customer.subscription.updated` made the old subscription current
 again, after which the old deletion matched and downgraded the account.
 
+**Every subscription-state writer applies the ordering rule, and payment is
+separate from entitlement.** The rule above first covered only the update and
+delete handlers; `checkout.session.completed` and `invoice.paid` still wrote
+unconditionally, and either could put an older subscription back as current.
+Checkout now applies the same rule. The invoice handler separates two facts: the
+payment happened, so its credits are always granted (keyed by event id, so a
+replay cannot double-grant); which plan the account is *on* is a different
+question that an invoice never answers, because invoices renew subscriptions
+rather than establish which one is current. Entitlement is written only when
+the invoice belongs to the subscription the account is already on.
+
 **Entitlements come from the price being charged, not from checkout metadata.**
 Metadata is written once at checkout and never updated, so after an upgrade it
 still names the old plan -- a Max-priced subscription kept Pro entitlements
@@ -376,11 +387,32 @@ still be edited.
 
 Counting and activating are two operations, so checking the count and then
 activating still let two concurrent resumptions take the same last slot. Both
-paths hold `tasks.account_task_gate`, a per-account mutex: a Postgres session
-advisory lock where a pool exists, so it serialises across every worker, and an
-asyncio lock keyed by `(loop, account)` otherwise. The lock is held on its own
-connection, which is fine because it is only a mutex -- every writer takes it,
-so the work itself can happen on any connection.
+paths hold `tasks.account_task_gate`, a per-account mutex: a transaction-scoped
+Postgres advisory lock where a pool exists, so it serialises across every
+worker, and an asyncio lock keyed by `(loop, account)` otherwise.
+
+The lock, the count and the write share **one connection and one transaction**.
+The first version held a pool connection for the lock and then asked the pool
+for a second connection to count and write. With as many concurrent activations
+as the pool has connections, every one of them held a lock-connection and none
+could obtain a work-connection: a deadlock that surfaced as request timeouts.
+Every store call inside the locked window now takes the gate's connection
+(`db=`) instead of going back to the pool, and the transaction-scoped lock is
+released with the commit, so there is no separate unlock to miss.
+
+**How this is tested, and the gap it exposed.** The ordinary suite cannot reach
+this code: `tests/conftest.py` points the pool getter of the accounts, credits,
+api_keys, billing and tasks modules at nothing, so every in-suite test of those
+layers runs their in-memory branch. The advisory-lock branch, the one
+production runs, had no coverage at all until `tests/test_postgres_task_gate.py`,
+which is opt-in and needs an isolated database:
+
+    TEST_DATABASE_URL=postgresql://localhost/orbit_test pytest tests/test_postgres_task_gate.py tests/test_postgres_execution.py
+
+Those are the skips a bare run reports. A skip there means the Postgres path is
+unverified in that run, and the skip message says so. Anything asserting about
+pools, transactions, advisory locks or SQL belongs in an opt-in test, because
+an in-suite version passes against broken code without noticing.
 
 ## Risk charter
 

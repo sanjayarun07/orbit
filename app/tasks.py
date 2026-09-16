@@ -146,21 +146,23 @@ def public(task: dict) -> dict:
     return {**task, "schedule_text": describe_schedule(task["schedule"], task.get("tz_offset_min", 0))}
 
 
-async def list_tasks(user_id: str, include_done: bool = True) -> list[dict]:
+async def list_tasks(user_id: str, include_done: bool = True, db=None) -> list[dict]:
+    """`db` is the connection an activation gate is already holding; inside
+    that window every query must ride it rather than ask the pool for another."""
     pool = await get_pg_pool()
     if pool is not None:
         # Oldest first: the numbers in "pause task 2" must stay stable as tasks are added.
-        rows = await pool.fetch("SELECT * FROM user_tasks WHERE user_id = $1 ORDER BY created_at ASC", user_id)
+        rows = await (db or pool).fetch("SELECT * FROM user_tasks WHERE user_id = $1 ORDER BY created_at ASC", user_id)
         tasks = [_row(r) for r in rows]
     else:
         tasks = sorted([dict(t) for t in _tasks.values() if t["user_id"] == user_id], key=lambda t: t["created_at"])
     return [t for t in tasks if include_done or t["status"] != "done"]
 
 
-async def get_task(task_id: str) -> dict | None:
+async def get_task(task_id: str, db=None) -> dict | None:
     pool = await get_pg_pool()
     if pool is not None:
-        row = await pool.fetchrow("SELECT * FROM user_tasks WHERE id = $1", task_id)
+        row = await (db or pool).fetchrow("SELECT * FROM user_tasks WHERE id = $1", task_id)
         return _row(row) if row else None
     task = _tasks.get(task_id)
     return dict(task) if task else None
@@ -184,21 +186,21 @@ async def account_task_gate(user_id: str):
     """
     pool = await get_pg_pool()
     if pool is not None:
-        key = _advisory_key(user_id)
-        connection = await pool.acquire()
-        try:
-            await connection.execute("SELECT pg_advisory_lock($1)", key)
-            try:
-                yield
-            finally:
-                await connection.execute("SELECT pg_advisory_unlock($1)", key)
-        finally:
-            await pool.release(connection)
+        # One connection for the lock AND the work, in one transaction. The
+        # first version held a connection for the lock and then asked the pool
+        # for another to count and write: with as many concurrent activations
+        # as the pool has connections, every one held a lock-connection and
+        # none could get a work-connection. A transaction-scoped advisory lock
+        # is released with the commit, so there is no separate unlock to miss.
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute("SELECT pg_advisory_xact_lock($1)", _advisory_key(user_id))
+                yield connection
         return
     loop_id = id(asyncio.get_running_loop())
     lock = _account_locks.setdefault((loop_id, user_id), asyncio.Lock())
     async with lock:
-        yield
+        yield None
 
 
 def _advisory_key(user_id: str) -> int:
@@ -207,7 +209,7 @@ def _advisory_key(user_id: str) -> int:
     return int.from_bytes(digest, "big") & ((1 << 63) - 1)
 
 
-async def assert_can_activate(user: dict, exclude_task_id: str | None = None) -> None:
+async def assert_can_activate(user: dict, exclude_task_id: str | None = None, db=None) -> None:
     """The plan's active-task limit, checked wherever a task BECOMES active.
 
     Creation was the only place this ran, so pausing tasks and resuming them
@@ -218,7 +220,7 @@ async def assert_can_activate(user: dict, exclude_task_id: str | None = None) ->
     plan = get_plan(user.get("plan_id"))
     limit = TASK_LIMITS.get(plan.id, 3)
     active = [
-        t for t in await list_tasks(user["id"], include_done=False)
+        t for t in await list_tasks(user["id"], include_done=False, db=db)
         if t["status"] == "active" and t["id"] != exclude_task_id
     ]
     if len(active) >= limit:
@@ -231,13 +233,13 @@ async def create_task(user: dict, kind: str, spec: dict, schedule: dict, channel
     when = next_run(schedule, tz_offset_min)
     if when is None:
         raise ValueError("That schedule has no future run (is the time in the past?)")
-    async with account_task_gate(user["id"]):
-        return await _create_task_locked(user, kind, spec, schedule, channel, tz_offset_min, title, when)
+    async with account_task_gate(user["id"]) as db:
+        return await _create_task_locked(user, kind, spec, schedule, channel, tz_offset_min, title, when, db)
 
 
 async def _create_task_locked(user: dict, kind: str, spec: dict, schedule: dict, channel: str,
-                              tz_offset_min: int, title: str | None, when) -> dict:
-    await assert_can_activate(user)
+                              tz_offset_min: int, title: str | None, when, db=None) -> dict:
+    await assert_can_activate(user, db=db)
     task = {
         "id": str(uuid4()), "user_id": user["id"], "kind": kind, "title": (title or _default_title(kind, spec))[:140],
         "spec": dict(spec), "schedule": dict(schedule), "channel": channel if channel in ("inapp", "email") else "inapp",
@@ -246,7 +248,7 @@ async def _create_task_locked(user: dict, kind: str, spec: dict, schedule: dict,
     }
     pool = await get_pg_pool()
     if pool is not None:
-        await pool.execute(
+        await (db or pool).execute(
             """
             INSERT INTO user_tasks (id, user_id, kind, title, spec, schedule, channel, status, tz_offset_min, next_run_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, $9)
@@ -268,12 +270,12 @@ def _default_title(kind: str, spec: dict) -> str:
     return kind
 
 
-async def update_task(task_id: str, user_id: str, **fields) -> dict | None:
+async def update_task(task_id: str, user_id: str, *, db=None, **fields) -> dict | None:
     allowed = {"status", "next_run_at", "last_run_at", "last_result", "fire_count", "channel", "schedule", "spec", "claimed_until", "claimed_occurrence"}
     changes = {k: v for k, v in fields.items() if k in allowed}
     pool = await get_pg_pool()
     if pool is not None:
-        current = await get_task(task_id)
+        current = await get_task(task_id, db=db)
         if current is None or current["user_id"] != user_id:
             return None
         values = []
@@ -287,7 +289,7 @@ async def update_task(task_id: str, user_id: str, **fields) -> dict | None:
             values.append(value)
         if not sets:
             return current
-        row = await pool.fetchrow(f"UPDATE user_tasks SET {', '.join(sets)} WHERE id = $1 AND user_id = $2 RETURNING *", task_id, user_id, *values)
+        row = await (db or pool).fetchrow(f"UPDATE user_tasks SET {', '.join(sets)} WHERE id = $1 AND user_id = $2 RETURNING *", task_id, user_id, *values)
         return _row(row) if row else None
     task = _tasks.get(task_id)
     if task is None or task["user_id"] != user_id:

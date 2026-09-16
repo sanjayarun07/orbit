@@ -408,6 +408,10 @@ def test_resumption_serialises_the_check_and_the_write_per_account():
     """Counting the active tasks and activating one are two operations, so two
     resumptions could both see the same last free slot.
 
+    Covers the in-memory asyncio-lock branch only: the conftest fixture points
+    this module's pool getter at nothing. The advisory-lock branch production
+    runs is covered by tests/test_postgres_task_gate.py, opt-in.
+
     Asserted as mutual exclusion rather than as an outcome, deliberately. Racing
     real coroutines and counting the survivors is not a reliable reproduction:
     whether the interleaving happens depends on where the awaits land, and my
@@ -473,3 +477,76 @@ def test_a_single_resumption_is_not_blocked_by_the_gate():
     asyncio.run(tasks.update_task(task["id"], user["id"], status="paused"))
     revived = asyncio.run(task_scheduling.update_task(task["id"], user["id"], user=user, status="active"))
     assert revived["status"] == "active"
+
+
+# --- follow-ups from the review of 10e00a3b ----------------------------------
+
+def test_a_stale_checkout_cannot_make_an_older_subscription_current():
+    """checkout.session.completed wrote unconditionally, so a redelivered or
+    late session for a subscription the customer had replaced made it current
+    again -- Max back to Pro, from an event that was already history."""
+    user, _ = asyncio.run(accounts.get_or_create_user("stale-checkout@example.com"))
+    asyncio.run(accounts.update_user(user["id"], stripe_customer_id="cus_sc",
+                                     stripe_subscription_id="sub_new", subscription_created=2000,
+                                     subscription_status="active", plan_id="max"))
+    result = asyncio.run(billing._on_checkout_completed("evt_old_checkout", {
+        "customer": "cus_sc", "mode": "subscription", "subscription": "sub_old", "created": 1000,
+        "metadata": {"plan_id": "pro"},
+    }))
+    assert result["status"] == "ignored"
+    after = asyncio.run(accounts.get_user(user["id"]))
+    assert after["plan_id"] == "max" and after["stripe_subscription_id"] == "sub_new"
+
+
+def test_a_first_checkout_still_establishes_the_subscription():
+    """The control: an account with no subscription must be able to get one."""
+    user, _ = asyncio.run(accounts.get_or_create_user("first-checkout@example.com"))
+    asyncio.run(accounts.update_user(user["id"], stripe_customer_id="cus_fc"))
+    result = asyncio.run(billing._on_checkout_completed("evt_first", {
+        "customer": "cus_fc", "mode": "subscription", "subscription": "sub_first", "created": 5000,
+        "metadata": {"plan_id": "pro"},
+    }))
+    assert result["status"] == "subscribed"
+    after = asyncio.run(accounts.get_user(user["id"]))
+    assert after["stripe_subscription_id"] == "sub_first" and after["subscription_created"] == 5000
+
+
+def test_an_invoice_for_a_superseded_subscription_credits_the_payment_but_changes_no_entitlement(monkeypatch):
+    """Two facts, handled separately. The payment happened, so its credits are
+    granted. Which plan the account is on is a different question that an
+    invoice never answers -- it used to, silently making the old subscription
+    current again."""
+    monkeypatch.setattr(settings, "stripe_price_pro", "price_pro")
+    user, _ = asyncio.run(accounts.get_or_create_user("stale-invoice@example.com"))
+    asyncio.run(accounts.update_user(user["id"], stripe_customer_id="cus_si",
+                                     stripe_subscription_id="sub_new", subscription_created=2000,
+                                     subscription_status="active", plan_id="max"))
+    before = asyncio.run(__import__("app.credits", fromlist=["balance"]).balance(
+        __import__("app.credits", fromlist=["user_account_id"]).user_account_id(user["id"])))
+    result = asyncio.run(billing._on_invoice_paid("evt_old_invoice", {
+        "id": "in_old", "customer": "cus_si", "subscription": "sub_old", "created": 1500,
+        "lines": {"data": [{"price": {"id": "price_pro"}}]},
+    }))
+    assert result["status"] == "credited"
+    assert result["entitlement"] == "unchanged"
+    after = asyncio.run(accounts.get_user(user["id"]))
+    assert after["plan_id"] == "max" and after["stripe_subscription_id"] == "sub_new"
+    from app import credits as credits_module
+    assert asyncio.run(credits_module.balance(credits_module.user_account_id(user["id"]))) > before
+
+
+def test_an_invoice_for_the_current_subscription_still_updates_entitlement(monkeypatch):
+    """The control: renewals of the subscription the account is on must keep
+    working exactly as before."""
+    monkeypatch.setattr(settings, "stripe_price_max", "price_max")
+    user, _ = asyncio.run(accounts.get_or_create_user("current-invoice@example.com"))
+    asyncio.run(accounts.update_user(user["id"], stripe_customer_id="cus_ci",
+                                     stripe_subscription_id="sub_cur", subscription_created=2000,
+                                     subscription_status="past_due", plan_id="pro"))
+    result = asyncio.run(billing._on_invoice_paid("evt_renewal", {
+        "id": "in_cur", "customer": "cus_ci", "subscription": "sub_cur", "created": 2500,
+        "lines": {"data": [{"price": {"id": "price_max"}}]},
+    }))
+    assert result["status"] == "credited" and result["entitlement"] == "updated"
+    after = asyncio.run(accounts.get_user(user["id"]))
+    assert after["plan_id"] == "max" and after["subscription_status"] == "active"

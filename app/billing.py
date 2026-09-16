@@ -367,10 +367,19 @@ async def _on_checkout_completed(event_id: str, session: dict) -> dict:
     if session.get("mode") == "subscription":
         plan_id = metadata.get("plan_id")
         if plan_id in PLANS:
+            # The same ordering rule as every other subscription-state writer.
+            # A redelivered or late checkout.session.completed for a
+            # subscription the customer has since replaced must not make it
+            # current again -- and this handler used to write unconditionally.
+            superseded = _superseded_subscription(
+                user, {"id": session.get("subscription"), "created": session.get("created")})
+            if superseded:
+                return {"status": "ignored", "reason": superseded,
+                        "active_subscription": user.get("stripe_subscription_id"),
+                        "event_subscription": session.get("subscription")}
             # `created` here is the checkout session's, which is the moment this
             # subscription came into being. It is the ordering key every later
-            # subscription event is compared against, so a stale event for a
-            # subscription this one replaced cannot overwrite it.
+            # subscription event is compared against.
             fields = {"plan_id": plan_id, "stripe_subscription_id": session.get("subscription"),
                       "subscription_status": "active"}
             if session.get("created") is not None:
@@ -436,15 +445,29 @@ async def _on_invoice_paid(event_id: str, invoice: dict) -> dict:
     plan = get_plan(plan_id)
     if plan.price_usd_month <= 0:
         return {"status": "ignored", "reason": "free plan"}
-    await accounts.update_user(
-        user["id"], plan_id=plan.id, subscription_status="active",
-        **({"stripe_subscription_id": subscription} if subscription else {}),
-    )
+    # Two different facts, handled separately. The payment happened, so the
+    # credits it bought are granted regardless -- keyed by event id, so a
+    # replay cannot double-grant. Which plan the account is ON is a separate
+    # question, and an invoice never answers it: invoices renew subscriptions,
+    # they do not establish which one is current. So the entitlement is
+    # written only when the invoice belongs to the subscription the account is
+    # already on (or the account has none yet). An invoice for a subscription
+    # the customer has moved on from credits the payment and changes nothing
+    # else; before this it silently made that old subscription current again.
+    current = user.get("stripe_subscription_id")
+    entitlement_written = False
+    if not current or subscription == current:
+        await accounts.update_user(
+            user["id"], plan_id=plan.id, subscription_status="active", stripe_subscription_id=subscription,
+        )
+        entitlement_written = True
     applied = await credits.grant(
         credits.user_account_id(user["id"]), plan.monthly_credits, f"subscription:{plan.id}",
         "stripe_event", event_id, {"invoice": invoice.get("id"), "period_end": invoice.get("period_end")},
     )
-    return {"status": "credited" if applied else "duplicate", "plan_id": plan.id, "credits": plan.monthly_credits}
+    return {"status": "credited" if applied else "duplicate", "plan_id": plan.id, "credits": plan.monthly_credits,
+            "entitlement": "updated" if entitlement_written else "unchanged",
+            **({} if entitlement_written else {"active_subscription": current, "invoice_subscription": subscription})}
 
 
 def _superseded_subscription(user: dict, subscription: dict) -> str | None:
