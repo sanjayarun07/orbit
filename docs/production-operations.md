@@ -97,3 +97,40 @@ collection). Verify a candidate with:
 
     pytest -q                      # the suite CI runs, nothing else
     curl -fsS $HOST/readyz | jq    # 503 = do not promote
+
+## Authorization model
+
+`tests/test_authorization_matrix.py` is the authority: it enumerates every
+route, requires each to be declared in one class, and fails the build when
+a route's enforcement does not match its declaration or when a new route is
+added without a class. The classes are:
+
+| Class | Means | Enforced by |
+|---|---|---|
+| `public` | no caller identity needed | nothing |
+| `auth_entry` | unauthenticated by design -- these establish identity | signature/token inside the handler |
+| `webhook` | authenticated by provider signature | Stripe signature check |
+| `user` | a signed-in account | `Depends(require_user)` |
+| `admin` | the admin API key | `Depends(_require_admin)` |
+| `owner_scoped` | bound to the resource's own owner | `_require_session_access` / `_require_plan_access` |
+
+Three hardening changes came out of building it:
+
+1. **Trade plans are bound to the account that requested them.**
+   `confirmation_text` is `CONFIRM {plan_id}`, so plan id alone previously
+   satisfied every check the execution endpoints made -- including
+   `/confirm`, which signs server-side when `LIVE_TRADING` and a signer key
+   are configured. Plans now carry `owner_account_id` (set per turn through
+   a contextvar, the same pattern as the call budget) and all four
+   trade-plan routes return 404 to anyone else. Plans quoted before this
+   have no owner and stay reachable by id until they expire.
+2. **Admin authorization runs before body validation.** All 27 admin
+   routes called `_require_admin(request)` inside the handler, so an
+   unauthenticated caller got a 422 schema error rather than 401. They now
+   use `Depends(_require_admin)`.
+3. **Relay tracking attached to a conversation passes the session gate.** A
+   matching revision alone used to be enough.
+
+Still open, and deliberately not claimed as done: the wallet sign-in paths
+other than Phantom have not been exercised with real extensions, and this
+matrix is a structural guarantee, not a penetration test.

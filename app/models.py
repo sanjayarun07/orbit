@@ -205,6 +205,10 @@ class TradePlan(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     simulation: dict
     confirmation_text: str
+    # The account this plan was quoted for. confirmation_text is derived from
+    # plan_id ("CONFIRM {plan_id}"), so without this the plan id alone is a
+    # bearer token for every trade-plan endpoint. Enforced in app/main.py.
+    owner_account_id: str | None = None
 
 
 class ConfirmRequest(BaseModel):

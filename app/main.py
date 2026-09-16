@@ -653,15 +653,13 @@ def _require_admin(request: Request) -> None:
 
 
 @app.get("/admin/providers")
-async def admin_providers(request: Request):
-    _require_admin(request)
+async def admin_providers(_admin: None = Depends(_require_admin)):
     return {"tools": get_provider_router().catalog(), "overrides": get_provider_router().overrides()}
 
 
 @app.get("/admin/tools/outcomes")
-async def admin_tool_outcomes(request: Request):
+async def admin_tool_outcomes(_admin: None = Depends(_require_admin)):
     """Per-tool grounded-success rates and the ranking adjustment each earns."""
-    _require_admin(request)
     return {
         "window_days": settings.tool_outcome_window_days,
         "prior_rate": settings.tool_outcome_prior_rate,
@@ -672,8 +670,7 @@ async def admin_tool_outcomes(request: Request):
 
 
 @app.put("/admin/providers/{tool_name}")
-async def update_admin_provider(tool_name: str, body: ProviderPolicyUpdate, request: Request):
-    _require_admin(request)
+async def update_admin_provider(tool_name: str, body: ProviderPolicyUpdate, _admin: None = Depends(_require_admin)):
     try:
         get_provider_router().configure(tool_name, body.model_dump(exclude_none=True))
         save_provider_overrides()
@@ -683,16 +680,14 @@ async def update_admin_provider(tool_name: str, body: ProviderPolicyUpdate, requ
 
 
 @app.delete("/admin/providers/{tool_name}")
-async def reset_admin_provider(tool_name: str, request: Request):
-    _require_admin(request)
+async def reset_admin_provider(tool_name: str, _admin: None = Depends(_require_admin)):
     get_provider_router().reset(tool_name)
     save_provider_overrides()
     return {"status": "reset", "tool": tool_name}
 
 
 @app.put("/admin/provider-groups/{provider}")
-async def update_admin_provider_group(provider: str, body: ProviderPolicyUpdate, request: Request):
-    _require_admin(request)
+async def update_admin_provider_group(provider: str, body: ProviderPolicyUpdate, _admin: None = Depends(_require_admin)):
     if body.enabled is None:
         raise HTTPException(400, "Provider group updates require enabled=true or enabled=false")
     try:
@@ -704,8 +699,7 @@ async def update_admin_provider_group(provider: str, body: ProviderPolicyUpdate,
 
 
 @app.post("/admin/routes/preview")
-async def preview_admin_route(body: RoutePreviewRequest, request: Request):
-    _require_admin(request)
+async def preview_admin_route(body: RoutePreviewRequest, request: Request, _admin: None = Depends(_require_admin)):
     return {
         "request": body.request,
         "capability": body.capability,
@@ -714,9 +708,8 @@ async def preview_admin_route(body: RoutePreviewRequest, request: Request):
 
 
 @app.post("/admin/intents/preview")
-async def preview_admin_intent(body: IntentPreviewRequest, request: Request):
+async def preview_admin_intent(body: IntentPreviewRequest, request: Request, _admin: None = Depends(_require_admin)):
     """Dry-run deterministic classification without spending model/provider tokens."""
-    _require_admin(request)
     if body.live:
         return await resolve_intent_node({"request": body.request, "history": body.conversation_history, "session_context": {}})
     route = route_capabilities(body.request)
@@ -747,9 +740,8 @@ async def preview_admin_intent(body: IntentPreviewRequest, request: Request):
 
 
 @app.post("/admin/providers/test")
-async def test_admin_provider(body: ProviderTestRequest, request: Request):
+async def test_admin_provider(body: ProviderTestRequest, request: Request, _admin: None = Depends(_require_admin)):
     """Preview or explicitly invoke the read-only provider route in the admin lab."""
-    _require_admin(request)
     router = get_provider_router()
     candidates = router.preview(body.request, body.capability, tuple(body.chains))
     if not body.live:
@@ -776,13 +768,12 @@ async def test_admin_provider(body: ProviderTestRequest, request: Request):
 
 
 @app.post("/admin/wash-trading/runs")
-async def create_wash_trading_run(body: WashTradingDetectionRequest, request: Request):
+async def create_wash_trading_run(body: WashTradingDetectionRequest, _admin: None = Depends(_require_admin)):
     """Kick off a wash-trading/wallet-clustering detection run (Phase 1:
     concentration stats, round-trip detection, single-hop funding fan-out).
     Every output here is a lead for a human analyst to review, never an
     automated verdict -- see app/wash_trading/pipeline.py's module docstring.
     """
-    _require_admin(request)
     try:
         run = await asyncio.to_thread(
             wash_trading_pipeline.run_detection,
@@ -806,8 +797,7 @@ async def create_wash_trading_run(body: WashTradingDetectionRequest, request: Re
 
 
 @app.get("/admin/wash-trading/runs/{run_id}")
-async def get_wash_trading_run(run_id: str, request: Request):
-    _require_admin(request)
+async def get_wash_trading_run(run_id: str, _admin: None = Depends(_require_admin)):
 
     def _read() -> dict:
         client = wash_trading_schema.get_client()
@@ -835,8 +825,7 @@ async def get_wash_trading_run(run_id: str, request: Request):
 
 
 @app.get("/admin/wash-trading/runs/{run_id}/wallets/{wallet}")
-async def get_wash_trading_wallet(run_id: str, wallet: str, request: Request):
-    _require_admin(request)
+async def get_wash_trading_wallet(run_id: str, wallet: str, _admin: None = Depends(_require_admin)):
 
     def _read() -> dict:
         client = wash_trading_schema.get_client()
@@ -1052,11 +1041,10 @@ async def revoke_api_key(key_id: str, identity: Identity = Depends(require_user)
 
 
 @app.put("/admin/users/{email}/plan")
-async def admin_set_plan(email: str, body: AdminPlanUpdate, request: Request):
+async def admin_set_plan(email: str, body: AdminPlanUpdate, _admin: None = Depends(_require_admin)):
     """Back-office plan override (support, comps, and the way a plan is set
     before Stripe webhooks exist). The monthly allowance for the new plan is
     granted on the user's next request."""
-    _require_admin(request)
     if body.plan_id not in billing_plans.PLANS or body.plan_id == "anonymous":
         raise HTTPException(400, f"Unknown plan {body.plan_id!r}")
     user = await accounts.get_user_by_email(email)
@@ -1067,10 +1055,9 @@ async def admin_set_plan(email: str, body: AdminPlanUpdate, request: Request):
 
 
 @app.post("/admin/users/{email}/credits")
-async def admin_grant_credits(email: str, body: AdminCreditGrant, request: Request):
+async def admin_grant_credits(email: str, body: AdminCreditGrant, _admin: None = Depends(_require_admin)):
     """Grant (positive) or claw back (negative) credits with an audit reason.
     `reference` makes the grant idempotent -- repeating it changes nothing."""
-    _require_admin(request)
     user = await accounts.get_user_by_email(email)
     if user is None:
         raise HTTPException(404, "No account with that email")
@@ -1257,8 +1244,7 @@ async def _admin_user(email: str) -> dict:
 
 
 @app.get("/admin/users")
-async def admin_list_users(request: Request, q: str = "", limit: int = 25):
-    _require_admin(request)
+async def admin_list_users(q: str = "", limit: int = 25, _admin: None = Depends(_require_admin)):
     users = await accounts.search_users(q, limit)
     out = []
     for user in users:
@@ -1271,10 +1257,9 @@ async def admin_list_users(request: Request, q: str = "", limit: int = 25):
 
 
 @app.get("/admin/users/{email}")
-async def admin_user_detail(email: str, request: Request):
+async def admin_user_detail(email: str, _admin: None = Depends(_require_admin)):
     """Everything support needs on one screen: plan, balance, ledger, usage,
     keys, devices, team, and the account's recent feedback-worthy turns."""
-    _require_admin(request)
     user = await _admin_user(email)
     account_id = credits.user_account_id(user["id"])
     return {
@@ -1292,8 +1277,7 @@ async def admin_user_detail(email: str, request: Request):
 
 
 @app.post("/admin/users/{email}/api-keys/{key_id}/revoke")
-async def admin_revoke_key(email: str, key_id: str, request: Request):
-    _require_admin(request)
+async def admin_revoke_key(email: str, key_id: str, _admin: None = Depends(_require_admin)):
     user = await _admin_user(email)
     if not await api_keys.revoke(user["id"], key_id):
         raise HTTPException(404, "API key not found or already revoked")
@@ -1301,22 +1285,19 @@ async def admin_revoke_key(email: str, key_id: str, request: Request):
 
 
 @app.post("/admin/users/{email}/sessions/revoke")
-async def admin_revoke_sessions(email: str, request: Request):
+async def admin_revoke_sessions(email: str, _admin: None = Depends(_require_admin)):
     """Sign the account out everywhere (compromised account, support request)."""
-    _require_admin(request)
     user = await _admin_user(email)
     return {"revoked": await accounts.revoke_user_sessions(user["id"])}
 
 
 @app.get("/admin/billing/events")
-async def admin_billing_events(request: Request, limit: int = 50):
-    _require_admin(request)
+async def admin_billing_events(limit: int = 50, _admin: None = Depends(_require_admin)):
     return {"events": await billing.list_events(limit), "configured": billing.configured()}
 
 
 @app.post("/admin/billing/events/{event_id}/replay")
-async def admin_replay_event(event_id: str, request: Request):
-    _require_admin(request)
+async def admin_replay_event(event_id: str, _admin: None = Depends(_require_admin)):
     if not re.fullmatch(r"evt_[A-Za-z0-9_]{6,64}", event_id):
         raise HTTPException(400, "Not a Stripe event id")
     try:
@@ -1328,10 +1309,9 @@ async def admin_replay_event(event_id: str, request: Request):
 
 
 @app.get("/admin/metrics/business")
-async def admin_business_metrics(request: Request, days: int = 30):
+async def admin_business_metrics(days: int = 30, _admin: None = Depends(_require_admin)):
     """MRR, plan mix, conversion, credits burned per feature, failed payments,
     sign-ups per day -- the numbers a founder checks every morning."""
-    _require_admin(request)
     stats = await accounts.user_stats()
     by_plan = stats["by_plan"]
     paid = sum(n for plan_id, n in by_plan.items() if billing_plans.get_plan(plan_id).price_usd_month > 0)
@@ -1418,9 +1398,8 @@ async def knowledge_status():
 
 
 @app.get("/admin/knowledge/protocols")
-async def admin_knowledge_protocols(request: Request, limit: int = 100):
+async def admin_knowledge_protocols(limit: int = 100, _admin: None = Depends(_require_admin)):
     """The registry as ingested: slugs (what the ingest endpoint takes), TVL, sources."""
-    _require_admin(request)
     store = await kb_store.get_store()
     out = []
     for p in await store.list_protocols(limit=max(1, min(limit, 500))):
@@ -1430,19 +1409,17 @@ async def admin_knowledge_protocols(request: Request, limit: int = 100):
 
 
 @app.get("/admin/research/gaps")
-async def admin_research_gaps(request: Request, days: int = 30):
+async def admin_research_gaps(days: int = 30, _admin: None = Depends(_require_admin)):
     """The fall-through log: research questions only web search could answer,
     counted by the data topic they needed. The business case for a paid
     source, or the next free connector, in numbers."""
-    _require_admin(request)
     return await research_gaps.summary(days=max(1, min(days, 365)))
 
 
 @app.get("/admin/knowledge/overview")
-async def admin_knowledge_overview(request: Request):
+async def admin_knowledge_overview(_admin: None = Depends(_require_admin)):
     """Everything the knowledge dashboard shows: totals, per-protocol coverage
     by source, source health, recent ingestion runs, retrieval config."""
-    _require_admin(request)
     store = await kb_store.get_store()
     coverage = await store.coverage()
     runs = await store.recent_runs(limit=60)
@@ -1458,10 +1435,9 @@ async def admin_knowledge_overview(request: Request):
 
 
 @app.post("/admin/knowledge/derive")
-async def admin_knowledge_derive(request: Request):
+async def admin_knowledge_derive(_admin: None = Depends(_require_admin)):
     """Recompute derived edges: COMPETITOR_OF (category + shared chain) and
     corroborated INTEGRATES_WITH (mentions in two or more independent documents)."""
-    _require_admin(request)
     from app.knowledge import derive as kb_derive
 
     result = await kb_derive.derive_all()
@@ -1495,18 +1471,16 @@ async def knowledge_graph(entity_id: str, relation: str | None = None):
 
 
 @app.post("/admin/knowledge/bootstrap")
-async def admin_knowledge_bootstrap(request: Request, limit: int = 50):
+async def admin_knowledge_bootstrap(limit: int = 50, _admin: None = Depends(_require_admin)):
     """Fill the protocol registry from DefiLlama (top N by TVL) with entities and edges."""
-    _require_admin(request)
     result = await kb_registry.bootstrap(limit=max(1, min(limit, 500)))
     await kb_tool.resolver(force=True)
     return result
 
 
 @app.post("/admin/knowledge/ingest/{protocol_slug}")
-async def admin_knowledge_ingest(protocol_slug: str, request: Request):
+async def admin_knowledge_ingest(protocol_slug: str, _admin: None = Depends(_require_admin)):
     """Run every applicable connector for one protocol now."""
-    _require_admin(request)
     try:
         results = await kb_ingest.run_protocol(f"protocol:{protocol_slug}")
     except ValueError as exc:
@@ -1516,9 +1490,8 @@ async def admin_knowledge_ingest(protocol_slug: str, request: Request):
 
 
 @app.post("/admin/knowledge/tick")
-async def admin_knowledge_tick(request: Request, limit: int = 5):
+async def admin_knowledge_tick(limit: int = 5, _admin: None = Depends(_require_admin)):
     """One ingestion pass over due (protocol, source) pairs."""
-    _require_admin(request)
     results = await kb_ingest.tick(limit=max(1, min(limit, 50)))
     await kb_tool.resolver(force=True)
     return {"results": [r.__dict__ for r in results]}
@@ -1650,15 +1623,35 @@ async def clear_chat_history(session_id: str, identity: Identity = Depends(requi
 
 
 @app.get("/trade-plans/{plan_id}")
-async def trade_plan(plan_id: str):
+async def trade_plan(plan_id: str, request: Request):
+    await _require_plan_access(plan_id, request)
     try:
         return await get_plan(plan_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
 
 
+async def _require_plan_access(plan_id: str, request: Request) -> None:
+    """A trade plan belongs to the account it was quoted for. Without this,
+    plan_id is a bearer token for execution: confirmation_text is just
+    "CONFIRM {plan_id}". Reported as 404, never 403, so plan ids cannot be
+    probed. Plans quoted before this existed carry no owner and stay
+    reachable by whoever holds the id -- they expire within plan_ttl_seconds."""
+    try:
+        plan = await get_plan(plan_id)
+    except (KeyError, ValueError):
+        return   # the endpoint's own handler reports a missing/invalid plan
+    owner = getattr(plan, "owner_account_id", None)
+    if owner is None:
+        return
+    identity = await resolve_identity(request)
+    if identity.account_id != owner:
+        raise HTTPException(404, "Trade plan not found")
+
+
 @app.post("/trade-plans/{plan_id}/confirm")
-async def confirm(plan_id: str, body: ConfirmRequest):
+async def confirm(plan_id: str, body: ConfirmRequest, request: Request):
+    await _require_plan_access(plan_id, request)
     try:
         return await execute_confirmed_plan(plan_id, body.confirmation_text)
     except (KeyError, ValueError) as exc:
@@ -1666,7 +1659,8 @@ async def confirm(plan_id: str, body: ConfirmRequest):
 
 
 @app.post("/trade-plans/{plan_id}/wallet-transaction")
-async def wallet_transaction(plan_id: str, body: ConfirmRequest):
+async def wallet_transaction(plan_id: str, body: ConfirmRequest, request: Request):
+    await _require_plan_access(plan_id, request)
     try:
         return await prepare_wallet_transaction(plan_id, body.confirmation_text)
     except (KeyError, ValueError) as exc:
@@ -1674,7 +1668,8 @@ async def wallet_transaction(plan_id: str, body: ConfirmRequest):
 
 
 @app.post("/trade-plans/{plan_id}/submit-wallet-transaction")
-async def submit_signed_wallet_transaction(plan_id: str, body: SignedTransactionRequest):
+async def submit_signed_wallet_transaction(plan_id: str, body: SignedTransactionRequest, request: Request):
+    await _require_plan_access(plan_id, request)
     try:
         return await submit_wallet_transaction(
             plan_id, body.confirmation_text, body.signed_transaction
@@ -1707,6 +1702,10 @@ async def track_relay_execution(request_id: str, request: Request):
             raise HTTPException(400, "Invalid execution context")
         lease = await acquire_session_turn(session_id)
         try:
+            # Attaching tracking to a conversation requires the same ownership
+            # gate every other session-scoped route uses -- a revision match
+            # alone let anyone holding a session id bind to it.
+            await _require_session_access(session_id, await resolve_identity(request))
             context = await get_session_context(session_id)
             if context.get("revision") != revision or not context.get("active_workflow"):
                 raise HTTPException(409, "This trade belongs to an earlier request")

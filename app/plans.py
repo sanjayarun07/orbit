@@ -1,5 +1,6 @@
 import json
 import secrets
+from contextvars import ContextVar
 import re
 import threading
 from datetime import datetime, timedelta, timezone
@@ -9,6 +10,25 @@ from app.jupiter import jupiter, normalize_mint
 from app.models import SwapProposal, TokenInfo, TradePlan
 from app.settings import settings
 from app.solana_rpc import simulate_transaction
+
+
+# Who this turn's plans belong to. A contextvar for the same reason the call
+# budget is one (app/call_budget.py): threading it through AgentState would
+# touch every node for a value only plan creation needs.
+_plan_owner: ContextVar[str | None] = ContextVar("orbit_plan_owner", default=None)
+
+
+def set_plan_owner(account_id: str | None):
+    """Returns the token to reset with; call from the request/turn boundary."""
+    return _plan_owner.set(account_id)
+
+
+def reset_plan_owner(token) -> None:
+    _plan_owner.reset(token)
+
+
+def plan_owner() -> str | None:
+    return _plan_owner.get()
 
 
 _plans: dict[str, TradePlan] = {}  # in-memory fallback when Postgres is unavailable
@@ -150,6 +170,7 @@ async def create_trade_plan(wallet_address: str, proposal: SwapProposal) -> Trad
         warnings=warnings,
         simulation=simulation,
         confirmation_text=confirmation,
+        owner_account_id=_plan_owner.get(),
     )
     await _store_plan(plan)
     await store_prepared_transaction(plan.plan_id, built["swapTransaction"])

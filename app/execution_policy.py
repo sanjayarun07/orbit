@@ -20,7 +20,7 @@ from app.identity import Identity, current_identity, service_identity
 from app.limits import acquire_chat_slot, allow_chat_request, release_chat_slot
 from app.metrics import increment
 from app.models import AgentResponse, ChatRequest, RiskCharterFields
-from app.plans import mark_plan_superseded
+from app.plans import reset_plan_owner, set_plan_owner, mark_plan_superseded
 from app.public_activity import public_activity
 from app.routing.controls import is_trade_confirmation, is_charter_clear
 from app.routing.workflow import WorkflowState, WorkflowEvent, apply_event
@@ -66,12 +66,15 @@ async def execute_chat_turn(body: ChatRequest, identity: Identity | str) -> Agen
                 "message": ("You've used your trial credits. Sign in to get 100 free credits every month."
                             if not identity.signed_in else "You're out of credits for this month. Upgrade or buy a credit pack."),
             })
+    owner_token = set_plan_owner(identity.account_id)
     try:
         response = await _execute_chat_turn(body, identity, session_id)
     except BaseException:
         if reserved:
             await credits.release(identity.account_id, turn_id, reserved)
         raise
+    finally:
+        reset_plan_owner(owner_token)
     if reserved:
         cost, kind = credits.turn_cost(response.intent, response.trajectory, response.team_report)
         charged = await credits.settle(
