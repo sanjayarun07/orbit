@@ -12,7 +12,12 @@ Classes:
   public          no caller identity needed (health, quotes, public config)
   auth_entry      unauthenticated by design -- these ESTABLISH identity
   webhook         authenticated by provider signature, not by session
-  user            requires a signed-in account (require_user)
+  user            a signed-in account of any kind (require_user) -- now only
+                  for routes that genuinely accept API keys; see the two below
+  browser         a signed-in BROWSER session (require_browser_session): API
+                  keys are refused. Every route that manages the account.
+  key:<scope>     a browser session or an API key holding <scope>
+                  (require_scope). The only routes a key may use.
   admin           requires the admin API key
   owner_scoped    no account dependency, but access is bound to the
                   resource's own owner/secret at the handler (chat
@@ -58,14 +63,15 @@ EXPECTED: dict[tuple[str, str], str] = {
     ("GET", "/me"): "owner_scoped",          # answers for anonymous callers too; returns only the CALLER's own state
     ("GET", "/home/suggestions"): "public",
     # Public on-chain data for an address the caller supplies explicitly.
-    ("GET", "/portfolio/{wallet_address}"): "public",
-    ("POST", "/portfolio/{wallet_address}/scenario"): "public",
-    ("GET", "/wallet-health/{wallet_address}"): "public",
+    ("GET", "/portfolio/{wallet_address}"): "key:data",
+    ("POST", "/portfolio/{wallet_address}/scenario"): "key:data",
+    ("GET", "/wallet-health/{wallet_address}"): "key:data",
     ("POST", "/chat"): "owner_scoped",
     ("POST", "/chat/feedback"): "owner_scoped",
-    ("GET", "/chat/history/{session_id}"): "user",
-    ("DELETE", "/chat/history/{session_id}"): "user",
-    ("DELETE", "/chat/wallet/{session_id}"): "user",
+    ("GET", "/chat/history/{session_id}"): "key:chat",
+    ("DELETE", "/chat/history/{session_id}"): "browser",
+    ("DELETE", "/chat/wallet/{session_id}"): "browser",
+    ("GET", "/me/credits"): "key:data",
     ("GET", "/trade-plans/{plan_id}"): "owner_scoped",
     ("POST", "/trade-plans/{plan_id}/confirm"): "owner_scoped",
     ("POST", "/trade-plans/{plan_id}/wallet-transaction"): "owner_scoped",
@@ -79,7 +85,8 @@ EXPECTED: dict[tuple[str, str], str] = {
 }
 
 # Everything under these prefixes is classified by prefix.
-PREFIX_RULES = [("/admin", "admin"), ("/me", "user"), ("/billing/checkout", "user"), ("/billing/portal", "user")]
+# Account management is a browser's job; a key may only read data and chat.
+PREFIX_RULES = [("/admin", "admin"), ("/me", "browser"), ("/billing/checkout", "browser"), ("/billing/portal", "browser")]
 IGNORED_PREFIXES = ("/ui", "/mcp", "/openapi", "/docs", "/redoc", "/static")
 
 
@@ -116,7 +123,8 @@ def _guards(route) -> set[str]:
         source = inspect.getsource(endpoint)
     except OSError:
         source = ""
-    for marker in ("_require_admin", "_require_session_access", "_require_plan_access", "resolve_identity", "require_user"):
+    for marker in ("_require_admin", "_require_session_access", "_require_plan_access", "resolve_identity", "require_user",
+                   "require_browser_session", "require_scope"):
         if marker in source:
             found.add(marker)
     return found
@@ -136,6 +144,14 @@ def test_route_enforcement_matches_its_declared_class(method, path, route):
     guards = _guards(route)
     if declared == "user":
         assert "require_user" in guards, f"{method} {path} is declared user-scoped but has no require_user dependency"
+    elif declared == "browser":
+        assert "require_browser_session" in guards, (
+            f"{method} {path} is declared browser-only but does not use require_browser_session; "
+            "an API key could reach it"
+        )
+    elif declared.startswith("key:"):
+        scope = declared.split(":", 1)[1]
+        assert f"require_scope_{scope}" in guards, f"{method} {path} is declared key:{scope} but does not check that scope"
     elif declared == "admin":
         assert "_require_admin" in guards or "require_admin" in guards, f"{method} {path} is declared admin but is not admin-guarded"
     elif declared == "owner_scoped":
@@ -169,7 +185,7 @@ def test_user_routes_reject_an_unauthenticated_caller():
     client = TestClient(app)
     checked = 0
     for method, path, _ in _routes():
-        if _declared(method, path) != "user" or "{" in path:
+        if _declared(method, path) not in ("user", "browser") and not str(_declared(method, path)).startswith("key:") or "{" in path:
             continue
         response = client.request(method, path, json={})
         assert response.status_code in (401, 403), f"{method} {path} returned {response.status_code} while signed out"

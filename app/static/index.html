@@ -409,10 +409,18 @@ let autoFollow = true;
 
 function readStorage(key, fallback) { try { const value = localStorage.getItem(key); return value ? JSON.parse(value) : fallback; } catch { return fallback; } }
 function writeStorage(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} }
-function escapeHtml(value) { const div = document.createElement("div"); div.textContent = String(value ?? ""); return div.innerHTML; }
+/* Text-node serialisation escapes &, < and > but leaves both quote characters
+   alone, so a value dropped into a quoted attribute could close the quote and
+   add attributes of its own -- a Markdown link with a `"` in its URL became an
+   onmouseover handler. Quotes are escaped here, at the one helper every
+   template uses, so the same value is safe in text and in an attribute. */
+function escapeHtml(value) { const div = document.createElement("div"); div.textContent = String(value ?? ""); return div.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
+/* A link target must be a plain http(s) URL: no quotes, angle brackets,
+   whitespace or control characters, whatever the escaping would do with them. */
+function safeLinkUrl(url) { const value = String(url || ""); return /^https?:\/\/[^\s"'<>\\`]+$/.test(value) && !/[\x00-\x1f\x7f]/.test(value) ? value : null; }
 function renderInline(value) {
   return escapeHtml(value)
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (match, text, url) => { const safe = safeLinkUrl(url); return safe ? `<a href="${safe}" target="_blank" rel="noopener noreferrer">${text}</a>` : match; })
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/`([^`]+)`/g, "<code>$1</code>");
 }
@@ -1543,7 +1551,11 @@ async function openPlans(){openDialog("plansDialog");const body=$("#plansBody");
     $("#portalBtn")?.addEventListener("click",async()=>{try{const res=await fetch("/billing/portal",{method:"POST"});const d=await res.json();if(!res.ok)throw new Error(normalizeError(d,res.status));location.href=d.url;}catch(error){body.insertAdjacentHTML("beforeend",`<div class="field-help" style="color:var(--red)">${escapeHtml(error.message)}</div>`);}});
   }catch{body.innerHTML='<div class="field-help">Plans are unavailable right now.</div>';}}
 async function startCheckout(kind,item,button){if(account&&!account.authenticated){closeDialog("plansDialog");openSignin("Sign in first so your purchase lands on your account.");return;}button.disabled=true;
-  try{const res=await fetch("/billing/checkout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({kind,item_id:item})});const d=await res.json();if(!res.ok)throw new Error(normalizeError(d,res.status));location.href=d.url;}
+  try{const res=await fetch("/billing/checkout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({kind,item_id:item})});const d=await res.json();
+    /* Already subscribed: a second checkout would start a second subscription.
+       Plan changes go through Stripe's portal, which edits the one they have. */
+    if(res.status===409&&d?.detail?.error==="subscription_exists"){const portal=await fetch("/billing/portal",{method:"POST"});const p=await portal.json();if(!portal.ok)throw new Error(normalizeError(p,portal.status));location.href=p.url;return;}
+    if(!res.ok)throw new Error(normalizeError(d,res.status));location.href=d.url;}
   catch(error){button.disabled=false;button.insertAdjacentHTML("afterend",`<span class="muted" style="font-size:11px">${escapeHtml(error.message)}</span>`);}}
 async function loadApiKeys(){const list=$("#apiKeysList");try{const data=await (await fetch("/me/api-keys")).json();list.innerHTML=(data.keys||[]).filter(k=>!k.revoked_at).map(k=>`<div class="key-row"><span>${escapeHtml(k.name)} <code>${escapeHtml(k.prefix)}…</code> <code>${(k.scopes||[]).join(", ")}</code></span><button class="secondary danger" type="button" data-revoke="${k.id}">Revoke</button></div>`).join("")||'<div class="field-help">No keys yet.</div>';
   list.querySelectorAll("[data-revoke]").forEach(b=>b.addEventListener("click",async()=>{await fetch(`/me/api-keys/${b.dataset.revoke}`,{method:"DELETE"});loadApiKeys();}));}catch{list.innerHTML="";}}

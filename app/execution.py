@@ -4,7 +4,7 @@ import base58
 from solders.keypair import Keypair
 from solders.transaction import VersionedTransaction
 
-from app.deployment import require_custodial_signing, require_execution_enabled
+from app.deployment import require_custodial_principal, require_custodial_signing, require_execution_enabled
 from app.plans import (
     claim_plan_submission,
     get_plan,
@@ -46,11 +46,26 @@ def _reviewed_message_diff(expected, signed) -> list[str]:
     ]
 
 
-async def execute_confirmed_plan(plan_id: str, confirmation_text: str) -> dict:
+def custodial_signer_address() -> str | None:
+    """The public address of the server-held key, or None when there is none."""
+    if not settings.solana_private_key:
+        return None
+    try:
+        return str(Keypair.from_bytes(base58.b58decode(settings.solana_private_key)).pubkey())
+    except Exception:
+        return None
+
+
+async def execute_confirmed_plan(plan_id: str, confirmation_text: str, principal: str | None = None) -> dict:
     # Checked before the plan is even loaded: a research deployment, or one
     # that does not hold keys for its users, refuses without touching state.
     require_custodial_signing()
     plan = await get_plan(plan_id)
+    # Owning a plan addressed to the server wallet is not the same as being
+    # allowed to spend from that wallet. Any signed-in account could quote a
+    # trade against the signer's public address; this is the entitlement that
+    # was missing between the two.
+    require_custodial_principal(principal, getattr(plan, "owner_account_id", None))
     if plan.status != "pending_confirmation":
         raise ValueError(f"Plan cannot execute in status {plan.status}")
     if confirmation_text != plan.confirmation_text:

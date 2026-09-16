@@ -46,7 +46,10 @@ def test_a_restricted_api_key_cannot_link_a_wallet_or_open_a_session():
     # API keys need a paid plan; the escalation is about what a key can do once
     # it exists, not about who may create one.
     asyncio.run(accounts.update_user(me["user"]["id"], plan_id="pro"))
-    created = owner.post("/me/api-keys", json={"name": "data only", "scopes": ["read"]})
+    # "data" is a real scope. The first version of this test asked for "read",
+    # which was not one -- and unknown scopes used to expand to ALL scopes, so
+    # it was exercising a full-power key while calling it restricted.
+    created = owner.post("/me/api-keys", json={"name": "data only", "scopes": ["data"]})
     assert created.status_code in (200, 201), created.text
     # The response carries the key record under "key" and the one-time token
     # under "secret"; the token is what a caller actually presents.
@@ -143,6 +146,9 @@ def test_account_deletion_cancels_the_subscription_first(monkeypatch):
                                      stripe_subscription_id="sub_live", subscription_status="active"))
     cancelled = []
     monkeypatch.setattr(settings, "stripe_secret_key", "sk_test_harness")
+    # Deletion now asks Stripe for every live subscription first (R05), so the
+    # listing is stubbed too; here it agrees with the recorded id.
+    monkeypatch.setattr(billing, "_api_list_active_subscriptions", lambda customer_id: [{"id": "sub_live", "status": "active"}])
     monkeypatch.setattr(billing, "_api_cancel_subscription",
                         lambda sid: (cancelled.append(sid), {"id": sid, "status": "canceled"})[1])
 
@@ -163,6 +169,8 @@ def test_a_failed_cancellation_stops_the_deletion(monkeypatch):
         raise RuntimeError("Stripe is down")
 
     monkeypatch.setattr(settings, "stripe_secret_key", "sk_test_harness")
+    # The listing succeeds so the failure under test is the cancellation itself.
+    monkeypatch.setattr(billing, "_api_list_active_subscriptions", lambda customer_id: [{"id": "sub_stuck", "status": "active"}])
     monkeypatch.setattr(billing, "_api_cancel_subscription", explode)
     refused = client.request("DELETE", "/me", json={"confirm_email": "cancel-fails@example.com"})
     assert refused.status_code == 409

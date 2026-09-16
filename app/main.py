@@ -42,7 +42,7 @@ from app.wash_trading import nansen_enrich, pipeline as wash_trading_pipeline, s
 from app import accounts, api_keys, billing, billing_plans, credits, emailer, event_calendar, feedback, home_highlights, mcp_server, notifications, research_gaps, session_access, tasks, tool_outcomes, x402_gate
 from app.knowledge import ingest as kb_ingest, registry as kb_registry, retrieval as kb_retrieval
 from app.knowledge import store as kb_store, tool as kb_tool
-from app.identity import Identity, current_identity, require_user, resolve_identity
+from app.identity import Identity, current_identity, require_browser_session, require_scope, require_user, resolve_identity
 from app.models import TRADING_CHAINS
 from app.models import (
     AdminCreditGrant,
@@ -926,7 +926,7 @@ async def get_wash_trading_wallet(run_id: str, wallet: str, _admin: None = Depen
 
 
 @app.get("/portfolio/{wallet_address}")
-async def portfolio(wallet_address: str, identity: Identity = Depends(require_user)):
+async def portfolio(wallet_address: str, identity: Identity = Depends(require_scope('data'))):
     try:
         return await build_portfolio_snapshot(wallet_address)
     except ValueError as exc:
@@ -938,7 +938,7 @@ async def portfolio(wallet_address: str, identity: Identity = Depends(require_us
 
 
 @app.get("/wallet-health/{wallet_address}")
-async def wallet_health_report(wallet_address: str, identity: Identity = Depends(require_user)):
+async def wallet_health_report(wallet_address: str, identity: Identity = Depends(require_scope('data'))):
     try:
         return wallet_health(await build_portfolio_snapshot(wallet_address))
     except ValueError as exc:
@@ -948,7 +948,7 @@ async def wallet_health_report(wallet_address: str, identity: Identity = Depends
 
 
 @app.post("/portfolio/{wallet_address}/scenario")
-async def portfolio_scenario_report(wallet_address: str, body: PortfolioScenarioRequest, identity: Identity = Depends(require_user)):
+async def portfolio_scenario_report(wallet_address: str, body: PortfolioScenarioRequest, identity: Identity = Depends(require_scope('data'))):
     try:
         snapshot = await build_portfolio_snapshot(wallet_address)
         return portfolio_scenario(snapshot, body.change_pct, body.symbol)
@@ -1067,7 +1067,7 @@ async def me(request: Request):
 
 
 @app.get("/me/credits")
-async def my_credits(identity: Identity = Depends(require_user)):
+async def my_credits(identity: Identity = Depends(require_scope('data'))):
     return {
         "balance": await credits.balance(identity.account_id),
         "plan": identity.plan.public(),
@@ -1081,7 +1081,7 @@ async def my_credits(identity: Identity = Depends(require_user)):
 
 
 @app.put("/me/preferences")
-async def update_preferences(body: PreferencesUpdate, identity: Identity = Depends(require_user)):
+async def update_preferences(body: PreferencesUpdate, identity: Identity = Depends(require_browser_session)):
     fields: dict = {}
     if body.display_name is not None:
         fields["display_name"] = body.display_name.strip()[:60] or None
@@ -1094,12 +1094,12 @@ async def update_preferences(body: PreferencesUpdate, identity: Identity = Depen
 
 
 @app.get("/me/api-keys")
-async def list_api_keys(identity: Identity = Depends(require_user)):
+async def list_api_keys(identity: Identity = Depends(require_browser_session)):
     return {"keys": await api_keys.list_for_user(identity.user["id"]), "allowed": identity.plan.api_keys}
 
 
 @app.post("/me/api-keys", status_code=201)
-async def create_api_key(body: ApiKeyCreate, identity: Identity = Depends(require_user)):
+async def create_api_key(body: ApiKeyCreate, identity: Identity = Depends(require_browser_session)):
     if not identity.plan.api_keys:
         raise HTTPException(403, {"error": "upgrade_required", "message": "API keys are available on Pro and Max plans."})
     if identity.api_key is not None:
@@ -1112,7 +1112,7 @@ async def create_api_key(body: ApiKeyCreate, identity: Identity = Depends(requir
 
 
 @app.delete("/me/api-keys/{key_id}")
-async def revoke_api_key(key_id: str, identity: Identity = Depends(require_user)):
+async def revoke_api_key(key_id: str, identity: Identity = Depends(require_browser_session)):
     if identity.api_key is not None:
         raise HTTPException(403, "Keys can only be managed from a signed-in browser session")
     if not await api_keys.revoke(identity.user["id"], key_id):
@@ -1148,7 +1148,7 @@ async def admin_grant_credits(email: str, body: AdminCreditGrant, _admin: None =
 
 
 @app.get("/me/usage")
-async def my_usage(days: int = 30, identity: Identity = Depends(require_user)):
+async def my_usage(days: int = 30, identity: Identity = Depends(require_browser_session)):
     """Credits spent per day and per feature (and per API key) for the account
     that is billed -- the team owner's pool for a member."""
     report = await credits.usage(identity.account_id, days)
@@ -1158,7 +1158,7 @@ async def my_usage(days: int = 30, identity: Identity = Depends(require_user)):
 
 
 @app.get("/me/invoices")
-async def my_invoices(identity: Identity = Depends(require_user)):
+async def my_invoices(identity: Identity = Depends(require_browser_session)):
     try:
         return {"invoices": await billing.list_invoices(identity.team_owner or identity.user)}
     except billing.BillingNotConfigured:
@@ -1166,19 +1166,19 @@ async def my_invoices(identity: Identity = Depends(require_user)):
 
 
 @app.get("/me/sessions")
-async def my_sessions(request: Request, identity: Identity = Depends(require_user)):
+async def my_sessions(request: Request, identity: Identity = Depends(require_browser_session)):
     return {"sessions": await accounts.list_user_sessions(identity.user["id"], request.cookies.get(accounts.USER_COOKIE))}
 
 
 @app.post("/me/sessions/revoke-all")
-async def revoke_my_sessions(request: Request, identity: Identity = Depends(require_user)):
+async def revoke_my_sessions(request: Request, identity: Identity = Depends(require_browser_session)):
     """Sign out everywhere except this browser."""
     revoked = await accounts.revoke_user_sessions(identity.user["id"], keep_token=request.cookies.get(accounts.USER_COOKIE))
     return {"revoked": revoked}
 
 
 @app.get("/me/export")
-async def export_my_data(identity: Identity = Depends(require_user)):
+async def export_my_data(identity: Identity = Depends(require_browser_session)):
     """Everything Orbit holds about the account, as one JSON document."""
     user = identity.user
     conversations = []
@@ -1199,7 +1199,7 @@ async def export_my_data(identity: Identity = Depends(require_user)):
 
 
 @app.get("/me/conversations")
-async def my_conversations(identity: Identity = Depends(require_user)):
+async def my_conversations(identity: Identity = Depends(require_browser_session)):
     """The signed-in account's own conversations, newest first, titled by
     their first user message -- what the sidebar shows for a signed-in user
     instead of whatever this browser happened to cache. Empty sessions are
@@ -1216,7 +1216,7 @@ async def my_conversations(identity: Identity = Depends(require_user)):
 
 
 @app.delete("/me/conversations")
-async def delete_my_conversations(identity: Identity = Depends(require_user)):
+async def delete_my_conversations(identity: Identity = Depends(require_browser_session)):
     session_ids = await accounts.list_chat_sessions(identity.user["id"])
     for session_id in session_ids:
         await clear_history(session_id)
@@ -1225,7 +1225,7 @@ async def delete_my_conversations(identity: Identity = Depends(require_user)):
 
 
 @app.delete("/me")
-async def delete_my_account(body: DeleteAccountRequest, request: Request, response: Response, identity: Identity = Depends(require_user)):
+async def delete_my_account(body: DeleteAccountRequest, request: Request, response: Response, identity: Identity = Depends(require_browser_session)):
     """Delete the account: conversations, wallets, API keys, sessions and team
     links go; the credit ledger stays as an anonymous financial record."""
     user = identity.user
@@ -1269,12 +1269,12 @@ def _require_team_owner(identity: Identity) -> None:
 
 
 @app.get("/me/team")
-async def my_team(identity: Identity = Depends(require_user)):
+async def my_team(identity: Identity = Depends(require_browser_session)):
     return await _team_payload(identity)
 
 
 @app.post("/me/team/invites", status_code=201)
-async def invite_team_member(body: TeamInvite, request: Request, identity: Identity = Depends(require_user)):
+async def invite_team_member(body: TeamInvite, request: Request, identity: Identity = Depends(require_browser_session)):
     _require_team_owner(identity)
     try:
         email = accounts.normalize_email(body.email)
@@ -1298,7 +1298,7 @@ async def invite_team_member(body: TeamInvite, request: Request, identity: Ident
 
 
 @app.delete("/me/team/members/{email}")
-async def remove_team_member(email: str, identity: Identity = Depends(require_user)):
+async def remove_team_member(email: str, identity: Identity = Depends(require_browser_session)):
     _require_team_owner(identity)
     if not await accounts.remove_team_member(identity.user["id"], email):
         raise HTTPException(404, "No such member")
@@ -1306,7 +1306,7 @@ async def remove_team_member(email: str, identity: Identity = Depends(require_us
 
 
 @app.post("/me/team/accept")
-async def accept_team_invite(body: TeamAccept, identity: Identity = Depends(require_user)):
+async def accept_team_invite(body: TeamAccept, identity: Identity = Depends(require_browser_session)):
     if identity.plan.seats > 1 and await accounts.list_team_members(identity.user["id"]):
         raise HTTPException(400, "You own a team; remove your members before joining another")
     user = await accounts.accept_team_invite(identity.user, body.owner_id)
@@ -1316,7 +1316,7 @@ async def accept_team_invite(body: TeamAccept, identity: Identity = Depends(requ
 
 
 @app.post("/me/team/leave")
-async def leave_team(identity: Identity = Depends(require_user)):
+async def leave_team(identity: Identity = Depends(require_browser_session)):
     if identity.team_owner is None:
         raise HTTPException(400, "You are not a member of a team")
     await accounts.leave_team(identity.user)
@@ -1425,40 +1425,40 @@ async def admin_business_metrics(days: int = 30, _admin: None = Depends(_require
 # ---- Tasks (reminders, alerts, briefs) and the inbox ----
 
 @app.get("/me/tasks")
-async def my_tasks(identity: Identity = Depends(require_user)):
+async def my_tasks(identity: Identity = Depends(require_browser_session)):
     return await task_scheduling.list_for_user(identity)
 
 
 @app.post("/me/tasks", status_code=201)
-async def create_my_task(body: TaskCreate, identity: Identity = Depends(require_user)):
+async def create_my_task(body: TaskCreate, identity: Identity = Depends(require_browser_session)):
     task = await task_scheduling.create_task(identity.user, body.kind, body.spec, body.schedule, body.channel, body.tz_offset_min, body.title)
     return tasks.public(task)
 
 
 @app.patch("/me/tasks/{task_id}")
-async def update_my_task(task_id: str, body: TaskUpdate, identity: Identity = Depends(require_user)):
+async def update_my_task(task_id: str, body: TaskUpdate, identity: Identity = Depends(require_browser_session)):
     task = await task_scheduling.update_task(task_id, identity.user["id"], user=identity.user, **body.model_dump(exclude_none=True))
     return tasks.public(task)
 
 
 @app.delete("/me/tasks/{task_id}")
-async def delete_my_task(task_id: str, identity: Identity = Depends(require_user)):
+async def delete_my_task(task_id: str, identity: Identity = Depends(require_browser_session)):
     await task_scheduling.delete_task(task_id, identity.user["id"])
     return {"deleted": True}
 
 
 @app.post("/me/tasks/{task_id}/run")
-async def run_my_task_now(task_id: str, identity: Identity = Depends(require_user)):
+async def run_my_task_now(task_id: str, identity: Identity = Depends(require_browser_session)):
     return await task_scheduling.run_now(task_id, identity.user["id"])
 
 
 @app.get("/me/inbox")
-async def my_inbox(identity: Identity = Depends(require_user)):
+async def my_inbox(identity: Identity = Depends(require_browser_session)):
     return {"items": await tasks.inbox(identity.user["id"]), "unread": await tasks.unread_count(identity.user["id"])}
 
 
 @app.post("/me/inbox/read")
-async def read_my_inbox(body: InboxRead, identity: Identity = Depends(require_user)):
+async def read_my_inbox(body: InboxRead, identity: Identity = Depends(require_browser_session)):
     return {"marked": await tasks.mark_read(identity.user["id"], body.ids), "unread": await tasks.unread_count(identity.user["id"])}
 
 
@@ -1596,7 +1596,7 @@ def _public_base(request: Request) -> str:
 
 
 @app.post("/billing/checkout")
-async def billing_checkout(body: CheckoutRequest, request: Request, identity: Identity = Depends(require_user)):
+async def billing_checkout(body: CheckoutRequest, request: Request, identity: Identity = Depends(require_browser_session)):
     """A Stripe-hosted Checkout URL. Orbit never handles the card or wallet."""
     if identity.api_key is not None:
         raise HTTPException(403, "Billing is managed from a signed-in browser session")
@@ -1604,12 +1604,16 @@ async def billing_checkout(body: CheckoutRequest, request: Request, identity: Id
         return await billing.create_checkout(identity.user, body.kind, body.item_id, _public_base(request))
     except billing.BillingNotConfigured as exc:
         raise HTTPException(503, str(exc)) from exc
+    except billing.SubscriptionExists as exc:
+        # Not a validation error: the request is well-formed, the account is
+        # simply already subscribed. The UI sends this case to the portal.
+        raise HTTPException(409, {"error": "subscription_exists", "message": str(exc), "portal": True}) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
 
 @app.post("/billing/portal")
-async def billing_portal(request: Request, identity: Identity = Depends(require_user)):
+async def billing_portal(request: Request, identity: Identity = Depends(require_browser_session)):
     if identity.api_key is not None:
         raise HTTPException(403, "Billing is managed from a signed-in browser session")
     try:
@@ -1670,7 +1674,7 @@ async def risk_charter_limits():
 
 
 @app.get("/chat/history/{session_id}")
-async def chat_history(session_id: str, identity: Identity = Depends(require_user)):
+async def chat_history(session_id: str, identity: Identity = Depends(require_scope('chat'))):
     await _require_session_access(session_id, identity, claim=True)
     messages = await get_messages(session_id)
     if not settings.expose_tool_trajectory:
@@ -1682,7 +1686,7 @@ async def chat_history(session_id: str, identity: Identity = Depends(require_use
 
 
 @app.delete("/chat/wallet/{session_id}")
-async def forget_chat_wallet(session_id: str, identity: Identity = Depends(require_user)):
+async def forget_chat_wallet(session_id: str, identity: Identity = Depends(require_browser_session)):
     """The client disconnected its wallet: stop remembering it for this
     conversation (and drop any request parked for a wallet)."""
     from app.sessions import get_session_context, save_session_context
@@ -1696,7 +1700,7 @@ async def forget_chat_wallet(session_id: str, identity: Identity = Depends(requi
 
 
 @app.delete("/chat/history/{session_id}")
-async def clear_chat_history(session_id: str, identity: Identity = Depends(require_user)):
+async def clear_chat_history(session_id: str, identity: Identity = Depends(require_browser_session)):
     await _require_session_access(session_id, identity)
     try:
         lease = await acquire_session_turn(session_id)
@@ -1735,8 +1739,9 @@ async def _require_plan_access(plan_id: str, request: Request) -> None:
 async def confirm(plan_id: str, body: ConfirmRequest, request: Request,
                   _mode: None = Depends(_require_execution_mode)):
     await _require_plan_access(plan_id, request)
+    identity = await resolve_identity(request)
     try:
-        return await execute_confirmed_plan(plan_id, body.confirmation_text)
+        return await execute_confirmed_plan(plan_id, body.confirmation_text, identity.principal_id)
     except (KeyError, ValueError) as exc:
         raise HTTPException(400, _safe_detail(exc, "Trade request could not be completed")) from exc
 

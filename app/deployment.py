@@ -103,6 +103,37 @@ def require_execution_enabled(action: str, config: Settings | None = None) -> No
     )
 
 
+def custodial_principals(config: Settings | None = None) -> frozenset[str]:
+    """The principals entitled to the server-held wallet, as principal ids."""
+    config = _config(config)
+    raw = getattr(config, "custodial_signing_principals", "") or ""
+    out = set()
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        out.add(item if item.startswith("user:") else f"user:{item}")
+    return frozenset(out)
+
+
+def require_custodial_principal(principal: str | None, plan_owner: str | None, config: Settings | None = None) -> None:
+    """The caller must be entitled to the custodial wallet AND own the plan.
+
+    Both halves are needed: ownership without entitlement is the reviewed
+    hole (anyone can own a plan addressed to the server signer); entitlement
+    without ownership would let an entitled account execute someone else's
+    quote.
+    """
+    allowed = custodial_principals(config)
+    if not principal or principal not in allowed:
+        raise ExecutionDisabledError(
+            "This account is not entitled to the server-held wallet. Custodial signing is "
+            "limited to the principals in CUSTODIAL_SIGNING_PRINCIPALS."
+        )
+    if plan_owner is not None and plan_owner != principal:
+        raise ExecutionDisabledError("Only the account that requested this plan may have the server sign it.")
+
+
 def require_custodial_signing(config: Settings | None = None) -> None:
     """Gate the one route where the server itself holds the key."""
     config = _config(config)
@@ -168,6 +199,12 @@ def audit(config: Settings | None = None) -> list[ConfigProblem]:
             "A server signing key is configured with live trading on, but custodial "
             "signing is not enabled. Remove the key, or set ALLOW_CUSTODIAL_SIGNING=true "
             "to state that this deployment signs for its users.",
+        )
+    if getattr(config, "allow_custodial_signing", False) and not custodial_principals(config):
+        add(
+            "custodial-principals-missing", FATAL, "CUSTODIAL_SIGNING_PRINCIPALS",
+            "Custodial signing is enabled but no account is entitled to the server wallet. "
+            "List the user ids that may use it, or turn custodial signing off.",
         )
     if getattr(config, "allow_custodial_signing", False) and not config.solana_private_key:
         add(

@@ -62,6 +62,15 @@ def _api_create_checkout(params: dict) -> dict:
     return {"id": session["id"], "url": session["url"]}
 
 
+def _api_list_active_subscriptions(customer_id: str) -> list[dict]:
+    """Every subscription Stripe still considers live for this customer."""
+    found: list[dict] = []
+    for status in ("active", "trialing", "past_due"):
+        page = _stripe().Subscription.list(customer=customer_id, status=status, limit=100)
+        found.extend({"id": item["id"], "status": item["status"]} for item in page.get("data", []))
+    return found
+
+
 def _api_cancel_subscription(subscription_id: str) -> dict:
     subscription = _stripe().Subscription.cancel(subscription_id)
     return {"id": subscription["id"], "status": subscription["status"]}
@@ -134,6 +143,19 @@ async def create_checkout(user: dict, kind: str, item_id: str, base_url: str) ->
         plan = PLANS.get(item_id)
         if plan is None or plan.price_usd_month <= 0:
             raise ValueError("Choose a paid plan")
+        # One live subscription per account. Checkout always creates a NEW
+        # subscription, so a subscribed user choosing another plan used to end
+        # up paying for two, while the app stored -- and on deletion cancelled
+        # -- only one id. Plan changes go through the billing portal, which
+        # updates the subscription Stripe already has.
+        # "Not known to be over" rather than "known to be live": a record can
+        # carry a subscription id with no status at all (rows from before the
+        # status column, or a webhook that never arrived), and starting a
+        # second subscription on top of an unknown one is the worse mistake.
+        if user.get("stripe_subscription_id") and user.get("subscription_status") not in TERMINAL_STATUSES:
+            raise SubscriptionExists(
+                "This account already has a subscription. Change plans from the billing portal instead of starting another."
+            )
         price = plan.stripe_price_id()
         if not price:
             raise ValueError(f"The {plan.name} plan has no Stripe price configured")
@@ -173,6 +195,13 @@ class SubscriptionCancelFailed(Exception):
     """Stripe would not confirm the cancellation; the caller must not proceed."""
 
 
+class SubscriptionExists(Exception):
+    """The account already has a live subscription; plan changes go through the portal."""
+
+
+LIVE_STATUSES = {"active", "trialing", "past_due"}
+
+
 async def cancel_subscription_for(user: dict) -> dict:
     """Cancel this account's subscription before its billing link is destroyed.
 
@@ -183,26 +212,44 @@ async def cancel_subscription_for(user: dict) -> dict:
     anyway is not.
     """
     subscription_id = user.get("stripe_subscription_id")
-    if not subscription_id:
+    customer_id = user.get("stripe_customer_id")
+    if not subscription_id and not customer_id:
         return {"status": "none"}
     if not configured():
         # No Stripe credentials here, but the account claims a subscription --
         # refuse rather than silently orphan a live one.
-        raise SubscriptionCancelFailed(
-            "This account has a subscription but Stripe is not configured, so it cannot be cancelled."
-        )
-    try:
-        result = await asyncio.to_thread(_api_cancel_subscription, subscription_id)
-    except BillingNotConfigured:
-        raise
-    except Exception as exc:
-        already_gone = "No such subscription" in str(exc) or "resource_missing" in str(exc)
-        if already_gone:
-            return {"status": "already_cancelled", "subscription": subscription_id}
-        raise SubscriptionCancelFailed(
-            "The subscription could not be cancelled, so the account was not deleted. Try again shortly."
-        ) from exc
-    return {"status": "cancelled", "subscription": result["id"], "stripe_status": result["status"]}
+        if subscription_id and user.get("subscription_status") in LIVE_STATUSES:
+            raise SubscriptionCancelFailed(
+                "This account has a subscription but Stripe is not configured, so it cannot be cancelled."
+            )
+        return {"status": "none"}
+    # Cancel every live subscription Stripe has for the customer, not only the
+    # one id the app remembered: an overlapping subscription the app never
+    # recorded would otherwise keep charging after the account was gone.
+    targets: list[str] = []
+    if customer_id:
+        try:
+            targets = [item["id"] for item in await asyncio.to_thread(_api_list_active_subscriptions, customer_id)]
+        except Exception as exc:
+            raise SubscriptionCancelFailed(
+                "Stripe could not list this account's subscriptions, so the account was not deleted. Try again shortly."
+            ) from exc
+    if subscription_id and subscription_id not in targets and user.get("subscription_status") in LIVE_STATUSES:
+        targets.append(subscription_id)
+    cancelled: list[str] = []
+    for target in targets:
+        try:
+            result = await asyncio.to_thread(_api_cancel_subscription, target)
+            cancelled.append(result["id"])
+        except BillingNotConfigured:
+            raise
+        except Exception as exc:
+            if "No such subscription" in str(exc) or "resource_missing" in str(exc):
+                continue
+            raise SubscriptionCancelFailed(
+                "A subscription could not be cancelled, so the account was not deleted. Try again shortly."
+            ) from exc
+    return {"status": "cancelled" if cancelled else "none", "subscriptions": cancelled}
 
 
 async def list_invoices(user: dict) -> list[dict]:
@@ -267,7 +314,7 @@ async def replay_event(event_id: str) -> dict:
     if handler is None:
         return {"event": event_id, "type": event.get("type"), "status": "ignored"}
     obj = (event.get("data") or {}).get("object") or {}
-    result = await handler(event_id, obj)
+    result = await handler(event_id, obj, event.get("created"))
     return {"event": event_id, "type": event.get("type"), "replayed": True, **result}
 
 
@@ -331,7 +378,7 @@ async def handle_event(event: dict) -> dict:
         await mark_event_processed(event_id)
         return {"event": event_id, "type": event_type, "status": "ignored"}
     try:
-        result = await handler(event_id, obj)
+        result = await handler(event_id, obj, event.get("created"))
     except Exception:
         # Left unprocessed: Stripe's redelivery (or a manual replay) runs the
         # handler again; every credit effect is keyed by event id, so a
@@ -342,7 +389,7 @@ async def handle_event(event: dict) -> dict:
     return {"event": event_id, "type": event_type, **result}
 
 
-async def _on_checkout_completed(event_id: str, session: dict) -> dict:
+async def _on_checkout_completed(event_id: str, session: dict, event_created: int | None = None) -> dict:
     user = await _user_for(session)
     if user is None:
         return {"status": "no_user"}
@@ -372,7 +419,7 @@ async def _on_checkout_completed(event_id: str, session: dict) -> dict:
             # subscription the customer has since replaced must not make it
             # current again -- and this handler used to write unconditionally.
             superseded = _superseded_subscription(
-                user, {"id": session.get("subscription"), "created": session.get("created")})
+                user, {"id": session.get("subscription"), "created": session.get("created")}, event_created)
             if superseded:
                 return {"status": "ignored", "reason": superseded,
                         "active_subscription": user.get("stripe_subscription_id"),
@@ -381,7 +428,7 @@ async def _on_checkout_completed(event_id: str, session: dict) -> dict:
             # subscription came into being. It is the ordering key every later
             # subscription event is compared against.
             fields = {"plan_id": plan_id, "stripe_subscription_id": session.get("subscription"),
-                      "subscription_status": "active"}
+                      "subscription_status": "active", **_event_stamp(event_created)}
             if session.get("created") is not None:
                 fields["subscription_created"] = int(session["created"])
             await accounts.update_user(user["id"], **fields)
@@ -410,26 +457,14 @@ def _plan_from_subscription(subscription: dict) -> str | None:
     return None
 
 
-async def _on_invoice_paid(event_id: str, invoice: dict) -> dict:
+async def _on_invoice_paid(event_id: str, invoice: dict, event_created: int | None = None) -> dict:
     """The monthly allowance for a paid plan is granted here, per invoice --
     not by the lazy grant used for the Free tier."""
     user = await _user_for(invoice)
     if user is None:
         return {"status": "no_user"}
     lines = ((invoice.get("lines") or {}).get("data")) or []
-    plan_id = None
-    for line in lines:
-        price = (line.get("price") or {}).get("id") or ((line.get("pricing") or {}).get("price_details") or {}).get("price")
-        meta = line.get("metadata") or {}
-        if meta.get("plan_id") in PLANS:
-            plan_id = meta["plan_id"]
-            break
-        for plan in PLANS.values():
-            if price and price == plan.stripe_price_id():
-                plan_id = plan.id
-                break
-        if plan_id:
-            break
+    plan_id = _plan_from_lines(lines)
     subscription = invoice.get("subscription")
     if not subscription:
         # API versions from 2025-03-31 (Basil) moved this under `parent`.
@@ -456,9 +491,11 @@ async def _on_invoice_paid(event_id: str, invoice: dict) -> dict:
     # else; before this it silently made that old subscription current again.
     current = user.get("stripe_subscription_id")
     entitlement_written = False
-    if not current or subscription == current:
+    stale = _superseded_subscription(user, {"id": subscription, "created": invoice.get("created")}, event_created)
+    if (not current or subscription == current) and not stale:
         await accounts.update_user(
             user["id"], plan_id=plan.id, subscription_status="active", stripe_subscription_id=subscription,
+            **_event_stamp(event_created),
         )
         entitlement_written = True
     applied = await credits.grant(
@@ -470,44 +507,83 @@ async def _on_invoice_paid(event_id: str, invoice: dict) -> dict:
             **({} if entitlement_written else {"active_subscription": current, "invoice_subscription": subscription})}
 
 
-def _superseded_subscription(user: dict, subscription: dict) -> str | None:
-    """Why this event is about a subscription the account has moved on from.
+TERMINAL_STATUSES = {"canceled", "unpaid", "incomplete_expired"}
 
-    One rule for every subscription-state handler. Guarding only the deletion
-    handler was not enough: an out-of-order `subscription.updated` for the old
-    subscription would quietly make it current again, and the old deletion that
-    followed then matched and downgraded the account.
 
-    An event for the account's current subscription always applies. A different
-    subscription applies only when it is demonstrably newer, which is what makes
-    an upgrade or a resubscribe work; without timestamps to compare, a different
-    id is treated as stale rather than allowed to overwrite the active one.
+def _superseded_subscription(user: dict, subscription: dict, event_created: int | None = None) -> str | None:
+    """Why this event must not change the account's entitlement.
+
+    One rule for every subscription-state writer -- update, delete, checkout
+    and invoice alike. Two orderings matter and they need different keys:
+
+    * A *different* subscription than the one recorded applies only when it is
+      demonstrably newer by its own `created`. That is what makes an upgrade or
+      a resubscribe work, and what stops a late event for a replaced
+      subscription putting it back.
+    * The *same* subscription is ordered by the event envelope's `created`,
+      recorded as `subscription_event_at` whenever a writer applies. A
+      subscription's own creation time cannot tell an old state from a new one
+      -- which is exactly how a late update, invoice or checkout for a
+      subscription that had been cancelled restored paid access. Cancellation
+      is therefore recorded, not erased: the id and timestamps stay, the
+      status becomes terminal, and only an event demonstrably newer than the
+      cancellation may move it again (Stripe does reactivate before period
+      end). With no envelope time to compare, an event for a cancelled
+      subscription is stale.
     """
     event_subscription = subscription.get("id")
     current = user.get("stripe_subscription_id")
-    if not event_subscription or not current or event_subscription == current:
+    if not event_subscription or not current:
         return None
-    event_created = subscription.get("created")
-    current_created = user.get("subscription_created")
-    if event_created is not None and current_created is not None:
-        if int(event_created) < int(current_created):
-            return "a newer subscription is active"
-        return None
-    return "a different subscription is active"
+    if event_subscription != current:
+        sub_created = subscription.get("created")
+        current_created = user.get("subscription_created")
+        if sub_created is not None and current_created is not None:
+            return "a newer subscription is active" if int(sub_created) < int(current_created) else None
+        return "a different subscription is active"
+    last_applied = user.get("subscription_event_at")
+    if event_created is not None and last_applied is not None and int(event_created) < int(last_applied):
+        return "an older event for the current subscription"
+    if user.get("subscription_status") in TERMINAL_STATUSES:
+        if event_created is None or last_applied is None or int(event_created) <= int(last_applied):
+            return "the subscription was cancelled; only a newer event may change it"
+    return None
 
 
-async def _on_subscription_updated(event_id: str, subscription: dict) -> dict:
+def _event_stamp(event_created: int | None) -> dict:
+    return {"subscription_event_at": int(event_created)} if event_created is not None else {}
+
+
+def _plan_from_lines(lines: list[dict]) -> str | None:
+    """The plan an invoice's lines are charging for. Price first, metadata as a
+    fallback, the same order as _plan_from_subscription -- this loop used to be
+    metadata-first, so a Max-priced invoice carrying stale Pro metadata restored
+    Pro entitlements and granted the wrong allowance."""
+    for line in lines:
+        price = (line.get("price") or {}).get("id") or ((line.get("pricing") or {}).get("price_details") or {}).get("price")
+        for plan in PLANS.values():
+            if price and price == plan.stripe_price_id():
+                return plan.id
+    for line in lines:
+        meta = line.get("metadata") or {}
+        if meta.get("plan_id") in PLANS:
+            return meta["plan_id"]
+    return None
+
+
+async def _on_subscription_updated(event_id: str, subscription: dict, event_created: int | None = None) -> dict:
     user = await _user_for(subscription)
     if user is None:
         return {"status": "no_user"}
-    superseded = _superseded_subscription(user, subscription)
+    superseded = _superseded_subscription(user, subscription, event_created)
     if superseded:
         return {"status": "ignored", "reason": superseded,
                 "active_subscription": user.get("stripe_subscription_id"),
                 "event_subscription": subscription.get("id")}
     status = subscription.get("status")
     plan_id = _plan_from_subscription(subscription)
-    fields: dict[str, Any] = {"subscription_status": status, "stripe_subscription_id": subscription.get("id")}
+    fields: dict[str, Any] = {"subscription_status": status, "stripe_subscription_id": subscription.get("id"),
+                              **_event_stamp(event_created)}
     if subscription.get("created") is not None:
         fields["subscription_created"] = int(subscription["created"])
     if status in {"active", "trialing", "past_due"} and plan_id:
@@ -518,21 +594,26 @@ async def _on_subscription_updated(event_id: str, subscription: dict) -> dict:
     return {"status": "updated", "plan_id": fields.get("plan_id", user.get("plan_id")), "subscription_status": status}
 
 
-async def _on_subscription_deleted(event_id: str, subscription: dict) -> dict:
+async def _on_subscription_deleted(event_id: str, subscription: dict, event_created: int | None = None) -> dict:
     user = await _user_for(subscription)
     if user is None:
         return {"status": "no_user"}
-    superseded = _superseded_subscription(user, subscription)
+    superseded = _superseded_subscription(user, subscription, event_created)
     if superseded:
         return {"status": "ignored", "reason": superseded,
                 "active_subscription": user.get("stripe_subscription_id"),
                 "event_subscription": subscription.get("id")}
-    await accounts.update_user(user["id"], plan_id="free", subscription_status="canceled",
-                               stripe_subscription_id=None, subscription_created=None)
+    # Keep the id and its timestamps: clearing them meant a late event for this
+    # very subscription found "no current subscription" and restored paid
+    # access. The terminal status is what says it is over.
+    fields = {"plan_id": "free", "subscription_status": "canceled", **_event_stamp(event_created)}
+    if not user.get("stripe_subscription_id") and subscription.get("id"):
+        fields["stripe_subscription_id"] = subscription["id"]
+    await accounts.update_user(user["id"], **fields)
     return {"status": "downgraded", "plan_id": "free"}
 
 
-async def _on_charge_refunded(event_id: str, charge: dict) -> dict:
+async def _on_charge_refunded(event_id: str, charge: dict, event_created: int | None = None) -> dict:
     """Claw back the credits of a refunded pack, pro rata for partial refunds."""
     metadata = charge.get("metadata") or {}
     if metadata.get("kind") != "pack":

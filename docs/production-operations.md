@@ -421,3 +421,61 @@ chat swap card never called the veto, so a trade the dialog and the chat card
 both refused went through it. All three now check at quote time and again
 immediately before signing, since the charter can be tightened while a quote
 sits on screen.
+
+## Consolidated review of 2026-09-17: the five P1 findings
+
+The report and its evidence live in `reports/review-2026-09-17/`. Its own
+reproductions assert the defects; `tests/test_review_20260917_p1.py` asserts the
+rules, using the same inputs, with a control beside every refusal. Each fix
+was checked both ways: the regression test passes and the review's check fails.
+
+**R01, untrusted Markdown could inject attributes.** The shared HTML helper
+serialised a text node, which escapes `&`, `<` and `>` and leaves both quote
+characters alone, so a Markdown link whose URL carried a `"` closed the `href`
+and added an `onmouseover`. Both helpers (`escapeHtml` in the app, `esc` in the
+admin shell) now escape quotes, so the same value is safe in text and in any of
+the attribute templates that use them. Link targets are additionally validated
+as plain `http(s)` URLs with no quotes, brackets, whitespace or control
+characters before insertion; anything else is left as literal text.
+
+**R02, API keys could manage the account.** The signed-in dependency accepted a
+key as signed in without regard to scope, so a key holding only `data` could
+change preferences, delete every conversation and revoke every browser session.
+There are now three dependencies and the authorization matrix declares which
+each route uses: `browser` (a cookie session; every `/me` and `/billing`
+route), `key:chat` (chat and history) and `key:data` (portfolio, wallet health,
+credit balance). A key is refused everywhere else with 403. Unknown scope names
+used to be filtered out and then, with nothing left, expanded to *every* scope;
+they are now a 400. That expansion is why one of this project's own earlier
+"restricted key" tests had been exercising a full-power key.
+
+**R03, the server wallet had no entitlement.** A plan is bound to the account
+that asked for it and execution checks that the plan's wallet is the server's;
+neither proves the account may spend from that wallet, so any signed-in account
+could address a quote to the signer's public address and confirm it.
+`CUSTODIAL_SIGNING_PRINCIPALS` lists the user ids entitled to the server-held
+key. It is checked when a plan is quoted against the signer and again when the
+server is asked to sign, and the caller must also own the plan. Custodial
+signing enabled with an empty list is a startup error, since that is custody
+for nobody.
+
+**R04, late billing events restored paid access.** Cancellation used to erase
+the subscription id, so a late update, invoice or checkout for that very
+subscription found "no current subscription" and re-entitled the account.
+Cancellation is now a tombstone: the id and timestamps stay, the status becomes
+terminal, and only an event demonstrably newer than the cancellation may move
+it (Stripe reactivates before period end). Every subscription-state writer
+receives the event envelope's `created`, recorded as `subscription_event_at`,
+which orders events for the *same* subscription; a subscription's own creation
+time orders *different* subscriptions. The invoice line loop resolves the plan
+from the price first and metadata second, as the subscription resolver already
+did; credits for a paid invoice are always granted, entitlement only when the
+invoice belongs to the account's current, non-terminal subscription.
+
+**R05, plan changes started a second subscription.** Checkout always creates a
+new subscription, so a subscribed account choosing another plan paid for two
+while the app remembered one. A subscription checkout is refused with 409 for
+an account whose recorded subscription is not known to be terminal, and the UI
+sends that case to the billing portal, which edits the subscription Stripe
+already has. Account deletion now lists every live subscription for the
+customer and cancels each, not only the one id on record.

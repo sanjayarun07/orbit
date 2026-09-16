@@ -66,6 +66,10 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status TEXT;
 -- subscription's creation time lets a stale event for a superseded
 -- subscription be recognised and ignored instead of overwriting it.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_created BIGINT;
+-- The envelope time of the last subscription-state event applied, so a
+-- later-delivered but earlier-issued event for the SAME subscription is
+-- recognised as stale. A subscription's own creation time cannot do that.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_event_at BIGINT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS team_owner_id UUID;
 ALTER TABLE users ALTER COLUMN email DROP NOT NULL;   -- a wallet-only account has none
 CREATE TABLE IF NOT EXISTS user_chat_sessions (

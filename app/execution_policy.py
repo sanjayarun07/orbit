@@ -53,6 +53,18 @@ async def execute_chat_turn(body: ChatRequest, identity: Identity | str) -> Agen
         raise ServiceError(401, {"error": "sign_in_required", "message": "Sign in with your email to use a wallet, trade, or keep history."})
     if identity.api_key is not None and not identity.has_scope("chat"):
         raise ServiceError(403, "This API key does not have the chat scope")
+    # A plan against the server-held wallet is refused at quoting time for
+    # anyone not entitled to that wallet, not only at signing time -- a quote
+    # that can never be executed should not exist, and the confirm route's
+    # own check then covers the case where the entitlement changes between.
+    if body.wallet_address and settings.allow_custodial_signing:
+        from app import deployment
+        from app.execution import custodial_signer_address
+
+        signer = custodial_signer_address()
+        if signer and body.wallet_address.strip() == signer and identity.principal_id not in deployment.custodial_principals():
+            raise ServiceError(403, {"error": "custodial_wallet_not_entitled",
+                                     "message": "This account may not trade from the server-held wallet."})
     turn_id = str(uuid4())
     reserved = 0
     if identity.kind != "service":

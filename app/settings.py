@@ -272,6 +272,15 @@ class Settings(BaseSettings):
     # May the SERVER hold a key and sign for the user? Separate from the mode
     # on purpose: a wallet-only product should never sign on anyone's behalf.
     allow_custodial_signing: bool = False
+    # WHO may use the server-held key, as a comma-separated list of user ids.
+    # Enabling custodial signing says the server may sign; this says for whom.
+    # A plan is bound to the account that asked for it, and execution checks
+    # that the plan's wallet is the server's -- neither proves that this
+    # account is entitled to spend from that wallet. Without this list, any
+    # signed-in account could address a plan to the server signer and confirm
+    # it. Empty means nobody, which the startup audit treats as an error when
+    # custodial signing is on.
+    custodial_signing_principals: str = ""
     live_trading: bool = False
     max_trade_usd: float = 25.0
     max_slippage_bps: int = 100

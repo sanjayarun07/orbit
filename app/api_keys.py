@@ -56,7 +56,17 @@ def _row(row) -> dict:
 async def create(user_id: str, name: str, scopes: list[str] | None = None) -> tuple[dict, str]:
     """(public record, full secret). The secret is never retrievable again."""
     name = (name or "").strip()[:60] or "API key"
-    chosen = tuple(scope for scope in (scopes or list(SCOPES)) if scope in SCOPES) or SCOPES
+    # A scope list is a restriction the caller asked for. Filtering unknown
+    # names out and then falling back to every scope when nothing was left
+    # turned a typo -- or a test's guess at a scope name -- into a full-power
+    # key. Unknown scopes are refused; an omitted list still means all.
+    requested = list(scopes) if scopes is not None else list(SCOPES)
+    unknown = [scope for scope in requested if scope not in SCOPES]
+    if unknown:
+        raise ValueError(f"Unknown scope(s) {', '.join(sorted(set(unknown)))}; choose from {', '.join(SCOPES)}")
+    if not requested:
+        raise ValueError(f"Choose at least one scope from {', '.join(SCOPES)}")
+    chosen = tuple(scope for scope in SCOPES if scope in requested)
     active = [key for key in await list_for_user(user_id) if not key["revoked_at"]]
     if len(active) >= MAX_KEYS_PER_USER:
         raise ValueError(f"You already have {MAX_KEYS_PER_USER} active keys; revoke one first")

@@ -129,6 +129,35 @@ async def require_user(request: Request) -> Identity:
     return identity
 
 
+async def require_browser_session(request: Request) -> Identity:
+    """A signed-in account that arrived through the browser session cookie.
+
+    `require_user` accepts an API-key identity too, and until this existed
+    every account mutation sat behind it -- so a key created with only the
+    `data` scope could change preferences, delete conversations and revoke
+    every browser session. Keys are for reading data and chatting on the
+    account's behalf; managing the account is a browser's job.
+    """
+    identity = await require_user(request)
+    if identity.api_key is not None:
+        raise HTTPException(403, {"error": "browser_session_required",
+                                  "message": "This action needs a signed-in browser session, not an API key."})
+    return identity
+
+
+def require_scope(scope: str):
+    """A dependency for the few routes an API key may use, checking its scope.
+    A browser session has every scope."""
+    async def dependency(request: Request) -> Identity:
+        identity = await require_user(request)
+        if not identity.has_scope(scope):
+            raise HTTPException(403, {"error": "scope_required", "scope": scope,
+                                      "message": f"This API key does not have the {scope!r} scope."})
+        return identity
+    dependency.__name__ = f"require_scope_{scope}"
+    return dependency
+
+
 def service_identity(name: str) -> Identity:
     """An internal caller (tests, workers) with no credit accounting."""
     return Identity("service", f"service:{name}", "internal", plan=get_plan("max"))
