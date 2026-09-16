@@ -31,6 +31,7 @@ from app.execution import execute_confirmed_plan, prepare_wallet_transaction, su
 from app.graph import run_agent, resolve_intent_node
 from app.capability_router import route_capabilities
 from app.routing.controls import is_trade_confirmation
+from app.routing.controls import is_charter_clear
 from app.experience import (
     advance_session_context,
     build_context_capsules,
@@ -883,6 +884,11 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
                 logger.warning("ignoring malformed saved risk charter for user %s", identity.user["id"])
         if charter_fields is not None and identity.signed_in and not charter_fields.is_empty():
             await accounts.update_user(identity.user["id"], preferences={"risk_charter_fields": charter_fields.model_dump()})
+        elif identity.signed_in and default_fields and is_charter_clear(body.message):
+            # "clear my risk charter" clears the saved default too; otherwise the
+            # next conversation would silently re-apply the rules just removed.
+            await accounts.update_user(identity.user["id"], preferences={"risk_charter_fields": None})
+            session_context = {**session_context, "risk_charter": None, "risk_charter_fields": None}
         if charter_fields is not None:
             if charter_fields.is_empty():
                 raise HTTPException(400, "Choose at least one rule for the risk charter.")

@@ -303,3 +303,32 @@ def test_card_saves_through_chat_and_free_text_replaces_fields(monkeypatch):
     assert typed.json()["risk_charter"] == "only bluechips" and typed.json()["risk_charter_fields"] is None
     cleared = client.post("/chat", json={"message": "clear my risk charter", "session_id": sid, "context_revision": typed.json()["session_revision"]})
     assert cleared.json()["risk_charter"] is None and cleared.json()["risk_charter_fields"] is None
+
+
+def test_clearing_the_charter_in_chat_also_clears_the_saved_default(monkeypatch):
+    """Live regression (e2e sweep): a signed-in user cleared the charter, but
+    the saved default in preferences survived and every new conversation
+    re-applied a $0.50 cap that blocked all quotes."""
+    from fastapi.testclient import TestClient
+    from app import main
+    from app.graph import AgentRun
+
+    async def fake_run(message, wallet, history, session_context, action):
+        return AgentRun(answer="ok", trajectory=None, trade_plan=None, intent="general", capabilities=[])
+
+    monkeypatch.setattr(main, "run_agent", fake_run)
+    client = TestClient(main.app)
+    from tests.conftest import sign_in
+    sign_in(client)
+    first = client.post("/chat", json={"message": "set my risk charter", "risk_charter_fields": {"max_trade_usd": 0.5, "verified_only": True}})
+    assert first.status_code == 200, first.text
+    assert client.get("/me").json()["user"]["preferences"]["risk_charter_fields"]["max_trade_usd"] == 0.5
+    # A brand-new conversation is seeded from the saved default.
+    fresh = client.post("/chat", json={"message": "hello"}).json()
+    assert fresh["risk_charter_fields"]["max_trade_usd"] == 0.5
+    cleared = client.post("/chat", json={"message": "clear my risk charter", "session_id": fresh["session_id"], "context_revision": fresh["session_revision"]}).json()
+    assert cleared["risk_charter"] is None and cleared["risk_charter_fields"] is None
+    assert client.get("/me").json()["user"]["preferences"].get("risk_charter_fields") is None
+    # The next conversation starts clean.
+    after = client.post("/chat", json={"message": "hello again"}).json()
+    assert after["risk_charter"] is None and after.get("risk_charter_fields") is None

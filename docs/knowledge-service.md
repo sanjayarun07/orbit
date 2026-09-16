@@ -86,9 +86,12 @@ nohup .venv/bin/python scripts/kb_ingest.py --loop --parallel 3 >> ~/Library/Log
 ```
 
 Each pass ingests every due (protocol, source) pair (docs every 12 h, GitHub
-6 h, forums 6 h, Snapshot 15 min, DefiLlama daily), then recomputes derived
-edges, then sleeps `KNOWLEDGE_INGEST_INTERVAL_SECONDS`. Unchanged pages
-hash-match and cost nothing. Stop it with `pkill -f "kb_ingest.py --loop"`.
+6 h, forums 6 h, Snapshot 15 min, DefiLlama daily, CoinGecko weekly), then
+recomputes derived edges, then sleeps `KNOWLEDGE_INGEST_INTERVAL_SECONDS`.
+A source whose last run failed (rate limit, timeout) is retried after an
+hour rather than its full interval. Unchanged pages hash-match and cost
+nothing. Stop it with `pkill -f "kb_ingest.py --loop"`; restart it after
+code changes, it does not reload.
 The admin dashboard (`/ui/admin.html`, "Knowledge base" panel) shows totals,
 per-protocol coverage by source, failing sources, recent runs, a search box
 and the graph around any entity.
