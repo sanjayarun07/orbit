@@ -1020,6 +1020,23 @@ async def export_my_data(identity: Identity = Depends(require_user)):
     }
 
 
+@app.get("/me/conversations")
+async def my_conversations(identity: Identity = Depends(require_user)):
+    """The signed-in account's own conversations, newest first, titled by
+    their first user message -- what the sidebar shows for a signed-in user
+    instead of whatever this browser happened to cache. Empty sessions are
+    left out."""
+    out = []
+    for row in await accounts.list_chat_sessions_with_times(identity.user["id"]):
+        messages = await get_messages(row["session_id"])
+        if not messages:
+            continue
+        first_user = next((m.get("content") for m in messages if m.get("role") == "user" and m.get("content")), None)
+        title = (first_user or "New chat").strip().splitlines()[0][:48]
+        out.append({"session_id": row["session_id"], "title": title, "updated_at": row["last_used"], "messages": len(messages)})
+    return {"conversations": out}
+
+
 @app.delete("/me/conversations")
 async def delete_my_conversations(identity: Identity = Depends(require_user)):
     session_ids = await accounts.list_chat_sessions(identity.user["id"])

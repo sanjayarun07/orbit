@@ -493,6 +493,19 @@ async def list_chat_sessions(user_id: str) -> list[str]:
     return sorted(_chat_sessions.get(user_id, {}), key=lambda sid: _chat_sessions[user_id][sid], reverse=True)
 
 
+async def list_chat_sessions_with_times(user_id: str, limit: int = 200) -> list[dict]:
+    """[{session_id, last_used}] newest first -- the account's own conversations."""
+    pool = await get_pg_pool()
+    if pool is not None:
+        rows = await pool.fetch(
+            "SELECT session_id, last_used FROM user_chat_sessions WHERE user_id = $1 ORDER BY last_used DESC LIMIT $2", user_id, limit,
+        )
+        return [{"session_id": r["session_id"], "last_used": r["last_used"].isoformat()} for r in rows]
+    own = _chat_sessions.get(user_id, {})
+    ordered = sorted(own.items(), key=lambda item: item[1], reverse=True)[:limit]
+    return [{"session_id": sid, "last_used": used} for sid, used in ordered]
+
+
 async def forget_chat_sessions(user_id: str, session_ids: list[str] | None = None) -> None:
     pool = await get_pg_pool()
     if pool is not None:

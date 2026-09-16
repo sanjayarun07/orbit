@@ -112,3 +112,26 @@ account instead. Signing is best-effort and never blocks connecting: if the
 user declines the signature prompt the wallet stays connected read-only,
 not signed in. Solana signatures are Ed25519 over the challenge text; EVM
 signatures are EIP-191 with ERC-1271/6492 for smart wallets.
+
+## History: whose it is, and how long it lives
+
+Signed out, the sidebar shows only the current browser session's chats --
+they live in `sessionStorage` and are gone when the tab closes; nothing from
+a past anonymous visit reappears. Signed in, the sidebar is the ACCOUNT's:
+`GET /me/conversations` returns that user's conversations (newest first,
+titled by their first user message, empty ones skipped) and the client
+merges its own per-chat metadata (pin, archive, project, rename) by id.
+Entries are stamped with an `owner`, so another account's chats never show,
+and only owned entries persist to `localStorage`.
+
+Retention matches that split: a conversation expires
+`chat_history_ttl_seconds` (2h) after its last turn, but every turn a
+signed-in account owns pushes the expiry to
+`chat_history_signed_in_ttl_seconds` (30d) via `sessions.extend_retention`.
+Before this, an account with hundreds of listed sessions could open none of
+them -- the mapping in Postgres outlived the messages in Redis.
+
+The client also stops asserting a `context_revision` it doesn't know
+(`null` until history is hydrated) and retries once without one if the
+server reports the conversation moved on, so "This chat changed in another
+tab" can no longer answer a fresh message after a reload.

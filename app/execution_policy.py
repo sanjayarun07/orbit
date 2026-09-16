@@ -25,7 +25,7 @@ from app.public_activity import public_activity
 from app.routing.controls import is_trade_confirmation, is_charter_clear
 from app.routing.workflow import WorkflowState, WorkflowEvent, apply_event
 from app.service_errors import ServiceError, safe_detail as _safe_detail
-from app.sessions import acquire_session_turn, commit_turn, get_session_snapshot, history_text_from_messages
+from app.sessions import acquire_session_turn, commit_turn, extend_retention, get_session_snapshot, history_text_from_messages
 from app.settings import settings
 from app.solana_rpc import rpc
 
@@ -89,6 +89,9 @@ async def execute_chat_turn(body: ChatRequest, identity: Identity | str) -> Agen
         # (and maps a brand-new conversation the caller did not name).
         try:
             await accounts.touch_chat_session(identity.user["id"], response.session_id)
+            # Their history must outlive the short scratch-space expiry a
+            # signed-out visitor's conversation gets.
+            await extend_retention(response.session_id, settings.chat_history_signed_in_ttl_seconds)
         except Exception:
             logger.warning("chat session ownership update failed", exc_info=True)
     return response

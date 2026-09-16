@@ -17,7 +17,11 @@ from typing import Any
 from app.db import get_redis
 from app.settings import settings
 
-_SESSION_TTL_SECONDS = 2 * 60 * 60
+def _base_ttl() -> int:
+    return int(settings.chat_history_ttl_seconds)
+
+
+_retention: dict[str, int] = {}   # session_id -> seconds, for the in-memory store
 _MAX_DISPLAY_MESSAGES = 200  # total messages retained for UI history
 
 _sessions: dict[str, deque[dict]] = {}
@@ -62,9 +66,30 @@ async def acquire_session_turn(session_id: str) -> SessionTurnLease:
     return SessionTurnLease(lock)
 
 
+def _ttl_for(session_id: str) -> int:
+    """Seconds a session's keys should live: the long, signed-in retention
+    once extend_retention has marked it, the short default otherwise."""
+    return _retention.get(session_id, _base_ttl())
+
+
+async def extend_retention(session_id: str, seconds: int) -> None:
+    """Keep this conversation for `seconds` from now -- called for every turn
+    a signed-in account owns, so their history stops expiring in two hours."""
+    seconds = int(seconds)
+    if seconds <= _base_ttl():
+        return
+    _retention[session_id] = seconds
+    redis = await get_redis()
+    if redis is not None:
+        await redis.expire(f"chat_history:{session_id}", seconds)
+        await redis.expire(f"chat_context:{session_id}", seconds)
+        return
+    _last_seen[session_id] = time.time()
+
+
 def _prune_expired() -> None:
     now = time.time()
-    expired = [sid for sid, ts in _last_seen.items() if now - ts > _SESSION_TTL_SECONDS]
+    expired = [sid for sid, ts in _last_seen.items() if now - ts > _retention.get(sid, _base_ttl())]
     for sid in expired:
         _sessions.pop(sid, None)
         _contexts.pop(sid, None)
@@ -72,6 +97,7 @@ def _prune_expired() -> None:
         if lock is None or not lock.locked():
             _session_locks.pop(sid, None)
         _last_seen.pop(sid, None)
+        _retention.pop(sid, None)
     overflow = len(_sessions) - settings.memory_session_max_entries + 1
     if overflow > 0:
         oldest = sorted(_last_seen, key=_last_seen.get)[:overflow]
@@ -103,7 +129,7 @@ async def append_turn(
         key = f"chat_history:{session_id}"
         await redis.rpush(key, json.dumps(entry))
         await redis.ltrim(key, -_MAX_DISPLAY_MESSAGES, -1)
-        await redis.expire(key, _SESSION_TTL_SECONDS)
+        await redis.expire(key, _ttl_for(session_id))
         return
     _prune_expired()
     history = _sessions.setdefault(session_id, deque(maxlen=_MAX_DISPLAY_MESSAGES))
@@ -230,7 +256,7 @@ async def save_session_context(session_id: str, context: dict) -> None:
     redis = await get_redis()
     if redis is not None:
         key = f"chat_context:{session_id}"
-        await redis.set(key, json.dumps(context), ex=_SESSION_TTL_SECONDS)
+        await redis.set(key, json.dumps(context), ex=_ttl_for(session_id))
         return
     _prune_expired()
     _contexts[session_id] = dict(context)
@@ -254,8 +280,8 @@ async def commit_turn(
         async with redis.pipeline(transaction=True) as pipeline:
             pipeline.rpush(history_key, json.dumps(user_entry), json.dumps(assistant_entry))
             pipeline.ltrim(history_key, -_MAX_DISPLAY_MESSAGES, -1)
-            pipeline.expire(history_key, _SESSION_TTL_SECONDS)
-            pipeline.set(context_key, json.dumps(context), ex=_SESSION_TTL_SECONDS)
+            pipeline.expire(history_key, _ttl_for(session_id))
+            pipeline.set(context_key, json.dumps(context), ex=_ttl_for(session_id))
             await pipeline.execute()
         return
     _prune_expired()

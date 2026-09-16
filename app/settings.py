@@ -270,6 +270,12 @@ class Settings(BaseSettings):
     portfolio_snapshot_timeout_seconds: float = 25.0
     risk_snapshot_timeout_seconds: float = 20.0
     memory_plan_max_entries: int = 1000
+    # Chat history retention. A signed-out visitor's conversation is scratch
+    # space that expires quickly; a signed-in account's conversations are the
+    # "history" the product promises, so every turn they own pushes the
+    # expiry out again.
+    chat_history_ttl_seconds: int = 2 * 60 * 60
+    chat_history_signed_in_ttl_seconds: int = 30 * 24 * 60 * 60
     memory_session_max_entries: int = 1000
 
     # Persistent memory/state. Both are optional: if unset or unreachable,

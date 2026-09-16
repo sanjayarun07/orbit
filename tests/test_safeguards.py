@@ -21,6 +21,7 @@
 """
 
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -378,3 +379,63 @@ def test_a_paid_occurrence_is_delivered_on_recovery_even_with_no_credits_left(mo
     assert asyncio.run(credits.balance(account)) == 0          # nothing charged twice
     after = asyncio.run(tasks.get_task(task["id"]))
     assert after["fire_count"] == 1 and after["claimed_occurrence"] is None and after["next_run_at"]
+
+
+# --- 11. history lists the signed-in account's own conversations -----------
+
+def test_conversations_list_is_per_account(fake_agent):
+    alice, bob = TestClient(main.app), TestClient(main.app)
+    sign_in(alice, email="hist-alice@example.com")
+    sign_in(bob, email="hist-bob@example.com")
+    a1 = alice.post("/chat", json={"message": "what is a liquidity pool"}).json()["session_id"]
+    a2 = alice.post("/chat", json={"message": "top holders of BONK\nsecond line ignored"}).json()["session_id"]
+    alice.post("/chat", json={"message": "and a follow-up", "session_id": a1})
+    bob.post("/chat", json={"message": "bob's own question"})
+    mine = alice.get("/me/conversations").json()["conversations"]
+    assert [c["session_id"] for c in mine] == [a1, a2]          # newest activity first
+    assert mine[0]["title"] == "what is a liquidity pool" and mine[0]["messages"] == 4
+    assert mine[1]["title"] == "top holders of BONK"
+    theirs = bob.get("/me/conversations").json()["conversations"]
+    assert [c["session_id"] for c in theirs] != [] and a1 not in {c["session_id"] for c in theirs}
+    assert TestClient(main.app).get("/me/conversations").status_code == 401
+
+
+def test_a_signed_in_accounts_history_outlives_the_anonymous_expiry(fake_agent):
+    """Conversations expire two hours after the last turn -- right for a
+    signed-out visitor's scratch space, fatal for the history a signed-in
+    account is promised (it is why an account with hundreds of past sessions
+    listed none of them). Every turn they own pushes the expiry out."""
+    from app import sessions
+
+    client = TestClient(main.app)
+    sign_in(client, email="retention@example.com")
+    sid = client.post("/chat", json={"message": "keep this"}).json()["session_id"]
+    anon_sid = TestClient(main.app).post("/chat", json={"message": "scratch"}).json()["session_id"]
+
+    base = settings.chat_history_ttl_seconds
+
+    async def _ttls(keys):
+        # A fresh client inside this one loop: the shared app client belongs to
+        # the server's loop and cannot be awaited from here.
+        import redis.asyncio as aioredis
+
+        client = aioredis.from_url(settings.redis_url, decode_responses=True)
+        try:
+            return [await client.ttl(key) for key in keys]
+        finally:
+            await client.aclose()
+
+    if settings.redis_url:
+        owned_ttl, anon_ttl = asyncio.run(_ttls([f"chat_history:{sid}", f"chat_history:{anon_sid}"]))
+        assert owned_ttl > base, f"a signed-in account's history must outlive the {base}s scratch expiry (got {owned_ttl}s)"
+        assert owned_ttl > settings.chat_history_signed_in_ttl_seconds - 120
+        assert 0 < anon_ttl <= base, f"a signed-out visitor's conversation stays scratch space (got {anon_ttl}s)"
+    else:
+        assert sessions._retention.get(sid) == settings.chat_history_signed_in_ttl_seconds
+        assert anon_sid not in sessions._retention
+        aged = time.time() - (base + 60)
+        sessions._last_seen[sid], sessions._last_seen[anon_sid] = aged, aged
+        sessions._prune_expired()
+        assert sid in sessions._sessions and anon_sid not in sessions._sessions
+
+    assert sid in {c["session_id"] for c in client.get("/me/conversations").json()["conversations"]}
