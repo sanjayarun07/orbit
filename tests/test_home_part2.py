@@ -57,7 +57,11 @@ def test_token_search_prefers_majors_and_verified(monkeypatch):
 
 def test_why_moving_matches_the_right_shapes():
     assert why_moving.match("why is SOL down today?") == ("SOL", "down")
-    assert why_moving.match("Why did $BONK pump?") == ("BONK", "pumping") or why_moving.match("Why did $BONK pump?") is None
+    assert why_moving.match("Why did $BONK pump?") == ("BONK", "up")
+    # Live: "why USELESS token was pumping this week in binance" fell through to a raw DEX table.
+    assert why_moving.match("why USELESS token was pumping this week in binanace?") == ("USELESS", "up")
+    assert why_moving.match("why has ETH been rallying") == ("ETH", "up") and why_moving.match("why did SOL crash yesterday") == ("SOL", "down")
+    assert why_moving.match("why is the market red") is None and why_moving.match("why does ETH keep dumping") == ("ETH", "down")
     assert why_moving.match("why is NVDA stock up") == ("NVDA", "up")
     assert why_moving.match("why is the market red") is None
     assert why_moving.match("what is a liquidity pool") is None

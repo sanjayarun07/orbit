@@ -200,6 +200,7 @@ SCENARIOS = [
     S("why is X moving (crypto + stock)", [
         dict(message="why is SOL down today?", check=_all(_intent("research"), _tools_any("market_data", "perplexity_web_search"), _contains("Why is Solana"))),
         dict(message="why is NVDA stock up?", check=_all(_intent("research"), _contains("Why is NVDA"))),
+        dict(message="why USELESS token was pumping this week in binance?", check=_all(_intent("research"), _contains("Why is"), _contains("USELESS"), _tools_none("dexscreener_pair_search"))),
     ], "research"),
     S("market event calendar card", [dict(message="what events could move the market this week?", check=_all(_intent("research"), _tools_any("market_event_calendar"), _contains("Market events")))], "research"),
     S("social sentiment tool", [dict(message="what is crypto twitter saying about BONK", check=_all(_intent("research"), _tools_any("x_kol_sentiment"), _contains("sentiment")))], "research"),

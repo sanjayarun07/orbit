@@ -20,12 +20,19 @@ from app.provider_registry import get_provider_router
 
 logger = logging.getLogger(__name__)
 
+# "why is SOL down today", "why did $BONK pump", "why USELESS token was pumping
+# this week", "why has ETH been rallying": the verb may precede the symbol,
+# follow it, or be missing; the direction word takes any tense.
 PATTERN = re.compile(
-    r"^\s*(?:so\s+)?why\s+(?:is|did|has|are|was)\s+\$?(?P<sym>[A-Za-z][A-Za-z0-9]{1,9})(?:\s+(?:token|coin|stock|price|shares?))?\s+"
-    r"(?P<dir>moving|up|down|pumping|dumping|rallying|falling|crashing|surging|dropping|rising|tanking|spiking|"
+    r"^\s*(?:so\s+)?why\s+(?:(?:is|did|has|have|are|was|were|does|do)\s+)?(?:the\s+)?\$?(?P<sym>[A-Za-z][A-Za-z0-9]{1,9})"
+    r"(?:\s+(?:token|coin|stock|price|shares?))?(?:\s+(?:is|was|were|has\s+been|have\s+been|been|did|does|keeps?|kept))?\s+"
+    r"(?P<dir>moving|up|down|pump(?:ing|ed|s)?|dump(?:ing|ed|s)?|rally(?:ing|ied|ies)?|falling|fell|crash(?:ing|ed)?|surg(?:ing|ed|es)?|"
+    r"dropp?(?:ing|ed|s)?|rising|rose|tank(?:ing|ed)?|spik(?:ing|ed)?|jump(?:ing|ed)?|moon(?:ing|ed)?|soar(?:ing|ed)?|bleed(?:ing)?|"
     r"going\s+(?:up|down)|so\s+(?:high|low)|red|green)\b.*$",
     re.I,
 )
+_UP = ("up", "pump", "rally", "surg", "ris", "rose", "spik", "jump", "moon", "soar", "green", "going up", "so high")
+_DOWN = ("down", "dump", "fall", "fell", "crash", "drop", "tank", "bleed", "red", "going down", "so low")
 _MAJORS = {"BTC": ("bitcoin", "Bitcoin"), "ETH": ("ethereum", "Ethereum"), "SOL": ("solana", "Solana"), "BNB": ("binancecoin", "BNB"),
            "XRP": ("ripple", "XRP"), "DOGE": ("dogecoin", "Dogecoin"), "ADA": ("cardano", "Cardano"), "AVAX": ("avalanche-2", "Avalanche"),
            "LINK": ("chainlink", "Chainlink"), "SUI": ("sui", "Sui"), "TON": ("the-open-network", "Toncoin"), "TRX": ("tron", "TRON")}
@@ -47,7 +54,9 @@ def match(request: str) -> tuple[str, str] | None:
     sym = m.group("sym").upper()
     if sym in _STOP:
         return None
-    return sym, m.group("dir").lower()
+    raw = re.sub(r"\s+", " ", m.group("dir").lower())
+    direction = "up" if any(raw.startswith(w) for w in _UP) else "down" if any(raw.startswith(w) for w in _DOWN) else "moving"
+    return sym, direction
 
 
 def prefers_stock(request: str) -> bool:

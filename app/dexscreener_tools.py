@@ -230,6 +230,21 @@ def dexscreener_latest_profiles(request: str) -> str:
     return compact_tool_result("\n".join(lines))
 
 
+def _rank_pairs(pairs: list[dict], limit: int = 10) -> list[dict]:
+    """Rank by what actually trades. Decoy listings fake liquidity ($350M
+    "USELESS/USDC" with $3.99 of volume) and would otherwise head the table;
+    when any pair shows real volume, deep-liquidity pairs with none are dropped."""
+    def _vol(pair):
+        return float((pair.get("volume") or {}).get("h24") or 0)
+
+    def _liq(pair):
+        return float((pair.get("liquidity") or {}).get("usd") or 0)
+
+    if any(_vol(p) >= 1_000 for p in pairs):
+        pairs = [p for p in pairs if not (_liq(p) >= 1_000_000 and _vol(p) < 1_000)]
+    return sorted(pairs, key=lambda pair: (_vol(pair), _liq(pair)), reverse=True)[:limit]
+
+
 def dexscreener_pair_search(request: str) -> str:
     """Search DEX pairs by token name, symbol, contract, or natural-language query."""
     address = _ADDRESS.search(request)
@@ -253,7 +268,7 @@ def dexscreener_pair_search(request: str) -> str:
          subject.casefold() == str((pair.get(side) or {}).get(field) or "").casefold())
         for side in ("baseToken", "quoteToken") for field in ("symbol", "name", "address")
     )]
-    pairs = sorted(pairs, key=lambda pair: float((pair.get("liquidity") or {}).get("usd") or 0), reverse=True)[:10]
+    pairs = _rank_pairs(pairs)
     lines = [
         "# DEX pair results",
         f"**Data freshness**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
@@ -293,7 +308,7 @@ def dexscreener_token_pairs(request: str) -> str:
 
 
 def dexscreener_pair_search_from_pairs(pairs: list[dict]) -> str:
-    pairs = sorted(pairs, key=lambda pair: float((pair.get("liquidity") or {}).get("usd") or 0), reverse=True)[:10]
+    pairs = _rank_pairs(pairs)
     lines = ["# Token liquidity venues", "", "| Pair | Chain / DEX | Price | 24h volume | Liquidity |", "|---|---|---:|---:|---:|"]
     for pair in pairs:
         base = (pair.get("baseToken") or {}).get("symbol") or "?"
