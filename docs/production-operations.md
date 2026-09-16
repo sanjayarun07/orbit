@@ -195,6 +195,62 @@ Still open, and deliberately not claimed as done: the wallet sign-in paths
 other than Phantom have not been exercised with real extensions, and this
 matrix is a structural guarantee, not a penetration test.
 
+## Conversation retention
+
+**Retention is measured from the last write.** Every turn appended to a
+conversation pushes its expiry out again; reading one does not. "Thirty days"
+means thirty days after the last message, not after the conversation started.
+
+| State | Kept for | Listed by account | Recoverable later |
+|---|---|---|---|
+| Signed out | 2 hours (`CHAT_HISTORY_TTL_SECONDS`) | no, never mapped to an account | no |
+| Signed in | 30 days (`CHAT_HISTORY_SIGNED_IN_TTL_SECONDS`) | yes, `GET /me/conversations` | yes, from any browser |
+
+A conversation started signed out is claimed by the first account to use it
+while signed in, and is retained as that account's from then on. Ownership never
+transfers after that.
+
+**The 200-message limit is a display cap, not retention.** A conversation keeps
+its most recent 200 messages; older ones are trimmed as new ones arrive. It is
+the length of the transcript the UI can show and the model can be given, and it
+is independent of how long the conversation lives.
+
+### Expiry writes never shorten what is stored
+
+This was a real defect. The retention a conversation had been granted lived only
+in a per-process dictionary, so any process that had not itself granted it --
+a restarted API, or simply a second worker -- wrote the two-hour scratch expiry
+back over a signed-in account's thirty-day history on the next turn.
+
+Every expiry write now goes through an extend-only pair, so retention is a
+property of the stored data rather than of whichever process handled the turn.
+Both halves of that pair are necessary: `GT` refuses to act on a key that has no
+expiry, because Redis treats that as an infinite one, so `GT` alone would leave
+a conversation's first message stored forever; `NX` sets that first expiry and
+`GT` handles every refresh after it. The routing-context key is written by value
+on each turn and so uses `KEEPTTL` before the same pair.
+
+Verified live across a real API restart: a wallet-only account's conversation
+held 30 days before the restart and still held 30 days after a further turn on
+a fresh process.
+
+### What is account-synchronized and what is not
+
+Shipped behavior, stated explicitly because the two halves differ:
+
+- **Synchronized:** the conversation list, its titles and their ordering. These
+  come from the server and appear on any browser the account signs in from.
+- **Per-browser only:** pins, renames, archive and the Recents/Pinned/Archived
+  view. These live in that browser's local storage and do not follow the account
+  to another device.
+
+Entries are stamped with the account that owns them, so signing in as a second
+account on a shared browser does not show the first account's conversations. To
+be precise about what that is and is not: it is a view filter, so the stored
+titles remain in that browser's local storage. Anything stronger requires moving
+this state to the server, which is the decision to revisit if pins and renames
+should follow the account.
+
 ## Wallet account identity
 
 **One EVM address is one account on every EVM network.** An EVM address is the

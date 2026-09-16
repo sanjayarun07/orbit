@@ -55,3 +55,27 @@ def test_every_script_is_safe_to_import(script):
         if isinstance(node, ast.If):   # `if __name__ == "__main__":` and simple guards are fine
             continue
         pytest.fail(f"{script.name} executes {type(node).__name__} at import time; move it into main()")
+
+
+def test_settings_never_renders_a_credential():
+    """`repr(settings)` reaches CI logs through any assertion or exception that
+    touches a setting. A failing comparison against `settings.anything` renders
+    the whole object, so masking has to live on the object, not at call sites.
+    """
+    from app.settings import Settings, _mask_secret, settings
+
+    rendered = repr(settings)
+    for name in ("openai_api_key", "admin_api_key", "stripe_secret_key", "mcp_api_key",
+                 "solana_private_key", "resend_api_key", "stripe_webhook_secret"):
+        value = getattr(settings, name, None)
+        if value:
+            assert value not in rendered, f"{name}'s value appears in repr(settings)"
+
+    # And the masking rule itself, so a newly added credential is covered by
+    # its name rather than by someone remembering to add it to a list.
+    assert "swordfish" not in _mask_secret("some_new_api_key", "swordfish")
+    assert "swordfish" not in _mask_secret("provider_secret", "swordfish")
+    assert _mask_secret("public_base_url", "https://orbit.example.com") == "https://orbit.example.com"
+    # A connection string carries its password inline.
+    assert "hunter2" not in _mask_secret("database_url", "postgresql://app:hunter2@db:5432/orbit")
+    assert isinstance(Settings().model, str)

@@ -68,8 +68,34 @@ async def acquire_session_turn(session_id: str) -> SessionTurnLease:
 
 def _ttl_for(session_id: str) -> int:
     """Seconds a session's keys should live: the long, signed-in retention
-    once extend_retention has marked it, the short default otherwise."""
+    once extend_retention has marked it, the short default otherwise.
+
+    Only a hint. `_retention` is per-process, so a restarted API or simply a
+    second worker returns the short default for a conversation that was already
+    granted the long one. That is why every expiry write below goes through
+    `_extend_only`, which never shortens what is already stored -- retention has
+    to be a property of the data, not of whichever process saw the turn.
+    """
     return _retention.get(session_id, _base_ttl())
+
+
+def _extend_only(pipeline, key: str, seconds: int) -> None:
+    """Queue an expiry that can lengthen a key's life but never shorten it.
+
+    Two commands, and both are needed. `GT` alone is a trap: Redis treats a key
+    with no expiry as having an infinite one, so `GT` refuses to set the first
+    expiry and the key would live forever. `NX` covers exactly that case -- a
+    key that has no TTL yet, such as a conversation's first message -- and `GT`
+    covers every refresh after it.
+    """
+    pipeline.expire(key, seconds, nx=True)
+    pipeline.expire(key, seconds, gt=True)
+
+
+async def _refresh_expiry(redis, key: str, seconds: int) -> None:
+    async with redis.pipeline(transaction=False) as pipeline:
+        _extend_only(pipeline, key, seconds)
+        await pipeline.execute()
 
 
 async def extend_retention(session_id: str, seconds: int) -> None:
@@ -81,8 +107,10 @@ async def extend_retention(session_id: str, seconds: int) -> None:
     _retention[session_id] = seconds
     redis = await get_redis()
     if redis is not None:
-        await redis.expire(f"chat_history:{session_id}", seconds)
-        await redis.expire(f"chat_context:{session_id}", seconds)
+        async with redis.pipeline(transaction=False) as pipeline:
+            _extend_only(pipeline, f"chat_history:{session_id}", seconds)
+            _extend_only(pipeline, f"chat_context:{session_id}", seconds)
+            await pipeline.execute()
         return
     _last_seen[session_id] = time.time()
 
@@ -129,7 +157,7 @@ async def append_turn(
         key = f"chat_history:{session_id}"
         await redis.rpush(key, json.dumps(entry))
         await redis.ltrim(key, -_MAX_DISPLAY_MESSAGES, -1)
-        await redis.expire(key, _ttl_for(session_id))
+        await _refresh_expiry(redis, key, _ttl_for(session_id))
         return
     _prune_expired()
     history = _sessions.setdefault(session_id, deque(maxlen=_MAX_DISPLAY_MESSAGES))
@@ -256,7 +284,10 @@ async def save_session_context(session_id: str, context: dict) -> None:
     redis = await get_redis()
     if redis is not None:
         key = f"chat_context:{session_id}"
-        await redis.set(key, json.dumps(context), ex=_ttl_for(session_id))
+        # keepttl, then extend-only: overwriting the value must not silently
+        # reset a signed-in account's retention to the short default.
+        await redis.set(key, json.dumps(context), keepttl=True)
+        await _refresh_expiry(redis, key, _ttl_for(session_id))
         return
     _prune_expired()
     _contexts[session_id] = dict(context)
@@ -280,8 +311,9 @@ async def commit_turn(
         async with redis.pipeline(transaction=True) as pipeline:
             pipeline.rpush(history_key, json.dumps(user_entry), json.dumps(assistant_entry))
             pipeline.ltrim(history_key, -_MAX_DISPLAY_MESSAGES, -1)
-            pipeline.expire(history_key, _ttl_for(session_id))
-            pipeline.set(context_key, json.dumps(context), ex=_ttl_for(session_id))
+            pipeline.set(context_key, json.dumps(context), keepttl=True)
+            _extend_only(pipeline, history_key, _ttl_for(session_id))
+            _extend_only(pipeline, context_key, _ttl_for(session_id))
             await pipeline.execute()
         return
     _prune_expired()

@@ -404,5 +404,33 @@ class Settings(BaseSettings):
     stripe_crypto_enabled: bool = False
     stripe_tax_enabled: bool = False
 
+    def __repr_args__(self):
+        """Never print a credential, even inside a stack trace.
+
+        Settings is a field on nothing, but it is reachable from plenty of
+        assertion failures and exception reprs -- a failing test that compares
+        against `settings.something` renders the whole object, and that output
+        goes to CI logs. Masking here covers every such path at once, including
+        ones nobody thought about, which is the only way this stays true as
+        fields are added.
+        """
+        for name, value in super().__repr_args__():
+            yield name, _mask_secret(str(name), value)
+
+
+_SECRET_NAME_HINTS = ("key", "secret", "token", "password", "private", "credential")
+
+
+def _mask_secret(name: str, value):
+    if not isinstance(value, str) or not value:
+        return value
+    lowered = name.lower()
+    if any(hint in lowered for hint in _SECRET_NAME_HINTS):
+        return f"<{name} set, {len(value)} chars>"
+    # A connection string carries its password inline: postgres://user:pw@host.
+    if "://" in value and "@" in value.split("://", 1)[1]:
+        return f"<{name} set, credentials in URL>"
+    return value
+
 
 settings = Settings()
