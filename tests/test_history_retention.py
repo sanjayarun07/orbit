@@ -32,6 +32,31 @@ from tests.conftest import sign_in
 HISTORY_KEY = "chat_history:{}"
 
 
+@pytest.fixture(autouse=True)
+def _redis_under_test(monkeypatch):
+    """Point the session store at TEST_REDIS_URL when it is set.
+
+    CI keeps the app's REDIS_URL empty so the suite stays in memory, which made
+    every one of these tests skip there -- and a skipped retention test is not
+    evidence of retention. With an isolated Redis provided under a separate
+    variable, they run. Locally, an unset variable keeps today's behaviour."""
+    import os
+
+    from app import db
+
+    url = os.getenv("TEST_REDIS_URL")
+    if not url:
+        yield
+        return
+    monkeypatch.setattr(settings, "redis_url", url)
+    # Drop any client cached from the app's own configuration so the next
+    # get_redis() builds one for the test instance.
+    monkeypatch.setattr(db, "_redis_client", None)
+    monkeypatch.setattr(db, "_redis_loop", None)
+    monkeypatch.setattr(db, "_redis_unavailable", False)
+    yield
+
+
 def _ttl(session_id: str) -> int | None:
     """Seconds left on the stored transcript, or None when Redis is not usable.
 

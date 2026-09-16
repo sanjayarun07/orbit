@@ -14,8 +14,16 @@ jobs:
         ports:
           - 5432:5432
         options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
       - uses: actions/checkout@v4
+      # The eviction test starts its own one-megabyte redis-server per policy;
+      # without the binary it skips, and a skipped safety test is not evidence.
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq redis-server
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -27,6 +35,10 @@ jobs:
           REDIS_URL: ''
           LIVE_TRADING: 'false'
           TEST_DATABASE_URL: postgresql://postgres:test-only@localhost:5432/orbit_test
+          # Retention is expressed as Redis key TTLs; with this set those tests
+          # run against the service above instead of skipping. The app's own
+          # REDIS_URL stays empty so the rest of the suite remains in memory.
+          TEST_REDIS_URL: redis://localhost:6379/1
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
