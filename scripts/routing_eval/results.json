@@ -2,11 +2,11 @@
  "router": {
   "mode": "router",
   "metrics": {
-   "cases": 34,
+   "cases": 48,
    "abstain": 0,
-   "top1": 0.9705882352941176,
-   "recall_at_k": 0.926470588235294,
-   "mrr": 0.9705882352941176,
+   "top1": 0.9583333333333334,
+   "recall_at_k": 0.9583333333333334,
+   "mrr": 0.9756944444444445,
    "forbidden_at_1": 0.0
   },
   "rows": [
@@ -132,18 +132,18 @@
    ],
    [
     "wallet-txns-sol",
-    "MISS",
-    "-",
-    "0.00",
-    "0.00",
+    "OK",
+    "helius_wallet_transactions",
+    "1.00",
+    "1.00",
     ""
    ],
    [
     "hyperliquid-positions",
-    "OK",
-    "goldrush_hyperliquid_positions",
+    "MISS",
+    "goldrush_hyperliquid_market",
     "1.00",
-    "1.00",
+    "0.50",
     ""
    ],
    [
@@ -280,6 +280,118 @@
     "coingecko_top_volume",
     "1.00",
     "1.00",
+    ""
+   ],
+   [
+    "slang-vol-1",
+    "OK",
+    "coingecko_top_volume",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "slang-vol-2",
+    "OK",
+    "coingecko_top_volume",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "slang-vol-3",
+    "OK",
+    "coingecko_top_volume",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "slang-boosts-1",
+    "OK",
+    "dexscreener_boosted_tokens",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "slang-newlist-1",
+    "OK",
+    "geckoterminal_pools",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "slang-newlist-2",
+    "OK",
+    "geckoterminal_pools",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "slang-narrative-1",
+    "OK",
+    "dexscreener_trending_metas",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "slang-perps-1",
+    "OK",
+    "goldrush_hyperliquid_market",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "slang-social-1",
+    "OK",
+    "x_kol_sentiment",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "slang-pricechange-1",
+    "OK",
+    "coingecko_gainers_losers",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "slang-security-1",
+    "OK",
+    "goplus_token_security",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "slang-balances-vs-tx-1",
+    "OK",
+    "goldrush_wallet_balances",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "slang-balances-vs-tx-2",
+    "OK",
+    "goldrush_wallet_transactions",
+    "1.00",
+    "1.00",
+    ""
+   ],
+   [
+    "slang-liquidity-vs-holders-1",
+    "MISS",
+    "dexscreener_token_pairs",
+    "0.50",
+    "0.33",
     ""
    ]
   ]

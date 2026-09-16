@@ -52,7 +52,7 @@ One token's overview by address: price, volume, liquidity, market cap, holder co
 Recent DEX trades for one token by chain and address
 
 - **API**: Bitquery GraphQL
-  - `POST graphql: EVM DEXTrades / Solana DEXTradeByTokens`
+  - `POST https://streaming.bitquery.io/graphql -- EVM: EVM(dataset:combined){DEXTrades(...)} (Block.Time, Trade.Buy/Sell.Currency, Trade.Buy/Sell.Amount, Trade.Buy/Sell.Price, Trade.Dex.ProtocolName, Transaction.Hash); Solana: a separate DEXTradeByTokens query per Bitquery's docs, not the EVM DEXTrades shape`
 - **Capabilities**: market_data · priority 6
 - **Needs**: chain, address
 - **Returns**: time, dex, side, amount, price, trader
@@ -97,14 +97,14 @@ Token balances for an EVM wallet (Bitquery; failover for GoldRush)
 Top gaining or losing tokens by 24h price change within one chain's ecosystem
 
 - **API**: CoinGecko markets
-  - `GET /coins/markets?category=<chain>-ecosystem&price_change_percentage=24h`
+  - `GET /coins/markets?vs_currency=usd&category=<chain>-ecosystem&price_change_percentage=24h&per_page=100`
 - **Capabilities**: token_discovery, market_data · priority 8
 - **Needs**: chain
-- **Returns**: symbol, price, 24h change, 24h volume
+- **Returns**: id, symbol, current_price, price_change_percentage_24h, total_volume, market_cap
 - **Answers**: price_change
 - **Never for**: boosts, narratives, volume
 - **Coverage**: ethereum, base, arbitrum, optimism, bsc, polygon, avalanche, solana, sui (CoinGecko ecosystem categories)
-- **Freshness**: minutes; client-side ranking, $10K volume floor
+- **Freshness**: Demo tier refreshes every 60s per CoinGecko's docs; client-side ranking, $10K volume floor applied here
 - **Right for**: “top gainers on solana” · “biggest losers on base today”
 - **Looks similar, belongs elsewhere**: “top tokens by volume (volume ranking)” · “trending tokens on base (attention)”
 
@@ -113,10 +113,10 @@ Top gaining or losing tokens by 24h price change within one chain's ecosystem
 Token identity, price, volume and market cap by chain and contract address
 
 - **API**: CoinGecko coins
-  - `GET /coins/<platform>/contract/<address>`
+  - `GET /coins/{platform}/contract/{address}`
 - **Capabilities**: token_discovery, market_data · priority 2
 - **Needs**: chain, address
-- **Returns**: name, symbol, price, volume, market cap, 24h change
+- **Returns**: id, symbol, name, market_data.current_price, market_data.total_volume, market_data.market_cap, market_data.price_change_percentage_24h
 - **Answers**: volume
 - **Never for**: balances, holders, security, transactions
 - **Coverage**: ethereum, base, arbitrum, optimism, bsc, polygon, avalanche, solana
@@ -128,14 +128,14 @@ Token identity, price, volume and market cap by chain and contract address
 Tokens ranked by 24h trading volume, market-wide or within one chain's ecosystem; a volume ranking, never paid boosts
 
 - **API**: CoinGecko markets
-  - `GET /coins/markets (vs_currency=usd, per_page, price_change_percentage=24h[, category=<chain>-ecosystem])`
+  - `GET /coins/markets?vs_currency=usd&order=volume_desc&per_page=<=250&page=&price_change_percentage=24h[&category=<chain>-ecosystem]`
 - **Capabilities**: token_discovery, market_data · priority 9
 - **Needs**: query
-- **Returns**: symbol, price, 24h volume, market cap, 24h change
+- **Returns**: id, symbol, name, current_price, market_cap, market_cap_rank, total_volume, price_change_percentage_24h, high_24h, low_24h, circulating_supply, ath, last_updated
 - **Answers**: volume
 - **Never for**: boosts, narratives, new_listings
-- **Coverage**: market-wide, or one chain's CoinGecko ecosystem category (ethereum, base, arbitrum, optimism, bsc, polygon, avalanche, solana, sui)
-- **Freshness**: minutes; ranking is client-side (the free tier ignores order=)
+- **Coverage**: market-wide (order=volume_desc, up to 250/page), or one chain's CoinGecko ecosystem category (ethereum, base, arbitrum, optimism, bsc, polygon, avalanche, solana, sui)
+- **Freshness**: Demo/keyless tier refreshes every 60s per CoinGecko's docs; ranking is done client-side here -- live-verified 2026-09 that order=volume_desc is silently ignored on the free/demo tier
 - **Right for**: “trending tokens by volume in 24hrs” · “top coins by 24h volume on solana” · “most traded tokens today”
 - **Looks similar, belongs elsewhere**: “trending tokens on pump.fun (paid boosts)” · “top gainers today (price change)”
 
@@ -160,14 +160,14 @@ Token identity and quote for an EVM token by contract address (CoinMarketCap)
 Total value locked for a whole blockchain, or a ranked list of chains
 
 - **API**: DefiLlama
-  - `GET /v2/chains`
+  - `GET https://api.llama.fi/v2/chains  (no API key -- confirmed live 2026-09)`
 - **Capabilities**: defi_data · priority 9
 - **Needs**: chain
-- **Returns**: chain, tvl, change
+- **Returns**: name (chain), tvl, tokenSymbol
 - **Answers**: tvl
 - **Never for**: fees, volume, yields
 - **Coverage**: all chains DefiLlama tracks
-- **Freshness**: hourly
+- **Freshness**: no key required; refreshed regularly, no documented interval
 - **Right for**: “TVL on solana” · “which chain has the most value locked”
 
 ## defillama_fees_revenue
@@ -175,11 +175,11 @@ Total value locked for a whole blockchain, or a ranked list of chains
 Fees and revenue a protocol generates (24h, 30d, all-time)
 
 - **API**: DefiLlama fees
-  - `GET /overview/fees`
-  - `GET /summary/fees/<protocol>`
+  - `GET https://api.llama.fi/overview/fees`
+  - `GET https://api.llama.fi/summary/fees/{protocol}`
 - **Capabilities**: defi_data · priority 10
 - **Needs**: protocol
-- **Returns**: 24h fees, 30d fees, revenue, all-time
+- **Returns**: total24h, total30d, totalAllTime, revenue24h, chains
 - **Answers**: fees
 - **Never for**: tvl, volume, yields
 - **Coverage**: protocols with fee adapters
@@ -191,11 +191,11 @@ Fees and revenue a protocol generates (24h, 30d, all-time)
 TVL for a named DeFi protocol, or a ranked protocol list
 
 - **API**: DefiLlama
-  - `GET /protocols`
-  - `GET /protocol/<slug>`
+  - `GET https://api.llama.fi/protocols  (no API key -- confirmed live 2026-09: id, name, symbol, chain, chains, category, tvl, chainTvls, change_1h, change_1d, change_7d, mcap, gecko_id, audits, twitter, github, listedAt)`
+  - `GET https://api.llama.fi/protocol/{slug}  (adds daily tvl history per chain)`
 - **Capabilities**: defi_data · priority 10
 - **Needs**: protocol
-- **Returns**: protocol, tvl, chains, category, change
+- **Returns**: name, tvl, chainTvls, category, change_1d, change_7d, mcap
 - **Answers**: tvl
 - **Never for**: fees, holders, volume, yields
 - **Coverage**: all protocols DefiLlama tracks
@@ -207,10 +207,10 @@ TVL for a named DeFi protocol, or a ranked protocol list
 Best DeFi yields (APY) for an asset, chain or protocol
 
 - **API**: DefiLlama yields
-  - `GET https://yields.llama.fi/pools`
+  - `GET https://yields.llama.fi/pools  (no API key)`
 - **Capabilities**: defi_data · priority 10
 - **Needs**: query
-- **Returns**: pool, project, chain, apy, tvl, stablecoin
+- **Returns**: pool, project, chain, symbol, apy, apyBase, apyReward, tvlUsd, stablecoin
 - **Answers**: yields
 - **Never for**: fees, tvl, volume
 - **Coverage**: all pools DefiLlama tracks
@@ -222,12 +222,12 @@ Best DeFi yields (APY) for an asset, chain or protocol
 Tokens currently paid-boosted on DEX Screener (attention, not organic demand), with live price, volume and liquidity
 
 - **API**: DEX Screener token boosts
-  - `GET /token-boosts/top/v1`
+  - `GET /token-boosts/top/v1  (returns: url, chainId, tokenAddress, totalAmount, icon, header, description, links, openGraph -- 60 req/min)`
   - `GET /token-boosts/latest/v1`
-  - `GET /tokens/v1/<chain>/<addresses> (enrichment)`
+  - `GET /tokens/v1/{chainId}/{tokenAddresses}  (price/volume/liquidity enrichment for the boosted addresses)`
 - **Capabilities**: market_data, token_discovery · priority 7
 - **Needs**: query
-- **Returns**: symbol, chain, price, 24h volume, liquidity, 24h change, boost amount
+- **Returns**: chainId, tokenAddress, totalAmount (boost spend, not a market metric), price, 24h volume, liquidity, 24h change
 - **Answers**: boosts
 - **Never for**: holders, price_change, security, volume
 - **Coverage**: solana, base, ethereum, base, arbitrum, optimism, bsc, polygon, avalanche, robinhood, pump.fun/launchpads
@@ -240,10 +240,10 @@ Tokens currently paid-boosted on DEX Screener (attention, not organic demand), w
 Newest token profiles published on DEX Screener (fresh launches with metadata)
 
 - **API**: DEX Screener token profiles
-  - `GET /token-profiles/latest/v1`
+  - `GET /token-profiles/latest/v1  (returns: url, chainId, tokenAddress, icon, header, description, links -- 60 req/min)`
 - **Capabilities**: token_discovery · priority 4
 - **Needs**: query
-- **Returns**: symbol, chain, address, description, links
+- **Returns**: chainId, tokenAddress, description, links
 - **Answers**: new_listings
 - **Never for**: holders, price_change, security, volume
 - **Coverage**: multi-chain
@@ -318,12 +318,13 @@ Official exchange listing and delisting announcements for a token
 Real trending or newly-created pools on one chain or launchpad, with price, volume, liquidity and age
 
 - **API**: GeckoTerminal (CoinGecko DEX API)
-  - `GET /networks/<network>/trending_pools`
-  - `GET /networks/<network>/new_pools`
-  - `GET /networks/<network>/dexes/<dex>/pools`
+  - `GET /networks/{network}/trending_pools`
+  - `GET /networks/{network}/new_pools`
+  - `GET /networks/{network}/dexes/{dex}/pools`
+  - `  (JSON:API; data[].attributes: name, address, base_token_price_usd, quote_token_price_usd, price_change_percentage.{m5,m15,m30,h1,h6,h24}, volume_usd.{m5,...,h24}, reserve_in_usd, fdv_usd, market_cap_usd, pool_created_at, transactions.{...} -- confirmed live 2026-09)`
 - **Capabilities**: market_data, token_discovery · priority 10
 - **Needs**: chain
-- **Returns**: pool, dex, price, 24h volume, liquidity, 24h change, created at
+- **Returns**: name, address, base_token_price_usd, volume_usd.h24, reserve_in_usd, price_change_percentage.h24, fdv_usd, market_cap_usd, pool_created_at
 - **Answers**: liquidity, new_listings, volume
 - **Never for**: boosts, holders, security
 - **Coverage**: solana, base, ethereum, base, arbitrum, optimism, bsc, polygon, avalanche, pump.fun and other launchpads
@@ -366,10 +367,10 @@ A wallet's open Hyperliquid perpetual positions, leverage and liquidation price
 Top wallet holders and their share of supply for an EVM token by contract
 
 - **API**: GoldRush (Covalent)
-  - `GET /<chain>/tokens/<address>/token_holders_v2/`
+  - `GET /v1/{chainName}/tokens/{address}/token_holders_v2/  (same balances_v2 field shape, per holder wallet)`
 - **Capabilities**: token_discovery, token_security · priority 10
 - **Needs**: chain, address
-- **Returns**: wallet, balance, share of supply
+- **Returns**: address (holder wallet), balance, total_supply
 - **Answers**: holders
 - **Never for**: boosts, price_change, volume
 - **Coverage**: ethereum, base, arbitrum, optimism, bsc, polygon, avalanche
@@ -381,10 +382,10 @@ Top wallet holders and their share of supply for an EVM token by contract
 Current token balances and USD values for a wallet address
 
 - **API**: GoldRush (Covalent)
-  - `GET /<chain>/address/<wallet>/balances_v2/`
+  - `GET /v1/{chainName}/address/{walletAddress}/balances_v2/?quote-currency=USD&no-spam=true`
 - **Capabilities**: wallet_intelligence · priority 10
 - **Needs**: chain, wallet
-- **Returns**: token, balance, usd value
+- **Returns**: contract_address, contract_ticker_symbol, contract_decimals, balance, quote (USD value), quote_rate, type, is_native_token
 - **Answers**: balances
 - **Never for**: boosts, holders, security
 - **Coverage**: ethereum, base, arbitrum, optimism, bsc, polygon, avalanche, solana (balances only)
@@ -396,10 +397,10 @@ Current token balances and USD values for a wallet address
 Recent transaction history for an EVM wallet on one chain
 
 - **API**: GoldRush (Covalent)
-  - `GET /<chain>/address/<wallet>/transactions_v3/`
+  - `GET /v1/{chainName}/address/{walletAddress}/transactions_v3/`
 - **Capabilities**: wallet_intelligence · priority 9
 - **Needs**: chain, wallet
-- **Returns**: hash, time, from/to, value, method
+- **Returns**: tx_hash, block_signed_at, from_address, to_address, value, fees_paid, log_events
 - **Answers**: transactions
 - **Never for**: balances, security
 - **Coverage**: ethereum, base, arbitrum, optimism, bsc, polygon, avalanche
@@ -411,10 +412,10 @@ Recent transaction history for an EVM wallet on one chain
 Token security scan for an EVM contract: honeypot, blacklist, mintable, taxes, holder flags
 
 - **API**: GoPlus
-  - `GET /token_security/<chain_id>?contract_addresses=`
+  - `GET /api/v1/token_security/{chain_id}?contract_addresses={address}  (20+ chain ids: 1 eth, 56 bsc, 137 polygon, 42161 arbitrum, 8453 base, 10 optimism, 43114 avalanche, ...)`
 - **Capabilities**: token_security · priority 10
 - **Needs**: chain, address
-- **Returns**: honeypot, blacklist, mintable, buy/sell tax, owner, holder count, proxy
+- **Returns**: is_honeypot, is_mintable, owner_address, creator_address, buy_tax, sell_tax, is_blacklisted, is_whitelisted, is_proxy, is_open_source, is_anti_whale, cannot_sell_all, transfer_pausable, slippage_modifiable, can_take_back_ownership, hidden_owner, external_call, holder_count, lp_holder_count, trust_list
 - **Answers**: security
 - **Never for**: boosts, price_change, volume
 - **Coverage**: ethereum, base, arbitrum, optimism, bsc, polygon, avalanche
@@ -441,14 +442,14 @@ Recent parsed transaction history for a Solana wallet
 Honeypot simulation for an EVM token: taxes, sellability, contract flags
 
 - **API**: honeypot.is
-  - `GET /IsHoneypot?address=&chainID=`
+  - `GET /v2/IsHoneypot?address={address}[&chainID=][&pair=]  (chainID omitted: picks the chain with the most liquidity for that address)`
 - **Capabilities**: token_security · priority 8
 - **Needs**: chain, address
-- **Returns**: buy/sell/transfer tax, sellable, open source, proxy
+- **Returns**: honeypotResult.isHoneypot, simulationResult.buyTax, simulationResult.sellTax, simulationResult.transferTax, simulationSuccess, holderAnalysis, contractCode.openSource, contractCode.isProxy
 - **Answers**: security
 - **Never for**: boosts, price_change, volume
 - **Coverage**: ethereum, base, arbitrum, optimism, bsc, polygon, avalanche
-- **Freshness**: live (simulation)
+- **Freshness**: live (buy/sell simulation, not a static scan)
 - **Right for**: “can I sell 0x... on ethereum” · “honeypot check”
 
 ## knowledge_base_search
@@ -624,11 +625,11 @@ Venture fund profiles and portfolios from RootData
 Largest 20 token accounts for a Solana mint with owner wallets and share of supply
 
 - **API**: Solana JSON-RPC
-  - `getTokenLargestAccounts`
+  - `getTokenLargestAccounts(pubkey, {commitment}) -- caps at the 20 largest token accounts, per Solana's own docs`
   - `getMultipleAccounts (owner lookup)`
 - **Capabilities**: token_discovery, token_security · priority 7
 - **Needs**: address
-- **Returns**: owner wallet, amount, share of supply
+- **Returns**: address (token account), amount (raw, base-10 string), decimals, uiAmountString
 - **Answers**: holders
 - **Never for**: boosts, price_change, volume
 - **Coverage**: solana (keyless failover)
@@ -640,11 +641,11 @@ Largest 20 token accounts for a Solana mint with owner wallets and share of supp
 Jupiter Shield safety dossier for a Solana token by mint: verification, authorities, warnings
 
 - **API**: Jupiter tokens v2 + Shield
-  - `GET /tokens/v2/search`
-  - `GET /shield?mints=`
+  - `GET https://lite-api.jup.ag/tokens/v2/search?query={mint}  (confirmed live 2026-09: id, name, symbol, icon, decimals, holderCount, fdv, mcap, usdPrice, liquidity, isVerified, organicScore, organicScoreLabel, tags, audit.{mintAuthorityDisabled,freezeAuthorityDisabled,topHoldersPercentage,devMints}, stats24h.{priceChange,volumeChange,buyVolume,sellVolume,numBuys,numSells,numTraders,numNetBuyers})`
+  - `GET /shield?mints={mint}  (warnings array per mint)`
 - **Capabilities**: token_security · priority 10
 - **Needs**: address
-- **Returns**: verified, tags, organic score, holders, authorities, concentration, warnings
+- **Returns**: isVerified, organicScore, holderCount, audit.mintAuthorityDisabled, audit.freezeAuthorityDisabled, audit.topHoldersPercentage, warnings
 - **Answers**: holders, security
 - **Never for**: boosts, price_change, volume
 - **Coverage**: solana

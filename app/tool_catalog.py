@@ -15,6 +15,20 @@ Dimensions are the subjects a market question can be about: a ranking by
 volume, a ranking by price change, paid boosts, narratives, new listings,
 holders, security, trades, balances, transactions, perps, TVL, fees, yields,
 sentiment, social, exchange listings, news, people, projects, VCs, docs, URLs.
+
+Endpoint paths and response fields below were checked 2026-09-16 against
+official docs or, where docs were unreachable/gated, the live endpoint
+itself (CoinGecko /coins/markets; GoPlus token_security; honeypot.is
+IsHoneypot; GoldRush balances_v2; DefiLlama /protocols, fetched live;
+DEX Screener /token-boosts/top/v1, fetched live; GeckoTerminal
+trending_pools, fetched live; Jupiter tokens/v2 search, fetched live;
+Solana RPC getTokenLargestAccounts; Bitquery DEXTrades/DEXTradeByTokens
+docs). Birdeye, Mobula, CoinMarketCap, LunarCrush, RootData and the
+Hyperliquid/GoldRush info endpoint were left as prior best-knowledge --
+their docs sites returned 403/redirected past what WebFetch could follow
+and there was no live no-key endpoint to confirm against directly; flag
+for a follow-up pass with an authenticated fetch if a misroute ever
+traces back to one of them.
 """
 
 from __future__ import annotations
@@ -89,20 +103,29 @@ _EVM = "ethereum, base, arbitrum, optimism, bsc, polygon, avalanche"
 
 TOOL_SPECS: dict[str, ToolSpec] = {spec.name: spec for spec in [
     # ---------------------------------------------------------------- market data / discovery
-    _spec("coingecko_top_volume", "CoinGecko markets", ["GET /coins/markets (vs_currency=usd, per_page, price_change_percentage=24h[, category=<chain>-ecosystem])"],
-          ["query"], ["symbol", "price", "24h volume", "market cap", "24h change"], {"volume"},
-          not_for={"boosts", "narratives", "new_listings"}, coverage="market-wide, or one chain's CoinGecko ecosystem category (" + _EVM + ", solana, sui)",
-          freshness="minutes; ranking is client-side (the free tier ignores order=)",
+    _spec("coingecko_top_volume", "CoinGecko markets", [
+              "GET /coins/markets?vs_currency=usd&order=volume_desc&per_page=<=250&page=&price_change_percentage=24h[&category=<chain>-ecosystem]",
+          ], ["query"], [
+              "id", "symbol", "name", "current_price", "market_cap", "market_cap_rank", "total_volume",
+              "price_change_percentage_24h", "high_24h", "low_24h", "circulating_supply", "ath", "last_updated",
+          ], {"volume"},
+          not_for={"boosts", "narratives", "new_listings"}, coverage="market-wide (order=volume_desc, up to 250/page), or one chain's CoinGecko ecosystem category (" + _EVM + ", solana, sui)",
+          freshness="Demo/keyless tier refreshes every 60s per CoinGecko's docs; ranking is done client-side here -- live-verified 2026-09 that order=volume_desc is silently ignored on the free/demo tier",
           answers=["trending tokens by volume in 24hrs", "top coins by 24h volume on solana", "most traded tokens today"],
           not_answers=["trending tokens on pump.fun (paid boosts)", "top gainers today (price change)"],
           summary="Tokens ranked by 24h trading volume, market-wide or within one chain's ecosystem; a volume ranking, never paid boosts"),
-    _spec("coingecko_gainers_losers", "CoinGecko markets", ["GET /coins/markets?category=<chain>-ecosystem&price_change_percentage=24h"],
-          ["chain"], ["symbol", "price", "24h change", "24h volume"], {"price_change"},
-          not_for={"boosts", "volume", "narratives"}, coverage=_EVM + ", solana, sui (CoinGecko ecosystem categories)", freshness="minutes; client-side ranking, $10K volume floor",
+    _spec("coingecko_gainers_losers", "CoinGecko markets", [
+              "GET /coins/markets?vs_currency=usd&category=<chain>-ecosystem&price_change_percentage=24h&per_page=100",
+          ], ["chain"], ["id", "symbol", "current_price", "price_change_percentage_24h", "total_volume", "market_cap"], {"price_change"},
+          not_for={"boosts", "volume", "narratives"}, coverage=_EVM + ", solana, sui (CoinGecko ecosystem categories)",
+          freshness="Demo tier refreshes every 60s per CoinGecko's docs; client-side ranking, $10K volume floor applied here",
           answers=["top gainers on solana", "biggest losers on base today"], not_answers=["top tokens by volume (volume ranking)", "trending tokens on base (attention)"],
           summary="Top gaining or losing tokens by 24h price change within one chain's ecosystem"),
-    _spec("dexscreener_boosted_tokens", "DEX Screener token boosts", ["GET /token-boosts/top/v1", "GET /token-boosts/latest/v1", "GET /tokens/v1/<chain>/<addresses> (enrichment)"],
-          ["query"], ["symbol", "chain", "price", "24h volume", "liquidity", "24h change", "boost amount"], {"boosts"},
+    _spec("dexscreener_boosted_tokens", "DEX Screener token boosts", [
+              "GET /token-boosts/top/v1  (returns: url, chainId, tokenAddress, totalAmount, icon, header, description, links, openGraph -- 60 req/min)",
+              "GET /token-boosts/latest/v1",
+              "GET /tokens/v1/{chainId}/{tokenAddresses}  (price/volume/liquidity enrichment for the boosted addresses)",
+          ], ["query"], ["chainId", "tokenAddress", "totalAmount (boost spend, not a market metric)", "price", "24h volume", "liquidity", "24h change"], {"boosts"},
           not_for={"volume", "price_change", "holders", "security"}, coverage="solana, base, " + _EVM + ", robinhood, pump.fun/launchpads", freshness="live (60s cache)",
           answers=["trending tokens on pump.fun", "hot tokens on solana right now", "boosted tokens on base"],
           not_answers=["tokens by 24h volume (CoinGecko ranking)", "top gainers (price change)"],
@@ -112,8 +135,8 @@ TOOL_SPECS: dict[str, ToolSpec] = {spec.name: spec for spec in [
           not_for={"volume", "price_change", "holders"}, coverage="multi-chain", freshness="live (60s cache)",
           answers=["what narratives are trending", "hot metas right now"], not_answers=["trending tokens (a token list)", "tokens by volume"],
           summary="Narratives and metas currently drawing attention on DEX Screener, not a token list"),
-    _spec("dexscreener_latest_profiles", "DEX Screener token profiles", ["GET /token-profiles/latest/v1"],
-          ["query"], ["symbol", "chain", "address", "description", "links"], {"new_listings"},
+    _spec("dexscreener_latest_profiles", "DEX Screener token profiles", ["GET /token-profiles/latest/v1  (returns: url, chainId, tokenAddress, icon, header, description, links -- 60 req/min)"],
+          ["query"], ["chainId", "tokenAddress", "description", "links"], {"new_listings"},
           not_for={"volume", "price_change", "holders", "security"}, coverage="multi-chain", freshness="live",
           answers=["newest token profiles", "latest launches with a profile"], not_answers=["new pools on base (GeckoTerminal)"],
           summary="Newest token profiles published on DEX Screener (fresh launches with metadata)"),
@@ -127,8 +150,14 @@ TOOL_SPECS: dict[str, ToolSpec] = {spec.name: spec for spec in [
           ["chain", "address"], ["pair", "dex", "price", "24h volume", "liquidity", "24h change", "buys/sells"], {"liquidity", "volume", "security"},
           not_for={"holders", "balances", "transactions"}, coverage="every DEX Screener chain", freshness="live",
           answers=["pairs for 0x... on base", "liquidity of <mint> on solana"], summary="Trading pairs for one token by chain and contract address"),
-    _spec("geckoterminal_pools", "GeckoTerminal (CoinGecko DEX API)", ["GET /networks/<network>/trending_pools", "GET /networks/<network>/new_pools", "GET /networks/<network>/dexes/<dex>/pools"],
-          ["chain"], ["pool", "dex", "price", "24h volume", "liquidity", "24h change", "created at"], {"new_listings", "liquidity", "volume"},
+    _spec("geckoterminal_pools", "GeckoTerminal (CoinGecko DEX API)", [
+              "GET /networks/{network}/trending_pools",
+              "GET /networks/{network}/new_pools",
+              "GET /networks/{network}/dexes/{dex}/pools",
+              "  (JSON:API; data[].attributes: name, address, base_token_price_usd, quote_token_price_usd, "
+              "price_change_percentage.{m5,m15,m30,h1,h6,h24}, volume_usd.{m5,...,h24}, reserve_in_usd, "
+              "fdv_usd, market_cap_usd, pool_created_at, transactions.{...} -- confirmed live 2026-09)",
+          ], ["chain"], ["name", "address", "base_token_price_usd", "volume_usd.h24", "reserve_in_usd", "price_change_percentage.h24", "fdv_usd", "market_cap_usd", "pool_created_at"], {"new_listings", "liquidity", "volume"},
           not_for={"holders", "security", "boosts"}, coverage="solana, base, " + _EVM + ", pump.fun and other launchpads", freshness="live (60s cache)",
           answers=["trending pools on base", "new pairs on solana", "new pump.fun launches"], not_answers=["tokens by 24h volume market-wide (CoinGecko)"],
           summary="Real trending or newly-created pools on one chain or launchpad, with price, volume, liquidity and age"),
@@ -140,15 +169,19 @@ TOOL_SPECS: dict[str, ToolSpec] = {spec.name: spec for spec in [
           ["chain", "address"], ["price", "market cap", "volume", "liquidity", "supply", "contracts per chain"], {"liquidity", "volume"},
           not_for={"holders", "security", "balances"}, coverage="solana, base, " + _EVM, freshness="live",
           answers=["token details for 0x... on ethereum"], summary="One token's market details by address across chains (price, cap, volume, liquidity, supply)"),
-    _spec("coingecko_token_by_contract", "CoinGecko coins", ["GET /coins/<platform>/contract/<address>"],
-          ["chain", "address"], ["name", "symbol", "price", "volume", "market cap", "24h change"], {"volume"},
+    _spec("coingecko_token_by_contract", "CoinGecko coins", ["GET /coins/{platform}/contract/{address}"],
+          ["chain", "address"], ["id", "symbol", "name", "market_data.current_price", "market_data.total_volume", "market_data.market_cap", "market_data.price_change_percentage_24h"], {"volume"},
           not_for={"holders", "security", "balances", "transactions"}, coverage=_EVM + ", solana", freshness="minutes",
           answers=["what is 0x... on base (identity + price)"], summary="Token identity, price, volume and market cap by chain and contract address"),
     _spec("coinmarketcap_token_by_contract", "CoinMarketCap", ["GET /v2/cryptocurrency/info?address=", "GET /v3/cryptocurrency/quotes/latest"],
           ["address"], ["name", "symbol", "price", "volume", "market cap", "24h change"], {"volume"},
           not_for={"holders", "security", "balances", "transactions"}, coverage="EVM tokens", freshness="minutes",
           answers=["CMC data for 0x..."], summary="Token identity and quote for an EVM token by contract address (CoinMarketCap)"),
-    _spec("bitquery_recent_dex_trades", "Bitquery GraphQL", ["POST graphql: EVM DEXTrades / Solana DEXTradeByTokens"],
+    _spec("bitquery_recent_dex_trades", "Bitquery GraphQL", [
+              "POST https://streaming.bitquery.io/graphql -- EVM: EVM(dataset:combined){DEXTrades(...)} "
+              "(Block.Time, Trade.Buy/Sell.Currency, Trade.Buy/Sell.Amount, Trade.Buy/Sell.Price, Trade.Dex.ProtocolName, Transaction.Hash); "
+              "Solana: a separate DEXTradeByTokens query per Bitquery's docs, not the EVM DEXTrades shape",
+          ],
           ["chain", "address"], ["time", "dex", "side", "amount", "price", "trader"], {"trades"},
           not_for={"holders", "balances", "security"}, coverage="solana, " + _EVM, freshness="live",
           answers=["recent trades of 0x... on base", "last swaps for <mint>"], summary="Recent DEX trades for one token by chain and address"),
@@ -161,37 +194,50 @@ TOOL_SPECS: dict[str, ToolSpec] = {spec.name: spec for spec in [
           ["chain", "address"], ["wallet", "balance", "share of supply"], {"holders"},
           not_for={"volume", "price_change", "boosts", "security"}, coverage="solana", freshness="minutes",
           answers=["top holders of <mint>"], summary="Top wallet holders and their share of supply for a Solana token by mint"),
-    _spec("solana_rpc_token_top_holders", "Solana JSON-RPC", ["getTokenLargestAccounts", "getMultipleAccounts (owner lookup)"],
-          ["address"], ["owner wallet", "amount", "share of supply"], {"holders"},
+    _spec("solana_rpc_token_top_holders", "Solana JSON-RPC", ["getTokenLargestAccounts(pubkey, {commitment}) -- caps at the 20 largest token accounts, per Solana's own docs", "getMultipleAccounts (owner lookup)"],
+          ["address"], ["address (token account)", "amount (raw, base-10 string)", "decimals", "uiAmountString"], {"holders"},
           not_for={"volume", "price_change", "boosts"}, coverage="solana (keyless failover)", freshness="live",
           answers=["largest holders of <mint>"], summary="Largest 20 token accounts for a Solana mint with owner wallets and share of supply"),
-    _spec("goldrush_token_top_holders", "GoldRush (Covalent)", ["GET /<chain>/tokens/<address>/token_holders_v2/"],
-          ["chain", "address"], ["wallet", "balance", "share of supply"], {"holders"},
+    _spec("goldrush_token_top_holders", "GoldRush (Covalent)", ["GET /v1/{chainName}/tokens/{address}/token_holders_v2/  (same balances_v2 field shape, per holder wallet)"],
+          ["chain", "address"], ["address (holder wallet)", "balance", "total_supply"], {"holders"},
           not_for={"volume", "price_change", "boosts"}, coverage=_EVM, freshness="minutes",
           answers=["top holders of 0x... on base"], summary="Top wallet holders and their share of supply for an EVM token by contract"),
-    _spec("goplus_token_security", "GoPlus", ["GET /token_security/<chain_id>?contract_addresses="],
-          ["chain", "address"], ["honeypot", "blacklist", "mintable", "buy/sell tax", "owner", "holder count", "proxy"], {"security"},
+    _spec("goplus_token_security", "GoPlus", ["GET /api/v1/token_security/{chain_id}?contract_addresses={address}  (20+ chain ids: 1 eth, 56 bsc, 137 polygon, 42161 arbitrum, 8453 base, 10 optimism, 43114 avalanche, ...)"],
+          ["chain", "address"], [
+              "is_honeypot", "is_mintable", "owner_address", "creator_address", "buy_tax", "sell_tax",
+              "is_blacklisted", "is_whitelisted", "is_proxy", "is_open_source", "is_anti_whale",
+              "cannot_sell_all", "transfer_pausable", "slippage_modifiable", "can_take_back_ownership",
+              "hidden_owner", "external_call", "holder_count", "lp_holder_count", "trust_list",
+          ], {"security"},
           not_for={"volume", "price_change", "boosts"}, coverage=_EVM, freshness="live",
           answers=["is 0x... on bsc safe", "rug check 0x..."], summary="Token security scan for an EVM contract: honeypot, blacklist, mintable, taxes, holder flags"),
-    _spec("honeypot_token_security", "honeypot.is", ["GET /IsHoneypot?address=&chainID="],
-          ["chain", "address"], ["buy/sell/transfer tax", "sellable", "open source", "proxy"], {"security"},
-          not_for={"volume", "price_change", "boosts"}, coverage=_EVM, freshness="live (simulation)",
+    _spec("honeypot_token_security", "honeypot.is", ["GET /v2/IsHoneypot?address={address}[&chainID=][&pair=]  (chainID omitted: picks the chain with the most liquidity for that address)"],
+          ["chain", "address"], [
+              "honeypotResult.isHoneypot", "simulationResult.buyTax", "simulationResult.sellTax", "simulationResult.transferTax",
+              "simulationSuccess", "holderAnalysis", "contractCode.openSource", "contractCode.isProxy",
+          ], {"security"},
+          not_for={"volume", "price_change", "boosts"}, coverage=_EVM, freshness="live (buy/sell simulation, not a static scan)",
           answers=["can I sell 0x... on ethereum", "honeypot check"], summary="Honeypot simulation for an EVM token: taxes, sellability, contract flags"),
-    _spec("solana_token_security", "Jupiter tokens v2 + Shield", ["GET /tokens/v2/search", "GET /shield?mints="],
-          ["address"], ["verified", "tags", "organic score", "holders", "authorities", "concentration", "warnings"], {"security", "holders"},
+    _spec("solana_token_security", "Jupiter tokens v2 + Shield", [
+              "GET https://lite-api.jup.ag/tokens/v2/search?query={mint}  (confirmed live 2026-09: id, name, symbol, icon, decimals, holderCount, "
+              "fdv, mcap, usdPrice, liquidity, isVerified, organicScore, organicScoreLabel, tags, "
+              "audit.{mintAuthorityDisabled,freezeAuthorityDisabled,topHoldersPercentage,devMints}, "
+              "stats24h.{priceChange,volumeChange,buyVolume,sellVolume,numBuys,numSells,numTraders,numNetBuyers})",
+              "GET /shield?mints={mint}  (warnings array per mint)",
+          ], ["address"], ["isVerified", "organicScore", "holderCount", "audit.mintAuthorityDisabled", "audit.freezeAuthorityDisabled", "audit.topHoldersPercentage", "warnings"], {"security", "holders"},
           not_for={"volume", "price_change", "boosts"}, coverage="solana", freshness="live",
           answers=["is <mint> safe", "freeze authority on <mint>"], summary="Jupiter Shield safety dossier for a Solana token by mint: verification, authorities, warnings"),
     # ---------------------------------------------------------------- wallets
-    _spec("goldrush_wallet_balances", "GoldRush (Covalent)", ["GET /<chain>/address/<wallet>/balances_v2/"],
-          ["chain", "wallet"], ["token", "balance", "usd value"], {"balances"},
+    _spec("goldrush_wallet_balances", "GoldRush (Covalent)", ["GET /v1/{chainName}/address/{walletAddress}/balances_v2/?quote-currency=USD&no-spam=true"],
+          ["chain", "wallet"], ["contract_address", "contract_ticker_symbol", "contract_decimals", "balance", "quote (USD value)", "quote_rate", "type", "is_native_token"], {"balances"},
           not_for={"security", "holders", "boosts"}, coverage=_EVM + ", solana (balances only)", freshness="live",
           answers=["balances of 0x... on base", "holdings of <wallet> on solana"], summary="Current token balances and USD values for a wallet address"),
     _spec("bitquery_wallet_balances", "Bitquery GraphQL", ["POST graphql: EVM BalanceUpdates by address"],
           ["chain", "wallet"], ["token", "balance"], {"balances"},
           not_for={"security", "holders"}, coverage=_EVM, freshness="minutes",
           answers=["what does 0x... hold on ethereum"], summary="Token balances for an EVM wallet (Bitquery; failover for GoldRush)"),
-    _spec("goldrush_wallet_transactions", "GoldRush (Covalent)", ["GET /<chain>/address/<wallet>/transactions_v3/"],
-          ["chain", "wallet"], ["hash", "time", "from/to", "value", "method"], {"transactions"},
+    _spec("goldrush_wallet_transactions", "GoldRush (Covalent)", ["GET /v1/{chainName}/address/{walletAddress}/transactions_v3/"],
+          ["chain", "wallet"], ["tx_hash", "block_signed_at", "from_address", "to_address", "value", "fees_paid", "log_events"], {"transactions"},
           not_for={"balances", "security"}, coverage=_EVM, freshness="live",
           answers=["recent transactions of 0x... on arbitrum"], summary="Recent transaction history for an EVM wallet on one chain"),
     _spec("helius_wallet_transactions", "Helius", ["POST /?api-key= getTransactionsForAddress / parsed transactions"],
@@ -203,16 +249,20 @@ TOOL_SPECS: dict[str, ToolSpec] = {spec.name: spec for spec in [
           not_for={"security", "holders"}, coverage="Hyperliquid (EVM address)", freshness="live",
           answers=["my hyperliquid positions", "open perps for 0x..."], summary="A wallet's open Hyperliquid perpetual positions, leverage and liquidation price"),
     # ---------------------------------------------------------------- DeFi data
-    _spec("defillama_chain_tvl", "DefiLlama", ["GET /v2/chains"], ["chain"], ["chain", "tvl", "change"], {"tvl"},
-          not_for={"fees", "yields", "volume"}, coverage="all chains DefiLlama tracks", freshness="hourly",
+    _spec("defillama_chain_tvl", "DefiLlama", ["GET https://api.llama.fi/v2/chains  (no API key -- confirmed live 2026-09)"], ["chain"], ["name (chain)", "tvl", "tokenSymbol"], {"tvl"},
+          not_for={"fees", "yields", "volume"}, coverage="all chains DefiLlama tracks", freshness="no key required; refreshed regularly, no documented interval",
           answers=["TVL on solana", "which chain has the most value locked"], summary="Total value locked for a whole blockchain, or a ranked list of chains"),
-    _spec("defillama_protocols", "DefiLlama", ["GET /protocols", "GET /protocol/<slug>"], ["protocol"], ["protocol", "tvl", "chains", "category", "change"], {"tvl"},
+    _spec("defillama_protocols", "DefiLlama", [
+              "GET https://api.llama.fi/protocols  (no API key -- confirmed live 2026-09: id, name, symbol, chain, chains, category, tvl, chainTvls, "
+              "change_1h, change_1d, change_7d, mcap, gecko_id, audits, twitter, github, listedAt)",
+              "GET https://api.llama.fi/protocol/{slug}  (adds daily tvl history per chain)",
+          ], ["protocol"], ["name", "tvl", "chainTvls", "category", "change_1d", "change_7d", "mcap"], {"tvl"},
           not_for={"fees", "yields", "volume", "holders"}, coverage="all protocols DefiLlama tracks", freshness="hourly",
           answers=["Aave TVL", "top DeFi protocols by TVL"], summary="TVL for a named DeFi protocol, or a ranked protocol list"),
-    _spec("defillama_fees_revenue", "DefiLlama fees", ["GET /overview/fees", "GET /summary/fees/<protocol>"], ["protocol"], ["24h fees", "30d fees", "revenue", "all-time"], {"fees"},
+    _spec("defillama_fees_revenue", "DefiLlama fees", ["GET https://api.llama.fi/overview/fees", "GET https://api.llama.fi/summary/fees/{protocol}"], ["protocol"], ["total24h", "total30d", "totalAllTime", "revenue24h", "chains"], {"fees"},
           not_for={"tvl", "yields", "volume"}, coverage="protocols with fee adapters", freshness="daily",
           answers=["how much does Uniswap earn in fees", "Jupiter revenue"], summary="Fees and revenue a protocol generates (24h, 30d, all-time)"),
-    _spec("defillama_yields", "DefiLlama yields", ["GET https://yields.llama.fi/pools"], ["query"], ["pool", "project", "chain", "apy", "tvl", "stablecoin"], {"yields"},
+    _spec("defillama_yields", "DefiLlama yields", ["GET https://yields.llama.fi/pools  (no API key)"], ["query"], ["pool", "project", "chain", "symbol", "apy", "apyBase", "apyReward", "tvlUsd", "stablecoin"], {"yields"},
           not_for={"tvl", "fees", "volume"}, coverage="all pools DefiLlama tracks", freshness="hourly",
           answers=["best USDC yields on base", "SOL staking rates"], summary="Best DeFi yields (APY) for an asset, chain or protocol"),
     # ---------------------------------------------------------------- sentiment / social / listings
