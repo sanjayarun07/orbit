@@ -49,7 +49,12 @@ function makeDom() {
       append() {}, appendChild(child) { el.children.push(child); return child; },
       replaceWith() {}, remove() {}, closest: () => null, focus() {}, blur() {}, scrollTo() {},
       setAttribute(name, v) { el[name] = v; }, getAttribute: (name) => el[name] ?? null,
-      removeAttribute() {}, insertAdjacentHTML() {}, querySelector: () => query("descendant"),
+      removeAttribute() {}, insertAdjacentHTML() {},
+      // Scoped by parent, so two different selectors inside one card are two
+      // different elements. Returning one shared element for every selector
+      // made a card's fields all alias each other, which silently turned any
+      // test driving a card into a test that proved nothing.
+      querySelector: (selector) => query(`${key} >> ${selector}`),
       querySelectorAll: () => [], getBoundingClientRect: () => ({ top: 0, left: 0, width: 0, height: 0 }),
     };
     return el;
@@ -103,6 +108,7 @@ function makeSandbox(dom, overrides = {}) {
     FormData: class { append() {} }, Blob: class {}, File: class {},
     TextEncoder, TextDecoder, btoa, atob, structuredClone,
     AbortController: class { constructor() { this.signal = {}; } abort() {} },
+    setImmediate, queueMicrotask,
     ...overrides,
   };
   sandbox.window = sandbox;
@@ -139,12 +145,22 @@ function load(overrides = {}) {
   // code inside the context. Assigning sandbox.relayChains would silently do
   // nothing, which is its own way to write a test that proves nothing.
   const evalIn = (code) => vm.runInContext(code, context);
+  /** Replace the stub executor with the REAL compiled bundle the page serves.
+   *
+   * The executor is where the guard immediately before wallet approval lives,
+   * so imitating it in the harness would test the imitation. This runs
+   * app/static/executors.js in the same context, exactly as the page's script
+   * tag does, and it overwrites the stub OrbitExecutors on the way. */
+  const useRealExecutors = () => {
+    const bundle = readFileSync(resolve(HERE, "../../app/static/executors.js"), "utf8");
+    new vm.Script(bundle, { filename: "executors.js" }).runInContext(context);
+  };
   const setScriptVar = (name, value) => {
     sandbox.__harnessValue = value;
     evalIn(`${name} = __harnessValue;`);
   };
   const getScriptVar = (name) => evalIn(name);
-  return { dom, sandbox, context, evalIn, setScriptVar, getScriptVar };
+  return { dom, sandbox, context, evalIn, setScriptVar, getScriptVar, useRealExecutors };
 }
 
 const SOLANA = { id: 792703809, name: "Solana", nativeSymbol: "SOL", vmType: "svm" };
@@ -319,6 +335,94 @@ const CASES = {
     sandbox.window.OrbitExecutors.executeRelay = async (quote) => { signed.push(quote); };
     await sandbox.executeRelayQuote();
     return { signedQuotes: signed.length, status: dom.query("#relayStatus").textContent };
+  },
+
+  /** Inputs edited while the server's execution claim is outstanding.
+   *
+   * The revision check runs before the executor is called, and the executor
+   * then awaits the claim over the network. An edit during that wait used to
+   * change nothing: the old quote went on to wallet approval anyway. The real
+   * compiled executor already re-checks an isCurrent callback immediately
+   * after the claim -- the page simply never passed one.
+   *
+   * `surface` is "dialog" or "inline" so the same race is proved on both.
+   */
+  async execution_aborts_when_inputs_change_during_the_claim() {
+    const { dom, sandbox, setScriptVar, useRealExecutors } = load();
+    useRealExecutors();
+    setScriptVar("relayChains", [SOLANA, BASE]);
+
+    // A quote whose step carries the requestId the claim is keyed on.
+    sandbox.window.OrbitRelay.getFreshQuote = async (args) => {
+      sandbox.recorded.relayQuoteArgs = args;
+      return {
+        quote: { details: {}, fees: {}, steps: [{ requestId: "r".repeat(24), action: "swap" }] },
+        wallet: {}, createdAt: Date.now(),
+      };
+    };
+
+    // The wallet step. Reaching this at all with a superseded quote is the bug.
+    const approvals = [];
+    sandbox.window.OrbitRelay.executeQuote = async (quote) => { approvals.push(quote); return {}; };
+
+    // Hold the claim open so the inputs can change underneath it.
+    let releaseClaim;
+    const claimHeld = new Promise(resolve => { releaseClaim = resolve; });
+    sandbox.fetch = async (url) => {
+      if (String(url).includes("/executions/relay/")) {
+        await claimHeld;
+        return { ok: true, status: 200, json: async () => ({ execution_claimed: true }) };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    };
+
+    dom.query("#relayFromChain").value = "792703809";
+    dom.query("#relayToChain").value = "8453";
+    dom.query("#relayFromToken").value = "SOL";
+    dom.query("#relayToToken").value = "USDC";
+    dom.query("#relayAmount").value = "0.01";
+    dom.query("#relayRecipient").value = "0x1111111111111111111111111111111111111111";
+    dom.query("#relaySlippage").value = "50";
+
+    await sandbox.requestRelayQuote();
+    const signing = sandbox.executeRelayQuote();
+    dom.query("#relaySlippage").value = "1";
+    sandbox.invalidateRelayQuote();   // the edit lands while the claim is open
+    releaseClaim();
+    await signing;
+
+    return {
+      requestedSlippage: sandbox.recorded.relayQuoteArgs?.slippageBps,
+      walletApprovals: approvals.length,
+      status: dom.query("#relayStatus").textContent,
+    };
+  },
+
+  /** The claim path must still reach the wallet when nothing changed. */
+  async execution_reaches_the_wallet_when_nothing_changes() {
+    const { dom, sandbox, setScriptVar, useRealExecutors } = load();
+    useRealExecutors();
+    setScriptVar("relayChains", [SOLANA, BASE]);
+    sandbox.window.OrbitRelay.getFreshQuote = async (args) => {
+      sandbox.recorded.relayQuoteArgs = args;
+      return { quote: { details: {}, fees: {}, steps: [{ requestId: "r".repeat(24) }] }, wallet: {}, createdAt: Date.now() };
+    };
+    const approvals = [];
+    sandbox.window.OrbitRelay.executeQuote = async (quote) => { approvals.push(quote); return {}; };
+    sandbox.fetch = async (url) => String(url).includes("/executions/relay/")
+      ? { ok: true, status: 200, json: async () => ({ execution_claimed: true }) }
+      : { ok: true, status: 200, json: async () => ({}) };
+
+    dom.query("#relayFromChain").value = "792703809";
+    dom.query("#relayToChain").value = "8453";
+    dom.query("#relayFromToken").value = "SOL";
+    dom.query("#relayToToken").value = "USDC";
+    dom.query("#relayAmount").value = "0.01";
+    dom.query("#relayRecipient").value = "0x1111111111111111111111111111111111111111";
+    dom.query("#relaySlippage").value = "50";
+    await sandbox.requestRelayQuote();
+    await sandbox.executeRelayQuote();
+    return { walletApprovals: approvals.length, status: dom.query("#relayStatus").textContent };
   },
 
   /** The dialog must recover once a configuration fetch finally succeeds. */

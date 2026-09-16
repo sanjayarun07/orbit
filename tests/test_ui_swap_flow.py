@@ -129,3 +129,27 @@ def test_an_unchanged_reviewed_quote_still_signs():
     result = run_case("an_unchanged_reviewed_quote_still_signs")
     assert result["signedQuotes"] == 1, "a valid, unchanged quote was refused"
     assert "completed" in result["status"]
+
+
+def test_editing_inputs_during_the_execution_claim_stops_wallet_approval():
+    """The reviewed gap. The revision check runs before the executor is called,
+    and the executor then awaits the server's claim over the network. An edit
+    during that wait used to change nothing: the superseded quote went on to
+    wallet approval anyway.
+
+    Driven through the REAL compiled app/static/executors.js, not an imitation
+    of it, because the guard immediately before wallet approval lives there --
+    it had always existed, and the page simply never passed the callback.
+    """
+    result = run_case("execution_aborts_when_inputs_change_during_the_claim")
+    assert result["requestedSlippage"] == 50, "fixture must quote the old slippage first"
+    assert result["walletApprovals"] == 0, "a superseded quote reached the wallet handler"
+    assert "superseded" in result["status"]
+
+
+def test_the_execution_claim_still_reaches_the_wallet_when_nothing_changes():
+    """The control. Without it the test above passes on a page that can never
+    sign anything at all."""
+    result = run_case("execution_reaches_the_wallet_when_nothing_changes")
+    assert result["walletApprovals"] == 1, "an unchanged quote never reached the wallet"
+    assert "completed" in result["status"]
