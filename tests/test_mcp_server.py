@@ -85,6 +85,8 @@ def test_full_web_surface_is_exposed():
     assert core <= set(tools)
     data_tools = [n for n in tools if n.startswith("orbit_data_")]
     assert len(data_tools) >= 30 and "orbit_data_birdeye_token_overview" in tools
+    # The knowledge base is a data tool like any other: MCP clients can query it directly.
+    assert "orbit_data_knowledge_base_search" in tools and "knowledge" in tools["orbit_data_knowledge_base_search"].description.lower()
     assert "birdeye" in tools["orbit_data_birdeye_token_overview"].description
     resources = {str(r.uri) for r in asyncio.run(mcp_server.mcp.list_resources())}
     assert {"orbit://skill", "orbit://capabilities", "orbit://health"} <= resources

@@ -197,6 +197,15 @@ SCENARIOS = [
     ], "research"),
     S("market event calendar card", [dict(message="what events could move the market this week?", check=_all(_intent("research"), _tools_any("market_event_calendar"), _contains("Market events")))], "research"),
     S("social sentiment tool", [dict(message="what is crypto twitter saying about BONK", check=_all(_intent("research"), _tools_any("x_kol_sentiment"), _contains("sentiment")))], "research"),
+    S("knowledge base: docs, incidents, funding, graph", [
+        dict(message="How does Aave V3's E-mode change the liquidation threshold?", check=_all(_intent("research"), _tools_any("knowledge_base_search"), _contains("[1]"))),
+        dict(message="has Aave ever been hacked?", check=_all(_intent("research"), _tools_any("knowledge_base_search"), _tools_none("perplexity_web_search"))),
+        dict(message="who are the investors backing EigenLayer?", check=_all(_intent("research"), _tools_any("knowledge_base_search"))),
+        dict(message="what is Aave's TVL right now", check=_all(_intent("research"), _tools_none("knowledge_base_search"))),   # live numbers never go to the KB
+        API("GET", "/knowledge/search?q=Aave%20liquidation%20threshold&limit=3", check=lambda st, d, t, c: [] if d.get("hits") and d.get("citations") and d["entities"] and d["entities"][0]["id"] == "protocol:aave-v3" else [f"search: entities={d.get('entities')} hits={len(d.get('hits') or [])}"]),
+        API("GET", "/knowledge/graph/protocol:aave-v3?relation=COMPETITOR_OF", check=lambda st, d, t, c: [] if d.get("edges") else ["no competitor edges"]),
+        API("GET", "/knowledge/status", check=lambda st, d, t, c: [] if d.get("backend") == "postgres" and d.get("vector_native") and d.get("chunks", 0) > 1000 else [f"status={d}"]),
+    ], "knowledge"),
     S("tasks from chat: remind, alert, list, delete", [
         dict(message="remind me in 3 hours to check SOL", extra={"tz_offset_min": 330}, check=_all(_intent("general"), _contains("Reminder set", "check SOL"))),
         dict(message="alert me when SOL drops below $10", check=_all(_intent("general"), _contains("Alert set", "SOL < $10"))),

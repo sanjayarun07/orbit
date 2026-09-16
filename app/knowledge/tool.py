@@ -20,7 +20,8 @@ from app.knowledge.store import get_store
 TRIGGER = re.compile(
     r"\b(?:what\s+is|what\s+are|what's|explain|describe|how\s+does|how\s+do|how\s+is|overview\s+of|tell\s+me\s+about|introduction\s+to|"
     r"how\s+(?:does|do)\s+.+\s+work|docs?\s+(?:for|on)|documentation|liquidation|collateral|governance|tokenomics|architecture|mechanism|"
-    r"compete|competitors?|alternatives?\s+to|integrat(?:e|es|ion)\s+with|deployed\s+on|supports?)\b",
+    r"compete|competitors?|alternatives?\s+to|integrat(?:e|es|ion)\s+with|deployed\s+on|supports?|"
+    r"hack(?:ed|s)?|exploit(?:ed|s)?|incidents?|audit(?:ed|s)?|investors?|backed\s+by|raised|funding|fork(?:ed)?\s+(?:of|from)|oracles?|proposals?|voted?)\b",
     re.IGNORECASE,
 )
 _LIVE = re.compile(r"\b(?:tvl|price|volume|market\s*cap|holders?|apy|apr|yield\s+now|right\s+now|today|current)\b", re.IGNORECASE)

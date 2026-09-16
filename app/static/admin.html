@@ -98,7 +98,7 @@ async function openUser(email){const box=$("#opsUser");box.hidden=false;box.inne
  }catch(e){box.innerHTML=`<div class="error">${esc(e.message)}</div>`}}
 $("#opsRefresh").onclick=loadOps;$("#opsSearch").onclick=searchUsers;$("#opsQuery").addEventListener("keydown",e=>{if(e.key==="Enter")searchUsers()});
 // ---- Knowledge base ----
-const SRC_LABEL={defillama:"llama",protocol_docs:"docs",github:"github",snapshot:"snapshot",discourse:"forum",governance:"gov"};
+const SRC_LABEL={defillama:"llama",protocol_docs:"docs",github:"github",snapshot:"snapshot",discourse:"forum",governance:"gov",coingecko:"gecko",token:"token",incident:"incident",funding:"funding"};
 function ago(iso){if(!iso)return "never";const s=(Date.now()-new Date(iso).getTime())/1000;if(s<90)return "just now";if(s<3600)return `${Math.round(s/60)}m ago`;if(s<86400)return `${Math.round(s/3600)}h ago`;return `${Math.round(s/86400)}d ago`}
 function fmtN(v){return Number(v||0).toLocaleString()}
 async function loadKb(){const m=$("#kbMetrics"),tb=$("#kbCoverage");try{const d=await api("/admin/knowledge/overview");const t=d.totals,c=d.config;

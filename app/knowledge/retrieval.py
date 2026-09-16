@@ -21,7 +21,7 @@ from app.knowledge.store import get_store
 
 _WORD = re.compile(r"[a-z0-9$#-]+")
 _STOP = {"the", "a", "an", "of", "on", "in", "to", "for", "and", "or", "is", "are", "what", "how", "does", "do", "explain", "me", "about", "tell", "with", "vs", "versus", "compare"}
-_PROTOCOL_EDGES = ("COMPETITOR_OF", "INTEGRATES_WITH", "FORK_OF")
+_PROTOCOL_EDGES = ("COMPETITOR_OF", "INTEGRATES_WITH", "FORK_OF", "PART_OF")
 
 
 @dataclass
@@ -96,11 +96,16 @@ async def graph_expand(plan: RetrievalPlan, store, max_hops: int = 1) -> list[st
         added = 0
         for rel in rels:
             other = rel.target_entity_id if rel.source_entity_id == entity.id else rel.source_entity_id
-            if other.startswith("protocol:") and other not in found and other not in plan.protocol_ids:
-                found.append(other)
-                added += 1
-                if added >= per_entity:
-                    break
+            candidates = [other]
+            if rel.relation == "PART_OF" and other.startswith("org:"):
+                # Same family (Aave V2 / V3 / Horizon): one hop through the organisation.
+                candidates = [r.source_entity_id for r in await store.neighbors(other, relation="PART_OF", direction="in")]
+            for candidate in candidates:
+                if candidate.startswith("protocol:") and candidate not in found and candidate not in plan.protocol_ids:
+                    found.append(candidate)
+                    added += 1
+            if added >= per_entity:
+                break
     return found[:12]
 
 

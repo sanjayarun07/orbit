@@ -392,3 +392,147 @@ def test_clean_markdown_strips_nul_bytes():
     """Pendle's docs carried a NUL byte; Postgres rejects it in TEXT columns."""
     assert "\x00" not in normalize.clean_markdown("# Minting\x00\n\nYield\x00 tokenization")
     assert normalize.html_to_markdown("<h1>Min\x00ting</h1><p>text</p>") == "# Minting\n\ntext"
+
+
+# --- DefiLlama facts, CoinGecko tokens, structured edges -----------------------
+
+AAVE_LLAMA_DETAIL = {
+    "name": "Aave V3", "symbol": "AAVE", "category": "Lending", "chains": ["Ethereum", "Base"], "url": "https://aave.com", "twitter": "aave",
+    "description": "Aave is a non-custodial liquidity protocol.", "methodology": "Counts tokens locked as collateral.", "audits": "2", "audit_links": ["https://aave.com/security"],
+    "oraclesBreakdown": [{"name": "Chainlink", "type": "Primary", "proof": [], "startDate": "2023-01-15"}], "forkedFrom": ["Morpho"], "parentProtocol": "parent#aave",
+    "otherProtocols": ["Aave", "Aave V2", "Aave V3"], "listedAt": 1648776877,
+    "hallmarks": [[1650412800, "Start AVAX Rewards"], [1776470400, "KelpDAO hack"]],
+    "hacks": [{"date": 1773273600, "name": "Aave V3", "classification": "Oracle Manipulation", "technique": "Oracle Misconfiguration", "amount": 862000, "chain": ["Ethereum"], "returnedFunds": 862000, "language": "Solidity"}],
+    "raises": [
+        {"date": 1679961600, "name": "Aave", "round": "Series A", "amount": 50, "chains": ["Ethereum"], "leadInvestors": ["Blockchain Capital"], "otherInvestors": ["Coinbase Ventures", "Polychain Capital"], "valuation": "500"},
+        {"date": 1750118400, "name": "Aave", "round": None, "amount": 70, "chains": ["Ethereum"], "leadInvestors": ["a16z crypto"], "otherInvestors": []},
+    ],
+}
+
+GECKO_AAVE = {
+    "id": "aave", "symbol": "aave", "name": "Aave", "genesis_date": "2020-10-02", "categories": ["Decentralized Finance (DeFi)", "Lending/Borrowing Protocols"],
+    "description": {"en": "Aave is a decentralized money market protocol where users can <b>lend and borrow</b> cryptocurrency."},
+    "links": {"homepage": ["https://aave.com/"], "whitepaper": "https://github.com/aave/aave-protocol/blob/master/docs/Aave_Protocol_Whitepaper_v1_0.pdf", "twitter_screen_name": "aave", "repos_url": {"github": ["https://github.com/aave/aave-protocol"]}},
+    "platforms": {"ethereum": "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9", "solana": "AavE1kKKnesPw4MuRJmJ9jZs9QzEE8CPxQ3ViczUDfc1", "base": "0x63706e401c06ac8513145b7687a14804d17f814b", "hydration": "asset_registry%2F1000624"},
+}
+
+
+def test_defillama_detail_becomes_overview_incident_and_funding_documents():
+    aave = Protocol(id="protocol:aave", slug="aave", name="Aave", symbol="AAVE", category="Lending", chains=["ethereum", "base"], defillama_slug="aave")
+    docs = DefiLlamaConnector.build(aave, AAVE_LLAMA_DETAIL, "https://api.llama.fi/protocol/aave")
+    assert [d.source_type for d in docs] == ["defillama", "incident", "funding"]
+    overview, incident, funding = docs
+    assert "**Forked from**: Morpho" in overview.content and "**Oracles**: Chainlink (Primary)" in overview.content and "**Family**: Aave" in overview.content
+    assert "## Security incidents" in overview.content and "Oracle Manipulation via Oracle Misconfiguration, $862,000 lost, $862,000 returned" in overview.content
+    assert "## Funding" in overview.content and "$120.0M raised in total" in overview.content and "led by a16z crypto" in overview.content
+    assert "## Timeline" in overview.content and "2022-04-20: Start AVAX Rewards" in overview.content
+    relations = {(f["relation"], f["target"].get("id") or f["target"]["name"]) for f in overview.metadata["facts"]}
+    assert relations == {("USES_ORACLE", "org:chainlink"), ("FORK_OF", "Morpho"), ("PART_OF", "org:aave")}
+    assert incident.title == "Aave V3 exploit — 2026-03-12" and incident.published_at.year == 2026 and incident.metadata["amount_usd"] == 862000
+    assert incident.metadata["facts"][0]["relation"] == "HAD_INCIDENT" and incident.metadata["facts"][0]["target"]["id"] == "incident:aave:2026-03-12"
+    assert funding.title == "Aave — funding rounds" and "**2023-03-28** · Series A · $50.0M at $500.0M valuation · lead: Blockchain Capital" in funding.content
+    funded_by = {f["target"]["id"]: (f["confidence"], f["metadata"]["lead"]) for f in funding.metadata["facts"]}
+    assert funded_by["org:a16z-crypto"] == (0.95, True) and funded_by["org:coinbase-ventures"] == (0.9, False)
+    # No hacks or raises: only the overview.
+    assert len(DefiLlamaConnector.build(aave, {"name": "Aave", "description": "x"}, "u")) == 1
+
+
+def test_ingestion_applies_structured_facts_as_entities_and_dated_edges():
+    asyncio.run(registry.bootstrap(limit=10))
+    store = asyncio.run(kb_store.get_store())
+    aave = asyncio.run(store.get_protocol("protocol:aave"))
+    docs = DefiLlamaConnector.build(aave, AAVE_LLAMA_DETAIL, "https://api.llama.fi/protocol/aave")
+    written = sum(asyncio.run(ingest.ingest_document(d))[2] for d in docs)
+    assert written >= 7   # oracle, fork, family, incident, 4 investors (+ mention edges)
+    entities = {e.id: e for e in asyncio.run(store.list_entities())}
+    assert entities["org:chainlink"].entity_type == "organization" and entities["org:aave"].canonical_name == "Aave family" and entities["org:aave"].aliases == []
+    assert asyncio.run(kb_tool.resolver(force=True)).resolve("Aave").entity.id == "protocol:aave"   # the family never shadows the protocol
+    assert entities["incident:aave:2026-03-12"].entity_type == "incident" and entities["incident:aave:2026-03-12"].metadata["technique"] == "Oracle Misconfiguration"
+    edges = {(r.relation, r.target_entity_id): r for r in asyncio.run(store.neighbors("protocol:aave", direction="out"))}
+    assert edges[("FORK_OF", "protocol:morpho")].confidence == 0.95            # resolved by name against the registry
+    assert edges[("USES_ORACLE", "org:chainlink")].valid_from.date().isoformat() == "2023-01-15"
+    assert edges[("HAD_INCIDENT", "incident:aave:2026-03-12")].valid_from.date().isoformat() == "2026-03-12"
+    assert edges[("FUNDED_BY", "org:blockchain-capital")].metadata == {"source": "defillama", "lead": True, "rounds": ["2023-03-28"], "method": "structured"}
+    assert all(r.source_document_id for r in edges.values() if r.metadata.get("method") == "structured")
+    # Same facts again: nothing duplicated.
+    assert sum(asyncio.run(ingest.ingest_document(d))[2] for d in DefiLlamaConnector.build(aave, AAVE_LLAMA_DETAIL, "https://api.llama.fi/protocol/aave")) == 0
+    # An unresolvable fork target is dropped rather than inventing an entity.
+    other = DefiLlamaConnector.document(aave, {**AAVE_LLAMA_DETAIL, "forkedFrom": ["Compound"], "hacks": [], "raises": []}, "https://api.llama.fi/protocol/aave-x")
+    asyncio.run(ingest.ingest_document(other))
+    assert not [r for r in asyncio.run(store.neighbors("protocol:aave", relation="FORK_OF")) if r.target_entity_id.endswith("compound")]
+    assert "org:compound" not in {e.id for e in asyncio.run(store.list_entities())}
+
+
+def test_coingecko_token_document_registers_addresses_on_every_chain():
+    from app.knowledge.connectors.coingecko import CoinGeckoConnector
+
+    aave = Protocol(id="protocol:aave", slug="aave", name="Aave", symbol="AAVE", coingecko_id="aave")
+    assert CoinGeckoConnector().applies(aave) and not CoinGeckoConnector().applies(Protocol(id="p", slug="p", name="P"))
+    doc = CoinGeckoConnector.document(aave, GECKO_AAVE)
+    assert doc.source_type == "token" and doc.url == "https://www.coingecko.com/en/coins/aave" and doc.title == "Aave token (AAVE)"
+    assert "lend and borrow" in doc.content and "<b>" not in doc.content and "- solana: `AavE1kKKnesPw4MuRJmJ9jZs9QzEE8CPxQ3ViczUDfc1`" in doc.content
+    assert "hydration" not in doc.metadata["platforms"]          # not an address
+    targets = {f["target"]["id"]: f for f in doc.metadata["facts"]}
+    assert set(targets) == {"token:ethereum:0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9", "token:solana:AavE1kKKnesPw4MuRJmJ9jZs9QzEE8CPxQ3ViczUDfc1", "token:base:0x63706e401c06ac8513145b7687a14804d17f814b"}
+    assert all(f["relation"] == "TOKEN_OF" and f["direction"] == "in" for f in targets.values())
+    # After ingestion the Base address resolves at 1.0 to the protocol's token.
+    asyncio.run(registry.bootstrap(limit=10))
+    asyncio.run(ingest.ingest_document(doc))
+    resolver = asyncio.run(kb_tool.resolver(force=True))
+    hit = resolver.resolve("0x63706e401c06ac8513145b7687a14804d17f814b", chain="base")
+    assert hit.confidence == 1.0 and hit.entity.chain == "base" and hit.entity.symbol == "AAVE"
+    store = asyncio.run(kb_store.get_store())
+    assert any(r.relation == "TOKEN_OF" and r.source_entity_id.startswith("token:base:") for r in asyncio.run(store.neighbors("protocol:aave")))
+
+
+def test_coingecko_calls_are_throttled_process_wide(monkeypatch):
+    from app.knowledge.connectors import coingecko
+
+    calls = []
+    monkeypatch.setattr(coingecko, "MIN_INTERVAL", 0.05)
+    monkeypatch.setattr(coingecko, "_last_call", 0.0)
+    monkeypatch.setattr(coingecko.time, "sleep", lambda s: calls.append(round(s, 3)))
+
+    class FakeClient:
+        def get(self, url):
+            return url
+
+    coingecko._throttled_get(FakeClient(), "a")
+    coingecko._throttled_get(FakeClient(), "b")
+    assert calls and 0 < calls[-1] <= 0.05      # the second call waited for the interval
+
+
+def test_knowledge_trigger_covers_incidents_funding_and_governance_asks():
+    for ask in ("has Aave ever been hacked", "who are the investors in EigenLayer", "which oracle does Spark use", "is Morpho a fork of Aave", "what did the Lido community vote on"):
+        assert kb_tool.TRIGGER.search(ask), ask
+    assert not kb_tool.TRIGGER.search("price of AAVE right now") or kb_tool._LIVE.search("price of AAVE right now")
+
+
+def test_graph_expansion_follows_the_protocol_family():
+    asyncio.run(registry.bootstrap(limit=10))
+    store = asyncio.run(kb_store.get_store())
+    aave = asyncio.run(store.get_protocol("protocol:aave"))
+    morpho = asyncio.run(store.get_protocol("protocol:morpho"))
+    for p in (aave, morpho):   # both declare the same family: one hop through org:aave-family links them
+        asyncio.run(ingest.ingest_document(DefiLlamaConnector.document(p, {"name": p.name, "description": "x", "parentProtocol": "parent#aave-family", "otherProtocols": []}, f"u/{p.slug}")))
+    resolver = ent.EntityResolver(asyncio.run(store.list_entities()))
+    plan = asyncio.run(retrieval.plan_query("how does Aave handle liquidations", resolver))
+    assert asyncio.run(retrieval.graph_expand(plan, store))[0] == "protocol:morpho"
+
+
+def test_name_aliases_and_shared_alias_disambiguation_by_tvl():
+    from app.knowledge.models import Entity
+
+    assert registry.name_aliases("Kamino Lend") == {"Kamino"} and registry.name_aliases("Uniswap V3") == {"Uniswap"}
+    assert registry.name_aliases("Morpho Blue") == {"Morpho"} and registry.name_aliases("Aave") == set()
+    assert "The" not in registry.name_aliases("The Graph") and "Staked" not in registry.name_aliases("Staked ETH")
+    # "Aave" is an alias on three registry protocols: context wins, then TVL.
+    resolver = ent.EntityResolver([
+        Entity(id="protocol:aave-v3", entity_type="protocol", canonical_name="Aave V3", aliases=["Aave", "AAVE"], metadata={"tvl_usd": 20e9}),
+        Entity(id="protocol:aave-v4", entity_type="protocol", canonical_name="Aave V4", aliases=["Aave", "AAVE"], metadata={"tvl_usd": 1e9}),
+        Entity(id="protocol:aave-horizon-rwa", entity_type="protocol", canonical_name="Aave Horizon RWA", aliases=["Aave"], metadata={"tvl_usd": 3e8}),
+    ])
+    assert resolver.resolve("Aave").entity.id == "protocol:aave-v3"
+    assert resolver.resolve("Aave", context="how does Aave V4 differ").entity.id == "protocol:aave-v4"
+    assert [m.entity.id for m in resolver.mentions("has Aave ever been hacked?")] == ["protocol:aave-v3"]
+    assert {m.entity.id for m in resolver.mentions("compare Aave Horizon RWA with Aave V3")} == {"protocol:aave-horizon-rwa", "protocol:aave-v3"}

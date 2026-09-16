@@ -67,8 +67,23 @@ def _ranked_tools(query: str, semantic: bool):
     return route.intent, caps, chains, [t.name for t in ranked]
 
 
+def _warm_knowledge_snapshot() -> None:
+    """The knowledge tool's matcher is I/O-free and reads a resolver snapshot
+    the API keeps warm; outside the server we build it once here (needs
+    DATABASE_URL with an ingested registry) so kb-* cases can route."""
+    try:
+        import asyncio
+        from app.knowledge import tool as kb_tool
+
+        resolver = asyncio.run(kb_tool.resolver(force=True))
+        print(f"knowledge snapshot: {len(resolver)} entities")
+    except Exception as exc:  # no database, empty registry: kb-* cases will abstain
+        print(f"knowledge snapshot unavailable ({exc}); kb-* cases will abstain")
+
+
 def run_router_mode(cases, k: int, semantic: bool):
     rows, agg = [], {"top1": 0, "recall_sum": 0.0, "mrr_sum": 0.0, "forbidden": 0, "n": 0, "abstain": 0}
+    _warm_knowledge_snapshot()
     for c in cases:
         if not c.get("router", True):
             continue

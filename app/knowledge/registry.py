@@ -30,12 +30,31 @@ def _fetch_protocols() -> list[dict]:
     return data if isinstance(data, list) else []
 
 
+_VERSION_SUFFIX = re.compile(r"\s+v\d+(?:\.\d+)?$", re.I)
+_GENERIC_WORDS = {"the", "protocol", "finance", "network", "labs", "dao", "swap", "bridge", "staked", "liquid", "staking", "lend", "lending", "core", "pool", "vault", "money", "capital", "chain", "token"}
+
+
+def name_aliases(name: str) -> set[str]:
+    """How people actually refer to a protocol: "Kamino" for "Kamino Lend",
+    "Uniswap" for "Uniswap V3", "Morpho" for "Morpho Blue". Shared first words
+    ("Binance Staked ETH", "Binance Bitcoin") end up on several entities and
+    the resolver then treats them as ambiguous, which is the right outcome."""
+    out: set[str] = set()
+    base = _VERSION_SUFFIX.sub("", name.strip())
+    if base and base.lower() != name.lower():
+        out.add(base)
+    first = re.split(r"[\s\-]+", base, maxsplit=1)[0] if base else ""
+    if first and first.lower() != base.lower() and len(first) >= 4 and first.isalpha() and first.lower() not in _GENERIC_WORDS:
+        out.add(first)
+    return out
+
+
 def protocol_from_llama(item: dict) -> Protocol | None:
     slug = str(item.get("slug") or slugify(item.get("name") or ""))
     if not slug or (item.get("category") in _SKIP_CATEGORIES):
         return None
     name = str(item.get("name") or slug)
-    aliases = {name, slug.replace("-", " ")}
+    aliases = {name, slug.replace("-", " "), *name_aliases(name)}
     if item.get("symbol") and item["symbol"] != "-":
         aliases.add(str(item["symbol"]))
     for extra in (item.get("parentProtocol") or "", item.get("module") or ""):
@@ -76,7 +95,7 @@ def entities_for(protocol: Protocol) -> tuple[list[Entity], list[Relationship]]:
     now = datetime.now(timezone.utc)
     entities = [Entity(
         id=protocol.id, entity_type="protocol", canonical_name=protocol.name, symbol=protocol.symbol, aliases=protocol.aliases,
-        metadata={"defillama_slug": protocol.defillama_slug, "coingecko_id": protocol.coingecko_id, "category": protocol.category, "website": protocol.website, "github_org": protocol.github_org},
+        metadata={"defillama_slug": protocol.defillama_slug, "coingecko_id": protocol.coingecko_id, "category": protocol.category, "website": protocol.website, "github_org": protocol.github_org, "tvl_usd": protocol.tvl_usd},
     )]
     relationships = []
     for chain in protocol.chains:

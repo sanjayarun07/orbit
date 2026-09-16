@@ -565,5 +565,102 @@
     "expected_intent": "general",
     "router": false,
     "notes": "policy question: answered from settings + charter, never the portfolio or the model (2026-09-15)"
+  },
+  {
+    "id": "kb-mechanism-aave-emode",
+    "query": "How does Aave V3's E-mode change the liquidation threshold?",
+    "expected_tools": [
+      "knowledge_base_search"
+    ],
+    "forbidden_tools": [
+      "defillama_protocols",
+      "jupiter"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "protocol mechanism from indexed docs, not a live number"
+  },
+  {
+    "id": "kb-what-is-protocol",
+    "query": "what is Morpho Blue and how does it work",
+    "expected_tools": [
+      "knowledge_base_search"
+    ],
+    "forbidden_tools": [
+      "jupiter",
+      "relay"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "'what is X' for a registry protocol -> knowledge base first"
+  },
+  {
+    "id": "kb-incident",
+    "query": "has Aave ever been hacked?",
+    "expected_tools": [
+      "knowledge_base_search"
+    ],
+    "forbidden_tools": [
+      "jupiter",
+      "portfolio_snapshot"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "DefiLlama hacks are indexed as incident documents"
+  },
+  {
+    "id": "kb-investors",
+    "query": "who are the investors backing EigenLayer",
+    "expected_tools": [
+      "knowledge_base_search"
+    ],
+    "forbidden_tools": [
+      "jupiter",
+      "portfolio_snapshot"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "funding rounds + FUNDED_BY edges"
+  },
+  {
+    "id": "kb-governance",
+    "query": "what did the Lido community vote on recently",
+    "expected_tools": [
+      "knowledge_base_search"
+    ],
+    "forbidden_tools": [
+      "jupiter"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "Snapshot proposals and forum threads are governance documents"
+  },
+  {
+    "id": "kb-competitors",
+    "query": "who are Kamino's competitors on Solana",
+    "expected_tools": [
+      "knowledge_base_search"
+    ],
+    "forbidden_tools": [
+      "jupiter",
+      "relay"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "COMPETITOR_OF edges derived from category + chain"
+  },
+  {
+    "id": "kb-not-live-tvl",
+    "query": "what is Aave's TVL right now",
+    "expected_tools": [
+      "defillama_protocols",
+      "defillama_chain_tvl"
+    ],
+    "forbidden_tools": [
+      "knowledge_base_search"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "live number: the KB matcher must decline ('right now')"
   }
 ]

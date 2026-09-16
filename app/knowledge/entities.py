@@ -96,7 +96,10 @@ class EntityResolver:
             self._by_address[(None, entity.address.lower())] = entity.id
         for key in ("coingecko_id", "defillama_slug"):
             if entity.metadata.get(key):
-                self._by_external[(key, str(entity.metadata[key]).lower())] = entity.id
+                external = (key, str(entity.metadata[key]).lower())
+                # A protocol and its token share a CoinGecko id; "aave" means the protocol.
+                if external not in self._by_external or entity.entity_type == "protocol" or self._by_id[self._by_external[external]].entity_type != "protocol" and entity.entity_type != "token":
+                    self._by_external[external] = entity.id
 
     def get(self, entity_id: str) -> Entity | None:
         return self._by_id.get(entity_id)
@@ -143,6 +146,9 @@ class EntityResolver:
         return None
 
     def _disambiguate(self, candidates: list[str], chain: str | None, context: str) -> str | None:
+        """Context first (chain, a fuller name in the sentence); when that does
+        not separate the candidates, the largest protocol by TVL wins -- "Aave"
+        means Aave V3, not Aave V4 or Aave Horizon RWA, unless the text says so."""
         context = (context or "").lower()
         scored = []
         for cid in candidates:
@@ -152,12 +158,15 @@ class EntityResolver:
                 score += 2
             if entity.canonical_name.lower() in context:
                 score += 2
-            if any(alias.lower() in context for alias in entity.aliases):
+            if any(alias.lower() in context and alias.lower() != entity.canonical_name.lower() for alias in entity.aliases if len(alias) > 5):
                 score += 1
             scored.append((score, cid))
-        scored.sort(reverse=True)
+        scored.sort(key=lambda s: -s[0])
         if scored and scored[0][0] > 0 and (len(scored) == 1 or scored[0][0] > scored[1][0]):
             return scored[0][1]
+        by_tvl = sorted(candidates, key=lambda cid: -float(self._by_id[cid].metadata.get("tvl_usd") or 0))
+        if by_tvl and float(self._by_id[by_tvl[0]].metadata.get("tvl_usd") or 0) > 0 and self._by_id[by_tvl[0]].entity_type == "protocol":
+            return by_tvl[0]
         return None
 
     def mentions(self, text: str, context: str = "") -> list[Resolution]:
@@ -168,6 +177,13 @@ class EntityResolver:
         text = text or ""
         lowered = text.lower()
         names = [(name, eid) for name, eid in self._by_name.items()] + [(alias, eids[0]) for alias, eids in self._by_alias.items() if len(eids) == 1]
+        # Shared aliases ("Aave" on V3 / V4 / Horizon) go through disambiguation:
+        # context or TVL picks one, so the ask is still recognised as about Aave.
+        for alias, eids in self._by_alias.items():
+            if len(eids) > 1:
+                pick = self._disambiguate(eids, None, text)
+                if pick:
+                    names.append((alias, pick))
         for name, eid in names:
             if len(name) < 3:
                 continue

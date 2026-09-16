@@ -28,7 +28,10 @@ Sources ── connectors ── normalize (html→md, hash, chunks) ── enti
 | `store.py` | `MemoryStore` (reference) and `PostgresStore`; `write_document` is hash-idempotent and versions on change, re-chunking only that document |
 | `retrieval.py` | `plan_query` (entity recognition) → semantic + lexical (+ graph-expanded protocols) → RRF → `Reranker` (heuristic default) → `build_context` with numbered citations |
 | `registry.py` | bootstrap from DefiLlama `/protocols` (top N by TVL, CEX/Chain skipped): protocol rows + entities + first edges `DEPLOYED_ON`, `IN_CATEGORY`, `TOKEN_OF` |
-| `connectors/` | `base.Connector` (`applies`, `discover`, `fetch`) — `defillama` (overview page), `docs` (llms.txt → crawl, budgeted, same-host), `github` (top READMEs), `snapshot` (proposals via GraphQL) |
+| `connectors/` | `base.Connector` (`applies`, `discover`, `fetch` or `documents`) — `defillama` (overview + one document per recorded hack + funding rounds, with structured facts), `docs` (llms.txt → crawl, budgeted, same-host), `github` (top READMEs), `snapshot` (proposals via GraphQL), `discourse` (forum threads), `coingecko` (token page + contract addresses on every chain) |
+| `overrides.py` | per-slug `docs_url` / `forum_url` / `governance_url` where DefiLlama's website is not enough |
+| `derive.py` | `COMPETITOR_OF` (category + shared chain) and corroborated `INTEGRATES_WITH` after each pass |
+| `reranker.py` | heuristic / cross-encoder / llm behind `retrieval.set_reranker` |
 | `ingest.py` | `ingest_document`, `run_source`, `run_protocol`, `tick` (due pairs by refresh policy), `worker`; prose-derived edges are low-confidence and carry `source_document_id` |
 | `tool.py` | `knowledge_base_search` ProviderTool (capability `knowledge`); matcher = knowledge-shaped ask + a registry entity − live-number words |
 
@@ -36,10 +39,12 @@ Sources ── connectors ── normalize (html→md, hash, chunks) ── enti
 
 | Source | Refresh |
 |---|---|
-| DefiLlama metadata | 1h |
+| DefiLlama detail (overview, hacks, raises, oracles, forks, family) | 24h |
 | Protocol docs | 12h |
 | GitHub READMEs | 6h |
 | Snapshot governance | 15 min |
+| Discourse forums | 6h |
+| CoinGecko token page + addresses | 7d |
 | TVL / prices / pools / social | live tools, never the corpus |
 
 Unchanged documents (same `content_hash`) are skipped before chunking, so a
@@ -96,6 +101,31 @@ Discourse site exposes (`/latest.json`, `/t/<id>.json`): the opening post in
 full plus the first replies, one document per thread. Both are
 `source_type = governance`, so "what did the community say about raising the
 LTV" is answered with a link to the thread.
+
+### Structured facts from DefiLlama and CoinGecko
+
+`/protocol/<slug>` carries more than a description, and each part becomes
+both text and graph:
+
+| DefiLlama field | Document | Edge |
+|---|---|---|
+| `hacks[]` | one `incident` document per event (date, loss, technique, returned funds) | `HAD_INCIDENT` → `incident:<slug>:<date>` (0.95, `valid_from` = date) |
+| `raises[]` | one `funding` document (rounds, valuations, investors) | `FUNDED_BY` → `org:<investor>` (0.95 lead, 0.90 other) |
+| `oraclesBreakdown[]` | in the overview | `USES_ORACLE` → `org:<oracle>` (0.95) |
+| `forkedFrom[]` | in the overview | `FORK_OF` → protocol, only when the name resolves at ≥ 0.9 |
+| `parentProtocol` | in the overview | `PART_OF` → `org:<family>` (0.98); graph expansion hops through it (Aave V2 ↔ V3) |
+| `hallmarks[]` | a dated timeline in the overview | — |
+
+CoinGecko's coin page adds the token description, categories, canonical
+links and the contract address on every chain the token is deployed to,
+each written as a `token:<chain>:<address>` entity with a `TOKEN_OF` edge:
+a Base or Solana address pasted into chat then resolves at confidence 1.0.
+Calls are throttled to one every 2.5 s process-wide (free tier).
+
+Connectors state facts in `NormalizedDocument.metadata["facts"]`; ingestion
+resolves or creates the target entity and writes the edge with the document
+as provenance (`method = structured`). A fact whose named target does not
+resolve is dropped, never invented.
 
 ### Derived edges
 

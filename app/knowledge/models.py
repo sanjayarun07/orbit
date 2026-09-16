@@ -7,9 +7,18 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-SOURCE_TYPES = ("protocol_docs", "github", "governance", "defillama", "subgraph", "news")
-ENTITY_TYPES = ("protocol", "token", "chain", "contract", "dao", "person", "exchange", "category")
-RELATIONS = ("DEPLOYED_ON", "TOKEN_OF", "GOVERNED_BY", "INTEGRATES_WITH", "COMPETITOR_OF", "SUPPORTS_ASSET", "IN_CATEGORY", "AUDITED_BY", "FORK_OF")
+SOURCE_TYPES = ("protocol_docs", "github", "governance", "defillama", "incident", "funding", "token", "subgraph", "news")
+ENTITY_TYPES = ("protocol", "token", "chain", "contract", "dao", "person", "exchange", "category", "organization", "incident")
+RELATIONS = ("DEPLOYED_ON", "TOKEN_OF", "GOVERNED_BY", "INTEGRATES_WITH", "COMPETITOR_OF", "SUPPORTS_ASSET", "IN_CATEGORY", "AUDITED_BY", "FORK_OF",
+             "USES_ORACLE", "FUNDED_BY", "PART_OF", "HAD_INCIDENT")
+
+# Structured facts ride along in NormalizedDocument.metadata["facts"]: the
+# connector states them, ingestion resolves/creates the target entity and
+# writes the edge with the document as provenance. Shape:
+#   {"relation": "FUNDED_BY", "target": {"id": "org:paradigm", "type": "organization", "name": "Paradigm"},
+#    "confidence": 0.95, "valid_from": "2023-03-28", "direction": "out" | "in", "metadata": {...}}
+# A target without an id is resolved by name against the entity index
+# (protocols, chains) and dropped when it does not resolve at >= 0.9.
 
 
 def utcnow() -> datetime:

@@ -14,10 +14,10 @@ import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from app.knowledge.connectors import DefiLlamaConnector, DiscourseConnector, DocsConnector, GitHubConnector, SnapshotConnector
+from app.knowledge.connectors import CoinGeckoConnector, DefiLlamaConnector, DiscourseConnector, DocsConnector, GitHubConnector, SnapshotConnector
 from app.knowledge.embeddings import get_embedder
 from app.knowledge.entities import EntityResolver
-from app.knowledge.models import Chunk, IngestionResult, NormalizedDocument, Protocol, Relationship
+from app.knowledge.models import Chunk, Entity, IngestionResult, NormalizedDocument, Protocol, Relationship
 from app.knowledge.normalize import chunk_markdown
 from app.knowledge.store import get_store
 from app.settings import settings
@@ -29,7 +29,42 @@ _status: dict = {"running": False, "last_run": None, "runs": []}
 
 
 def default_connectors() -> list:
-    return [DefiLlamaConnector(), DocsConnector(page_budget=settings.knowledge_docs_page_budget), GitHubConnector(), SnapshotConnector(), DiscourseConnector()]
+    return [DefiLlamaConnector(), DocsConnector(page_budget=settings.knowledge_docs_page_budget), GitHubConnector(), SnapshotConnector(), DiscourseConnector(), CoinGeckoConnector()]
+
+
+async def apply_facts(doc: NormalizedDocument, store, resolver: EntityResolver) -> int:
+    """Structured facts a connector attached to a document (see models.py):
+    create or resolve the target entity, then write the edge with the
+    document as provenance. Returns edges written."""
+    facts = [f for f in (doc.metadata.get("facts") or []) if isinstance(f, dict) and f.get("relation") and doc.protocol_id and doc.id]
+    written = 0
+    for fact in facts:
+        target = fact.get("target") or {}
+        target_id = target.get("id")
+        if target_id:
+            await store.upsert_entity(Entity(id=target_id, entity_type=target.get("type") or "organization", canonical_name=target.get("name") or target_id,
+                                             symbol=target.get("symbol"), chain=target.get("chain"), address=target.get("address"),
+                                             aliases=[a for a in (target.get("aliases") or []) if isinstance(a, str)], metadata=dict(target.get("metadata") or {})))
+        elif target.get("name"):
+            resolution = resolver.resolve(target["name"], context=doc.content[:500])
+            if not resolution or resolution.confidence < 0.9 or (target.get("type") and resolution.entity.entity_type != target["type"]):
+                continue
+            target_id = resolution.entity.id
+        else:
+            continue
+        if target_id == doc.protocol_id:
+            continue
+        valid_from = fact.get("valid_from")
+        if isinstance(valid_from, str):
+            try:
+                valid_from = datetime.fromisoformat(valid_from[:10]).replace(tzinfo=timezone.utc)
+            except ValueError:
+                valid_from = None
+        source, dest = (target_id, doc.protocol_id) if fact.get("direction") == "in" else (doc.protocol_id, target_id)
+        rel = Relationship(source, str(fact["relation"]), dest, confidence=float(fact.get("confidence") or 0.9), source_document_id=doc.id,
+                           valid_from=valid_from, observed_at=datetime.now(timezone.utc), metadata={**(fact.get("metadata") or {}), "method": "structured"})
+        written += int(await store.upsert_relationship(rel))
+    return written
 
 
 async def _resolver(store) -> EntityResolver:
@@ -83,6 +118,7 @@ async def ingest_document(doc: NormalizedDocument, store=None, resolver: EntityR
     resolver = resolver or await _resolver(store)
     for rel in await asyncio.to_thread(extract_relationships, doc, resolver):
         written += int(await store.upsert_relationship(rel))
+    written += await apply_facts(doc, store, resolver)
     return True, len(chunks), written
 
 
@@ -100,7 +136,7 @@ async def run_source(connector, protocol: Protocol, store=None) -> IngestionResu
         return result
     for ref in refs:
         try:
-            if hasattr(connector, "documents") and ref.kind == "proposal":
+            if hasattr(connector, "documents") and ref.kind in ("proposal", "bundle"):
                 docs = await asyncio.to_thread(connector.documents, protocol, ref)
             else:
                 doc = await asyncio.to_thread(connector.fetch, protocol, ref)
