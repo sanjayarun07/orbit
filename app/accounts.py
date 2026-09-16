@@ -430,6 +430,9 @@ async def touch_chat_session(user_id: str, session_id: str) -> bool:
     if owner is not None and owner != user_id:
         return False
     _chat_sessions.setdefault(user_id, {})[session_id] = _now()
+    if await chat_session_owner(session_id) != user_id:      # lost a concurrent claim
+        _chat_sessions[user_id].pop(session_id, None)
+        return False
     return True
 
 

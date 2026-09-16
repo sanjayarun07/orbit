@@ -8,6 +8,7 @@ from solders.keypair import Keypair
 from solders.message import MessageV0
 from solders.transaction import VersionedTransaction
 
+from app import execution_policy
 from app import execution, plans, reconciliation, relay_tracking
 from app.models import TradePlan, SwapProposal
 
@@ -154,7 +155,7 @@ def test_chat_plan_wallet_submission_and_reconciliation(reviewed, monkeypatch):
         return AgentRun("Review this swap", None, plan, "trade", ["swap"])
     async def send(method, args):
         return str(tx.signatures[0])
-    monkeypatch.setattr(main, "run_agent", agent)
+    monkeypatch.setattr(execution_policy, "run_agent", agent)
     monkeypatch.setattr(execution, "rpc", send)
     client = TestClient(main.app)
     from tests.conftest import sign_in

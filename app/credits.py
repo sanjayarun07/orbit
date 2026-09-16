@@ -93,6 +93,20 @@ async def balance(account_id: str) -> int:
     return sum(row["delta"] for row in _ledger.get(account_id, []))
 
 
+async def clawed_back(account_id: str, charge_id: str) -> int:
+    """Credits already deducted for refunds of one Stripe charge (a positive
+    number), so successive partial refunds deduct only their increment."""
+    pool = await get_pg_pool()
+    if pool is not None:
+        total = await pool.fetchval(
+            "SELECT COALESCE(SUM(-delta), 0) FROM credit_ledger WHERE account_id = $1 AND reason LIKE 'refund:%' AND meta->>'charge' = $2",
+            account_id, charge_id,
+        )
+        return int(total or 0)
+    return sum(-row["delta"] for row in _ledger.get(account_id, [])
+               if row["reason"].startswith("refund:") and str((row.get("meta") or {}).get("charge")) == charge_id)
+
+
 async def history(account_id: str, limit: int = 50) -> list[dict]:
     pool = await get_pg_pool()
     if pool is not None:

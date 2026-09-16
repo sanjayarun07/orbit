@@ -3,6 +3,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from app import execution_policy
 from app import main, x402_gate
 from app.graph import AgentRun
 from app.settings import settings
@@ -40,7 +41,7 @@ def paid_chat(monkeypatch):
     async def fake_run(message, wallet, history, session_context, action):
         return AgentRun(answer="ok", trajectory=None, trade_plan=None, intent="general", capabilities=[])
 
-    monkeypatch.setattr(main, "run_agent", fake_run)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run)
     monkeypatch.setattr(settings, "x402_enabled", True)
     monkeypatch.setattr(settings, "x402_pay_to", PAY_TO)
     monkeypatch.setattr(settings, "x402_network", "eip155:84532")
@@ -54,7 +55,7 @@ def test_disabled_gate_is_a_passthrough(monkeypatch):
     async def fake_run(message, wallet, history, session_context, action):
         return AgentRun(answer="free", trajectory=None, trade_plan=None, intent="general", capabilities=[])
 
-    monkeypatch.setattr(main, "run_agent", fake_run)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run)
     monkeypatch.setattr(settings, "x402_enabled", False)
     x402_gate.reset()
     response = TestClient(main.app).post("/chat", json={"message": "hello"})

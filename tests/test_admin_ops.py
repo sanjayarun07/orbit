@@ -2,11 +2,13 @@
 key revocation, sign-out-everywhere), Stripe event list + replay, and the
 business metrics (MRR, conversion, credits burned per feature, failed
 payments, sign-ups)."""
+
 import asyncio
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app import execution_policy
 from app import accounts, billing, credits, main
 from app.billing_plans import FREE, MAX, PRO
 from app.graph import AgentRun
@@ -27,7 +29,7 @@ def fake_agent(monkeypatch):
         trajectory = {"tool_name_0": "birdeye_token_overview", "observation_0": "ok"} if message.startswith("price") else None
         return AgentRun(answer="ok", trajectory=trajectory, trade_plan=None, intent="general", capabilities=[])
 
-    monkeypatch.setattr(main, "run_agent", fake_run)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run)
 
 
 def test_admin_endpoints_need_the_admin_key():

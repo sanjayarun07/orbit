@@ -1,12 +1,14 @@
 """Per-user tasks: scheduling math, natural-language creation from chat,
 alert evaluation, brief delivery (inbox + email + credit), the worker tick,
 plan caps, and the REST surface."""
+
 import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app import execution_policy
 from app import accounts, credits, emailer, home_highlights, main, tasks, tasks_nl
 from app.billing_plans import FREE
 from app.settings import settings
@@ -75,7 +77,7 @@ def test_chat_creates_lists_and_manages_tasks(prices, monkeypatch):
     async def fake_run(*args, **kwargs):
         raise AssertionError("task controls must not reach the graph")
 
-    monkeypatch.setattr(main, "run_agent", fake_run)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run)
     client = TestClient(main.app)
     sign_in(client, email="tasks@example.com")
     r = client.post("/chat", json={"message": "remind me tomorrow at 9am to check SOL", "tz_offset_min": IST}).json()

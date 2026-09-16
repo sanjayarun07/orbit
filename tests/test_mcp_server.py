@@ -3,6 +3,7 @@ import asyncio
 import pytest
 from fastapi.testclient import TestClient
 
+from app import execution_policy
 from app import main, mcp_server
 from app.graph import AgentRun
 from app.settings import settings
@@ -46,7 +47,7 @@ def test_chat_tool_runs_a_real_turn_and_hands_off_quotes(monkeypatch):
                              quote={}, input_token=token, output_token=token, simulation={}, confirmation_text="CONFIRM plan_mcp")
         return AgentRun(answer="ok", trajectory=None, trade_plan=plan, intent="trade" if plan else "general", capabilities=[])
 
-    monkeypatch.setattr(main, "run_agent", fake_run)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run)
     monkeypatch.setattr(settings, "public_base_url", "https://orbit.example.com")
 
     bound = asyncio.run(mcp_server.orbit_connect_wallet(None, SOL))
@@ -131,7 +132,7 @@ def test_session_controls_go_through_the_chat_turn(monkeypatch):
         seen.append((message, dict(session_context)))
         return AgentRun(answer=message, trajectory=None, trade_plan=None, intent="general", capabilities=[])
 
-    monkeypatch.setattr(main, "run_agent", fake_run)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run)
     monkeypatch.setattr(settings, "max_trade_usd", 25.0)
     on = asyncio.run(mcp_server.orbit_set_team_mode(None, True))
     sid = on["session_id"]

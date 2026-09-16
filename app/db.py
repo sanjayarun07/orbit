@@ -102,6 +102,13 @@ CREATE TABLE IF NOT EXISTS user_tasks (
 );
 CREATE INDEX IF NOT EXISTS user_tasks_due ON user_tasks (next_run_at) WHERE status = 'active';
 ALTER TABLE user_tasks ADD COLUMN IF NOT EXISTS claimed_until TIMESTAMPTZ;
+ALTER TABLE user_tasks ADD COLUMN IF NOT EXISTS claimed_occurrence TEXT;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'stripe_events' AND column_name = 'processed_at') THEN
+        ALTER TABLE stripe_events ADD COLUMN processed_at TIMESTAMPTZ;
+        UPDATE stripe_events SET processed_at = received_at;   -- everything recorded before this column existed was handled
+    END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS user_tasks_user ON user_tasks (user_id, created_at DESC);
 CREATE TABLE IF NOT EXISTS user_inbox (
     id UUID PRIMARY KEY,

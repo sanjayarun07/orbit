@@ -35,6 +35,7 @@ from fastapi import HTTPException
 from mcp.server.fastmcp import FastMCP
 
 from app.settings import settings
+from app.service_errors import ServiceError
 
 _SKILL_PATH = Path(__file__).resolve().parent.parent / "skills" / "orbit" / "SKILL.md"
 _SKILL_TEXT = _SKILL_PATH.read_text(encoding="utf-8") if _SKILL_PATH.exists() else "Orbit Web3 copilot."
@@ -86,7 +87,7 @@ async def _guard(session_id: str | None, claim: bool = False) -> None:
     try:
         await require_session_access(session_id, current_identity.get(), claim=claim)
     except SessionAccessDenied as exc:
-        raise HTTPException(404, "Conversation not found") from exc
+        raise ServiceError(404, "Conversation not found") from exc
 
 
 async def _context(session_id: str | None) -> dict:
@@ -109,20 +110,20 @@ async def _resolve_wallet(session_id: str | None, wallet_address: str | None) ->
 
 
 def _error(exc: Exception) -> dict:
-    if isinstance(exc, HTTPException):
+    if isinstance(exc, (HTTPException, ServiceError)):
         return {"error": exc.detail, "status": exc.status_code}
     return {"error": str(exc) or exc.__class__.__name__}
 
 
 async def _turn(message: str, session_id: str | None, wallet: str | None, **extra) -> dict:
-    from app.main import execute_chat_turn
+    from app.execution_policy import execute_chat_turn
     from app.models import ChatRequest
 
     body = ChatRequest(message=message, session_id=session_id, wallet_address=wallet, **extra)
     try:
-        await _guard(session_id)
+        await _guard(session_id, claim=True)    # a chat turn owns the conversation before any work
         return _response_payload(await execute_chat_turn(body, identity="mcp"))
-    except HTTPException as exc:
+    except (HTTPException, ServiceError) as exc:
         return _error(exc)
 
 
@@ -183,7 +184,7 @@ async def orbit_connect_wallet(session_id: str | None, address: str) -> dict:
     sid = session_id or str(uuid4())
     try:
         await _guard(sid, claim=True)
-    except HTTPException as exc:
+    except (HTTPException, ServiceError) as exc:
         return _error(exc)
     context = await get_session_context(sid)
     context["mcp_wallet_address"] = canonical
@@ -281,7 +282,7 @@ async def orbit_policy(session_id: str | None = None) -> dict:
 
     try:
         context = await _context(session_id)
-    except HTTPException as exc:
+    except (HTTPException, ServiceError) as exc:
         return _error(exc)
     return {"session_id": session_id, "policy": policy_summary({"session_context": context, "wallet_address": context.get("mcp_wallet_address") or ""})}
 
@@ -294,7 +295,7 @@ async def orbit_history(session_id: str) -> dict:
 
     try:
         await _guard(session_id, claim=True)
-    except HTTPException as exc:
+    except (HTTPException, ServiceError) as exc:
         return _error(exc)
     messages = await get_messages(session_id)
     return {
@@ -312,7 +313,7 @@ async def orbit_delete_history(session_id: str) -> dict:
 
     try:
         await _guard(session_id)
-    except HTTPException as exc:
+    except (HTTPException, ServiceError) as exc:
         return _error(exc)
     try:
         lease = await acquire_session_turn(session_id)
@@ -331,7 +332,7 @@ async def orbit_handoff_url(session_id: str) -> dict:
     connect a wallet and confirm any pending quote with their own signature."""
     try:
         await _guard(session_id)
-    except HTTPException as exc:
+    except (HTTPException, ServiceError) as exc:
         return _error(exc)
     return {"session_id": session_id, "handoff_url": handoff_url(session_id),
             "note": "Wallet signing happens only in the browser; this conversation never holds keys."}
@@ -347,7 +348,7 @@ async def orbit_portfolio(session_id: str | None = None, wallet_address: str | N
 
     try:
         wallet = await _resolve_wallet(session_id, wallet_address)
-    except HTTPException as exc:      # the session is not the caller's
+    except (HTTPException, ServiceError) as exc:      # the session is not the caller's
         return _error(exc)
     if not wallet:
         return {"error": "no_wallet", "detail": "Pass wallet_address or bind one with orbit_connect_wallet."}
@@ -366,7 +367,7 @@ async def orbit_wallet_health(session_id: str | None = None, wallet_address: str
 
     try:
         wallet = await _resolve_wallet(session_id, wallet_address)
-    except HTTPException as exc:      # the session is not the caller's
+    except (HTTPException, ServiceError) as exc:      # the session is not the caller's
         return _error(exc)
     if not wallet:
         return {"error": "no_wallet", "detail": "Pass wallet_address or bind one with orbit_connect_wallet."}
@@ -385,7 +386,7 @@ async def orbit_portfolio_scenario(change_pct: float, session_id: str | None = N
 
     try:
         wallet = await _resolve_wallet(session_id, wallet_address)
-    except HTTPException as exc:      # the session is not the caller's
+    except (HTTPException, ServiceError) as exc:      # the session is not the caller's
         return _error(exc)
     if not wallet:
         return {"error": "no_wallet", "detail": "Pass wallet_address or bind one with orbit_connect_wallet."}
@@ -427,11 +428,11 @@ async def orbit_execution_status(signature: str) -> dict:
     """Status of a submitted Solana transaction by signature (GET /executions/solana/{signature})."""
     if not _SIGNATURE.match(signature or ""):
         return {"error": "Invalid Solana transaction signature", "status": 400}
-    from app.main import solana_execution_status
+    from app.execution_policy import solana_execution_status
 
     try:
         return await solana_execution_status(signature)
-    except HTTPException as exc:
+    except (HTTPException, ServiceError) as exc:
         return _error(exc)
 
 

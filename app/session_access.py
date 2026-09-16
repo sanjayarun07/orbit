@@ -38,4 +38,7 @@ async def require_session_access(session_id: str | None, identity, claim: bool =
     if owner is not None and owner != user_id:
         raise SessionAccessDenied(session_id)
     if owner is None and claim and user_id:
-        await accounts.touch_chat_session(user_id, session_id)
+        # Two signed-in callers can both see an unowned conversation; the
+        # store hands it to exactly one. The loser is denied, not admitted.
+        if not await accounts.touch_chat_session(user_id, session_id):
+            raise SessionAccessDenied(session_id)

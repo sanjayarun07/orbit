@@ -1,10 +1,12 @@
 """Thumbs up/down on an answer feed the tools behind it into outcome scoring:
 weighted, idempotent per turn, reversible, and visible in the ranking term."""
+
 import asyncio
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app import execution_policy
 from app import feedback, main, tool_outcomes
 from app.graph import AgentRun
 from app.settings import settings
@@ -34,7 +36,7 @@ def fake_agent(monkeypatch):
         trajectory = {"tool_name_0": "birdeye_token_overview", "observation_0": "ok", "tool_name_1": "semantic_cache", "observation_1": "cached"}
         return AgentRun(answer="ok", trajectory=trajectory, trade_plan=None, intent="research", capabilities=["market_data"])
 
-    monkeypatch.setattr(main, "run_agent", fake_run)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run)
 
 
 def test_rating_moves_the_tools_behind_the_turn_and_is_reversible(fake_agent):

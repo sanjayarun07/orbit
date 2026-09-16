@@ -134,7 +134,14 @@ User message
 
 ### A user query, end to end
 
-`POST /chat` runs one turn (`app/main.py`):
+`POST /chat` resolves the caller in `app/main.py` and delegates to
+`app/execution_policy.py`. MCP calls the same service directly; it does not
+import the API application. The service owns admission, credit accounting,
+revision and charter checks, agent execution, and turn persistence.
+`app/session_access.py` owns conversation access. Shared `ServiceError` failures
+are translated into HTTP responses or MCP tool results at the transport boundary.
+
+Each turn follows this flow:
 
 1. **Admission.** Per-client chat rate limit, global concurrency slot with a
    queue timeout, then a per-session turn lease so two tabs cannot mutate the
@@ -547,6 +554,10 @@ recurring), price alerts ("alert me when SOL drops below $90", re-checked
 every 5 minutes, majors and Jupiter-verified tokens), and a daily morning
 brief (headlines, core quotes, your wallet total; 1 credit per delivery).
 Results land in the inbox (bell in the top bar) and optionally by email.
+`app/task_scheduling.py` shares account access, creation validation, resume timing,
+and chat timezone handling across HTTP and natural-language controls (including
+MCP chat). `app/tasks_nl.py` parses commands; `app/tasks.py` retains persistence,
+schedule calculations, leases, and worker delivery.
 Free 3 · Pro 25 · Max 100 active tasks. The worker is an in-process asyncio
 loop over the `user_tasks` table — no Temporal or queue to run; a
 multi-instance deployment would add row-level locking or move to one.

@@ -14,7 +14,12 @@
    invoice grants nothing beyond the pack itself.
 8. A running task holds a lease: "run now" cannot re-claim it, a failed run is
    rescheduled, and a claim whose lease expired is recovered.
+9. A conversation claim that loses a race is denied, and a chat turn claims
+   the conversation before doing any work.
+10. Recovering an expired claim reuses the persisted occurrence, so a run that
+    died after charging never charges twice.
 """
+
 import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -22,6 +27,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from app import execution_policy
 from app import accounts, billing, credits, main, mcp_server, tasks
 from app.identity import current_identity
 from app.graph import AgentRun
@@ -35,7 +41,7 @@ def fake_agent(monkeypatch):
     async def fake_run(message, wallet, history, session_context, action):
         return AgentRun(answer="ok", trajectory=None, trade_plan=None, intent="general", capabilities=[])
 
-    monkeypatch.setattr(main, "run_agent", fake_run)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run)
 
 
 # --- 1. conversation ownership -------------------------------------------------
@@ -295,3 +301,60 @@ def test_a_failed_run_is_rescheduled_and_releases_its_lease(monkeypatch):
     past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
     asyncio.run(tasks.update_task(task["id"], user["id"], next_run_at=past))
     assert asyncio.run(tasks.run_task(asyncio.run(tasks.get_task(task["id"]))))["fired"] is True
+
+
+# --- 9. losing claims are denied; turns claim first -------------------------
+
+def test_a_losing_claim_is_denied_and_a_turn_claims_first(fake_agent, monkeypatch):
+    from app import session_access
+    alice, bob = TestClient(main.app), TestClient(main.app)
+    sign_in(alice, email="race-alice@example.com")
+    sign_in(bob, email="race-bob@example.com")
+    sid = TestClient(main.app).post("/chat", json={"message": "hello"}).json()["session_id"]   # unowned
+    a_id, b_id = _mcp_identity(alice), _mcp_identity(bob)
+
+    async def race():
+        return await asyncio.gather(session_access.require_session_access(sid, a_id, claim=True),
+                                    session_access.require_session_access(sid, b_id, claim=True), return_exceptions=True)
+
+    results = asyncio.run(race())
+    assert sum(r is None for r in results) == 1 and sum(isinstance(r, session_access.SessionAccessDenied) for r in results) == 1
+    owner = asyncio.run(accounts.chat_session_owner(sid))
+    assert owner in (a_id.user["id"], b_id.user["id"])
+    # The store refusing a claim (another caller won between the read and the write) is a denial, never an admission.
+    fresh = TestClient(main.app).post("/chat", json={"message": "hello"}).json()["session_id"]
+
+    async def lost(user_id, session_id):
+        return False
+
+    real_touch = accounts.touch_chat_session
+    monkeypatch.setattr(accounts, "touch_chat_session", lost)
+    with pytest.raises(session_access.SessionAccessDenied):
+        asyncio.run(session_access.require_session_access(fresh, a_id, claim=True))
+    monkeypatch.setattr(accounts, "touch_chat_session", real_touch)
+    # A signed-in chat turn on an unowned conversation claims it before the turn runs.
+    assert alice.post("/chat", json={"message": "mine now", "session_id": fresh}).status_code == 200
+    assert asyncio.run(accounts.chat_session_owner(fresh)) == a_id.user["id"]
+    assert bob.post("/chat", json={"message": "hijack", "session_id": fresh}).status_code == 404
+
+
+# --- 10. recovery reuses the occurrence ---------------------------------------
+
+def test_recovering_an_expired_claim_charges_the_occurrence_once(monkeypatch):
+    monkeypatch.setattr(tasks.home_highlights, "get_highlights", lambda force=False: {"as_of": "x", "source": "news", "cards": []})
+    monkeypatch.setattr(tasks.market_overview, "_get_json", lambda url: {})
+    client, user, task = _make_task(kind="brief", schedule={"daily": "08:00"})
+    before = client.get("/me").json()["credits"]["balance"]
+    # The worker claimed the occurrence, charged the brief, then died before delivering.
+    running = asyncio.run(tasks.claim_task(dict(task)))
+    assert running["claimed_occurrence"] == running["occurrence"] == task["next_run_at"]
+    account = credits.user_account_id(user["id"])
+    asyncio.run(credits.append(account, -settings.credit_cost_brief, "task:brief", "task_run", f"{task['id']}:{running['occurrence']}", {"kind": "brief"}))
+    expired = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    asyncio.run(tasks.update_task(task["id"], user["id"], claimed_until=expired))
+    # Recovery delivers the same occurrence and finds its charge already in the ledger.
+    recovered = asyncio.run(tasks.run_task(asyncio.run(tasks.get_task(task["id"]))))
+    assert recovered["fired"] is True
+    assert client.get("/me").json()["credits"]["balance"] == before - settings.credit_cost_brief
+    after = asyncio.run(tasks.get_task(task["id"]))
+    assert after["claimed_occurrence"] is None and after["claimed_until"] is None and after["next_run_at"]

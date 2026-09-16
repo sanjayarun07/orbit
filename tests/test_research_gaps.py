@@ -1,10 +1,12 @@
 """The fall-through log: research turns only web search could answer, tagged
 by the data topic they needed."""
+
 import asyncio
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app import execution_policy
 from app import main, research_gaps
 from app.settings import settings
 
@@ -65,7 +67,7 @@ def test_chat_turn_records_a_fallthrough(monkeypatch):
     async def fake_run(message, wallet, history, session_context, action):
         return AgentRun(answer="web says…", trajectory={"tool_name_1": "perplexity_web_search"}, trade_plan=None, intent="research", capabilities=["web_research"])
 
-    monkeypatch.setattr(main, "run_agent", fake_run)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run)
     client = TestClient(main.app)
     assert client.post("/chat", json={"message": "how much is in the Arbitrum DAO treasury"}).status_code == 200
     assert asyncio.run(research_gaps.summary(days=1))["topics"][0]["topic"] == "treasury"

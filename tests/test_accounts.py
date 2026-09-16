@@ -1,11 +1,13 @@
 """Accounts, credits and API keys: the magic-link flow, the anonymous trial,
 per-turn charging with refund of the unused reservation, the 402 when credits
 run out, sign-in gates, preferences, and per-user API keys on /chat and /mcp."""
+
 import asyncio
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app import execution_policy
 from app import accounts, api_keys, credits, main
 from app.billing_plans import ANONYMOUS, FREE, PRO
 from app.graph import AgentRun
@@ -23,7 +25,7 @@ def fake_agent(monkeypatch):
         team = {"coordinator": "ok"} if message.startswith("desk") else None
         return AgentRun(answer="ok", trajectory=trajectory, trade_plan=None, intent="general", capabilities=[], team_report=team)
 
-    monkeypatch.setattr(main, "run_agent", fake_run)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run)
     return calls
 
 
@@ -74,7 +76,7 @@ def test_failed_turn_costs_nothing(monkeypatch):
     async def boom(message, wallet, history, session_context, action):
         raise RuntimeError("provider down")
 
-    monkeypatch.setattr(main, "run_agent", boom)
+    monkeypatch.setattr(execution_policy, "run_agent", boom)
     client = TestClient(main.app)
     sign_in(client)
     before = client.get("/me").json()["credits"]["balance"]

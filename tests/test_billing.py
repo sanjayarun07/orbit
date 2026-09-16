@@ -197,9 +197,10 @@ def test_refund_claws_back_pack_credits_pro_rata():
               "metadata": metadata}
     partial = post_event(client, event("evt_7", "charge.refunded", charge)).json()
     assert partial["status"] == "clawed_back" and partial["credits"] == -250
+    # amount_refunded is cumulative: the full refund takes only what the partial one left.
     full = post_event(client, event("evt_8", "charge.refunded", {**charge, "amount_refunded": 600})).json()
-    assert full["credits"] == -500
-    assert client.get("/me").json()["credits"]["balance"] == FREE.monthly_credits + 500 - 250 - 500
+    assert full["credits"] == -250 and full["clawed_back_total"] == 500
+    assert client.get("/me").json()["credits"]["balance"] == FREE.monthly_credits + 500 - 500
     # A refund on something that isn't a credit pack is ignored.
     other = post_event(client, event("evt_9", "charge.refunded", {"id": "ch_9", "amount": 100, "amount_refunded": 100, "metadata": {}})).json()
     assert other["status"] == "ignored"
@@ -230,3 +231,62 @@ def test_a_credit_pack_invoice_grants_no_monthly_allowance():
                "lines": {"data": [{"price": {"id": "price_pack_500"}, "metadata": {}}]}}
     paid = post_event(client, event("evt_p2", "invoice.paid", invoice)).json()
     assert paid["status"] == "ignored" and client.get("/me").json()["credits"]["balance"] == before
+
+
+def test_basil_invoices_carry_the_subscription_under_parent():
+    client = TestClient(main.app)
+    me = sign_in(client, email="basil@example.com")
+    user_id = me["user"]["id"]
+    checkout = {"id": "cs_b", "object": "checkout.session", "mode": "subscription", "customer": "cus_b", "subscription": "sub_b",
+                "client_reference_id": user_id, "metadata": {"user_id": user_id, "kind": "subscription", "plan_id": "pro"}}
+    assert post_event(client, event("evt_b1", "checkout.session.completed", checkout)).json()["status"] == "subscribed"
+    # API version 2025-03-31: no top-level `subscription`; the line's price sits under `pricing`.
+    invoice = {"id": "in_b", "object": "invoice", "customer": "cus_b", "period_end": 1_800_000_000,
+               "parent": {"type": "subscription_details", "subscription_details": {"subscription": "sub_b"}},
+               "lines": {"data": [{"pricing": {"price_details": {"price": "price_pro"}}, "metadata": {}}]}}
+    paid = post_event(client, event("evt_b2", "invoice.paid", invoice)).json()
+    assert paid["status"] == "credited" and paid["credits"] == PRO.monthly_credits
+    assert client.get("/me").json()["billing"]["subscription_id" if "subscription_id" in client.get("/me").json()["billing"] else "has_billing_account"]
+
+
+def test_a_failed_webhook_is_retried_on_redelivery(monkeypatch):
+    client = TestClient(main.app)
+    me = sign_in(client, email="retry@example.com")
+    user_id = me["user"]["id"]
+    session = {"id": "cs_r", "object": "checkout.session", "mode": "payment", "payment_status": "paid", "customer": "cus_r",
+               "client_reference_id": user_id, "payment_intent": "pi_r", "amount_total": 600, "currency": "usd",
+               "metadata": {"user_id": user_id, "kind": "pack", "pack_id": "pack_500", "credits": "500"}}
+    real_grant = credits.grant
+
+    async def flaky(*args, **kwargs):
+        raise RuntimeError("ledger unavailable")
+
+    monkeypatch.setattr(credits, "grant", flaky)
+    failed = post_event(client, event("evt_r", "checkout.session.completed", session))
+    assert failed.status_code == 500          # Stripe will redeliver
+    monkeypatch.setattr(credits, "grant", real_grant)
+    retried = post_event(client, event("evt_r", "checkout.session.completed", session)).json()
+    assert retried["status"] == "credited" and retried["credits"] == 500
+    assert post_event(client, event("evt_r", "checkout.session.completed", session)).json()["status"] == "duplicate"
+    assert client.get("/me").json()["credits"]["balance"] == FREE.monthly_credits + 500
+
+
+def test_successive_partial_refunds_deduct_only_their_increment():
+    client = TestClient(main.app)
+    me = sign_in(client, email="partial@example.com")
+    user_id = me["user"]["id"]
+    session = {"id": "cs_q", "object": "checkout.session", "mode": "payment", "payment_status": "paid", "customer": "cus_q",
+               "client_reference_id": user_id, "payment_intent": "pi_q", "amount_total": 1000, "currency": "usd",
+               "metadata": {"user_id": user_id, "kind": "pack", "pack_id": "pack_500", "credits": "100"}}
+    assert post_event(client, event("evt_q0", "checkout.session.completed", session)).json()["credits"] == 100
+    base = client.get("/me").json()["credits"]["balance"]
+    charge = {"id": "ch_q", "object": "charge", "customer": "cus_q", "amount": 1000, "metadata": {"user_id": user_id, "kind": "pack", "pack_id": "pack_500", "credits": "100"}}
+    first = post_event(client, event("evt_q1", "charge.refunded", {**charge, "amount_refunded": 250})).json()
+    assert first["status"] == "clawed_back" and first["credits"] == -25
+    second = post_event(client, event("evt_q2", "charge.refunded", {**charge, "amount_refunded": 500})).json()
+    assert second["status"] == "clawed_back" and second["credits"] == -25 and second["clawed_back_total"] == 50
+    assert client.get("/me").json()["credits"]["balance"] == base - 50
+    # A redelivered or unchanged cumulative amount deducts nothing more.
+    assert post_event(client, event("evt_q3", "charge.refunded", {**charge, "amount_refunded": 500})).json()["credits"] == 0
+    full = post_event(client, event("evt_q4", "charge.refunded", {**charge, "amount_refunded": 1000})).json()
+    assert full["credits"] == -50 and client.get("/me").json()["credits"]["balance"] == base - 100

@@ -12,7 +12,8 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 
-from app import tasks
+from app import tasks, task_scheduling
+from app.service_errors import ServiceError
 
 _DAYS = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6,
          "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
@@ -116,11 +117,11 @@ async def handle(message: str, user: dict, tz_offset_min: int = 0) -> str | None
         count = 0
         for task in await tasks.list_tasks(user["id"], include_done=False):
             if verb in ("delete", "cancel", "stop"):
-                count += int(await tasks.delete_task(task["id"], user["id"]))
+                count += int(await task_scheduling.delete_task(task["id"], user["id"]))
             else:
                 status = "paused" if verb == "pause" else "active"
                 if task["status"] != status:
-                    await tasks.update_task(task["id"], user["id"], status=status, **({"next_run_at": tasks.next_run(task["schedule"], task.get("tz_offset_min", 0))} if status == "active" else {}))
+                    await task_scheduling.update_task(task["id"], user["id"], status=status)
                     count += 1
         return f"Done — {count} task{'s' if count != 1 else ''} {'deleted' if verb in ('delete', 'cancel', 'stop') else verb + 'd'}."
     m = _MUTATE.match(text)
@@ -132,11 +133,10 @@ async def handle(message: str, user: dict, tz_offset_min: int = 0) -> str | None
         task = items[index]
         verb = m.group("verb").lower()
         if verb in ("delete", "remove", "cancel", "stop"):
-            await tasks.delete_task(task["id"], user["id"])
+            await task_scheduling.delete_task(task["id"], user["id"])
             return f"Deleted task {index + 1}: **{task['title']}**."
         status = "paused" if verb == "pause" else "active"
-        extra = {"next_run_at": tasks.next_run(task["schedule"], task.get("tz_offset_min", 0))} if status == "active" else {}
-        await tasks.update_task(task["id"], user["id"], status=status, **extra)
+        await task_scheduling.update_task(task["id"], user["id"], status=status)
         return f"Task {index + 1} **{task['title']}** is now {status}."
     m = _BRIEF.match(text)
     if m:
@@ -175,9 +175,9 @@ async def handle(message: str, user: dict, tz_offset_min: int = 0) -> str | None
 
 async def _create(user, kind, spec, schedule, channel, tz, title=None):
     try:
-        return await tasks.create_task(user, kind, spec, schedule, channel, tz, title)
-    except ValueError as exc:
-        return f"I couldn't schedule that: {exc}"
+        return await task_scheduling.create_task(user, kind, spec, schedule, channel, tz, title)
+    except ServiceError as exc:
+        return f"I couldn't schedule that: {exc.detail}"
 
 
 def _when(task: dict) -> str:

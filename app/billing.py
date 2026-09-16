@@ -26,7 +26,8 @@ from app.settings import settings
 
 logger = logging.getLogger(__name__)
 
-_seen_events: set[str] = set()
+_seen_events: set[str] = set()          # received (in-memory store)
+_processed_events: set[str] = set()     # handled to completion; a redelivery is then a duplicate
 
 
 class BillingNotConfigured(Exception):
@@ -229,20 +230,35 @@ async def replay_event(event_id: str) -> dict:
 
 
 async def record_event(event_id: str, event_type: str) -> bool:
-    """True the first time an event id is seen."""
+    """True when the event still needs handling: the first delivery, or a
+    redelivery of one whose handler failed (received but never marked
+    processed). A processed event is a duplicate."""
     pool = await get_pg_pool()
     if pool is not None:
         row = await pool.fetchrow(
-            "INSERT INTO stripe_events (id, type) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING RETURNING id",
+            """
+            INSERT INTO stripe_events (id, type) VALUES ($1, $2)
+            ON CONFLICT (id) DO UPDATE SET type = EXCLUDED.type WHERE stripe_events.processed_at IS NULL
+            RETURNING id
+            """,
             event_id, event_type,
         )
         return row is not None
-    if event_id in _seen_events:
+    if event_id in _processed_events:
         return False
-    _seen_events.add(event_id)
-    _recent_events.append({"id": event_id, "type": event_type, "received_at": datetime.now(timezone.utc).isoformat()})
-    del _recent_events[:-500]
+    if event_id not in _seen_events:
+        _seen_events.add(event_id)
+        _recent_events.append({"id": event_id, "type": event_type, "received_at": datetime.now(timezone.utc).isoformat()})
+        del _recent_events[:-500]
     return True
+
+
+async def mark_event_processed(event_id: str) -> None:
+    pool = await get_pg_pool()
+    if pool is not None:
+        await pool.execute("UPDATE stripe_events SET processed_at = NOW() WHERE id = $1", event_id)
+        return
+    _processed_events.add(event_id)
 
 
 async def _user_for(obj: dict) -> dict | None:
@@ -270,12 +286,17 @@ async def handle_event(event: dict) -> dict:
         return {"event": event_id, "type": event_type, "status": "duplicate"}
     handler = _HANDLERS.get(event_type)
     if handler is None:
+        await mark_event_processed(event_id)
         return {"event": event_id, "type": event_type, "status": "ignored"}
     try:
         result = await handler(event_id, obj)
     except Exception:
+        # Left unprocessed: Stripe's redelivery (or a manual replay) runs the
+        # handler again; every credit effect is keyed by event id, so a
+        # partially applied event cannot double-credit.
         logger.exception("stripe webhook %s (%s) failed", event_id, event_type)
         raise
+    await mark_event_processed(event_id)
     return {"event": event_id, "type": event_type, **result}
 
 
@@ -345,6 +366,9 @@ async def _on_invoice_paid(event_id: str, invoice: dict) -> dict:
         if plan_id:
             break
     subscription = invoice.get("subscription")
+    if not subscription:
+        # API versions from 2025-03-31 (Basil) moved this under `parent`.
+        subscription = ((invoice.get("parent") or {}).get("subscription_details") or {}).get("subscription")
     if isinstance(subscription, dict):
         subscription = subscription.get("id")
     # Only a subscription invoice whose line matches a plan price grants the
@@ -403,12 +427,20 @@ async def _on_charge_refunded(event_id: str, charge: dict) -> dict:
     bought = int(metadata.get("credits") or 0)
     if total <= 0 or refunded <= 0 or bought <= 0:
         return {"status": "ignored"}
-    clawback = bought if refunded >= total else round(bought * refunded / total)
+    # `amount_refunded` is cumulative across a charge's refunds, so the target
+    # clawback is too; only the part not yet taken by earlier refund events is
+    # deducted now (25% then 50% of a 100-credit pack costs 25 + 25, not 25 + 50).
+    account_id = credits.user_account_id(user["id"])
+    target = bought if refunded >= total else round(bought * refunded / total)
+    already = await credits.clawed_back(account_id, str(charge.get("id")))
+    clawback = target - already
+    if clawback <= 0:
+        return {"status": "duplicate", "credits": 0, "clawed_back_total": already}
     applied = await credits.append(
-        credits.user_account_id(user["id"]), -clawback, f"refund:{metadata.get('pack_id') or 'pack'}",
+        account_id, -clawback, f"refund:{metadata.get('pack_id') or 'pack'}",
         "stripe_event", event_id, {"charge": charge.get("id"), "amount_refunded": refunded},
     )
-    return {"status": "clawed_back" if applied else "duplicate", "credits": -clawback}
+    return {"status": "clawed_back" if applied else "duplicate", "credits": -clawback, "clawed_back_total": target if applied else already}
 
 
 _HANDLERS = {
@@ -431,4 +463,5 @@ def public_config() -> dict:
 
 def reset() -> None:
     _seen_events.clear()
+    _processed_events.clear()
     _recent_events.clear()

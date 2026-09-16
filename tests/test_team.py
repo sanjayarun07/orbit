@@ -1,6 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
+from app import execution_policy
 from app.nodes import team, runtime
 from app.answer_validator import validate_answer
 from app.routing.resolver import resolve
@@ -233,7 +234,7 @@ def test_ui_switch_sets_team_mode_and_response_echoes_it(monkeypatch):
         seen.append(dict(session_context))
         return AgentRun(answer="ok", trajectory=None, trade_plan=None, intent="general", capabilities=[])
 
-    monkeypatch.setattr(main, "run_agent", fake_run)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run)
     client = TestClient(main.app)
 
     first = client.post("/chat", json={"message": "hello", "team_mode": True})

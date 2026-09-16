@@ -133,6 +133,7 @@ def _row(row) -> dict:
         "created_at": _iso(row["created_at"]), "next_run_at": _iso(row["next_run_at"]), "last_run_at": _iso(row["last_run_at"]),
         "last_result": row["last_result"], "fire_count": int(row["fire_count"] or 0),
         "claimed_until": _iso(row["claimed_until"]) if "claimed_until" in row.keys() else None,
+        "claimed_occurrence": row["claimed_occurrence"] if "claimed_occurrence" in row.keys() else None,
     }
 
 
@@ -202,7 +203,7 @@ def _default_title(kind: str, spec: dict) -> str:
 
 
 async def update_task(task_id: str, user_id: str, **fields) -> dict | None:
-    allowed = {"status", "next_run_at", "last_run_at", "last_result", "fire_count", "channel", "schedule", "spec", "claimed_until"}
+    allowed = {"status", "next_run_at", "last_run_at", "last_result", "fire_count", "channel", "schedule", "spec", "claimed_until", "claimed_occurrence"}
     changes = {k: v for k, v in fields.items() if k in allowed}
     pool = await get_pg_pool()
     if pool is not None:
@@ -424,16 +425,20 @@ async def claim_task(task: dict) -> dict | None:
     occurrence = task.get("next_run_at")
     now = _now()
     lease_until = now + timedelta(seconds=CLAIM_LEASE_SECONDS)
+    # The occurrence key is persisted with the claim: recovering an expired
+    # claim reuses it, so the ledger's unique reference keeps a run that died
+    # after charging from charging again.
+    occurrence_key = occurrence or task.get("claimed_occurrence") or f"manual:{now.isoformat()}"
     pool = await get_pg_pool()
     if pool is not None:
         row = await pool.fetchrow(
             """
-            UPDATE user_tasks SET next_run_at = NULL, last_result = 'running', claimed_until = $4
+            UPDATE user_tasks SET next_run_at = NULL, last_result = 'running', claimed_until = $4, claimed_occurrence = $5
             WHERE id = $1 AND status IN ('active', 'paused') AND next_run_at IS NOT DISTINCT FROM $2
               AND (claimed_until IS NULL OR claimed_until < $3)
             RETURNING *
             """,
-            task["id"], _parse_dt(occurrence), now, lease_until,
+            task["id"], _parse_dt(occurrence), now, lease_until, occurrence_key,
         )
         if row is None:
             return None
@@ -448,8 +453,9 @@ async def claim_task(task: dict) -> dict | None:
             current["next_run_at"] = None
             current["last_result"] = "running"
             current["claimed_until"] = _iso(lease_until)
+            current["claimed_occurrence"] = occurrence_key
             claimed = dict(current)
-    claimed["occurrence"] = occurrence or f"manual:{now.isoformat()}"
+    claimed["occurrence"] = occurrence_key
     return claimed
 
 
@@ -473,14 +479,14 @@ async def run_task(task: dict) -> dict:
         logger.warning("tasks: run failed for %s", task["id"], exc_info=True)
         now = _now()
         nxt = next_run(task["schedule"], task.get("tz_offset_min", 0), after=now) or (now + timedelta(minutes=settings.task_alert_check_minutes))
-        await update_task(task["id"], task["user_id"], last_run_at=now, last_result=f"error: {str(exc)[:160] or exc.__class__.__name__}", next_run_at=nxt, claimed_until=None)
+        await update_task(task["id"], task["user_id"], last_run_at=now, last_result=f"error: {str(exc)[:160] or exc.__class__.__name__}", next_run_at=nxt, claimed_until=None, claimed_occurrence=None)
         return {"id": task["id"], "fired": False, "result": "error", "status": "active"}
 
 
 async def _run_claimed(task: dict, user: dict) -> dict:
     fired, result, body = await evaluate(task)
     now = _now()
-    updates: dict = {"last_run_at": now, "last_result": result, "claimed_until": None}
+    updates: dict = {"last_run_at": now, "last_result": result, "claimed_until": None, "claimed_occurrence": None}
     if fired and body:
         charge = settings.credit_cost_brief if task["kind"] == "brief" else 0
         if charge:

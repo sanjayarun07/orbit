@@ -2,11 +2,13 @@
 everywhere, notifications (low-credit alert, receipts), data export, delete
 conversations and delete account, saved risk charter as the default for new
 conversations, invoices through the Stripe shim, and team seats on Max."""
+
 import asyncio
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app import execution_policy
 from app import accounts, billing, credits, emailer, main, notifications
 from app.billing_plans import FREE, MAX, PRO
 from app.graph import AgentRun
@@ -23,7 +25,7 @@ def fake_agent(monkeypatch):
         trajectory = {"tool_name_0": "birdeye_token_overview"} if message.startswith("price") else None
         return AgentRun(answer="ok", trajectory=trajectory, trade_plan=None, intent="general", capabilities=[])
 
-    monkeypatch.setattr(main, "run_agent", fake_run)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run)
     return seen
 
 

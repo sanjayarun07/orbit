@@ -1,6 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
+from app import execution_policy
 from app.nodes import runtime
 from app.nodes import trading
 from app.nodes.general import general_node
@@ -174,7 +175,7 @@ def test_chat_response_and_history_carry_the_persisted_risk_charter(monkeypatch)
     async def fake_run(message, wallet, history, session_context, action):
         return AgentRun(answer="ok", trajectory=None, trade_plan=None, intent="general", capabilities=[])
 
-    monkeypatch.setattr(main, "run_agent", fake_run)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run)
     client = TestClient(main.app)
     from tests.conftest import sign_in
     sign_in(client)
@@ -277,7 +278,7 @@ def test_card_saves_through_chat_and_free_text_replaces_fields(monkeypatch):
     async def fake_run(message, wallet, history, session_context, action):
         return AgentRun(answer=message, trajectory=None, trade_plan=None, intent="general", capabilities=[])
 
-    monkeypatch.setattr(main, "run_agent", fake_run)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run)
     monkeypatch.setattr(settings, "max_trade_usd", 25.0)
     client = TestClient(main.app)
     from tests.conftest import sign_in
@@ -316,7 +317,7 @@ def test_clearing_the_charter_in_chat_also_clears_the_saved_default(monkeypatch)
     async def fake_run(message, wallet, history, session_context, action):
         return AgentRun(answer="ok", trajectory=None, trade_plan=None, intent="general", capabilities=[])
 
-    monkeypatch.setattr(main, "run_agent", fake_run)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run)
     client = TestClient(main.app)
     from tests.conftest import sign_in
     sign_in(client)
