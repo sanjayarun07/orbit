@@ -7,15 +7,28 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="/ui/theme.css?v=1">
-<link rel="stylesheet" href="/ui/admin-theme.css?v=2">
+<link rel="stylesheet" href="/ui/admin-theme.css?v=4">
 </head>
 <body>
-<header><div class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 15.5 9.5 11l3 3L19 7.5M19 12v7H5V5h8"/></svg></span>Orbit <span>Admin</span></div><a href="/ui/">← Back to chat</a></header>
-<main>
- <nav class="admin-nav" aria-label="Administration sections"><a href="#opsPanel">Accounts &amp; billing</a><a href="#kbPanel">Knowledge base</a><a href="#providersPanel">Data providers</a><a href="#testingPanel">Testing</a></nav>
- <section class="hero"><div><h1>Administration</h1><p>Manage accounts, data sources, and service health.</p></div><div class="auth"><input id="token" aria-label="Admin API key" type="password" placeholder="Admin API key" autocomplete="off"><button class="primary" id="connect">Load dashboard</button></div></section>
+<a class="skip-link" href="#mainContent">Skip to content</a>
+<aside class="admin-sidebar">
+ <a class="brand" href="/ui/" aria-label="Orbit home"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 15.5 9.5 11l3 3L19 7.5M19 12v7H5V5h8"/></svg></span>Orbit</a>
+ <div class="nav-label">Administration</div>
+ <nav class="admin-nav" aria-label="Administration sections">
+  <a href="/ui/admin.html#opsPanel" data-section="opsPanel"><span aria-hidden="true">01</span>Accounts &amp; billing</a>
+  <a href="/ui/knowledge.html" data-section="kbPanel"><span aria-hidden="true">02</span>Knowledge base</a>
+  <a href="/ui/admin.html#providersPanel" data-section="providersPanel"><span aria-hidden="true">03</span>Data providers</a>
+  <a href="/ui/admin.html#testingPanel" data-section="testingPanel"><span aria-hidden="true">04</span>Testing</a>
+ </nav>
+ <div class="sidebar-footer"><label for="themeChoice">Appearance</label><select id="themeChoice"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select><a href="/ui/">← Back to chat</a></div>
+</aside>
+<div class="admin-workspace">
+<header class="topbar"><span>Workspace <span class="breadcrumb">/ Administration</span></span><span class="pill">Admin access</span></header>
+<main id="mainContent" tabindex="-1">
+ <section class="hero"><div><h1 id="pageTitle">Accounts &amp; billing</h1><p id="pageDescription">Monitor usage, manage accounts, and review payments.</p></div></section>
+ <form class="auth" id="adminAuth"><div class="auth-field"><label for="token">Admin API key</label><input id="token" type="password" placeholder="Enter your API key" autocomplete="off" required></div><button class="primary" id="connect" type="submit">Connect</button><span id="connectionStatus" role="status">Connect to load your workspace.</span></form>
  <section class="panel" id="opsPanel">
-  <div class="panel-head"><h2>Accounts &amp; billing</h2><div class="lab-actions"><span class="pill" id="opsWindow">last 30 days</span><button id="opsRefresh">Refresh</button></div></div>
+  <div class="panel-head"><h2>Accounts &amp; billing</h2><div class="lab-actions"><span class="pill" id="opsWindow">Last 30 days</span><button id="opsRefresh">Refresh</button></div></div>
   <div class="lab-body">
    <div class="summary" id="opsMetrics" style="margin-bottom:6px"></div>
    <div class="ops-grid">
@@ -25,7 +38,7 @@
     </div>
     <div>
      <h3 class="ops-h">Find an account</h3>
-     <div class="route-form" style="padding:0 0 8px"><input id="opsQuery" placeholder="Search by email"><button id="opsSearch">Search</button></div>
+     <div class="route-form" style="padding:0 0 8px"><input id="opsQuery" aria-label="Search accounts by email" placeholder="Search by email"><button id="opsSearch">Search</button></div>
      <div id="opsUsers" class="ops-list"></div>
      <div id="opsUser" class="ops-user" hidden></div>
     </div>
@@ -33,42 +46,43 @@
   </div>
  </section>
  <section class="panel" id="kbPanel">
-  <div class="panel-head"><h2>Knowledge base</h2><div class="lab-actions"><span class="pill" id="kbConfig">—</span><button id="kbDerive" title="Refresh competitor and integration relationships">Update relationships</button><button id="kbRefresh">Refresh</button></div></div>
+  <div class="panel-head"><h2>Knowledge overview</h2><div class="lab-actions"><span class="pill" id="kbConfig">—</span><button id="kbDerive" title="Refresh competitor and integration relationships">Update relationships</button><button id="kbRefresh">Refresh</button></div></div>
   <div class="lab-body">
    <div class="summary" id="kbMetrics" style="margin-bottom:6px"></div>
-   <div class="ops-grid">
-    <div>
+   <div class="knowledge-layout">
+    <div class="knowledge-coverage">
      <h3 class="ops-h">Coverage by protocol <span class="muted" id="kbCoverageNote"></span></h3>
      <div class="table-wrap"><table style="min-width:0"><thead><tr><th>Protocol</th><th>Docs</th><th>Chunks</th><th>Relationships</th><th>Sources</th><th></th></tr></thead><tbody id="kbCoverage"><tr><td colspan="6" class="empty">Connect to load the knowledge base.</td></tr></tbody></table></div>
     </div>
-    <div>
-     <h3 class="ops-h">Ask the knowledge base</h3>
-     <div class="route-form" style="padding:0 0 8px"><input id="kbQuery" placeholder="e.g. how does Aave E-mode change the liquidation threshold"><button id="kbSearch">Search</button></div>
+    <div class="knowledge-tools">
+     <section class="knowledge-block"><h3 class="ops-h">Ask the knowledge base</h3>
+     <div class="route-form" style="padding:0 0 8px"><input id="kbQuery" aria-label="Search the knowledge base" placeholder="e.g. how does Aave E-mode change the liquidation threshold"><button id="kbSearch">Search</button></div>
      <div id="kbHits" class="ops-list"></div>
-     <h3 class="ops-h">Relationships <span class="muted" id="kbGraphTitle"></span></h3>
+     </section><section class="knowledge-block"><h3 class="ops-h">Relationships <span class="muted" id="kbGraphTitle"></span></h3>
      <div id="kbGraph" class="ops-list muted">Select a protocol to explore its relationships.</div>
-     <h3 class="ops-h">Recent data updates</h3><div id="kbRuns" class="ops-list"></div>
-     <h3 class="ops-h">Data gaps · 30d <span class="muted">research answered only by web search</span></h3><div id="kbGaps" class="ops-list"></div>
+     </section><section class="knowledge-block"><h3 class="ops-h">Recent data updates</h3><div id="kbRuns" class="ops-list"></div>
+     </section><section class="knowledge-block"><h3 class="ops-h">Knowledge gaps · 30 days <span class="muted">Answers relying on web search</span></h3><div id="kbGaps" class="ops-list"></div></section>
     </div>
    </div>
   </div>
  </section>
- <section class="summary"><div class="metric"><span>Registered tools</span><strong id="registered">—</strong></div><div class="metric"><span>Enabled</span><strong id="enabled">—</strong></div><div class="metric"><span>Healthy</span><strong id="healthy">—</strong></div><div class="metric"><span>Providers</span><strong id="providers">—</strong></div></section>
+ <section class="summary" data-admin-section="providersPanel"><div class="metric"><span>Registered tools</span><strong id="registered">—</strong></div><div class="metric"><span>Enabled</span><strong id="enabled">—</strong></div><div class="metric"><span>Healthy</span><strong id="healthy">—</strong></div><div class="metric"><span>Providers</span><strong id="providers">—</strong></div></section>
  <section class="panel" id="providersPanel"><div class="panel-head"><h2>Data providers</h2><button id="refresh">Refresh</button></div><div class="table-wrap"><table><thead><tr><th>Provider / tool</th><th>Capabilities</th><th>Status</th><th>Enabled</th><th>Priority</th><th>Requests / min</th><th>Cost / call ($)</th><th>Remaining</th><th>Actions</th></tr></thead><tbody id="rows"><tr><td colspan="9" class="empty">Enter the admin API key to load providers.</td></tr></tbody></table></div></section>
  <section class="panel" id="testingPanel"><div class="panel-head"><h2>Route preview</h2></div><div class="route-form"><input id="request" aria-label="Request to preview" placeholder="e.g. Research Reliance Industries stock"><select id="capability" aria-label="Capability"><option value="equity_research">Equity research</option><option value="project_intelligence">Project research</option><option value="vc_intelligence">Investor research</option><option value="people_intelligence">People research</option><option value="market_data">Market data</option><option value="token_discovery">Token discovery</option><option value="token_security">Token security</option><option value="wallet_intelligence">Wallet analysis</option><option value="defi_data">DeFi data</option><option value="listing_events">Listings</option><option value="finance_data">Financial data</option><option value="web_research">Web research</option><option value="url_fetch">Page content</option></select><input id="chains" aria-label="Networks" placeholder="Networks, separated by commas"><button class="primary" id="preview">Preview route</button></div><div class="route-results" id="routeResults"></div></section>
- <div class="lab-grid">
+ <div class="lab-grid" data-admin-section="testingPanel">
   <section class="panel"><div class="panel-head"><h2>Request routing</h2><span class="pill">Classification only</span></div><div class="lab-body"><textarea id="intentRequest" aria-label="Request to classify" placeholder="Enter a natural-language request"></textarea><div class="lab-actions"><button id="testIntent">Preview rules</button><button class="primary" id="liveIntent">Test full classifier</button></div><pre class="lab-output" id="intentOutput">Rule previews are free. Full classification uses model quota. These tests do not create quotes or transactions.</pre></div></section>
   <section class="panel"><div class="panel-head"><h2>Provider testing</h2><span class="pill">Read only</span></div><div class="lab-body"><textarea id="providerRequest" aria-label="Provider test request" placeholder="Enter a provider request"></textarea><div class="lab-actions"><button id="dryProvider">Preview</button><button class="primary" id="liveProvider">Run live test</button></div><pre class="lab-output" id="providerOutput">Preview provider rankings without a call. Live tests use provider quota and may incur charges.</pre></div></section>
  </div>
 </main>
+</div>
 <script>
 const $=s=>document.querySelector(s);let tools=[];const saved=sessionStorage.getItem("orbit_admin_key")||"";$("#token").value=saved;
 function headers(){return {"Content-Type":"application/json","Authorization":`Bearer ${$("#token").value.trim()}`}}
 function esc(v){const d=document.createElement("div");d.textContent=String(v??"");return d.innerHTML}
 async function api(url,options={}){const response=await fetch(url,{...options,headers:{...headers(),...(options.headers||{})}});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.detail||`Request failed (${response.status})`);return data}
-function render(){const body=$("#rows");body.innerHTML="";const names=new Set(tools.map(t=>t.provider));$("#registered").textContent=tools.length;$("#enabled").textContent=tools.filter(t=>t.enabled).length;$("#healthy").textContent=tools.filter(t=>t.healthy).length;$("#providers").textContent=names.size;for(const tool of tools){const tr=document.createElement("tr");tr.dataset.name=tool.name;tr.innerHTML=`<td><div class="provider">${esc(tool.provider)}</div><div class="tool">${esc(tool.name)}</div></td><td>${(tool.capabilities||[]).map(c=>`<span class="pill">${esc(c)}</span>`).join("")}</td><td class="${tool.healthy?"ok":"bad"}">${tool.configured?(tool.healthy?"Healthy":"Circuit open"):"Key required"}</td><td><input class="switch enabled" type="checkbox" ${tool.enabled?"checked":""} ${tool.configured?"":"disabled"}></td><td><input class="priority" type="number" value="${tool.priority}"></td><td><input class="quota" type="number" min="1" value="${tool.quota_per_minute}"></td><td><input class="cost" type="number" min="0" step="0.0001" value="${tool.cost_usd_per_invocation}"></td><td>${tool.quota_remaining}</td><td><button class="save">Save</button> <button class="reset">Reset</button></td>`;body.appendChild(tr)}
+function render(){const body=$("#rows");body.innerHTML="";const names=new Set(tools.map(t=>t.provider));$("#registered").textContent=tools.length;$("#enabled").textContent=tools.filter(t=>t.enabled).length;$("#healthy").textContent=tools.filter(t=>t.healthy).length;$("#providers").textContent=names.size;for(const tool of tools){const tr=document.createElement("tr");tr.dataset.name=tool.name;tr.innerHTML=`<td><div class="provider">${esc(tool.provider)}</div><div class="tool">${esc(tool.name)}</div></td><td>${(tool.capabilities||[]).map(c=>`<span class="pill">${esc(c)}</span>`).join("")}</td><td class="${tool.healthy?"ok":"bad"}">${tool.configured?(tool.healthy?"Healthy":"Circuit open"):"Key required"}</td><td><input aria-label="Enable ${esc(tool.name)}" class="switch enabled" type="checkbox" ${tool.enabled?"checked":""} ${tool.configured?"":"disabled"}></td><td><input aria-label="Priority for ${esc(tool.name)}" class="priority" type="number" value="${tool.priority}"></td><td><input aria-label="Requests per minute for ${esc(tool.name)}" class="quota" type="number" min="1" value="${tool.quota_per_minute}"></td><td><input aria-label="Cost per call for ${esc(tool.name)}" class="cost" type="number" min="0" step="0.0001" value="${tool.cost_usd_per_invocation}"></td><td>${tool.quota_remaining}</td><td><button class="save">Save</button> <button class="reset">Reset</button></td>`;body.appendChild(tr)}
  body.querySelectorAll(".save").forEach(b=>b.onclick=()=>save(b.closest("tr")));body.querySelectorAll(".reset").forEach(b=>b.onclick=()=>reset(b.closest("tr")))}
-async function load(){try{sessionStorage.setItem("orbit_admin_key",$("#token").value.trim());const data=await api("/admin/providers");tools=data.tools;render()}catch(e){$("#rows").innerHTML=`<tr><td colspan="9" class="error">${esc(e.message)}</td></tr>`}}
+async function load(){try{sessionStorage.setItem("orbit_admin_key",$("#token").value.trim());const data=await api("/admin/providers");tools=data.tools;render();$("#connectionStatus").textContent="Connected"}catch(e){$("#connectionStatus").textContent="Connection failed. Check your key and try again.";$("#rows").innerHTML=`<tr><td colspan="9" class="error">${esc(e.message)}</td></tr>`}}
 async function save(row){try{await api(`/admin/providers/${encodeURIComponent(row.dataset.name)}`,{method:"PUT",body:JSON.stringify({enabled:row.querySelector(".enabled").checked,priority:Number(row.querySelector(".priority").value),quota_per_minute:Number(row.querySelector(".quota").value),cost_usd:Number(row.querySelector(".cost").value)})});await load()}catch(e){alert(e.message)}}
 async function reset(row){try{await api(`/admin/providers/${encodeURIComponent(row.dataset.name)}`,{method:"DELETE"});await load()}catch(e){alert(e.message)}}
 async function preview(){const out=$("#routeResults");try{const data=await api("/admin/routes/preview",{method:"POST",body:JSON.stringify({request:$("#request").value,capability:$("#capability").value,chains:$("#chains").value.split(",").map(v=>v.trim()).filter(Boolean)})});out.innerHTML=data.candidates.length?data.candidates.map((c,i)=>`<div class="route-card"><span><b>${i+1}. ${esc(c.name)}</b> · ${esc(c.provider)}</span><span>${c.quota_remaining} remaining · $${c.cost_usd_per_invocation}</span></div>`).join(""):'<div class="empty">No eligible provider. Check credentials, health, quotas, and capability coverage.</div>'}catch(e){out.innerHTML=`<div class="error">${esc(e.message)}</div>`}}
@@ -77,8 +91,8 @@ async function testProvider(live){const out=$("#providerOutput"),request=$("#pro
 // ---- Accounts & billing ops ----
 function money(v){return `$${Number(v||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`}
 async function loadOps(){const m=$("#opsMetrics");try{const d=await api("/admin/metrics/business?days=30");
-  m.innerHTML=[["MRR",money(d.mrr_usd)],["Users",d.users.total],["Paid",`${d.users.paid} · ${d.users.conversion_pct}%`],["Credits used",d.credits.burned_total.toLocaleString()],["Active accounts",d.credits.active_accounts],["Failed payments",d.failed_payments],["Ratings",`👍 ${d.feedback.up} · 👎 ${d.feedback.down}`]].map(([k,v])=>`<div class="metric"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join("");
-  const burn=Object.entries(d.credits.burned_by_kind||{}).sort((a,b)=>b[1]-a[1]);$("#opsBurn").innerHTML=burn.length?burn.map(([k,v])=>`<div class="ops-row"><span>${esc(k.replace("_"," "))}</span><b>${v.toLocaleString()}</b></div>`).join("")+`<div class="ops-row muted"><span>plans: ${Object.entries(d.users.by_plan).map(([p,n])=>`${esc(p)} ${n}`).join(", ")||"—"}</span><span>${d.credits.turns} turns</span></div>`:'<div class="muted">No usage in the window.</div>';
+  m.innerHTML=[["Monthly recurring revenue",money(d.mrr_usd)],["Users",d.users.total],["Paid accounts",`${d.users.paid} · ${d.users.conversion_pct}%`],["Credits used",d.credits.burned_total.toLocaleString()],["Active accounts",d.credits.active_accounts],["Failed payments",d.failed_payments],["Feedback",`${d.feedback.up} positive · ${d.feedback.down} negative`]].map(([k,v])=>`<div class="metric"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join("");
+  const burn=Object.entries(d.credits.burned_by_kind||{}).sort((a,b)=>b[1]-a[1]);$("#opsBurn").innerHTML=burn.length?burn.map(([k,v])=>`<div class="ops-row"><span>${esc(k.replace("_"," "))}</span><b>${v.toLocaleString()}</b></div>`).join("")+`<div class="ops-row muted"><span>plans: ${Object.entries(d.users.by_plan).map(([p,n])=>`${esc(p)} ${n}`).join(", ")||"—"}</span><span>${d.credits.turns} turns</span></div>`:'<div class="muted">No usage in the last 30 days.</div>';
   const ev=d.stripe.recent_events||[];$("#opsEvents").innerHTML=ev.length?ev.map(e=>`<div class="ops-row"><span><code>${esc(e.id)}</code> ${esc(e.type)}</span><span class="muted">${esc((e.received_at||"").slice(0,16).replace("T"," "))} <button class="mini" data-replay="${esc(e.id)}" ${d.stripe.configured?"":"disabled"}>Replay</button></span></div>`).join(""):`<div class="muted">${d.stripe.configured?"No events yet.":"Stripe not configured."}</div>`;
   $("#opsEvents").querySelectorAll("[data-replay]").forEach(b=>b.onclick=async()=>{b.disabled=true;try{const r=await api(`/admin/billing/events/${b.dataset.replay}/replay`,{method:"POST"});b.textContent=r.status||"replayed"}catch(e){b.textContent=e.message.slice(0,40)}});
  }catch(e){m.innerHTML=`<div class="metric error">${esc(e.message)}</div>`}}
@@ -88,7 +102,7 @@ async function searchUsers(){const out=$("#opsUsers");out.innerHTML='<div class=
 async function openUser(email){const box=$("#opsUser");box.hidden=false;box.innerHTML='<div class="muted">Loading…</div>';try{const d=await api(`/admin/users/${encodeURIComponent(email)}`);const u=d.user;
   const plans=["free","pro","max"].map(p=>`<option value="${p}" ${u.plan_id===p?"selected":""}>${p}</option>`).join("");
   box.innerHTML=`<div class="ops-userhead"><div><b>${esc(u.email)}</b> <span class="muted">${esc(u.display_name||"")}</span><div class="muted">joined ${esc((u.created_at||"").slice(0,10))} · ${d.conversations} conversations · ${d.wallets.length} wallets · ${d.sessions.length} devices${u.team_owner_id?" · team member":""}</div></div><div class="ops-bal"><span>Balance</span><strong>${d.credits.balance.toLocaleString()}</strong></div></div>
-   <div class="ops-actions"><label>Plan <select id="opsPlan">${plans}</select></label><button id="opsSetPlan">Set plan</button><label>Credits <input id="opsAmount" type="number" value="100" style="width:90px"></label><input id="opsReason" placeholder="reason (audit)" style="width:160px"><button id="opsGrant">Grant</button><button id="opsClaw">Deduct credits</button><button id="opsSignout">Sign out everywhere</button><span id="opsStatus" class="muted"></span></div>
+   <div class="ops-actions"><label>Plan <select id="opsPlan">${plans}</select></label><button id="opsSetPlan">Set plan</button><label>Credits <input id="opsAmount" type="number" value="100" style="width:90px"></label><input id="opsReason" aria-label="Reason for credit adjustment" placeholder="Reason for adjustment" style="width:160px"><button id="opsGrant">Add credits</button><button id="opsClaw">Deduct credits</button><button id="opsSignout">Sign out everywhere</button><span id="opsStatus" class="muted"></span></div>
    <h3 class="ops-h">Usage · 30d</h3><div class="ops-row"><span>${Object.entries(d.usage.by_kind).map(([k,v])=>`${esc(k)} ${v}`).join(" · ")||"none"}</span><b>${d.usage.total} credits · ${d.usage.turns} turns</b></div>
    <h3 class="ops-h">API keys</h3>${d.api_keys.length?d.api_keys.map(k=>`<div class="ops-row"><span>${esc(k.name)} <code>${esc(k.prefix)}…</code> <span class="muted">${(k.scopes||[]).join(", ")}</span>${k.revoked_at?' <span class="pill">revoked</span>':""}</span>${k.revoked_at?"":`<button class="mini" data-revoke="${esc(k.id)}">Revoke</button>`}</div>`).join(""):'<div class="muted">No keys.</div>'}
    <h3 class="ops-h">Ledger</h3><div class="table-wrap"><table style="min-width:0"><thead><tr><th>When</th><th>Reason</th><th>Reference</th><th style="text-align:right">Change</th></tr></thead><tbody>${d.credits.ledger.slice(0,40).map(r=>`<tr><td>${esc((r.created_at||"").slice(0,16).replace("T"," "))}</td><td>${esc(r.reason)}</td><td><code>${esc(r.ref_type)}:${esc(String(r.ref_id).slice(0,14))}</code></td><td style="text-align:right;color:${r.delta<0?"var(--bad)":"var(--good)"}">${r.delta>0?"+":""}${r.delta}</td></tr>`).join("")}</tbody></table></div>`;
@@ -107,13 +121,13 @@ function fmtN(v){return Number(v||0).toLocaleString()}
 async function loadKb(){const m=$("#kbMetrics"),tb=$("#kbCoverage");try{const d=await api("/admin/knowledge/overview");const t=d.totals,c=d.config;
   $("#kbConfig").textContent=`${t.backend} · ${t.vector_native?"pgvector":"float[]"} · ${c.embedder} · rerank ${c.reranker}`;
   const lastRun=d.runs[0]?ago(d.runs[0].finished_at||d.runs[0].started_at):"never";
-  m.innerHTML=[["Protocols",t.protocols],["With docs",t.protocols_with_docs],["Documents",fmtN(t.documents)],["Chunks",fmtN(t.chunks)],["Entities",fmtN(t.entities)],["Edges",fmtN(t.relationships)],["Failing sources",t.failing_sources],["Last ingest",lastRun]].map(([k,v])=>`<div class="metric${k==="Failing sources"&&v>0?" warn":""}"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join("");
+  m.innerHTML=[["Protocols",t.protocols],["With docs",t.protocols_with_docs],["Documents",fmtN(t.documents)],["Chunks",fmtN(t.chunks)],["Entities",fmtN(t.entities)],["Relationships",fmtN(t.relationships)],["Failing sources",t.failing_sources],["Last updated",lastRun]].map(([k,v])=>`<div class="metric${k==="Failing sources"&&v>0?" warn":""}"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join("");
   $("#kbCoverageNote").textContent=`${d.coverage.length} protocols by TVL`;
   tb.innerHTML=d.coverage.map(p=>{const bs=Object.entries(p.by_source||{}).map(([k,v])=>`<span class="pill" title="${esc(k)}">${esc(SRC_LABEL[k]||k)} ${v}</span>`).join("");
     const src=(p.sources||[]).map(s=>`<span class="pill ${s.error?"bad":(s.documents?"ok":"")}" title="${esc(s.error||`last run ${ago(s.last_run_at)}`)}">${esc(SRC_LABEL[s.source]||s.source)}${s.error?" ✕":""}</span>`).join("");
     return `<tr data-slug="${esc(p.slug)}" data-id="${esc(p.id)}"><td><div class="provider">${esc(p.name)}</div><div class="tool">${esc(p.category||"")} · ${(p.chains||[]).slice(0,3).map(esc).join(", ")}${p.chains&&p.chains.length>3?` +${p.chains.length-3}`:""}</div></td><td>${fmtN(p.documents)} ${bs}</td><td class="${p.chunks<10?"bad":""}">${fmtN(p.chunks)}</td><td>${fmtN(p.edges)}</td><td>${src||'<span class="muted">none</span>'}</td><td><button class="mini kb-ingest">Update data</button> <button class="mini kb-graph">Relationships</button></td></tr>`}).join("");
   tb.querySelectorAll(".kb-ingest").forEach(b=>b.onclick=()=>kbIngest(b));tb.querySelectorAll(".kb-graph").forEach(b=>b.onclick=()=>kbGraph(b.closest("tr").dataset.id,b.closest("tr").querySelector(".provider").textContent));
-  $("#kbRuns").innerHTML=d.runs.length?d.runs.slice(0,25).map(r=>`<div class="ops-row"><span>${esc((r.protocol_id||"").replace("protocol:",""))} <span class="pill">${esc(SRC_LABEL[r.source]||r.source)}</span>${r.errors&&r.errors.length?` <span class="pill bad" title="${esc(r.errors[0])}">error</span>`:""}</span><span class="muted">${r.documents_changed}/${r.documents_seen} changed · ${fmtN(r.chunks_written)} chunks · ${r.seconds??"?"}s · ${ago(r.finished_at||r.started_at)}</span></div>`).join(""):'<div class="muted">No runs recorded yet. Run <code>scripts/kb_ingest.py</code> or press Ingest.</div>';
+  $("#kbRuns").innerHTML=d.runs.length?d.runs.slice(0,25).map(r=>`<div class="ops-row"><span>${esc((r.protocol_id||"").replace("protocol:",""))} <span class="pill">${esc(SRC_LABEL[r.source]||r.source)}</span>${r.errors&&r.errors.length?` <span class="pill bad" title="${esc(r.errors[0])}">error</span>`:""}</span><span class="muted">${r.documents_changed}/${r.documents_seen} changed · ${fmtN(r.chunks_written)} chunks · ${r.seconds??"?"}s · ${ago(r.finished_at||r.started_at)}</span></div>`).join(""):'<div class="muted">No updates yet. Select Update data for a protocol to get started.</div>';
  }catch(e){m.innerHTML=`<div class="metric error">${esc(e.message)}</div>`;tb.innerHTML=`<tr><td colspan="6" class="error">${esc(e.message)}</td></tr>`}}
 async function kbIngest(btn){const tr=btn.closest("tr");btn.disabled=true;btn.textContent="Running…";try{const r=await api(`/admin/knowledge/ingest/${encodeURIComponent(tr.dataset.slug)}`,{method:"POST"});const total=r.results.reduce((a,x)=>a+x.chunks_written,0);btn.textContent=`+${total} chunks`;setTimeout(loadKb,800)}catch(e){btn.textContent=e.message.slice(0,30)}}
 async function kbGraph(id,name){const box=$("#kbGraph");$("#kbGraphTitle").textContent=name||id;box.classList.remove("muted");box.innerHTML='<div class="muted">Loading…</div>';try{const d=await api(`/knowledge/graph/${encodeURIComponent(id)}`);
@@ -130,7 +144,14 @@ async function loadGaps(){const out=$("#kbGaps");try{const d=await api("/admin/r
 const _loadKb=loadKb;loadKb=async function(){await _loadKb();loadGaps();};
 $("#kbRefresh").onclick=loadKb;$("#kbSearch").onclick=kbSearch;$("#kbQuery").addEventListener("keydown",e=>{if(e.key==="Enter")kbSearch()});
 $("#kbDerive").onclick=async()=>{const b=$("#kbDerive");b.disabled=true;try{const r=await api("/admin/knowledge/derive",{method:"POST"});b.textContent=`+${r.competitors} competitors · +${r.integrations} integrations`;loadKb()}catch(e){b.textContent=e.message.slice(0,40)}finally{setTimeout(()=>{b.disabled=false;b.textContent="Update relationships"},4000)}};
-const _load=load;load=async function(){await _load();loadOps();searchUsers();loadKb();};
-$("#connect").onclick=load;$("#refresh").onclick=load;$("#preview").onclick=preview;$("#testIntent").onclick=()=>testIntent(false);$("#liveIntent").onclick=()=>testIntent(true);$("#dryProvider").onclick=()=>testProvider(false);$("#liveProvider").onclick=()=>testProvider(true);if(saved)load();
+const _load=load;load=async function(){await _load();if($("#connectionStatus").textContent==="Connected")await Promise.all([loadOps(),searchUsers(),loadKb()]);};
+$("#adminAuth").onsubmit=async e=>{e.preventDefault();const b=$("#connect");b.disabled=true;b.textContent="Connecting…";$("#connectionStatus").textContent="Loading workspace…";try{await load()}finally{b.disabled=false;b.textContent="Reconnect"}};$("#refresh").onclick=load;$("#preview").onclick=preview;$("#testIntent").onclick=()=>testIntent(false);$("#liveIntent").onclick=()=>testIntent(true);$("#dryProvider").onclick=()=>testProvider(false);$("#liveProvider").onclick=()=>testProvider(true);
+const sectionCopy={opsPanel:["Accounts & billing","Monitor usage, manage accounts, and review payments."],kbPanel:["Knowledge base","Review coverage, refresh sources, and explore relationships."],providersPanel:["Data providers","Manage available tools, usage limits, and provider health."],testingPanel:["Testing","Preview routing and validate provider responses."]};
+function showSection(){if(location.hash==="#mainContent")return;const id=location.pathname.endsWith("/knowledge.html")?"kbPanel":Object.hasOwn(sectionCopy,location.hash.slice(1))?location.hash.slice(1):"opsPanel";for(const key of Object.keys(sectionCopy))document.getElementById(key).hidden=key!==id;document.querySelectorAll("[data-admin-section]").forEach(el=>el.hidden=el.dataset.adminSection!==id);document.querySelectorAll(".admin-nav a").forEach(a=>{if(a.dataset.section===id)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current")});$("#pageTitle").textContent=sectionCopy[id][0];$("#pageDescription").textContent=sectionCopy[id][1];document.title="Orbit — "+sectionCopy[id][0];}
+window.addEventListener("hashchange",showSection);showSection();
+let appearance="system";try{appearance=JSON.parse(localStorage.getItem("orbit_theme_v1")||'"system"')}catch(e){};$("#themeChoice").value=["system","light","dark"].includes(appearance)?appearance:"system";
+function applyAppearance(){const choice=$("#themeChoice").value;document.documentElement.dataset.theme=choice==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):choice;}
+$("#themeChoice").onchange=()=>{try{localStorage.setItem("orbit_theme_v1",JSON.stringify($("#themeChoice").value))}catch(e){}applyAppearance()};matchMedia("(prefers-color-scheme: light)").addEventListener("change",applyAppearance);
+if(saved)load();
 </script>
 </body></html>

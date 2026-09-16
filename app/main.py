@@ -19,7 +19,7 @@ from uuid import uuid4
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from fastapi.responses import JSONResponse
 from app.limits import allow_auth_request
 from app.public_activity import public_activity
@@ -181,6 +181,12 @@ async def ui_revalidation(request: Request, call_next):
     if request.url.path.startswith("/ui") and response.status_code == 200:
         response.headers["Cache-Control"] = "no-cache"
     return response
+
+
+@app.get("/ui/knowledge.html", include_in_schema=False)
+async def knowledge_admin_page():
+    """Dedicated knowledge workspace using the shared administration shell."""
+    return FileResponse(STATIC_DIR / "admin.html")
 
 
 app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
