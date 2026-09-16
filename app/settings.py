@@ -256,6 +256,9 @@ class Settings(BaseSettings):
     # embed it in the browser bundle; production usage should go via a proxy.
     relay_api_key: str | None = None
     solana_private_key: str | None = None
+    # Readiness probe (/readyz): per-check timeout, so a wedged datastore
+    # fails the probe fast instead of hanging the load balancer's check.
+    readiness_check_timeout_seconds: float = 3.0
     live_trading: bool = False
     max_trade_usd: float = 25.0
     max_slippage_bps: int = 100

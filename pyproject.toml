@@ -36,3 +36,7 @@ rerank = ["sentence-transformers>=3.0"]  # KNOWLEDGE_RERANKER=cross-encoder
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+# Bare `pytest -q` (what CI runs) must collect the suite and nothing else:
+# scripts/ holds operational tools that talk to live services.
+testpaths = ["tests"]
+norecursedirs = ["scripts", "reports", "data", ".venv", "node_modules"]

@@ -21,7 +21,7 @@ jobs:
           python-version: '3.11'
       - run: pip install -e '.[dev]'
       - run: python scripts/check_secrets.py
-      - run: pytest -q
+      - run: pytest -q          # pinned to tests/ by pyproject's testpaths; scripts/ is never collected
         env:
           DATABASE_URL: ''
           REDIS_URL: ''

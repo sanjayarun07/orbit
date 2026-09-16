@@ -57,3 +57,43 @@ an existing repository. Protect the release branch with:
 
 No remote or author was configured in this checkout when this pass began.
 Local CI files do not activate host-level protections automatically.
+
+## Liveness, readiness, and release evidence
+
+`GET /health` is liveness only: the process is up and serving. It is cheap,
+touches no dependency, and must not be used to decide whether to send
+traffic.
+
+`GET /readyz` is the readiness gate. It reports, with per-check latency and
+a 3s timeout each (`readiness_check_timeout_seconds`):
+
+| Check | Required when | Fails the probe |
+|---|---|---|
+| `postgres` | `DATABASE_URL` is set | yes |
+| `redis` | `REDIS_URL` is set | yes |
+| `model_credentials` | always | yes |
+| `reconciliation`, `relay_reconciliation`, `tasks` | always | yes -- these must never die silently |
+| `tool_outcomes`, `knowledge_ingest` | never | no, reported as `degraded` |
+
+It returns **503** when any required check fails, so a load balancer or
+deploy gate can act on it, and **200** with a non-empty `degraded` list
+when only optional workers are down (the knowledge ingester is off by
+default, which is a degraded state, not an outage). The response also
+carries `version` (the running commit, or `ORBIT_RELEASE`) and
+`live_trading`, so a deployed instance can be identified from its own
+probe rather than from deployment notes.
+
+A required worker that was never started reports `not started` and fails
+the probe -- a process whose startup did not complete must not receive
+traffic.
+
+### Release candidate
+
+CI runs a bare `pytest -q`, which `pyproject.toml`'s `testpaths` pins to
+`tests/`; `scripts/` is excluded from collection and every script must be
+import-safe (`tests/test_release_hygiene.py` fails the build otherwise --
+an operational script that ran work or exited at import time used to break
+collection). Verify a candidate with:
+
+    pytest -q                      # the suite CI runs, nothing else
+    curl -fsS $HOST/readyz | jq    # 503 = do not promote

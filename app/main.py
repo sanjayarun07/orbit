@@ -3,6 +3,7 @@ import hmac
 import ipaddress
 import logging
 import os
+import time
 import re
 from contextlib import asynccontextmanager
 
@@ -75,6 +76,7 @@ from app.models import (
 )
 from app.plans import get_plan
 from app.provider_registry import get_provider_router, save_provider_overrides
+from app.db import get_pg_pool, get_redis
 from app.settings import settings
 from app.portfolio import build_portfolio_snapshot
 from app.wallet_insights import portfolio_scenario, wallet_health
@@ -118,6 +120,10 @@ async def lifespan(_app: FastAPI):
     kb_tool.set_loop(asyncio.get_running_loop())
     kb_warm = asyncio.create_task(_warm_knowledge())
     kb_worker = asyncio.create_task(kb_ingest.worker())
+    _workers.update({
+        "reconciliation": reconciliation, "relay_reconciliation": relay_reconciliation,
+        "tool_outcomes": outcomes_refresh, "tasks": task_worker, "knowledge_ingest": kb_worker,
+    })
     try:
         async with mcp_server.mcp.session_manager.run():
             yield
@@ -206,9 +212,114 @@ async def mcp_admission(request: Request, call_next):
 
 app.mount("/mcp", mcp_server.mcp.streamable_http_app(), name="mcp")
 
+_workers: dict[str, "asyncio.Task"] = {}
+
+
 @app.get("/health")
 async def health():
+    """Liveness only: the process is up and serving. Deliberately cheap and
+    dependency-free -- use /readyz to decide whether to send traffic."""
     return {"status": "ok", "counters": snapshot()}
+
+
+async def _check(name: str, coro, required: bool) -> dict:
+    started = time.monotonic()
+    try:
+        detail = await asyncio.wait_for(coro, timeout=settings.readiness_check_timeout_seconds)
+        ok = True
+    except asyncio.TimeoutError:
+        detail, ok = f"timed out after {settings.readiness_check_timeout_seconds}s", False
+    except Exception as exc:
+        detail, ok = f"{type(exc).__name__}: {str(exc)[:160]}", False
+    return {"name": name, "ok": ok, "required": required, "detail": detail,
+            "latency_ms": round((time.monotonic() - started) * 1000)}
+
+
+async def _check_postgres() -> str:
+    pool = await get_pg_pool()
+    if pool is None:
+        return "not configured (in-memory fallback)"
+    value = await pool.fetchval("SELECT 1")
+    if value != 1:
+        raise RuntimeError("unexpected response")
+    return "query ok"
+
+
+async def _check_redis() -> str:
+    redis = await get_redis()
+    if redis is None:
+        return "not configured (in-memory fallback)"
+    await redis.ping()
+    return "ping ok"
+
+
+async def _check_model() -> str:
+    """Reachability of the answer model's provider, without spending a call:
+    a missing key is the failure this catches at deploy time."""
+    if not settings.openai_api_key and not settings.model.startswith(("hosted_vllm/", "openai/gpt-4.1-mini-local")):
+        raise RuntimeError("no model credentials configured")
+    return f"credentials present for {settings.model}"
+
+
+def _worker_health() -> list[dict]:
+    rows = []
+    # Required workers are reported even when absent: a process whose startup
+    # never registered them is not ready, and silence would hide that.
+    for name in _REQUIRED_WORKERS - set(_workers):
+        rows.append({"name": name, "ok": False, "required": True, "detail": "not started"})
+    for name, task in _workers.items():
+        if task is None:
+            state, ok = "missing", False
+        elif task.cancelled():
+            state, ok = "cancelled", False
+        elif task.done():
+            exc = task.exception() if not task.cancelled() else None
+            state, ok = (f"stopped: {type(exc).__name__}" if exc else "stopped"), False
+        else:
+            state, ok = "running", True
+        rows.append({"name": name, "ok": ok, "required": name in _REQUIRED_WORKERS, "detail": state})
+    return rows
+
+
+_REQUIRED_WORKERS = {"reconciliation", "relay_reconciliation", "tasks"}
+
+
+@app.get("/readyz")
+async def readyz(response: Response):
+    """Readiness: can this instance actually serve? Checks the datastores it
+    is configured for, model credentials, and that the workers that must not
+    silently die (execution reconciliation, relay tracking, scheduled tasks)
+    are still running. 503 when any REQUIRED check fails, so a load balancer
+    or deploy gate can act on it."""
+    checks = list(await asyncio.gather(
+        _check("postgres", _check_postgres(), required=bool(settings.database_url)),
+        _check("redis", _check_redis(), required=bool(settings.redis_url)),
+        _check("model_credentials", _check_model(), required=True),
+    ))
+    checks.extend(_worker_health())
+    failed = [c["name"] for c in checks if c["required"] and not c["ok"]]
+    degraded = [c["name"] for c in checks if not c["required"] and not c["ok"]]
+    status = "ready" if not failed else "not_ready"
+    if failed:
+        response.status_code = 503
+    return {"status": status, "failed": failed, "degraded": degraded, "checks": checks,
+            "live_trading": settings.live_trading, "version": _release_version()}
+
+
+def _release_version() -> str:
+    """The commit this instance is running, for release evidence."""
+    env = os.environ.get("ORBIT_RELEASE") or os.environ.get("GIT_COMMIT")
+    if env:
+        return env
+    head = Path(__file__).resolve().parents[1] / ".git" / "HEAD"
+    try:
+        ref = head.read_text().strip()
+        if ref.startswith("ref: "):
+            ref_path = head.parent / ref.removeprefix("ref: ")
+            return ref_path.read_text().strip()[:12]
+        return ref[:12]
+    except OSError:
+        return "unknown"
 
 
 _EVM_CHAIN_NAMES = {1: "ethereum", 10: "optimism", 56: "bsc", 137: "polygon", 8453: "base", 42161: "arbitrum", 43114: "avalanche"}
