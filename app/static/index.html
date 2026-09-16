@@ -639,12 +639,19 @@
   .primary:hover { background: var(--brand-grad); filter: brightness(1.06); }
   .dialog { border-radius: 22px; }
   .field input, .field select, .charter-grid textarea { border-radius: 12px; }
-  .explore-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .explore-group h3 { margin: 14px 0 6px; font-size: 12px; color: var(--subtle); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
-  .explore-group h3:first-child { margin-top: 0; }
-  .explore-item { width: 100%; text-align: left; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 10px 12px; font-size: 13px; color: var(--text); cursor: pointer; }
-  .explore-item:hover { border-color: var(--brand-border-strong); background: var(--surface-2); }
-  .explore-item small { display: block; color: var(--subtle); font-size: 11px; margin-top: 3px; }
+  /* "What Orbit can do": the capability catalogue on the home screen (replaced the Explore dialog). */
+  .capabilities { width: 100%; margin-top: 34px; }
+  .cap-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+  .cap-head h2 { margin: 0; font-family: var(--serif, Georgia, serif); font-weight: 400; font-size: 22px; color: var(--text-strong); }
+  .cap-head p { margin: 0; font-size: 12px; color: var(--subtle); }
+  .cap-group { margin-top: 18px; }
+  .cap-group h3 { margin: 0 0 8px; font-size: 11px; color: var(--subtle); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; display: flex; align-items: center; gap: 8px; }
+  .cap-group h3 .icon { width: 14px; height: 14px; color: var(--brand); }
+  .cap-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .cap-item { width: 100%; text-align: left; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 10px 12px; font: inherit; font-size: 13px; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .cap-item:hover { border-color: var(--brand-border-strong); background: var(--surface-2); }
+  .cap-item small { color: var(--subtle); font-size: 11px; line-height: 1.35; }
+  .cap-item .cap-q { font-weight: 500; }
   @media (max-width: 1100px) { .prompts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .prompt-card { min-height: 130px; } .main::after { display: none; } }
   @media (max-width: 720px) {
     .app { padding: 0; gap: 0; grid-template-columns: 1fr; }
@@ -677,7 +684,8 @@
     .welcome { padding-top: 4vh; }
     .welcome h1 { font-size: 34px; }
     .main::before, .deco { display: none; }
-    .explore-grid { grid-template-columns: 1fr; }
+    .cap-grid { grid-template-columns: 1fr; }
+    .cap-head { flex-direction: column; gap: 2px; }
     .composer { border-radius: 20px; }
   }
 </style>
@@ -686,13 +694,12 @@
 <div class="app">
   <aside class="sidebar" id="sidebar">
     <div class="side-brand"><span class="mark"><svg class="icon" viewBox="0 0 24 24"><path d="M5 15.5 9.5 11l3 3L19 7.5"/><path d="M19 12v7H5V5h8"/></svg></span>Orbit</div>
-    <button class="new-chat" id="newChatBtn"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New Chat</button>
+    <button class="new-chat" id="newChatBtn"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New chat</button>
     <nav class="side-nav" aria-label="Primary">
       <button class="nav-item active" id="navHome" type="button"><svg class="icon" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9Z"/></svg>Home</button>
-      <button class="nav-item" id="navExplore" type="button"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15 9-2 6-4 2 2-6 4-2Z"/></svg>Explore</button>
-      <button class="nav-item" id="navLibrary" type="button"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M8 6V4h8v2"/></svg>Library</button>
+      <button class="nav-item" id="navLibrary" type="button"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M8 6V4h8v2"/></svg>History</button>
     </nav>
-    <div class="history-heading">Chats</div>
+    <div class="history-heading">Recent</div>
     <div class="history" id="chatList"></div>
     <div class="sidebar-footer">
       <button class="account-button" id="profileBtn">
@@ -725,17 +732,18 @@
       <div class="thread" id="messages">
         <div class="welcome" id="welcome">
           <div class="welcome-mark"></div>
-          <h1><span id="greetingWord">Good morning</span>, <em id="greetingName">there</em></h1>
-          <p>How can I help you with Web3 today?</p>
+          <h1><span id="greetingWord">Good morning</span><span id="greetingSep">, </span><em id="greetingName">there</em></h1>
+          <p>Research, trade and stay ahead of the market, from one place.</p>
           <div class="mono-cap" id="highlightsCaption" hidden></div>
           <div class="prompts">
-            <button class="prompt-card" data-action="portfolio" data-tone="teal"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/></svg></span><strong>Analyze my portfolio and concentration risk</strong><span>Review holdings, allocation, and concentration risk</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
-            <button class="prompt-card" data-msg="Check my SOL balance and list my SPL token balances. Do not prepare any trade." data-tone="blue"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2"/></svg></span><strong>Check my wallet balances</strong><span>Read SOL and SPL balances from your connected wallet</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
-            <button class="prompt-card" data-msg="Find the verified Jupiter token information and safety warnings for USDC mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v. Do not trade." data-tone="violet"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg></span><strong>Research a token and its safety</strong><span>Inspect token details, verification, and safety warnings</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
-            <button class="prompt-card" data-action="relay" data-tone="amber"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h13l-3-3M20 17H7l3 3"/></svg></span><strong>Swap across chains with a reviewed quote</strong><span>Buy a token through Relay after reviewing route, fees, and output</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+            <button class="prompt-card" data-action="portfolio" data-tone="teal"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/></svg></span><strong>Analyze my portfolio</strong><span>Holdings, allocation and concentration risk</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+            <button class="prompt-card" data-msg="Check my SOL balance and list my SPL token balances. Do not prepare any trade." data-tone="blue"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2"/></svg></span><strong>Check my balances</strong><span>SOL and token balances from your connected wallet</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+            <button class="prompt-card" data-msg="Find the verified Jupiter token information and safety warnings for USDC mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v. Do not trade." data-tone="violet"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg></span><strong>Check a token's safety</strong><span>Verification, holders and risk warnings before you buy</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+            <button class="prompt-card" data-action="relay" data-tone="amber"><span class="prompt-tile"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h13l-3-3M20 17H7l3 3"/></svg></span><strong>Swap across chains</strong><span>A reviewed route, fees and output before you sign</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
           </div>
           <div class="chips" id="homeChips" hidden></div>
           <div class="suggest-rows" id="homeRows" hidden></div>
+          <section class="capabilities" id="homeCapabilities" aria-label="What Orbit can do"></section>
         </div>
       </div>
     </section>
@@ -745,7 +753,7 @@
     <div class="composer-shell">
       <form class="composer" id="composer">
         <div class="mention-menu" id="mentionMenu" hidden role="listbox"></div>
-        <textarea id="messageInput" rows="1" maxlength="2000" placeholder="Message anything… ($ to mention a token)"></textarea>
+        <textarea id="messageInput" rows="1" maxlength="2000" placeholder="Ask about a token, wallet, protocol or trade — type $ to mention a token"></textarea>
         <div class="composer-tools">
           <button class="composer-plus" id="composerPlus" type="button" aria-label="Connect a wallet" title="Connect a wallet"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
           <span class="composer-context"><svg class="icon" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg><span>Live tools</span></span>
@@ -816,7 +824,7 @@
         <div class="field"><label for="charterMaxPct">Max % of portfolio per position</label><input id="charterMaxPct" type="number" min="0.1" max="100" step="0.1" inputmode="decimal" placeholder="e.g. 1" /><div class="field-help">Checked against your wallet's total value.</div></div>
         <div class="field"><label for="charterMaxBps">Max slippage (bps)</label><input id="charterMaxBps" type="number" min="1" step="1" inputmode="numeric" placeholder="e.g. 50" /><div class="field-help" id="charterMaxBpsHelp">Built-in cap applies.</div></div>
         <div class="field"><label>Token requirement</label><label class="charter-check"><input id="charterVerified" type="checkbox" /> Only Jupiter-verified tokens</label></div>
-        <div class="field span2"><label>Allowed chains <span style="color:var(--subtle);font-weight:400">(none checked = any chain)</span></label><div class="charter-chains" id="charterChains"></div></div>
+        <div class="field span2"><label>Allowed chains <span style="color:var(--subtle);font-weight:400">Leave all unchecked to allow any chain.</span></label><div class="charter-chains" id="charterChains"></div></div>
         <div class="field span2"><label for="charterNotes">Anything else, in plain words</label><textarea id="charterNotes" rows="2" maxlength="300" placeholder="e.g. no memecoins during a market-wide selloff"></textarea><div class="field-help">Rules above are checked exactly on every quote. Notes are interpreted by the Risk agent and can be ambiguous — prefer the fields when one fits.</div></div>
       </div>
       <div class="charter-error" id="charterError"></div>
@@ -997,7 +1005,7 @@ teamToggle.addEventListener("change",()=>{teamModePending=teamToggle.checked;$("
 // text (chip) plus the structured fields (card). Fields are enforced exactly
 // on every quote; only free-text notes are interpreted by the Risk agent.
 let policySet=false, charterFields=null, charterLimits=null;
-function syncPolicy(charter,fields){const chip=$("#policyChip");const text=(charter||"").trim();policySet=Boolean(text);charterFields=fields||null;chip.hidden=false;chip.classList.toggle("unset",!policySet);$("#policyText").textContent=policySet?text:"none set — click to choose rules";chip.title=policySet?`Your risk charter: ${text}\nClick to review or change it.`:"No risk charter yet: trades run in advisory mode. Click to choose your rules.";}
+function syncPolicy(charter,fields){const chip=$("#policyChip");const text=(charter||"").trim();policySet=Boolean(text);charterFields=fields||null;chip.hidden=false;chip.classList.toggle("unset",!policySet);$("#policyText").textContent=policySet?text:"not set";chip.title=policySet?`Your risk charter: ${text}\nClick to review or change it.`:"No risk charter yet: trades run in advisory mode. Click to choose your rules.";}
 async function openCharterDialog(){
   if(!charterLimits){try{charterLimits=await (await fetch("/chat/risk-charter/limits")).json();}catch{charterLimits={max_trade_usd:null,max_slippage_bps:null,chains:[]};}}
   const f=charterFields||{};
@@ -1234,13 +1242,58 @@ function renderHomeSuggestions(){const chips=$("#homeChips"),rows=$("#homeRows")
   rows.innerHTML=(cat?.rows||[]).map(r=>`<button class="suggest-row" type="button" data-fill="${escapeHtml(r)}"><span>${escapeHtml(r)}</span><svg class="icon" viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8"/></svg></button>`).join("");
   rows.querySelectorAll("[data-fill]").forEach(b=>b.addEventListener("click",()=>{input.value=b.dataset.fill;input.focus();input.dispatchEvent(new Event("input"));}));}
 function fillGreeting(){const h=new Date().getHours();const word=h<5?"Good night":h<12?"Good morning":h<17?"Good afternoon":h<22?"Good evening":"Good night";const w=$("#greetingWord"),n=$("#greetingName");if(w)w.textContent=word;
-  const name=(typeof account!=="undefined"&&account?.user?.display_name)||(typeof profile!=="undefined"&&profile?.name)||(typeof account!=="undefined"&&account?.user?.email?.split("@")[0])||"there";if(n)n.textContent=name;
-  const avatar=$("#topAvatar");if(avatar)avatar.textContent=(name==="there"?"W":name).trim()[0].toUpperCase();}
+  const name=((typeof account!=="undefined"&&account?.user?.display_name)||(typeof profile!=="undefined"&&profile?.name)||"").trim();const sep=$("#greetingSep");
+  if(n){n.textContent=name;n.hidden=!name;}if(sep)sep.hidden=!name;
+  const initial=(name||(typeof account!=="undefined"&&account?.user?.email)||"W").trim()[0].toUpperCase();const avatar=$("#topAvatar");if(avatar)avatar.textContent=initial;}
 function setNav(id){document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("active",b.id===id));}
 function startNewChat() {
   if (busy) return;
-  chatTurnEpoch++;sessionId = null;sessionRevision=0; sessionStorage.removeItem("orbit_session_id"); messagesEl.innerHTML = welcomeMarkup; fillGreeting(); renderHighlights(); renderHomeSuggestions(); setNav("navHome"); renderChatList(); syncTeamMode(false); syncPolicy(null,null); autoFollow=true;conversationEl.scrollTop=0;closeSidebar();input.focus();
+  chatTurnEpoch++;sessionId = null;sessionRevision=0; sessionStorage.removeItem("orbit_session_id"); messagesEl.innerHTML = welcomeMarkup; fillGreeting(); renderHighlights(); renderHomeSuggestions(); renderCapabilities(); setNav("navHome"); renderChatList(); syncTeamMode(false); syncPolicy(null,null); autoFollow=true;conversationEl.scrollTop=0;closeSidebar();input.focus();
 }
+// What Orbit can do: the capability catalogue rendered on the home screen. One
+// example prompt per capability, phrased the way people actually ask.
+const CAPABILITIES=[
+ ["Market","<svg class=\"icon\" viewBox=\"0 0 24 24\"><path d=\"M4 19V5M4 19h16M8 15l3-4 3 2 5-6\"/></svg>",[
+  ["How's the crypto market today?","Overview card: BTC / ETH / SOL, sentiment, movers, trending"],
+  ["What are the trending narratives right now?","The market-wide story from the news, plus on-chain metas"],
+  ["Trending tokens on Solana","Live pools and launches with volume and liquidity"],
+  ["Best USDC yield on Base","DefiLlama pools ranked by APY, dust filtered"],
+  ["How much revenue does Aave make?","Fees and revenue: 24h, 30d, all-time, with methodology"],
+  ["Top gainers on Base in the last 24h","Ranked movers per chain"]]],
+ ["Research","<svg class=\"icon\" viewBox=\"0 0 24 24\"><circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"m20 20-3.5-3.5\"/></svg>",[
+  ["Deep dive on JUP","10-dimension due diligence with confidence and flip variable"],
+  ["Is BONK safe to ape into?","Jupiter identity + Shield safety dossier"],
+  ["Who are the top holders of PEPE?","Holder concentration, chain-correct"],
+  ["Why is SOL moving today?","Price, volume and the news driver, with sources"],
+  ["What is crypto twitter saying about BONK?","KOL and social sentiment"],
+  ["What events could move the market this week?","Unlocks, listings, macro dates"]]],
+ ["Knowledge base","<svg class=\"icon\" viewBox=\"0 0 24 24\"><path d=\"M4 5h7a2 2 0 0 1 2 2v12a1 1 0 0 0-1-1H4V5Zm16 0h-7a2 2 0 0 0-2 2v12a1 1 0 0 1 1-1h8V5Z\"/></svg>",[
+  ["How does Aave V3's E-mode change the liquidation threshold?","Answers from protocol docs, cited"],
+  ["Has Aave ever been hacked?","Every recorded DeFi incident, with dates and losses"],
+  ["What backs USDe and how does it keep its peg?","Stablecoin peg, mechanism and chains"],
+  ["Who are Kamino's competitors on Solana?","The protocol graph: competitors, integrations, forks"],
+  ["What did the Lido community vote on recently?","Snapshot proposals and forum threads"],
+  ["Who are the investors backing EigenLayer?","Funding rounds and investors"]]],
+ ["Wallets","<svg class=\"icon\" viewBox=\"0 0 24 24\"><rect x=\"3\" y=\"6\" width=\"18\" height=\"13\" rx=\"2\"/><path d=\"M16 12h5M3 10h18\"/></svg>",[
+  ["Analyze my portfolio","Holdings, allocation and concentration risk"],
+  ["What if my portfolio drops 20%?","Deterministic price-shock scenario"],
+  ["Wallet health check","Balances, pricing gaps, gas readiness"]]],
+ ["Trading","<svg class=\"icon\" viewBox=\"0 0 24 24\"><path d=\"M4 7h13l-3-3M20 17H7l3 3\"/></svg>",[
+  ["What would happen if I sold 0.05 SOL for USDC?","Read-only simulation with a live Jupiter quote"],
+  ["Swap 0.01 SOL to USDC on Solana with 50 bps slippage","Quote → review → confirm from your wallet"],
+  ["Start a cross-chain swap","Bridge and swap across chains with a reviewed Relay quote"],
+  ["Set my risk charter","Rules the Risk agent enforces before any quote"]]],
+ ["Alerts & tasks","<svg class=\"icon\" viewBox=\"0 0 24 24\"><path d=\"M6 16V11a6 6 0 0 1 12 0v5l2 2H4l2-2Zm4 3a2 2 0 0 0 4 0\"/></svg>",[
+  ["Alert me when SOL drops below $100","Price alerts land in your inbox"],
+  ["Remind me in 3 hours to check SOL","Reminders run in the background"],
+  ["Show my tasks","Everything scheduled, one place to cancel"]]]];
+function renderCapabilities(){const host=$("#homeCapabilities");if(!host)return;
+  host.innerHTML=`<div class="cap-head"><h2>What Orbit can do</h2><p>Tap any example, or ask in your own words.</p></div>`+CAPABILITIES.map(([group,icon,items])=>`<div class="cap-group"><h3>${icon}${escapeHtml(group)}</h3><div class="cap-grid">${items.map(([q,d])=>`<button class="cap-item" type="button" data-q="${escapeHtml(q)}"><span class="cap-q">${escapeHtml(q)}</span><small>${escapeHtml(d)}</small></button>`).join("")}</div></div>`).join("");}
+document.addEventListener("click",event=>{const item=event.target.closest(".cap-item");if(!item)return;const q=item.dataset.q;
+  if(q==="Set my risk charter"){openCharterDialog();return;}
+  if(q==="Analyze my portfolio"){analyzePortfolio();return;}
+  sendMessage(q);});
+renderCapabilities();
 const welcomeMarkup = messagesEl.innerHTML;
 
 function addUserMessage(text) {
@@ -1466,11 +1519,14 @@ function renderInlineRelaySwap(draft={}){
   return card;
 }
 function renderRouteBadge(intent,capabilities=[]){const row=document.createElement("div");row.className="route-badge";const label=String(intent||"research").replaceAll("_"," ");row.innerHTML=`<span>Intent</span><strong>${escapeHtml(label)}</strong>${capabilities.map(item=>`<span class="route-capability">${escapeHtml(String(item).replaceAll("_"," "))}</span>`).join("")}`;return row;}
-function renderExperience(data){const fragment=document.createDocumentFragment();if(data.context_capsules?.length){const row=document.createElement("div");row.className="context-strip";row.innerHTML=data.context_capsules.map(item=>`<span class="context-chip"><b>${escapeHtml(item.kind)}</b><span>${escapeHtml(item.label)}${item.chain?` · ${escapeHtml(item.chain)}`:""}${item.address?` · ${escapeHtml(compactAddress(item.address))}`:""}</span></span>`).join("");fragment.appendChild(row);}if(data.intent_lock){const lock=data.intent_lock,row=document.createElement("div");row.className="trust-strip";const input=lock.input_token.length>18?compactAddress(lock.input_token):lock.input_token,output=lock.output_token.length>18?compactAddress(lock.output_token):lock.output_token;row.innerHTML=`<strong>Intent locked</strong> · ${escapeHtml(lock.amount)} ${escapeHtml(input)} · ${escapeHtml(lock.source_chain)} → ${escapeHtml(lock.destination_chain)} · ${escapeHtml(output)} · <span title="${escapeHtml(lock.fingerprint)}">${escapeHtml(lock.fingerprint.slice(0,8))}</span>`;fragment.appendChild(row);}if(data.trade_readiness){const ready=data.trade_readiness,row=document.createElement("div");row.className=`trust-strip ${ready.level==="ready"?"":"caution"}`;row.innerHTML=`<strong>Trade readiness: ${escapeHtml(ready.level.replaceAll("_"," "))}</strong> · ${escapeHtml((ready.checks||[]).join(" · "))}${ready.warnings?.length?`<br>${escapeHtml(ready.warnings.join(" · "))}`:""}`;fragment.appendChild(row);}if(data.gas_advisory){const gas=data.gas_advisory,row=document.createElement("div");row.className=`trust-strip ${gas.status==="check_required"?"caution":""}`;row.innerHTML=`<strong>Destination gas</strong> · ${escapeHtml(gas.message)}`;fragment.appendChild(row);}if(data.evidence){const ev=data.evidence,row=document.createElement("div");row.className=`trust-strip ${ev.confidence==="limited"?"caution":""}`;const time=new Date(ev.generated_at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});row.innerHTML=`<strong>Evidence: ${escapeHtml(ev.confidence)}</strong> · ${ev.successful_tools} successful${ev.failed_tools?` · ${ev.failed_tools} failed`:""} · ${escapeHtml((ev.providers||[]).join(", "))} · ${escapeHtml(time)}${ev.cached?" · cached":""}`;fragment.appendChild(row);}return fragment;}
+function renderExperience(data){const fragment=document.createDocumentFragment();if(data.context_capsules?.length){const row=document.createElement("div");row.className="context-strip";row.innerHTML=data.context_capsules.map(item=>`<span class="context-chip"><b>${escapeHtml(item.kind)}</b><span>${escapeHtml(item.label)}${item.chain?` · ${escapeHtml(item.chain)}`:""}${item.address?` · ${escapeHtml(compactAddress(item.address))}`:""}</span></span>`).join("");fragment.appendChild(row);}if(data.intent_lock){const lock=data.intent_lock,row=document.createElement("div");row.className="trust-strip";const input=lock.input_token.length>18?compactAddress(lock.input_token):lock.input_token,output=lock.output_token.length>18?compactAddress(lock.output_token):lock.output_token;row.innerHTML=`<strong>Intent locked</strong> · ${escapeHtml(lock.amount)} ${escapeHtml(input)} · ${escapeHtml(lock.source_chain)} → ${escapeHtml(lock.destination_chain)} · ${escapeHtml(output)} · <span title="${escapeHtml(lock.fingerprint)}">${escapeHtml(lock.fingerprint.slice(0,8))}</span>`;fragment.appendChild(row);}if(data.trade_readiness){const ready=data.trade_readiness,row=document.createElement("div");row.className=`trust-strip ${ready.level==="ready"?"":"caution"}`;row.innerHTML=`<strong>Trade readiness: ${escapeHtml(ready.level.replaceAll("_"," "))}</strong> · ${escapeHtml((ready.checks||[]).join(" · "))}${ready.warnings?.length?`<br>${escapeHtml(ready.warnings.join(" · "))}`:""}`;fragment.appendChild(row);}if(data.gas_advisory){const gas=data.gas_advisory,row=document.createElement("div");row.className=`trust-strip ${gas.status==="check_required"?"caution":""}`;row.innerHTML=`<strong>Destination gas</strong> · ${escapeHtml(gas.message)}`;fragment.appendChild(row);}if(SHOW_TRACES&&data.evidence){const ev=data.evidence,row=document.createElement("div");row.className=`trust-strip ${ev.confidence==="limited"?"caution":""}`;const time=new Date(ev.generated_at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});row.innerHTML=`<strong>Evidence: ${escapeHtml(ev.confidence)}</strong> · ${ev.successful_tools} successful${ev.failed_tools?` · ${ev.failed_tools} failed`:""} · ${escapeHtml((ev.providers||[]).join(", "))} · ${escapeHtml(time)}${ev.cached?" · cached":""}`;fragment.appendChild(row);}return fragment;}
+// Routing intent, tool activity and evidence strips are diagnostics: hidden from users,
+// shown when localStorage orbit_debug is "1" (admin/dev). Sources and cards always show.
+const SHOW_TRACES=(()=>{try{return localStorage.getItem("orbit_debug")==="1";}catch{return false;}})();
 function finishAgentMessage(el, data) {
   const body=$(".message-body",el); body.innerHTML='<div class="answer"></div>';
   if(data.error){el.classList.add("error");$(".answer",body).textContent=data.error;}
-  else { const answerNode=$(".answer",body);answerNode.replaceWith(renderAnswerResult(data.answer || ""));if(data.intent)body.appendChild(renderRouteBadge(data.intent,data.capabilities));body.appendChild(renderExperience(data));if(data.cross_chain_swap)body.appendChild(renderRelayPlanCard(data.cross_chain_swap,Number(data.session_revision??-1))); const portfolio=renderMcpPortfolioCard(data.trajectory);if(portfolio)body.appendChild(portfolio);const activity=renderToolActivity(data.trajectory); if(activity)body.appendChild(activity); if(data.trade_plan)body.appendChild(renderPlanCard(data.trade_plan));const actions=data.quick_actions?.length?data.quick_actions:[];if(actions.length)body.appendChild(renderSuggestions(actions,data.trade_plan)); }
+  else { const answerNode=$(".answer",body);answerNode.replaceWith(renderAnswerResult(data.answer || ""));if(SHOW_TRACES&&data.intent)body.appendChild(renderRouteBadge(data.intent,data.capabilities));body.appendChild(renderExperience(data));if(data.cross_chain_swap)body.appendChild(renderRelayPlanCard(data.cross_chain_swap,Number(data.session_revision??-1))); const portfolio=renderMcpPortfolioCard(data.trajectory);if(portfolio)body.appendChild(portfolio);const activity=SHOW_TRACES?renderToolActivity(data.trajectory):null; if(activity)body.appendChild(activity); if(data.trade_plan)body.appendChild(renderPlanCard(data.trade_plan));const actions=data.quick_actions?.length?data.quick_actions:[];if(actions.length)body.appendChild(renderSuggestions(actions,data.trade_plan)); }
   if(!data.error) attachMessageActions(el, data.answer, data.session_revision);
   scrollToBottom();
 }
@@ -1756,17 +1812,8 @@ document.addEventListener("keydown",event=>{if(event.key==="Escape"){document.qu
 $("#newChatBtn").addEventListener("click",startNewChat);
 $("#navHome").addEventListener("click",startNewChat);
 $("#navLibrary").addEventListener("click",()=>{setNav("navLibrary");if(window.matchMedia("(max-width:720px)").matches)setSidebar(true);const first=$("#chatList .chat-item");if(first)first.focus();});
-$("#navExplore").addEventListener("click",()=>{setNav("navExplore");openExplore();});
 $("#topAvatarBtn").addEventListener("click",()=>openSettings("account"));
 $("#composerPlus").addEventListener("click",()=>{if(account&&!account.authenticated){openSignin("Sign in to connect a wallet, review trades and keep your history.");return;}openDialog("walletDialog");});
-const EXPLORE_PROMPTS=[["Market",[["How's the crypto market today?","Overview card: BTC/ETH/SOL, sentiment, movers, trending"],["Trending tokens on Solana","Live pools and launches with volume and liquidity"],["Top gainers on Base in the last 24h","Ranked movers per chain"]]],
- ["Research",[["Deep dive on JUP","10-dimension due diligence with confidence and flip variable"],["Is BONK safe to ape into?","Jupiter identity + Shield safety dossier"],["Who are the top holders of PEPE?","Holder concentration, chain-correct"],["Latest news on Ethereum ETFs","Web research with sources"]]],
- ["Wallets",[["Analyze my portfolio","Holdings, allocation and concentration risk"],["What if my portfolio drops 20%?","Deterministic price-shock scenario"],["Wallet health check","Balances, pricing gaps, gas readiness"]]],
- ["Trading",[["What would happen if I sold 0.05 SOL for USDC?","Read-only simulation with a live Jupiter quote"],["Swap 0.01 SOL to USDC on Solana with 50 bps slippage","Quote → review → confirm from your wallet"],["Set my risk charter","Rules the Risk agent enforces before any quote"]]]];
-function openExplore(){let dlg=$("#exploreDialog");if(!dlg){dlg=document.createElement("div");dlg.className="overlay";dlg.id="exploreDialog";dlg.setAttribute("role","dialog");dlg.setAttribute("aria-modal","true");dlg.innerHTML='<div class="dialog" style="width:min(720px,100%)"><div class="dialog-head"><h2>Explore</h2><button class="close" data-close="exploreDialog" aria-label="Close">×</button></div><div class="dialog-body" id="exploreBody"></div></div>';document.body.appendChild(dlg);dlg.querySelector("[data-close]").addEventListener("click",()=>closeDialog("exploreDialog"));dlg.addEventListener("click",e=>{if(e.target===dlg)closeDialog("exploreDialog");});
-    $("#exploreBody").innerHTML=EXPLORE_PROMPTS.map(([group,items])=>`<div class="explore-group"><h3>${escapeHtml(group)}</h3><div class="explore-grid">${items.map(([q,d])=>`<button class="explore-item" type="button" data-q="${escapeHtml(q)}">${escapeHtml(q)}<small>${escapeHtml(d)}</small></button>`).join("")}</div></div>`).join("");
-    $("#exploreBody").querySelectorAll("[data-q]").forEach(b=>b.addEventListener("click",()=>{closeDialog("exploreDialog");if(b.dataset.q==="Set my risk charter"){openCharterDialog();return;}input.value=b.dataset.q;input.focus();form.requestSubmit();}));}
-  openDialog("exploreDialog");}
 fillGreeting();$("#mobileMenu").addEventListener("click",()=>setSidebar(!$("#sidebar").classList.contains("open")));$("#sidebarBackdrop").addEventListener("click",closeSidebar);
 
 async function checkHealth(){try{const res=await fetch("/health");$("#healthDot").classList.toggle("online",res.ok);}catch{$("#healthDot").classList.remove("online");}}
