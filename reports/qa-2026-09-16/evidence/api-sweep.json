@@ -1,0 +1,256 @@
+{
+  "passed": 29,
+  "total": 33,
+  "rows": [
+    {
+      "scenario": "market overview card",
+      "group": "research",
+      "ok": true,
+      "problems": [],
+      "ms": 927
+    },
+    {
+      "scenario": "trending narratives lead with the story",
+      "group": "research",
+      "ok": true,
+      "problems": [],
+      "ms": 29036
+    },
+    {
+      "scenario": "token deep dive",
+      "group": "research",
+      "ok": true,
+      "problems": [],
+      "ms": 24121
+    },
+    {
+      "scenario": "chain ambiguity: ask then answer",
+      "group": "research",
+      "ok": true,
+      "problems": [],
+      "ms": 4300
+    },
+    {
+      "scenario": "trending on solana",
+      "group": "research",
+      "ok": true,
+      "problems": [],
+      "ms": 2824
+    },
+    {
+      "scenario": "top holders",
+      "group": "research",
+      "ok": true,
+      "problems": [],
+      "ms": 7188
+    },
+    {
+      "scenario": "token security, casual phrasing",
+      "group": "research",
+      "ok": true,
+      "problems": [],
+      "ms": 2641
+    },
+    {
+      "scenario": "hyperliquid positions for an address",
+      "group": "research",
+      "ok": true,
+      "problems": [],
+      "ms": 2000
+    },
+    {
+      "scenario": "news",
+      "group": "research",
+      "ok": true,
+      "problems": [],
+      "ms": 6862
+    },
+    {
+      "scenario": "explain (no tools)",
+      "group": "routing",
+      "ok": true,
+      "problems": [],
+      "ms": 12
+    },
+    {
+      "scenario": "advice is research, not a simulation",
+      "group": "routing",
+      "ok": true,
+      "problems": [],
+      "ms": 20239
+    },
+    {
+      "scenario": "conditional order never quotes",
+      "group": "safety",
+      "ok": true,
+      "problems": [],
+      "ms": 11
+    },
+    {
+      "scenario": "policy question",
+      "group": "policy",
+      "ok": true,
+      "problems": [],
+      "ms": 9
+    },
+    {
+      "scenario": "portfolio: balances + exposure",
+      "group": "portfolio",
+      "ok": true,
+      "problems": [],
+      "ms": 9931
+    },
+    {
+      "scenario": "trade simulation (read-only)",
+      "group": "portfolio",
+      "ok": true,
+      "problems": [],
+      "ms": 8982
+    },
+    {
+      "scenario": "jupiter quote -> cancel",
+      "group": "trading",
+      "ok": true,
+      "problems": [],
+      "ms": 37041
+    },
+    {
+      "scenario": "typed CONFIRM is refused in chat",
+      "group": "safety",
+      "ok": false,
+      "problems": [
+        "step 1 ('swap 0.01 SOL to USDC on solana with 50 '): trade_plan present=False, expected True"
+      ],
+      "ms": 7639
+    },
+    {
+      "scenario": "risk charter blocks an over-cap quote",
+      "group": "safety",
+      "ok": false,
+      "problems": [
+        "step 2 ('swap 0.01 SOL to USDC on solana with 50 '): answer lacks 'Blocked by your risk charter'",
+        "step 2 ('swap 0.01 SOL to USDC on solana with 50 '): answer lacks 'max per trade'",
+        "step 2 ('swap 0.01 SOL to USDC on solana with 50 '): risk verdict not blocked"
+      ],
+      "ms": 4050
+    },
+    {
+      "scenario": "cross-chain: refused without wallet, then 'yes connected'",
+      "group": "trading",
+      "ok": true,
+      "problems": [],
+      "ms": 15
+    },
+    {
+      "scenario": "team desk switch routes to the desk",
+      "group": "desk",
+      "ok": true,
+      "problems": [],
+      "ms": 9975
+    },
+    {
+      "scenario": "pronoun follow-up keeps the subject",
+      "group": "context",
+      "ok": true,
+      "problems": [],
+      "ms": 14055
+    },
+    {
+      "scenario": "home: news tiles, chips, $ticker search",
+      "group": "home",
+      "ok": true,
+      "problems": [],
+      "ms": 947
+    },
+    {
+      "scenario": "home tile follow-up is news research",
+      "group": "home",
+      "ok": true,
+      "problems": [],
+      "ms": 21020
+    },
+    {
+      "scenario": "why is X moving (crypto + stock)",
+      "group": "research",
+      "ok": true,
+      "problems": [],
+      "ms": 30517
+    },
+    {
+      "scenario": "market event calendar card",
+      "group": "research",
+      "ok": true,
+      "problems": [],
+      "ms": 12
+    },
+    {
+      "scenario": "social sentiment tool",
+      "group": "research",
+      "ok": true,
+      "problems": [],
+      "ms": 8031
+    },
+    {
+      "scenario": "fees, yields and stablecoins (free DefiLlama)",
+      "group": "research",
+      "ok": false,
+      "problems": [
+        "step 3 ('what backs USDe and how does it keep its'): intent=general not in ('research',)",
+        "step 3 ('what backs USDe and how does it keep its'): no tool from ('knowledge_base_search',) in []"
+      ],
+      "ms": 11076
+    },
+    {
+      "scenario": "knowledge base: docs, incidents, funding, graph",
+      "group": "knowledge",
+      "ok": false,
+      "problems": [
+        "step 1 (\"How does Aave V3's E-mode change the liq\"): intent=general not in ('research',)",
+        "step 1 (\"How does Aave V3's E-mode change the liq\"): no tool from ('knowledge_base_search',) in []",
+        "step 1 (\"How does Aave V3's E-mode change the liq\"): answer lacks '[1]'",
+        "step 2 ('has Aave ever been hacked?'): no tool from ('knowledge_base_search',) in ['perplexity_web_search']",
+        "step 2 ('has Aave ever been hacked?'): forbidden tool perplexity_web_search",
+        "step 3 ('who are the investors backing EigenLayer'): no tool from ('knowledge_base_search',) in ['perplexity_web_search']",
+        "step 5 (GET /knowledge/search?q=Aave%20liquidation%20threshold&limit=3): search: entities=[] hits=0",
+        "step 6 (GET /knowledge/graph/protocol:aave-v3?relation=COMPETITOR_OF): HTTP 404 != 200 {'detail': 'unknown entity protocol:aave-v3'}",
+        "step 7 (GET /knowledge/status): status={'backend': 'postgres', 'protocols': 0, 'documents': 0, 'chunks': 0, 'entities': 0, 'relationships': 0, 'vector_native': True, 'ingestion': {'running': False, 'last_run': None, 'runs': []}, 'embedder': 'openai', 'reranker': 'heuristic'}"
+      ],
+      "ms": 23300
+    },
+    {
+      "scenario": "tasks from chat: remind, alert, list, delete",
+      "group": "tasks",
+      "ok": true,
+      "problems": [],
+      "ms": 102
+    },
+    {
+      "scenario": "morning brief: run now lands in the inbox",
+      "group": "tasks",
+      "ok": true,
+      "problems": [],
+      "ms": 123
+    },
+    {
+      "scenario": "account surface: me, usage, sessions, keys",
+      "group": "account",
+      "ok": true,
+      "problems": [],
+      "ms": 14
+    },
+    {
+      "scenario": "stale revision is rejected, not reinterpreted",
+      "group": "safety",
+      "ok": true,
+      "problems": [],
+      "ms": 13
+    },
+    {
+      "scenario": "delete conversation history",
+      "group": "history",
+      "ok": true,
+      "problems": [],
+      "ms": 0
+    }
+  ]
+}

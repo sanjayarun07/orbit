@@ -1,0 +1,242 @@
+{
+  "rows": [
+    {
+      "name": "Home loads and composer is usable",
+      "ok": true,
+      "ms": 649,
+      "detail": {
+        "heading": "A clearer view of the market."
+      }
+    },
+    {
+      "name": "Anonymous settings gate",
+      "ok": true,
+      "ms": 330
+    },
+    {
+      "name": "Sign in through UI",
+      "ok": true,
+      "ms": 632
+    },
+    {
+      "name": "Prepare isolated Max test account",
+      "ok": true,
+      "ms": 94
+    },
+    {
+      "name": "Preferences save and survive reload",
+      "ok": true,
+      "ms": 740
+    },
+    {
+      "name": "Settings tab: account",
+      "ok": true,
+      "ms": 316
+    },
+    {
+      "name": "Settings tab: billing",
+      "ok": true,
+      "ms": 318
+    },
+    {
+      "name": "Settings tab: keys",
+      "ok": true,
+      "ms": 379
+    },
+    {
+      "name": "Settings tab: preferences",
+      "ok": true,
+      "ms": 318
+    },
+    {
+      "name": "Settings tab: tasks",
+      "ok": true,
+      "ms": 319
+    },
+    {
+      "name": "Settings tab: notifications",
+      "ok": true,
+      "ms": 349
+    },
+    {
+      "name": "Settings tab: data",
+      "ok": true,
+      "ms": 316
+    },
+    {
+      "name": "Settings tab: members",
+      "ok": true,
+      "ms": 316
+    },
+    {
+      "name": "Create API key and call MCP",
+      "ok": true,
+      "ms": 358,
+      "detail": {
+        "tools": 65
+      }
+    },
+    {
+      "name": "Revoke API key",
+      "ok": true,
+      "ms": 91
+    },
+    {
+      "name": "Create reminder in UI",
+      "ok": true,
+      "ms": 372
+    },
+    {
+      "name": "Pause and resume reminder",
+      "ok": true,
+      "ms": 100
+    },
+    {
+      "name": "Run reminder, read inbox, delete task",
+      "ok": true,
+      "ms": 215
+    },
+    {
+      "name": "Plans show unavailable payment state",
+      "ok": true,
+      "ms": 599
+    },
+    {
+      "name": "Sweep prompt: explain TVL",
+      "ok": true,
+      "ms": 220,
+      "detail": {
+        "intent": "general",
+        "revision": 1
+      }
+    },
+    {
+      "name": "Feedback and history reload",
+      "ok": true,
+      "ms": 104
+    },
+    {
+      "name": "Sweep prompt: market overview",
+      "ok": true,
+      "ms": 1027,
+      "detail": {
+        "intent": "research",
+        "tools": [
+          "crypto_market_overview",
+          "Tool call completed. See the answer for results."
+        ]
+      }
+    },
+    {
+      "name": "Read-only public wallet connection",
+      "ok": true,
+      "ms": 287
+    },
+    {
+      "name": "Sweep prompt: portfolio balance",
+      "ok": true,
+      "ms": 1853,
+      "detail": {
+        "intent": "portfolio"
+      }
+    },
+    {
+      "name": "Sweep prompt: quote then cancel",
+      "ok": true,
+      "ms": 14539,
+      "detail": {
+        "quoted": true,
+        "cancelled": true
+      }
+    },
+    {
+      "name": "Trade preference controls save and clear",
+      "ok": true,
+      "ms": 367
+    },
+    {
+      "name": "Delete conversation",
+      "ok": true,
+      "ms": 82
+    },
+    {
+      "name": "Mobile navigation and settings",
+      "ok": true,
+      "ms": 641
+    },
+    {
+      "name": "Ticker autocomplete selection",
+      "ok": false,
+      "ms": 12850,
+      "error": "locator.click: Timeout 12000ms exceeded. Call log: \u001b[2m  - waiting for locator('#mentionMenu .mention-item').first()\u001b[22m \u001b[2m    - locator resolved to <button data-i=\"0\" type=\"button\" class=\"mention-item active\">\u2026</button>\u001b[22m"
+    },
+    {
+      "name": "Home Swap assets shortcut routes to swap flow",
+      "ok": false,
+      "ms": 46,
+      "error": "Swap shortcut returned general: Could you add a bit more detail so I answer the right question \u2014 for example the token, wallet, company, or topic you mean, and whether you want research or a transaction prepared  + actual - expected  + 'general'"
+    },
+    {
+      "name": "Admin connect and accounts",
+      "ok": true,
+      "ms": 342
+    },
+    {
+      "name": "Knowledge Base separate page and search",
+      "ok": true,
+      "ms": 1761
+    },
+    {
+      "name": "Provider dashboard",
+      "ok": true,
+      "ms": 72,
+      "detail": {
+        "tools": 40
+      }
+    },
+    {
+      "name": "Admin routing preview",
+      "ok": true,
+      "ms": 406
+    },
+    {
+      "name": "Admin mobile and dark theme",
+      "ok": true,
+      "ms": 59
+    },
+    {
+      "name": "Knowledge Base returns populated results and citations",
+      "ok": true,
+      "ms": 862,
+      "detail": {
+        "hits": 6,
+        "citations": 6
+      }
+    },
+    {
+      "name": "Sign out returns to anonymous account",
+      "ok": false,
+      "ms": 12318,
+      "error": "locator.click: Timeout 12000ms exceeded. Call log: \u001b[2m  - waiting for locator('#profileDialog [data-close=\"profileDialog\"]').first()\u001b[22m \u001b[2m    - locator resolved to <button class=\"close\" aria-label=\"Close\" data-close=\"profileDialog\">\u00d7</button>\u001b[22m"
+    }
+  ],
+  "errors": [],
+  "failedRequests": [
+    {
+      "path": "/ui/",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/ui/",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/ui/",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/ui/",
+      "error": "net::ERR_ABORTED"
+    }
+  ]
+}

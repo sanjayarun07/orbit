@@ -1,0 +1,86 @@
+[
+  {
+    "name": "Sign-in and isolated test account setup",
+    "ok": true,
+    "seconds": 0.02,
+    "detail": null
+  },
+  {
+    "name": "Anonymous and invalid-key access gates",
+    "ok": true,
+    "seconds": 0.01,
+    "detail": null
+  },
+  {
+    "name": "Chat stored and owner can reload history",
+    "ok": true,
+    "seconds": 0.01,
+    "detail": null
+  },
+  {
+    "name": "Cross-account conversation privacy",
+    "ok": true,
+    "seconds": 0.01,
+    "detail": null
+  },
+  {
+    "name": "Stale revision rejected",
+    "ok": true,
+    "seconds": 0.0,
+    "detail": null
+  },
+  {
+    "name": "Account data export contains own conversation",
+    "ok": true,
+    "seconds": 0.0,
+    "detail": null
+  },
+  {
+    "name": "API-key scopes and key-management restriction",
+    "ok": true,
+    "seconds": 0.01,
+    "detail": null
+  },
+  {
+    "name": "Task ownership for update/run/delete",
+    "ok": true,
+    "seconds": 0.01,
+    "detail": null
+  },
+  {
+    "name": "Temporary wallet authentication and nonce replay denial",
+    "ok": false,
+    "seconds": 0.03,
+    "error": "POST /auth/coinbase/verify: 401 {\"detail\":\"Login challenge is invalid, expired, or already used\"}"
+  },
+  {
+    "name": "Team invitation, acceptance, access rules and leave (email disabled)",
+    "ok": true,
+    "seconds": 0.02,
+    "detail": null
+  },
+  {
+    "name": "Unconfigured billing returns controlled errors",
+    "ok": true,
+    "seconds": 0.0,
+    "detail": null
+  },
+  {
+    "name": "Malformed execution, chat and task inputs rejected",
+    "ok": true,
+    "seconds": 0.0,
+    "detail": null
+  },
+  {
+    "name": "Revoke other sessions preserves current session",
+    "ok": true,
+    "seconds": 0.02,
+    "detail": null
+  },
+  {
+    "name": "Conversation deletion and test account deletion",
+    "ok": true,
+    "seconds": 0.01,
+    "detail": null
+  }
+]

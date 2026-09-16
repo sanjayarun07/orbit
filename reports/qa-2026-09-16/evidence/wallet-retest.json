@@ -1,0 +1,8 @@
+[
+  {
+    "name": "Temporary wallet authentication and nonce replay denial",
+    "ok": true,
+    "seconds": 0.03,
+    "detail": null
+  }
+]

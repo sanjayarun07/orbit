@@ -1,11 +1,14 @@
-# Dopamint Web3 knowledge service
+# Orbit Web3 knowledge service
+
+For the current deployment and retention boundaries, see the
+[product documentation](product/README.md).
 
 A knowledge service, not a vector database: a protocol registry, normalized
 and versioned documents, structure-aware chunks with embeddings and
 full-text vectors, canonical entities, temporal relationships, and hybrid
 retrieval exposed to the existing router. Live data (TVL, prices, pools,
-social) stays with the live tools; the KB answers *what is / how does / who
-competes with* with citations.
+social) stays with the live tools; the KB answers mechanisms, governance,
+incidents, funding/investors, and protocol relationships with citations.
 
 ```
 Sources ── connectors ── normalize (html→md, hash, chunks) ── entity resolution

@@ -1,11 +1,16 @@
 # Orbit — Web3 Copilot
 
+**Detailed documentation:** start with the [product documentation hub](docs/product/README.md)
+for the user guide, current architecture, complete HTTP route inventory,
+deployment instructions, and verified implementation limits.
+
 Orbit is a multi-chain Web3 copilot: it researches tokens, wallets, protocols and
 markets with live on-chain and market evidence, prepares Solana and cross-chain
 swaps as reviewable quotes, and enforces the user's own risk rules before any
-trade reaches a confirmation card. Every answer is grounded in named provider
-data with freshness and provenance checks; nothing is ever signed server-side —
-a swap executes only in the user's wallet, after an explicit confirm.
+trade reaches a confirmation card. Responses can include provider evidence and
+advisory freshness/provenance checks. The standard browser flow asks the user's
+wallet to sign after explicit approval; a separate, configuration-gated
+server-signing endpoint also exists. See the [execution boundaries](docs/product/architecture.md).
 
 It runs as a FastAPI service with a LangGraph agent graph, DSPy programs on any
 LiteLLM-compatible model, a multi-provider data router, and MCP integrations,
@@ -47,6 +52,10 @@ shows the price and whether a paying wallet is connected. Off by default.
 top bar or Profile & settings. Conversations can be deleted one at a time from
 the sidebar or the top bar (inline confirm, no browser dialogs), or all at once
 from Profile & settings; deletion removes the server-side history.
+Retained messages/context default to 30 days for signed-in users and two hours
+for anonymous sessions, with a 200-message display limit. Signed-in conversation
+listing comes from the account; custom titles, pins, archives and projects remain
+browser-local. Redis retention is not a permanent transcript archive.
 
 **Team desk.** A switch in the composer routes requests through a multi-agent
 trading desk: a Coordinator fans each request to Market Research, Execution and
@@ -126,7 +135,7 @@ User message
 | API | FastAPI + uvicorn; static UI served from `app/static` (vanilla HTML/JS, esbuild-bundled wallet SDKs from `web/*.ts`) |
 | Agent graph | LangGraph state machine (`app/graph.py`, nodes in `app/nodes/`) |
 | Model programs | DSPy signatures/ReAct on any LiteLLM model (`MODEL`, default `openai/gpt-4.1-mini`); optional separate `INTENT_MODEL` for the routing classifier |
-| Data providers | `ProviderRouter` (`app/provider_router.py`) over 36 read-only tools in 14 capabilities; MCP registry (`app/mcp_tools.py`) for Nansen and any `mcp.json` server |
+| Data providers | `ProviderRouter` (`app/provider_router.py`) over the registered read-only tool catalogue; MCP registry (`app/mcp_tools.py`) for Nansen and any `mcp.json` server. Inspect `/capabilities` for the current surface. |
 | Execution | Jupiter (Solana quotes/plans), Relay (cross-chain and EVM), LI.FI (quote/status backup); wallet-side signing only |
 | State | Postgres (trade plans, Relay executions, tool outcomes) and Redis (sessions, per-session turn locks, caches); in-memory fallback for development |
 | Analytics | ClickHouse (provider events, per-turn budgets) and Langfuse tracing, both optional |
@@ -370,7 +379,8 @@ UI: `http://localhost:8000/ui/`. Admin control plane: `/ui/admin.html` (set
 `ADMIN_API_KEY`). Without `DATABASE_URL`/`REDIS_URL` the service falls back to
 in-memory state for development.
 
-Tests: `pytest -q`. Routing evaluation: `python scripts/routing_eval/harness.py
+Tests: `pytest -q` (discovery is restricted to `tests/`; live diagnostics run
+separately). See [release operations](docs/production-operations.md). Routing evaluation: `python scripts/routing_eval/harness.py
 --mode resolve` (decision layer, in-process) or `--mode chat` (end to end against
 a running server); extend `scripts/routing_eval/cases.json` from real
 misroutes rather than adding rules.
@@ -421,7 +431,7 @@ and can also run over stdio. Four families of tools:
   `orbit_trade_plan`, `orbit_execution_status`, `orbit_relay_status`,
   `orbit_capabilities`, `orbit_route_preview`, `orbit_health`.
 - **Data sources** — one `orbit_data_<tool>` per read-only provider tool
-  (36 today), each running through the router's quotas, circuit breakers,
+  (discovered dynamically), each running through the router's quotas, circuit breakers,
   cache, budget and outcome accounting with the request→tool matchers
   bypassed because the host chose the tool; plus `orbit_mcp_catalog` /
   `orbit_mcp_call` for tools Orbit discovers from its own MCP servers
@@ -508,7 +518,8 @@ and trades all require sign-in; anonymous visitors can research on the trial.
 and the MCP server as the owning user with scopes `chat`, `data`, `mcp`; they
 never grant execution. Manage them under Profile → API keys.
 
-**Settings** (Profile → Settings) has six tabs — Account (email, linked
+**Settings** (Profile → Settings) has eight tabs, including Tasks and the
+conditional Members tab — Account (email, linked
 wallets, signed-in devices, sign out everywhere, team invitations), Billing
 (plan, credits, 30-day usage chart by feature, invoices, Portal, buy credits),
 API keys (create / scope / revoke, usage per key), Preferences (display name,
@@ -559,8 +570,9 @@ and chat timezone handling across HTTP and natural-language controls (including
 MCP chat). `app/tasks_nl.py` parses commands; `app/tasks.py` retains persistence,
 schedule calculations, leases, and worker delivery.
 Free 3 · Pro 25 · Max 100 active tasks. The worker is an in-process asyncio
-loop over the `user_tasks` table — no Temporal or queue to run; a
-multi-instance deployment would add row-level locking or move to one.
+loop over the `user_tasks` table with atomic occurrence claims, recoverable
+leases, and occurrence-keyed brief charges. There is no separate workflow
+engine; idempotent charging does not guarantee exactly-once notification delivery.
 
 **Payments** go through Stripe-hosted pages only — Orbit never sees a card or
 wallet. `POST /billing/checkout` opens Checkout for a plan (subscription mode)
@@ -603,7 +615,7 @@ UI shows the catalog read-only.
 | `GET /chat/history/{session_id}` | Display messages plus the canonical context snapshot |
 | `GET /chat/risk-charter/limits` | Built-in caps and chains the charter card may use |
 | `POST /trade-plans/{plan_id}/confirm` | Confirm a quoted plan (wallet-signed; server signing only with `LIVE_TRADING`) |
-| `GET /wallet-health/{wallet}`, `GET /portfolio/{wallet}/scenario` | Deterministic wallet diagnostics and price-shock simulation |
+| `GET /wallet-health/{wallet}`, `POST /portfolio/{wallet}/scenario` | Deterministic wallet diagnostics and price-shock simulation |
 | `GET /executions/solana/{signature}` | Track a submitted Solana transaction |
 | `GET /capabilities`, `GET /health` | Provider catalog and health; aggregate counters incl. estimated spend |
 | `GET /admin/providers`, `PUT /admin/providers/{tool}` | Enable/disable tools, override priority, quota, cost |
@@ -626,10 +638,13 @@ guidance, and — when enabled — an **Agent activity** trace of the tools call
   body and batch limits still apply.
 - Rotate any credential that was ever pasted, logged or committed;
   `scripts/check_secrets.py` runs as a pre-commit hook and in CI.
-- Knowledge-base ingestion runs as its own process, never inside the API:
+- Run bulk knowledge-base ingestion as its own process:
   `scripts/kb_ingest.py --loop --parallel 3` (crawls docs, GitHub, Snapshot
   and Discourse forums for the registry, then derives competitor and
-  integration edges). The admin page's "Knowledge base" panel shows coverage
+  integration edges). An optional in-process worker also exists and is off by
+  default. The standalone script requires the checkout or a worker image that
+  includes `scripts/`; the current API Docker image does not. The dedicated
+  `/ui/knowledge.html` workspace shows coverage
   per protocol, failing sources, recent runs, a search box and the graph.
 
 ## Documentation

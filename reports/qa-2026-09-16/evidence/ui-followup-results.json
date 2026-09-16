@@ -1,0 +1,58 @@
+[
+  {
+    "name": "Chat rename and persistence",
+    "ok": true
+  },
+  {
+    "name": "Pin and pinned view",
+    "ok": true
+  },
+  {
+    "name": "Project assignment persists",
+    "ok": true
+  },
+  {
+    "name": "Share copies own-account link",
+    "ok": true
+  },
+  {
+    "name": "Archive and restore chat",
+    "ok": true
+  },
+  {
+    "name": "History delete requires confirmation and removes chat",
+    "ok": true
+  },
+  {
+    "name": "Token dropdown viewport measurements",
+    "ok": true,
+    "detail": {
+      "menu": {
+        "x": 447,
+        "y": -7,
+        "width": 360,
+        "height": 354,
+        "top": -7,
+        "right": 807,
+        "bottom": 347,
+        "left": 447
+      },
+      "first": {
+        "x": 448,
+        "y": -6,
+        "width": 358,
+        "height": 34,
+        "top": -6,
+        "right": 806,
+        "bottom": 28,
+        "left": 448
+      },
+      "overflow": "hidden",
+      "viewport": 1000
+    }
+  },
+  {
+    "name": "Sign out with request completion awaited",
+    "ok": true
+  }
+]
