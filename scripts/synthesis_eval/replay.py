@@ -38,7 +38,20 @@ def _pct(values, q):
     return values[min(len(values) - 1, int(len(values) * q))] if values else 0.0
 
 
-def replay(models: list[str], bundles: list[dict], include_baseline: bool) -> dict:
+def _lm_for(model: str, api_bases: dict, timeout: float):
+    """`--api-base MODEL=URL` points an OpenAI-compatible server (vLLM, SGLang,
+    a hosted proxy) at a model id without touching the environment the other
+    models use; the id is passed through as `openai/<id>` so LiteLLM speaks
+    plain chat-completions to it."""
+    import dspy
+    base = api_bases.get(model)
+    if base:
+        return dspy.LM(f"openai/{model}", api_base=base, api_key=api_bases.get("__key__", "none"), timeout=timeout, num_retries=0, max_tokens=4000)
+    return dspy.LM(model, timeout=timeout, num_retries=0)
+
+
+def replay(models: list[str], bundles: list[dict], include_baseline: bool, api_bases: dict | None = None) -> dict:
+    api_bases = api_bases or {}
     import dspy
     from app.nodes import runtime
     from app.settings import settings
@@ -55,7 +68,7 @@ def replay(models: list[str], bundles: list[dict], include_baseline: bool) -> di
                              "validation": _score(b["prompt"], b["baseline_answer"], b["evidence"], b["program"])})
         report[f"baseline ({settings.model})"] = rows
     for model in models:
-        lm = dspy.LM(model, timeout=settings.llm_request_timeout_seconds, num_retries=0)
+        lm = _lm_for(model, api_bases, settings.llm_request_timeout_seconds)
         rows = []
         for b in bundles:
             program = getattr(runtime, b["program"])
@@ -103,11 +116,14 @@ def main():
     ap.add_argument("--model", action="append", default=[], help="LiteLLM model id; repeatable")
     ap.add_argument("--no-baseline", action="store_true")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--api-base", action="append", default=[], metavar="MODEL=URL",
+                    help="serve MODEL from an OpenAI-compatible URL, e.g. DMindAI/DMind-3-mini=https://host/v1")
     args = ap.parse_args()
     bundles = json.loads(BUNDLES.read_text())
     if args.limit:
         bundles = bundles[: args.limit]
-    report = replay(args.model, bundles, include_baseline=not args.no_baseline)
+    api_bases = dict(item.split("=", 1) for item in args.api_base)
+    report = replay(args.model, bundles, include_baseline=not args.no_baseline, api_bases=api_bases)
     RESULTS.write_text(json.dumps(report, indent=2))
     summarise(report)
     print(f"Saved {RESULTS}")

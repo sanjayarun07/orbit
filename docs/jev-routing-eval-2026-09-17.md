@@ -206,3 +206,46 @@ answers, two equity briefs): gpt-4.1-mini 0% validator warnings, 4.8 s p50 /
 (they hold raw answers and evidence, full of addresses that trip the secrets
 scan); the numbers live here. The bar for a domain model is the same
 warn-rate at equal evidence; tone and vocabulary do not count, grounding does.
+
+## DMind-3-mini on the synthesis tier: first measurement
+
+Served at a hosted OpenAI-compatible endpoint (`replay.py --api-base
+DMindAI/DMind-3-mini=<url>/v1`); thirteen bundles, identical evidence,
+DSPy cache off. The raw endpoint returns chain-of-thought inside `content`
+and an unconstrained chat ran out of tokens mid-thought, but under the
+DSPy-structured synthesis programs every answer parsed and none leaked
+thinking.
+
+|                                   | gpt-4.1-mini (replay) | DMind-3-mini |
+|-----------------------------------|----------------------:|-------------:|
+| Step-7 validator warnings         | 0%                    | 0% |
+| Numeric claims / ungrounded       | 139 / 3 (2%)          | 100 / 1 (1%) |
+| KB answers citing passages        | 5 of 7 (2.3 cites/answer) | 3 of 7 (1.3) |
+| Latency p50 / p95                 | 4.6 / 12.3 s          | 6.3 / 23.5 s |
+| Output tokens (thinking included) | ~400                  | ~1,200 |
+
+Read together: the validator cannot separate them (0% both), and a strict
+numeric audit slightly favours DMind, which states fewer figures. The
+difference shows where numbers do not reach. On "what is Morpho Blue and
+how does it work" DMind wrote a confident, uncited mechanism -- an order
+book, "Morpho Lazy vaults", a "winning deposit rate" -- none of it in the
+passages and not how Morpho Blue works; gpt-4.1-mini stayed inside the
+passages with citations. Across the seven knowledge-base bundles DMind
+cited passages in three, gpt-4.1-mini in five. On the token deep dives,
+where the evidence is dense with figures, both were disciplined and DMind's
+structured tables were arguably the better read; the "$20M BONKDAO"
+claim it made is in the evidence.
+
+The "baseline" row in results is the app's post-processed final answer,
+not the raw program output, so its citation count (5.1) is not comparable;
+replay-versus-replay is the fair comparison.
+
+Verdict: not adopted. On the job that suits it -- figure-heavy deep dives
+-- it matches the current model at higher latency and no cost advantage
+yet measured; on knowledge answers it fabricates mechanism when the
+passages run thin, which is the one failure the synthesis tier exists to
+prevent. The grounding gap is mechanism-level, invisible to a numeric
+check, so any next round needs a claim-level judge (a second model
+scoring "is each sentence supported by a passage") before the tier could
+be trusted to a smaller domain model. Reproduce with the command above;
+run files stay untracked.
