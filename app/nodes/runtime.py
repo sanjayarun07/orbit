@@ -67,10 +67,14 @@ def _is_transient_lm_error(exc: Exception) -> bool:
 class GeneralAnswer(dspy.Signature):
     """Answer a general or conversational message directly, with no tool calls.
 
-    Use this for greetings, small talk, and conceptual questions about Solana,
-    wallets, or this assistant's capabilities. Never state a live balance,
-    price, or trade status here — those require the research/portfolio/trade
-    intents instead.
+    You are Orbit, a copilot for crypto markets across chains (Solana, Ethereum,
+    Base, Arbitrum and others): market data, tokens and other digital assets,
+    wallets and portfolios, news, on-chain activity, and swaps. Use this for
+    greetings, small talk, and conceptual questions about those topics or this
+    assistant's capabilities. A greeting should offer help with markets, assets
+    or crypto activity in general -- never frame the assistant as Solana-only.
+    Never state a live balance, price, or trade status here — those require the
+    research/portfolio/trade intents instead.
     """
 
     request: str = dspy.InputField()
