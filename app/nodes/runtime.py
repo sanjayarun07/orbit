@@ -489,6 +489,37 @@ async def _call_lm(program, **kwargs):
 synthesis_recorder = None
 
 
+async def stream_synthesis(program, field: str, on_delta, **kwargs):
+    """Run a synthesis program with its `field` streamed token by token to
+    `on_delta` as it is generated, on the synthesis tier's model. Returns the
+    final prediction. Any failure falls back to the ordinary call, so a
+    streaming client never gets less than a non-streaming one."""
+    import dspy
+    from dspy.streaming import StreamListener, StreamResponse
+
+    lm = _synthesis_lm or _primary_lm
+    if synthesis_recorder is not None:
+        synthesis_recorder(_program_name(program), kwargs)
+    try:
+        streamer = dspy.streamify(program, stream_listeners=[StreamListener(signature_field_name=field)],
+                                  async_streaming=True, include_final_prediction_in_output_stream=True)
+        final = None
+        async with _llm_slots:
+            increment("llm_calls")
+            with dspy.context(lm=lm):
+                async for chunk in streamer(**kwargs):
+                    if isinstance(chunk, StreamResponse):
+                        if chunk.chunk:
+                            on_delta(chunk.chunk)
+                    elif isinstance(chunk, dspy.Prediction):
+                        final = chunk
+        if final is not None:
+            return final
+    except Exception:
+        logger.warning("streaming synthesis failed; falling back to a whole answer", exc_info=True)
+    return await _call_synthesis_lm(program, **kwargs)
+
+
 async def _call_synthesis_lm(program, **kwargs):
     """The synthesis tier: `synthesis_model` when configured, else the primary
     path. Same backpressure and guard scope as _call_lm; a transient failure

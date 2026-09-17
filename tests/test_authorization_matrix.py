@@ -67,6 +67,9 @@ EXPECTED: dict[tuple[str, str], str] = {
     ("POST", "/portfolio/{wallet_address}/scenario"): "key:data",
     ("GET", "/wallet-health/{wallet_address}"): "key:data",
     ("POST", "/chat"): "owner_scoped",
+    # The same turn as POST /chat, streamed: it runs execute_chat_turn itself,
+    # so ownership is enforced identically -- the enforcement test proves it.
+    ("POST", "/chat/stream"): "owner_scoped",
     ("POST", "/chat/feedback"): "owner_scoped",
     ("GET", "/chat/history/{session_id}"): "key:chat",
     ("DELETE", "/chat/history/{session_id}"): "browser",

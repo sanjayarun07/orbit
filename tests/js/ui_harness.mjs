@@ -687,6 +687,51 @@ const CASES = {
   async purchase_controls_show_when_billing_is_open() {
     return runClosedBeta(false);
   },
+
+  /** Streaming: the SSE parser handles split frames; the client renders
+   *  progressively and resolves to a fetch-shaped result; without an SSE
+   *  response it returns null so the JSON route runs. */
+  async sse_parser_handles_frames_split_across_reads() {
+    const { sandbox } = load();
+    const first = sandbox.parseSse("event: status\ndata: {\"text\":\"Running x\"}\n\nevent: card\ndata: {\"mark");
+    const second = sandbox.parseSse(first.rest + "down\":\"# C\"}\n\n");
+    return { firstEvents: first.events, rest: first.rest, secondEvents: second.events, secondRest: second.rest };
+  },
+  async stream_renders_progressively_and_returns_the_done_payload() {
+    const { dom, sandbox } = load();
+    const frames = [
+      "event: status\ndata: {\"text\":\"Running shield\"}\n\n",
+      "event: card\ndata: {\"markdown\":\"# Shield\\n| ok |\",\"tool\":\"shield\"}\n\n",
+      "event: delta\ndata: {\"text\":\"Safe \"}\n\nevent: delta\ndata: {\"text\":\"by the dossier.\"}\n\n",
+      "event: done\ndata: {\"data\":{\"answer\":\"final\",\"intent\":\"research\",\"session_id\":\"s1\"}}\n\n",
+    ];
+    let i = 0;
+    const reader = { read: async () => i < frames.length ? { value: new TextEncoder().encode(frames[i++]), done: false } : { value: undefined, done: true } };
+    sandbox.fetch = async () => ({ ok: true, status: 200, body: { getReader: () => reader }, headers: { get: () => "text/event-stream" } });
+    sandbox.ReadableStream = class {};
+    const typing = dom.query("#typing");
+    const rendered = [];
+    sandbox.renderMarkdownResult = (md) => { rendered.push(md); return dom.query("#card-" + rendered.length); };
+    const result = await sandbox.streamChat({ message: "is BONK safe" }, typing);
+    return { ok: result.ok, status: result.status, data: await result.json(), cards: rendered,
+             summary: dom.query("#typing >> .message-body >> .stream-summary").textContent, statusLine: dom.query("#typing >> .message-body >> .stream-status").textContent };
+  },
+  async stream_falls_back_to_json_when_the_response_is_not_a_stream() {
+    const { dom, sandbox } = load();
+    sandbox.ReadableStream = class {};
+    sandbox.fetch = async () => ({ ok: true, status: 200, body: null, headers: { get: () => "application/json" } });
+    const result = await sandbox.streamChat({ message: "hi" }, dom.query("#typing"));
+    return { fallback: result === null };
+  },
+  async stream_error_event_is_fetch_shaped_for_the_existing_handling() {
+    const { dom, sandbox } = load();
+    sandbox.ReadableStream = class {};
+    let sent = false;
+    const reader = { read: async () => sent ? { done: true } : (sent = true, { value: new TextEncoder().encode("event: error\ndata: {\"status\":404,\"detail\":\"Conversation not found\"}\n\n"), done: false }) };
+    sandbox.fetch = async () => ({ ok: true, status: 200, body: { getReader: () => reader }, headers: { get: () => "text/event-stream" } });
+    const result = await sandbox.streamChat({ message: "hi", session_id: "old" }, dom.query("#typing"));
+    return { ok: result.ok, status: result.status, data: await result.json() };
+  },
 };
 
 async function runClosedBeta(on) {

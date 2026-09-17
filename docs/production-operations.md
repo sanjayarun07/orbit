@@ -751,3 +751,39 @@ admin document measures 320 px with nothing overflowing. The two followup
 checks still failing are the reviewer's own noted harness problem in the
 team-leave step (superseded by their team-retest, which passes) and the swap
 shortcut waiting for a relay card absent from the live news set.
+
+## Streaming: the turn rendered as it happens (2026-09-17)
+
+`POST /chat/stream` is the same turn as `POST /chat` -- same admission, lease,
+credits, persistence and gates, because it runs `execute_chat_turn` itself --
+delivered as server-sent events instead of one JSON body at the end:
+
+| event | when | payload |
+|---|---|---|
+| `status` | routing decided; each tool starting; the synthesis starting | `text` |
+| `card` | the moment a tool's output is usable | `markdown`, `tool` |
+| `delta` | each token of the synthesis, as it is generated | `text` |
+| `done` | the turn is persisted and charged | `data`: the complete AgentResponse |
+| `error` | the turn was refused or failed | `status`, `detail` -- what the JSON route would have answered |
+
+The channel is a per-turn ContextVar (`app/streaming.py`); `emit` is a
+no-op when nobody is streaming, so the JSON route and the MCP server are
+untouched. The research path reports from its composition points (the
+multi-tool plan, the market bundle, a compound message's clauses) and the
+synthesis streams its `summary` field through DSPy's `streamify` on the
+synthesis tier's model, falling back to a whole answer on any failure.
+
+The browser tries the stream first and falls back to the JSON route when
+the response is not an event stream (a proxy that buffers or strips it) or
+when x402 payment wrapping is on. It renders each card as it arrives, grows
+the summary token by token, and on `done` renders the final answer exactly
+as before. A streamed `error` is shaped like a failed fetch, so the existing
+404 (conversation gone -> retry fresh) and 409 (stale revision -> retry)
+handling still applies.
+
+Measured on the dev instance for "is BONK safe": routed at 0.2 s, first
+card at 4.0 s, second at 12.3 s, first synthesis token at 13.6 s, done at
+15.5 s -- against ~15 s of blank typing indicator before.
+
+Behind Caddy nothing needs configuring (it streams chunked responses); the
+`X-Accel-Buffering: no` header covers nginx if one is ever put in front.

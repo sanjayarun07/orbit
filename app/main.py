@@ -1,4 +1,5 @@
 import asyncio
+import json
 import hmac
 import ipaddress
 import logging
@@ -20,7 +21,7 @@ from uuid import uuid4
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import StreamingResponse, FileResponse, Response
 from fastapi.responses import JSONResponse
 from app.limits import allow_auth_request
 from app.public_activity import public_activity
@@ -30,6 +31,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import deployment, execution_policy, plan_access, task_scheduling
 from app.deployment import ExecutionDisabledError
+from app import streaming
 from app.service_errors import ServiceError, safe_detail as _safe_detail
 from app.execution import execute_confirmed_plan, prepare_wallet_transaction, submit_wallet_transaction
 from app.graph import resolve_intent_node
@@ -995,6 +997,47 @@ async def portfolio_scenario_report(wallet_address: str, body: PortfolioScenario
 @app.post("/chat", response_model=AgentResponse)
 async def chat(body: ChatRequest, request: Request):
     return await execution_policy.execute_chat_turn(body, await resolve_identity(request))
+
+
+@app.post("/chat/stream")
+async def chat_stream(body: ChatRequest, request: Request):
+    """The same turn as POST /chat, streamed as server-sent events: `status`
+    lines while tools run, each `card` the moment its tool returns, the
+    synthesis as `delta` tokens, then `done` with the complete response the
+    JSON route would have returned (persisted and charged identically), or
+    `error` with the status and detail the JSON route would have answered."""
+    identity = await resolve_identity(request)
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def run():
+        token = streaming.attach(queue)
+        try:
+            response = await execution_policy.execute_chat_turn(body, identity)
+            queue.put_nowait({"event": "done", "data": response.model_dump(mode="json")})
+        except ServiceError as exc:
+            queue.put_nowait({"event": "error", "status": exc.status_code, "detail": exc.detail})
+        except Exception:
+            logger.exception("streamed chat turn failed")
+            queue.put_nowait({"event": "error", "status": 500, "detail": "Chat request failed"})
+        finally:
+            streaming.detach(token)
+            queue.put_nowait(None)
+
+    task = asyncio.create_task(run())
+
+    async def events():
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield f"event: {item['event']}\ndata: {json.dumps(item)}\n\n"
+        finally:
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"})
 
 
 async def _require_session_access(session_id: str, identity: Identity | None, claim: bool = False) -> None:

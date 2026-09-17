@@ -26,6 +26,7 @@ import asyncio
 import logging
 import re
 
+from app import streaming
 from app.nodes import runtime
 from app.provider_registry import get_provider_router
 
@@ -79,8 +80,13 @@ async def synthesize(request: str, cards: str, trajectory: dict, advice: bool = 
     if not cards.strip():
         return cards
     try:
-        result = await runtime._call_synthesis_lm(runtime.composite_synthesizer, request=request, evidence=cards,
-                                                  stance="a market read, not a recommendation" if advice else "a factual summary")
+        stance = "a market read, not a recommendation" if advice else "a factual summary"
+        if streaming.active():
+            streaming.emit("status", text="Reading the cards together")
+            result = await runtime.stream_synthesis(runtime.composite_synthesizer, "summary", lambda text: streaming.emit("delta", text=text),
+                                                    request=request, evidence=cards, stance=stance)
+        else:
+            result = await runtime._call_synthesis_lm(runtime.composite_synthesizer, request=request, evidence=cards, stance=stance)
         summary = (getattr(result, "summary", "") or "").strip()
     except Exception:
         logger.warning("composite synthesis failed; cards only", exc_info=True)
@@ -106,10 +112,13 @@ async def compose_market_advice(request: str) -> tuple[str, dict]:
     router = get_provider_router()
 
     async def one(tool: str, probe: str):
+        streaming.emit("status", text=f"Running {tool.replace('_', ' ')}")
         for attempt in (1, 2):   # a second, sequential try after the concurrent burst
             try:
                 result = await asyncio.to_thread(router.invoke, tool, probe, ())
                 if result is not None:
+                    if result.output:
+                        streaming.emit("card", markdown=result.output, tool=result.tool)
                     return tool, result
             except Exception:
                 logger.warning("composition: %s failed (attempt %d)", tool, attempt, exc_info=True)

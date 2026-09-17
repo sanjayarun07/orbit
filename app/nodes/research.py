@@ -14,7 +14,7 @@ from app.jupiter import WRAPPED_SOL_MINT
 from app.capability_router import extract_chains
 from app.market_brief import crypto_market_brief
 from app.market_overview import crypto_market_overview
-from app import composition
+from app import composition, streaming
 from app import event_calendar, why_moving
 from app.market_providers import TRENDING_TOKENS
 from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available
@@ -1230,11 +1230,15 @@ async def _gather_planned(request: str, capabilities: tuple[str, ...], chains: t
         return None
 
     async def one(tool):
+        streaming.emit("status", text=f"Running {tool.name.replace('_', ' ')}")
         try:
-            return await asyncio.to_thread(router.invoke, tool.name, request, chains)
+            result = await asyncio.to_thread(router.invoke, tool.name, request, chains)
         except Exception:
             logger.warning("planned tool %s failed", tool.name, exc_info=True)
             return None
+        if result is not None and result.output and result.tool != "knowledge_base_search":
+            streaming.emit("card", markdown=result.output, tool=result.tool)
+        return result
 
     results = [r for r in await asyncio.gather(*(one(t) for t in plan)) if r is not None and r.output]
     if len(results) < 2:
@@ -1260,7 +1264,10 @@ async def research_node(state: AgentState) -> dict:
         # for the rest is what this replaces.
         parts, extras = [], {}
         for clause in clauses:
+            streaming.emit("status", text=f"Working on: {clause}")
             part = await _research_node({**state, "request": clause, "contextual_request": None}, sink)
+            if part.get("answer") and not (part.get("trajectory") or {}).get("tool_name_0", "").startswith("_"):
+                streaming.emit("card", markdown=part["answer"], tool=(part.get("trajectory") or {}).get("tool_name_0"))
             parts.append((part.get("answer") or "", part.get("trajectory") or {}))
             for key in ("pending_token", "resolved_token"):
                 if part.get(key) and key not in extras:

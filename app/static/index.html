@@ -1172,11 +1172,35 @@ async function chatFetch(url,init){
   if(!window.OrbitX402)throw new Error("Payments are required here but the payment module did not load. Reload the page.");
   return window.OrbitX402.fetchWithPayment(x402Config.network,url,init);
 }
+// ---- Streaming: the turn rendered as it happens ---------------------------
+// POST /chat/stream answers server-sent events: status lines while tools run,
+// each card the moment its tool returns, the synthesis token by token, then
+// `done` with the complete response (identical to POST /chat) or `error`
+// with the same status and detail. If the stream cannot be opened the turn
+// falls back to the JSON route, so nothing is lost when a proxy strips it.
+function parseSse(buffer){const events=[];let idx;while((idx=buffer.indexOf("\n\n"))>=0){const block=buffer.slice(0,idx);buffer=buffer.slice(idx+2);let event="message",data="";for(const line of block.split("\n")){if(line.startsWith("event:"))event=line.slice(6).trim();else if(line.startsWith("data:"))data+=line.slice(5).trim();}if(data){try{events.push({event,data:JSON.parse(data)});}catch{}}}return {events,rest:buffer};}
+function streamView(typing){const body=$(".message-body",typing);body.innerHTML='<div class="answer streaming"><div class="stream-status"></div><div class="stream-summary" hidden></div><div class="stream-cards"></div></div>';return {
+  status(text){const el=$(".stream-status",body);if(el){el.textContent=text;el.hidden=!text;}},
+  card(markdown){const cards=$(".stream-cards",body);if(!cards)return;cards.appendChild(renderMarkdownResult(markdown));const sep=document.createElement("hr");sep.className="stream-sep";cards.appendChild(sep);scrollToBottom();},
+  delta(text){const el=$(".stream-summary",body);if(!el)return;el.hidden=false;el.textContent+=text;scrollToBottom();},
+};}
+// Resolves to a fetch-shaped result ({ok,status,json()}) so the caller's handling is unchanged, or null to fall back.
+async function streamChat(payload,typing){
+  if(x402Config?.enabled||typeof ReadableStream==="undefined")return null;   // payment-wrapped fetches stay on the JSON route
+  let res;try{res=await fetch("/chat/stream",{method:"POST",headers:{"Content-Type":"application/json","X-Orbit-Device":deviceId},body:JSON.stringify(payload)});}catch{return null;}
+  if(!res.ok||!res.body||!(res.headers.get("content-type")||"").includes("text/event-stream"))return null;
+  const view=streamView(typing);view.status("Thinking…");const reader=res.body.getReader();const decoder=new TextDecoder();let buffer="";
+  const shaped=(ok,status,data)=>({ok,status,json:async()=>data});
+  while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const parsed=parseSse(buffer);buffer=parsed.rest;
+    for(const {event,data} of parsed.events){if(event==="status")view.status(data.text||"");else if(event==="card")view.card(data.markdown||"");else if(event==="delta")view.delta(data.text||"");else if(event==="done")return shaped(true,200,data.data);else if(event==="error")return shaped(false,Number(data.status)||500,{detail:data.detail});}}
+  return shaped(false,0,{detail:"The response stream ended before the answer arrived."});
+}
 async function sendMessage(text,quickAction=null,extra={},retryTyping=null) {
   if (busy || !text.trim()) return;retireQuickActions();chatTurnEpoch++;retirePendingTradeCards();busy=true; sendBtn.disabled=true;
   const typing=retryTyping||(addUserMessage(text),addTyping());
   const requestSession=sessionId || undefined;
-  try { const res=await chatFetch("/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:text,tz_offset_min:-new Date().getTimezoneOffset(),wallet_address:walletInput.value.trim() || null,session_id:requestSession,context_revision:(requestSession&&sessionRevision!=null)?sessionRevision:null,quick_action:quickAction,team_mode:teamModePending,...extra})}); const data=await res.json();
+  try { const payload={message:text,tz_offset_min:-new Date().getTimezoneOffset(),wallet_address:walletInput.value.trim() || null,session_id:requestSession,context_revision:(requestSession&&sessionRevision!=null)?sessionRevision:null,quick_action:quickAction,team_mode:teamModePending,...extra};const streamed=await streamChat(payload,typing);
+    const res=streamed||await chatFetch("/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}); const data=await res.json();
     if(!res.ok){
       // The session this tab remembers belongs to an account we're no longer
       // authenticated as (a lapsed sign-in, or a different account signed in
