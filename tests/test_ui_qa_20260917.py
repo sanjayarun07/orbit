@@ -84,3 +84,16 @@ def test_a_real_address_is_adopted_and_marked_view_only():
     assert not result["errorShown"] and not result["dialogOpen"]
     assert result["adopted"] == "So11111111111111111111111111111111111111112"
     assert "view only" in result["label"] and "readonly" in result["classes"]
+
+
+def test_well_formed_base58_that_is_not_a_32_byte_key_is_refused():
+    """Follow-up to UI-05: the alphabet-and-length regex accepted strings that
+    cannot be a Solana public key. The string is now decoded and must be
+    exactly 32 bytes."""
+    result = run_case("a_base58_string_that_is_not_32_bytes_is_refused")
+    for name in ("fortyThreeOnes", "fortyFourZs", "thirtyTwoChars"):
+        assert result[name]["regex"] is True, f"{name} must be a regex-passing string, or this proves nothing"
+        assert result[name]["bytes"] != 32 and result[name]["accepted"] is False, (name, result[name])
+    assert result["systemProgram"] == {"regex": True, "bytes": 32, "accepted": True}
+    assert result["wrappedSol"] == {"regex": True, "bytes": 32, "accepted": True}
+    assert result["evm"]["accepted"] is True

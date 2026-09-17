@@ -723,9 +723,12 @@ the control that the confirmed path still completes.
   y=314 (the QA geometry): the list opens below at y=455 and
   `elementFromPoint` on the first row hits the row.
 - **UI-05, arbitrary text as a wallet address.** A public address must be a
-  Solana address (32–44 base58 characters) or an Ethereum address
-  (`0x` + 40 hex); anything else shows an inline error and the dialog stays
-  open. An adopted public address is labelled "view only" and the wallet
+  Solana public key or an Ethereum address (`0x` + 40 hex); anything else
+  shows an inline error and the dialog stays open. The Solana check decodes
+  the base58 and requires exactly 32 bytes: the alphabet-and-length regex it
+  started as accepted strings that cannot be a key (43 ones decode to 43
+  bytes, 44 z's to 33). The browser decoder was cross-checked against
+  `solders.Pubkey.from_string` on the same strings. An adopted public address is labelled "view only" and the wallet
   control carries a `readonly` class and title, so it cannot be mistaken for
   a signing wallet.
 - **UI-06, admin pages at 320 px.** The outer layout could not shrink: nav

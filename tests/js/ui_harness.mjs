@@ -665,6 +665,19 @@ const CASES = {
   async a_real_public_address_is_adopted_as_view_only() {
     return runUseAddress("So11111111111111111111111111111111111111112");
   },
+  /** Well-formed base58 of a plausible length that is not 32 bytes. */
+  async a_base58_string_that_is_not_32_bytes_is_refused() {
+    const { sandbox } = load();
+    const probe = (v) => ({ regex: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v), bytes: sandbox.base58ByteLength(v), accepted: sandbox.isPublicAddress(v) });
+    return {
+      fortyThreeOnes: probe("1".repeat(43)),                          // 43 zero bytes
+      fortyFourZs: probe("z".repeat(44)),                             // 33 bytes
+      thirtyTwoChars: probe("2".repeat(32)),                          // 24 bytes
+      systemProgram: probe("1".repeat(32)),                           // the system program id: 32 zero bytes, valid
+      wrappedSol: probe("So11111111111111111111111111111111111111112"),
+      evm: probe("0x" + "ab".repeat(20)),
+    };
+  },
 };
 
 function answer(ok, body = {}) {

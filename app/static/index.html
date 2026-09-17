@@ -1468,8 +1468,14 @@ $("#relayFromChain").addEventListener("change",()=>setRelayNativeToken("#relayFr
 $("#relayToChain").addEventListener("change",()=>setRelayNativeToken("#relayToToken","#relayToChain"));
 document.querySelectorAll("#relayDialog input").forEach(field=>field.addEventListener("input",invalidateRelayQuote));
 $("#connectPrivyBtn").addEventListener("click",connectPrivy);$("#connectCoinbaseBtn").addEventListener("click",connectCoinbase);$("#connectReownBtn").addEventListener("click",connectReown);$("#privySendCodeBtn").addEventListener("click",sendPrivyCode);$("#privyVerifyBtn").addEventListener("click",verifyPrivyCode);$("#connectPhantomBtn").addEventListener("click",connectPhantom);$("#connectMetaMaskBtn").addEventListener("click",connectMetaMask);$("#disconnectWalletBtn").addEventListener("click",disconnectWallet);
-const SOLANA_ADDRESS=/^[1-9A-HJ-NP-Za-km-z]{32,44}$/,EVM_ADDRESS=/^0x[0-9a-fA-F]{40}$/;
-function isPublicAddress(value){return SOLANA_ADDRESS.test(value)||EVM_ADDRESS.test(value);}
+const SOLANA_ADDRESS=/^[1-9A-HJ-NP-Za-km-z]{32,44}$/,EVM_ADDRESS=/^0x[0-9a-fA-F]{40}$/,BASE58="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+// The alphabet and length are necessary, not sufficient: a Solana public key
+// is exactly 32 bytes, and many 32-44 character base58 strings decode to 31,
+// 33 or 43. So the string is decoded and its byte length checked.
+function base58ByteLength(value){const bytes=[0];for(const ch of value){let carry=BASE58.indexOf(ch);if(carry<0)return -1;for(let i=0;i<bytes.length;i++){carry+=bytes[i]*58;bytes[i]=carry&255;carry>>=8;}while(carry){bytes.push(carry&255);carry>>=8;}}
+  let zeros=0;for(const ch of value){if(ch!=="1")break;zeros++;}const magnitude=bytes.length===1&&bytes[0]===0?0:bytes.length;return zeros+magnitude;}
+function isSolanaAddress(value){return SOLANA_ADDRESS.test(value)&&base58ByteLength(value)===32;}
+function isPublicAddress(value){return isSolanaAddress(value)||EVM_ADDRESS.test(value);}
 $("#walletAddress").addEventListener("input",()=>{$("#walletAddressError").hidden=true;});
 // Any text used to be adopted as a "connected" wallet. Only an address that
 // can be one is, and it is shown as view-only: a public address is not a
