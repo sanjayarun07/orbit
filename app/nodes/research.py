@@ -14,6 +14,7 @@ from app.jupiter import WRAPPED_SOL_MINT
 from app.capability_router import extract_chains
 from app.market_brief import crypto_market_brief
 from app.market_overview import crypto_market_overview
+from app import composition
 from app import event_calendar, why_moving
 from app.market_providers import TRENDING_TOKENS
 from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available
@@ -786,6 +787,20 @@ _NAMED_TOKEN = re.compile(
     re.IGNORECASE,
 )
 _NAMED_STOP = {"THE", "A", "AN", "MY", "THIS", "THAT", "IT", "SOME", "TOP", "NEW", "MINT", "SPL", "USD"}
+_SYMBOL_LIKE = re.compile(r"(?<![A-Za-z0-9$])\$?[A-Z][A-Z0-9]{1,9}(?![A-Za-z0-9])")
+_SYMBOL_STOP = {"I", "A", "OK", "ETF", "ETFS", "USD", "USDT", "USDC", "AI", "DEFI", "NFT", "NFTS", "DEX", "CEX", "TVL", "APY", "APR", "ATH", "ATL", "OI", "RSI", "MACD", "EMA", "SMA", "US", "UK", "EU", "SEC", "FED", "CPI", "L1", "L2"}
+
+
+def _mentions_asset(request: str) -> bool:
+    """Whether the ask names a specific asset: a contract/mint, a $ticker or a
+    phrasing the named-token pattern knows, or a bare all-caps symbol that is
+    not market jargon. Decides between a market-wide bundle and a deep dive."""
+    if _TOKEN_ADDRESS.search(request) or _named_tickers(request):
+        return True
+    return any(m.group(0).lstrip("$") not in _SYMBOL_STOP for m in _SYMBOL_LIKE.finditer(request))
+
+
+_WHALE_ASK = re.compile(r"\b(?:whales?|whale\s+activity|smart\s+money|large\s+(?:buys|transfers|holders))\b", re.IGNORECASE)
 _SECURITY_ASK = re.compile(r"\b(?:safe|safety|security|rug|honeypot|scam|legit|audit)\b", re.IGNORECASE)
 
 
@@ -1203,7 +1218,24 @@ async def _synthesize_knowledge(request: str, passages: str, history: str) -> st
 
 async def research_node(state: AgentState) -> dict:
     sink: dict = {}
-    result = await _research_node(state, sink)
+    request = _effective_request(state)
+    clauses = composition.split_asks(request)
+    if len(clauses) >= 2:
+        # A compound message: every ask answered, each through the same
+        # path, the cards combined and read together. One card and silence
+        # for the rest is what this replaces.
+        parts, extras = [], {}
+        for clause in clauses:
+            part = await _research_node({**state, "request": clause, "contextual_request": None}, sink)
+            parts.append((part.get("answer") or "", part.get("trajectory") or {}))
+            for key in ("pending_token", "resolved_token"):
+                if part.get(key) and key not in extras:
+                    extras[key] = part[key]
+        cards, trajectory = composition.combine(parts)
+        answer = await composition.synthesize(request, cards, trajectory)
+        result = {"answer": answer, "trajectory": trajectory or None, **extras}
+    else:
+        result = await _research_node(state, sink)
     if sink.get("resolved_token") and not result.get("resolved_token"):
         result = {**result, "resolved_token": sink["resolved_token"]}
     return result
@@ -1231,6 +1263,20 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         and not tuple(state.get("chains", []))
         and not TRENDING_TOKENS.search(request)
     )
+    # "what should I day-trade today based on technicals, news, sentiment": one
+    # ask, four tools. Movers, volume, sentiment and news are composed by name
+    # and read together; the model never picks what to buy. A ticker in the
+    # ask means a specific asset and belongs to the deep dive below.
+    if composition.MARKET_ADVICE.search(request) and not _mentions_asset(request):
+        cards, trajectory = await composition.compose_market_advice(request)
+        if cards:
+            answer = await composition.synthesize(request, cards, trajectory, advice=True)
+            return {"answer": answer, "trajectory": {"thought_0": "A market-wide 'what to trade' ask is movers, volume, sentiment and news read together.", **trajectory}}
+    # "check whale activity" with no token, address or ticker: whales of what?
+    # Asked, not guessed (and never silently dropped from a compound message).
+    if _WHALE_ASK.search(request) and not _TOKEN_ADDRESS.search(request) and not _named_tickers(request):
+        return {"answer": ("Whale activity for which token or wallet? Name the token (a $ticker or its contract/mint) and I'll pull its top holders "
+                           "and concentration, or paste a wallet address and I'll show its recent large transfers."), "trajectory": None}
     # "why is SOL down?" -> the composed market + news card (crypto first, stock
     # otherwise). Checked BEFORE the overview: a message can carry both ("today
     # market trend on crypto. why zec is pumping"), and the specific question

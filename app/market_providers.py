@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import re
+
+from app.routing.entities import extract_chains
 from typing import Any
 
 import httpx
@@ -60,6 +62,9 @@ VOLUME_RANKED = re.compile(
     re.IGNORECASE,
 )
 _TREND_WORD = re.compile(r"\b(?:trending|trends?|narratives?|metas?|hot)\b", re.IGNORECASE)
+# What makes a "trending" ask about paid attention rather than organic activity.
+ATTENTION_WORD = re.compile(r"\b(?:hot|boost\w*|promot\w*|paid|pump\.?fun|launchpads?|gems?|hype)\b", re.IGNORECASE)
+BARE_TRENDING = re.compile(r"\btrending\s+(?:tokens?|coins?|crypto|alts?)\b|\b(?:tokens?|coins?)\s+trending\b", re.IGNORECASE)
 
 
 def _address(request: str) -> str:
@@ -146,7 +151,12 @@ class DexScreenerProvider:
             # A ranked LIST OF TOKENS for "trending tokens on <chain/launchpad>".
             # Wins over trending_metas (narratives) and latest_profiles for
             # token-level asks via priority + keyword hits.
-            matches=lambda request: bool(TRENDING_TOKENS.search(request)) and not VOLUME_RANKED.search(request),
+            # Paid boosts are "trending" only when the ask is about attention
+            # (hot, boosted, promoted, a launchpad) or scoped to a chain; a bare
+            # "trending tokens" is an organic question and goes to the volume
+            # ranking. This list of -90% tokens answered "check trending tokens".
+            matches=lambda request: bool(TRENDING_TOKENS.search(request)) and not VOLUME_RANKED.search(request)
+                and (bool(ATTENTION_WORD.search(request)) or bool(extract_chains(request))),
             chains=_SUPPORTED_CHAINS + ("robinhood",),
             quota_per_minute=60, cache_ttl_seconds=60, priority=7,
             description="Ranked list of trending/boosted tokens on a chain or launchpad (pump.fun, etc.), with live price, volume, and liquidity",

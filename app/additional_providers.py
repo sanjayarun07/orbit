@@ -9,12 +9,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import re
+
+from app.routing.entities import extract_chains
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import httpx
 
-from app.market_providers import VOLUME_RANKED, _address, _chain, _has_chain_and_address, _money, _snapshot
+from app.market_providers import VOLUME_RANKED, _address, _chain, _has_chain_and_address, _money, _snapshot, ATTENTION_WORD, BARE_TRENDING
 from app.perplexity_tools import perplexity_available, perplexity_web_search
 from app.provider_router import ProviderRouter, ProviderTool
 from app.settings import settings
@@ -253,7 +255,10 @@ class CoinGeckoProvider:
         ))
         router.register(ProviderTool(
             "coingecko_top_volume", self.name, ("token_discovery", "market_data"), self.top_volume,
-            matches=lambda request: bool(VOLUME_RANKED.search(request)),
+            # A volume ranking, and the organic answer to a bare "trending
+            # tokens" with no chain and no attention word (boosts take those).
+            matches=lambda request: bool(VOLUME_RANKED.search(request)) or (
+                bool(BARE_TRENDING.search(request)) and not ATTENTION_WORD.search(request) and not extract_chains(request)),
             keywords=("volume", "traded", "trending", "top", "tokens", "coins"),
             chains=tuple(_GAINERS_CATEGORY), quota_per_minute=settings.coingecko_requests_per_minute,
             cache_ttl_seconds=120, priority=9,

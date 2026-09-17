@@ -389,3 +389,35 @@ code and nothing at this seam can authorize a swap.
 
 To run the B instance: a second stack on its own domain with the same
 template and `ROUTING_BACKEND=jev_fallthrough`, `TYPESAFE_API_KEY` set.
+
+## Several tools, one answer (rule of 2026-09-17)
+
+"If the query needs multiple tools or APIs, combine results and synthesize."
+Two shapes needed it and both used to get one tool:
+
+- **A compound message** ("check trending tokens. check whale activity",
+  "today market trend on crypto. why zec is pumping"). `composition.split_asks`
+  breaks it at sentence boundaries and explicit connectors (never at a bare
+  "and": "price and volume of BONK" is one ask); each clause is routed on
+  its own through the same deterministic path; `combine` joins the cards
+  with their trajectories renumbered; `synthesize` writes a short
+  "Taken together" reading over the combined evidence through the synthesis
+  tier, and the cards stay verbatim underneath -- the model summarises, it
+  never rewrites a table. A clause that needs more information ("whale
+  activity" with no token) contributes its clarifying question instead of
+  silence.
+- **One ask that spans tools** ("suggest crypto for day trading based on
+  technicals, news, sentiment"). `compose_market_advice` invokes movers,
+  losers, volume, sentiment and news by name, tolerates a provider being
+  down (one retry, then the bundle without it), and the same synthesis reads
+  them together with a market-read stance: it describes conditions and
+  risks, never what to buy. A named asset ("should I day trade BONK") is not
+  the market bundle; it is the token deep dive.
+- **"Trending tokens" is an organic question.** The paid-boosts list
+  answers only attention words (hot, boosted, promoted, a launchpad) or a
+  chain scope; a bare "trending tokens" ranks the CoinGecko volume list.
+  Router mode 67/67 with the new case.
+
+Live on the dev instance: the day-trading ask now returns four cards read
+together; the compound message returns the volume list and "Whale activity
+for which token or wallet?".

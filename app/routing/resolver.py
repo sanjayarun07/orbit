@@ -76,7 +76,11 @@ def _speech_route(understanding: SpeechUnderstanding, method: str, chains: list[
         # Advice is answered as research, never as a quote path, and is tagged
         # in routing_decision so the caller can attach a not-financial-advice
         # disclaimer. finance_data is only requested for crypto/equity subjects.
-        caps = ["finance_data", "web_research"] if understanding.domain in {"crypto", "equity"} else ["web_research"]
+        # A crypto advice ask with no single asset ("what should I day-trade")
+        # is answered from movers, volume, sentiment and news; those tools
+        # must be in reach, not only the web-search ones.
+        caps = (["finance_data", "web_research", "market_data", "market_sentiment", "token_discovery", "news"] if understanding.domain == "crypto"
+                else ["finance_data", "web_research"] if understanding.domain == "equity" else ["web_research"])
         return {"intent": "research", "capabilities": caps, "chains": chains, "route_source": method}
     return {"intent": "research", "capabilities": ["web_research"], "chains": chains, "route_source": method}
 

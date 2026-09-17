@@ -1249,5 +1249,35 @@
     "expected_intent": "research",
     "router": true,
     "notes": "catalog example for perplexity_finance_search; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user"
+  },
+  {
+    "id": "trending-bare",
+    "query": "check trending tokens",
+    "expected_tools": [
+      "coingecko_top_volume"
+    ],
+    "forbidden_tools": [
+      "dexscreener_boosted_tokens"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "a bare 'trending tokens' is an organic question (volume ranking); paid boosts answer only attention words or a chain scope (2026-09-17)"
+  },
+  {
+    "id": "advice-market-wide",
+    "query": "suggest some crypto to buy for day trading based on technicals, news, sentiment",
+    "expected_tools": [
+      "coingecko_gainers_losers",
+      "coingecko_top_volume",
+      "market_sentiment_snapshot",
+      "perplexity_finance_search"
+    ],
+    "forbidden_tools": [
+      "jupiter",
+      "relay"
+    ],
+    "expected_intent": "research",
+    "router": false,
+    "notes": "market-wide advice with no asset: composed from movers, volume, sentiment and news, read together; never a quote (2026-09-17)"
   }
 ]

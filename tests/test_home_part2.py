@@ -143,9 +143,15 @@ def test_a_compound_ask_gets_the_overview_and_the_asset_card(monkeypatch):
 
     monkeypatch.setattr(research_mod.why_moving, "compose", fake_compose)
     monkeypatch.setattr(research_mod, "crypto_market_overview", lambda query: "# Crypto market overview\noverview")
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from app import composition
+    monkeypatch.setattr(composition.runtime, "_call_synthesis_lm", AsyncMock(return_value=SimpleNamespace(summary="Market flat; ZEC up on its own news.")))
     out = asyncio.run(research_mod.research_node({"request": "today market trend on crypto. why zec is pumping",
                                                   "capabilities": ["web_research"], "chains": [], "history": "", "session_context": {}}))
-    assert out["answer"].startswith("# Crypto market overview") and "# Why is ZEC up?" in out["answer"]
+    # Two sentences, two cards, read together: the summary on top, then the
+    # overview, then ZEC -- the message's own order.
+    assert out["answer"].startswith("**Taken together**") and "# Crypto market overview" in out["answer"] and "# Why is ZEC up?" in out["answer"]
     assert out["answer"].index("overview") < out["answer"].index("Why is ZEC")
     assert out["trajectory"]["tool_name_0"] == "crypto_market_overview" and out["trajectory"]["tool_name_1"] == "market_data"
     # A plain overview ask is still just the overview.

@@ -93,6 +93,21 @@ class GeneralAnswer(dspy.Signature):
     answer: str = dspy.OutputField()
 
 
+class CompositeSynthesis(dspy.Signature):
+    """Read several evidence cards together and write a short summary (3-6
+    sentences) of what they say IN COMBINATION: what agrees, what conflicts,
+    what stands out. Use only facts present in the evidence and name the card
+    each fact comes from ("per the gainers list", "the sentiment snapshot").
+    Never add a number, token or claim that is not in the evidence. When the
+    stance is a market read, do not tell the user what to buy; describe the
+    conditions the evidence shows and the risks it shows."""
+
+    request: str = dspy.InputField()
+    evidence: str = dspy.InputField(desc="The cards, separated by ---; each is verbatim tool output")
+    stance: str = dspy.InputField(desc="'a factual summary' or 'a market read, not a recommendation'")
+    summary: str = dspy.OutputField()
+
+
 class ResearchAnswer(dspy.Signature):
     """Answer live-information and research questions on any topic.
 
@@ -424,6 +439,7 @@ risk_agent = dspy.Predict(RiskAssessment)
 market_research_agent = dspy.Predict(MarketResearch)
 team_coordinator = dspy.Predict(TeamSynthesis)
 token_deepdive_agent = dspy.Predict(TokenDeepDive)
+composite_synthesizer = dspy.Predict(CompositeSynthesis)
 role_reflection_agent = dspy.Predict(RoleReflection)
 _mcp_registry = get_mcp_registry()
 _llm_slots = asyncio.Semaphore(max(1, settings.max_concurrent_llm_requests))
