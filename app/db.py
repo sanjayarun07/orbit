@@ -94,7 +94,47 @@ CREATE TABLE IF NOT EXISTS team_members (
     PRIMARY KEY (owner_id, email)
 );
 -- One active membership per user, enforced by the database and not only by
--- the code that tries to keep it so.
+-- the code that tries to keep it so. Earlier versions allowed several, so the
+-- data is reconciled before the constraint the first time this runs (when the
+-- index does not exist yet): of a user's active memberships the one their
+-- team pointer names survives -- with no pointer to any of them, the most
+-- recently accepted -- and the rest are moved to team_members_reconciled,
+-- not lost. The pointer is then set to the survivor. Without this, a database
+-- carrying the duplicates could not be initialised at all.
+CREATE TABLE IF NOT EXISTS team_members_reconciled (
+    owner_id UUID NOT NULL,
+    email TEXT NOT NULL,
+    role TEXT,
+    status TEXT,
+    user_id UUID,
+    invited_at TIMESTAMPTZ,
+    accepted_at TIMESTAMPTZ,
+    reason TEXT NOT NULL,
+    reconciled_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+DO $$ BEGIN
+    IF to_regclass('team_members_one_active') IS NULL THEN
+        WITH ranked AS (
+            SELECT m.owner_id, m.email,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY m.user_id
+                       ORDER BY (m.owner_id = u.team_owner_id) IS TRUE DESC, m.accepted_at DESC NULLS LAST, m.invited_at DESC
+                   ) AS rank
+            FROM team_members m JOIN users u ON u.id = m.user_id
+            WHERE m.status = 'active' AND m.user_id IS NOT NULL
+        ), removed AS (
+            DELETE FROM team_members m USING ranked r
+            WHERE m.owner_id = r.owner_id AND m.email = r.email AND r.rank > 1
+            RETURNING m.owner_id, m.email, m.role, m.status, m.user_id, m.invited_at, m.accepted_at
+        )
+        INSERT INTO team_members_reconciled (owner_id, email, role, status, user_id, invited_at, accepted_at, reason)
+        SELECT owner_id, email, role, status, user_id, invited_at, accepted_at, 'duplicate active membership before team_members_one_active'
+        FROM removed;
+        UPDATE users u SET team_owner_id = m.owner_id
+        FROM team_members m
+        WHERE m.user_id = u.id AND m.status = 'active' AND u.team_owner_id IS DISTINCT FROM m.owner_id;
+    END IF;
+END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS team_members_one_active ON team_members (user_id) WHERE status = 'active' AND user_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS stripe_events (
     id TEXT PRIMARY KEY,

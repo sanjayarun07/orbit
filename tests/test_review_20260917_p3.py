@@ -120,47 +120,50 @@ def test_a_slower_older_event_cannot_overwrite_a_newer_one(monkeypatch):
     assert current["plan_id"] == "max" and current["subscription_event_at"] == 400, current
 
 
-def test_same_second_updates_do_not_depend_on_delivery_order():
-    async def run():
-        user, _ = await accounts.get_or_create_user("tie@example.com")
-        await accounts.update_user(user["id"], stripe_customer_id="cus_tie", stripe_subscription_id="sub_a",
-                                   subscription_created=100, subscription_status="active", plan_id="pro")
-        for plan in ["max", "pro"]:
-            await billing._on_subscription_updated("evt_" + plan, {"id": "sub_a", "created": 100, "status": "active",
-                                                                   "customer": "cus_tie", "metadata": {"plan_id": plan}}, 300)
-        first_order = (await accounts.get_user(user["id"]))["plan_id"]
-        user2, _ = await accounts.get_or_create_user("tie2@example.com")
-        await accounts.update_user(user2["id"], stripe_customer_id="cus_tie2", stripe_subscription_id="sub_a",
-                                   subscription_created=100, subscription_status="active", plan_id="pro")
-        for plan in ["pro", "max"]:
-            await billing._on_subscription_updated("evt2_" + plan, {"id": "sub_a", "created": 100, "status": "active",
-                                                                    "customer": "cus_tie2", "metadata": {"plan_id": plan}}, 300)
-        return first_order, (await accounts.get_user(user2["id"]))["plan_id"]
+@pytest.mark.parametrize("order", [["max", "pro"], ["pro", "max"]], ids=["max-then-pro", "pro-then-max"])
+def test_same_second_updates_end_in_the_authoritative_state_whatever_their_order(monkeypatch, order):
+    """Two conflicting updates in one second: the record ends in the state
+    Stripe holds, in both delivery orders. (The first version of this test
+    accepted different outcomes for the two orders under a first-wins rule;
+    that is not reconciliation, and it dropped real same-second events.)"""
+    monkeypatch.setattr(billing, "configured", lambda: True)
+    monkeypatch.setattr(billing, "_api_retrieve_subscription",
+                        lambda sid: {"id": "sub_a", "created": 100, "status": "active", "metadata": {"plan_id": "max"}})
 
-    first, second = asyncio.run(run())
-    # The rule is "first applied wins": the outcome is a function of arrival
-    # order in both cases, but it is deterministic and never last-wins.
-    assert first == "max" and second == "pro"
+    async def run():
+        user, _ = await accounts.get_or_create_user(f"tie-{'-'.join(order)}@example.com")
+        await accounts.update_user(user["id"], stripe_subscription_id="sub_a", subscription_created=100,
+                                   subscription_event_at=300, subscription_status="active", plan_id="pro")
+        for plan in order:
+            await billing._on_subscription_updated("evt_" + plan, {"id": "sub_a", "created": 100, "status": "active",
+                                                                   "metadata": {"user_id": user["id"], "plan_id": plan}}, 300)
+        return await accounts.get_user(user["id"])
+
+    final = asyncio.run(run())
+    assert final["plan_id"] == "max" and final["subscription_status"] == "active"
 
 
 # --- R05 · one checkout in flight; unknown state fails closed ----------------
 
-def test_a_second_subscription_checkout_is_refused_while_one_is_pending(monkeypatch):
+def test_a_second_subscription_checkout_while_one_is_open_returns_that_one(monkeypatch):
+    """One session per pending checkout: the second request gets the open
+    session back (confirmed open with Stripe) rather than a duplicate."""
     async def run():
         user, _ = await accounts.get_or_create_user("checkout@example.com")
         user = await accounts.update_user(user["id"], stripe_customer_id="cus_x")
         monkeypatch.setattr(billing, "configured", lambda: True)
         monkeypatch.setattr(settings, "stripe_price_pro", "price_pro")
         monkeypatch.setattr(billing, "_api_list_active_subscriptions", lambda customer_id: [])
+        monkeypatch.setattr(billing, "_api_retrieve_checkout", lambda sid: {"id": sid, "status": "open", "url": "https://example.com/c"})
         calls = []
         monkeypatch.setattr(billing, "_api_create_checkout", lambda params: calls.append(params) or {"id": f"cs_{len(calls)}", "url": "https://example.com/c"})
         first = await billing.create_checkout(user, "subscription", "pro", "https://example.com")
-        with pytest.raises(billing.CheckoutPending):
-            await billing.create_checkout(await accounts.get_user(user["id"]), "subscription", "pro", "https://example.com")
-        return first, calls, await accounts.get_user(user["id"])
+        second = await billing.create_checkout(await accounts.get_user(user["id"]), "subscription", "pro", "https://example.com")
+        return first, second, calls, await accounts.get_user(user["id"])
 
-    first, calls, stored = asyncio.run(run())
-    assert len(calls) == 1 and stored["checkout_session_id"] == first["session_id"]
+    first, second, calls, stored = asyncio.run(run())
+    assert len(calls) == 1 and second["session_id"] == first["session_id"] and second.get("reused")
+    assert stored["checkout_session_id"] == first["session_id"]
 
 
 def test_a_live_subscription_stripe_knows_about_blocks_checkout_even_before_its_webhook(monkeypatch):

@@ -604,3 +604,88 @@ membership through a partial unique index.
 
 **R12.** The pipeline fingerprint names the provider and the model, not only
 the provider, so a change between models of one provider forces fresh vectors.
+
+## Verification of a1b477ba: the five remaining partial closures
+
+The verification of `a1b477ba` closed eight of the thirteen consolidated
+findings and reproduced five that were still partial. Each reproduction was
+confirmed at that commit before anything changed, and each is now a
+regression test with its assertion inverted plus a control
+(`tests/test_review_20260917_p4.py`; the Postgres-only parts in
+`tests/test_postgres_review_p4.py`).
+
+**R04, one writer path.** Every subscription-state writer -- update,
+deletion, checkout completion, invoice -- now goes through
+`billing._apply_subscription_event`, so ordering, tie reconciliation and the
+mapping from a subscription's state to the account's fields cannot drift
+apart. They had: a checkout took a same-second tie as agreement "by
+construction" and a checkout tying with a recorded cancellation restored paid
+access; an invoice took the reconciliation as a yes/no and wrote its own plan
+and `active` over a cancelled subscription. On a tie the authoritative
+subscription's own status and plan are what get written, for every writer. And
+when Stripe cannot be asked, nothing is decided: `ReconciliationUnavailable`
+propagates, the webhook answers 500, the event stays unprocessed, and
+Stripe's redelivery tries again. Marking it processed turned a moment's
+outage into a silently dropped entitlement change. Invoice credit grants stay
+separate from the entitlement decision: the payment happened, the credits are
+granted, and whether the account is on that plan is answered by the writer
+path.
+
+**R05, a durable checkout intent.** Starting a subscription checkout now
+records an intent (`checkout_session_id = intent:<key>`) under the account's
+lock, commits it, and only then calls Stripe with that key as the request's
+idempotency key. If the outcome is never recorded -- the process dies, the
+write fails -- the next attempt replays the identical request and Stripe
+answers with the session it already created. A recorded session is settled
+with Stripe before anything replaces it: open and within the window, it is
+handed back rather than duplicated; open past the window, it is expired at
+Stripe first; complete, the subscription is being activated and no
+replacement is allowed; anything Stripe cannot confirm fails closed. Sessions
+are created with `expires_at` at the end of the pending window (never under
+Stripe's 30-minute minimum), so the local timer never outlives what Stripe
+would still let the customer pay.
+
+**R08, admission re-checked under the lease.** Ownership was checked and
+claimed before a chat turn's session lease, and the wait for the lease is
+where that goes stale: a deletion under the lease removes the mapping, another
+account claims the id, and the queued turn committed a private question and
+answer into that account's conversation. `execution_policy._require_still_admitted`
+now confirms, under the lease and before anything is read, that the
+conversation is still what the caller was admitted to (theirs, or nobody's
+for a visitor); anything else is "not found", the same answer the first check
+gives. The post-turn ownership refresh moved under the lease too, so it can
+never re-map a conversation a deletion has just forgotten. Account deletion is
+covered by the same check: its conversations are forgotten under their
+leases before the account row goes.
+
+**R09, retry state and delivered work.** `retry_count` was written to
+Postgres but never read back from a row, so every attempt at an occurrence
+was attempt one and the bounded retry never bounded. It is hydrated now, and
+the opt-in test drives it through real reads and claims. The terminal refund
+also consulted only the ledger, which cannot tell "never delivered" from
+"delivered, then failed to record it". The inbox row keyed by occurrence is
+the delivery record, and the recovery consults it first: a delivered
+occurrence is completed (its records written, its schedule advanced) and never
+refunded or re-composed; only an occurrence that never delivered is refunded
+when its retries run out.
+
+**R10, joins that write nothing when rejected; the migration.** The Postgres
+join deleted the user's current membership before establishing that the
+destination had a valid invite, and a missing invite returned `None` from
+inside the transaction, committing the deletion. The invite is now selected
+and locked first; a rejected join has written nothing. Nonexistent, revoked
+and already-accepted invites are tested. The one-active-membership index is
+added only after the data is reconciled the first time the schema runs
+against a database that predates it: of a user's active memberships the one
+their team pointer names survives (with no pointer to any of them, the most
+recently accepted), the others are moved to `team_members_reconciled` with a
+reason, and the pointer is set to the survivor. The test starts from the
+older data state, not an empty schema.
+
+**Not established by these checks.** The Stripe interactions
+(`Subscription.retrieve`, `checkout.Session.retrieve/expire`, idempotency-key
+replay) are exercised against stubs that model Stripe's documented behaviour;
+no live Stripe call was made. The R05 reproduction's own stub returned a
+distinct session per create call regardless of key, which Stripe does not do;
+the regression test's stub honours the key, and the invariant proved is that
+the retry is the identical request under the same key.

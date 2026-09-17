@@ -35,7 +35,9 @@ def test_a_one_shot_brief_whose_provider_failed_is_not_marked_done(monkeypatch):
 
 def test_a_retry_after_a_post_delivery_write_failure_does_not_deliver_or_charge_again(monkeypatch):
     """The review's reproduction, inverted: delivery and charge succeeded and
-    only the final bookkeeping write failed; the retry must find both done."""
+    only the final bookkeeping write failed. The run recovers it on the spot
+    (the inbox row is the delivery record, so the occurrence is completed
+    rather than retried), and a later run finds nothing to deliver or charge."""
 
     async def run():
         user, _ = await accounts.get_or_create_user("retry@example.com")
@@ -63,7 +65,8 @@ def test_a_retry_after_a_post_delivery_write_failure_does_not_deliver_or_charge_
         return first, second, await credits.balance(account), await tasks.inbox(user["id"])
 
     first, second, balance, inbox = asyncio.run(run())
-    assert first["result"] == "error"
+    assert first["fired"] and first.get("recovered") and first["status"] == "done", first
+    assert not second["fired"], second
     assert balance == 4, f"the retry charged again (balance {balance})"
     assert len(inbox) == 1, "the retry delivered the same occurrence twice"
 

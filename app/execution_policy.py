@@ -115,16 +115,6 @@ async def execute_chat_turn(body: ChatRequest, identity: Identity | str) -> Agen
                 await notifications.maybe_low_credit_alert(identity.team_owner or identity.user, balance)
             except Exception:
                 logger.warning("low-credit alert failed", exc_info=True)
-    if identity.signed_in:
-        # Ownership was claimed before the turn; this only refreshes last_used
-        # (and maps a brand-new conversation the caller did not name).
-        try:
-            await accounts.touch_chat_session(identity.user["id"], response.session_id)
-            # Their history must outlive the short scratch-space expiry a
-            # signed-out visitor's conversation gets.
-            await extend_retention(response.session_id, settings.chat_history_signed_in_ttl_seconds)
-        except Exception:
-            logger.warning("chat session ownership update failed", exc_info=True)
     return response
 
 
@@ -134,6 +124,23 @@ async def _require_session_access(session_id: str, identity: Identity | None, cl
         await session_access.require_session_access(session_id, identity, claim=claim)
     except session_access.SessionAccessDenied as exc:
         raise ServiceError(404, "Conversation not found") from exc
+
+
+async def _require_still_admitted(session_id: str, identity: Identity) -> None:
+    """The admission check again, under the turn lease.
+
+    Ownership is checked and claimed before the lease, and the wait for the
+    lease is exactly where that can go stale: a deletion running under the
+    lease removes the ownership mapping, and another account can then claim
+    the id. A queued turn that went on with its earlier admission committed
+    a private question and answer into that other account's conversation.
+    So nothing is read or written until the conversation is confirmed to be
+    what the caller was admitted to: owned by them, or (for a visitor)
+    owned by nobody. Anything else is reported as not found, the same answer
+    the first check gives."""
+    owner = await accounts.chat_session_owner(session_id)
+    if owner != session_access.caller_user_id(identity):
+        raise ServiceError(404, "Conversation not found")
 
 
 async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: str) -> AgentResponse:
@@ -167,6 +174,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
                 409,
                 "Another request is already updating this chat. Wait for it to finish and retry.",
             ) from exc
+        await _require_still_admitted(session_id, identity)
         messages, session_context = await get_session_snapshot(session_id)
         history = history_text_from_messages(messages)
         current_revision = int(session_context.get("revision", 0))
@@ -355,6 +363,16 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             assistant_metadata,
             next_context,
         )
+        if identity.signed_in:
+            # Still under the lease, so this refresh of last_used (and the
+            # longer retention a signed-in account's history gets) can never
+            # re-map a conversation a deletion has just forgotten: deletion
+            # takes the same lease, and the ownership was confirmed above.
+            try:
+                await accounts.touch_chat_session(identity.user["id"], session_id)
+                await extend_retention(session_id, settings.chat_history_signed_in_ttl_seconds)
+            except Exception:
+                logger.warning("chat session ownership update failed", exc_info=True)
         return AgentResponse(
             answer=answer,
             trade_plan=plan,

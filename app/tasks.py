@@ -139,6 +139,9 @@ def _row(row) -> dict:
         "last_result": row["last_result"], "fire_count": int(row["fire_count"] or 0),
         "claimed_until": _iso(row["claimed_until"]) if "claimed_until" in row.keys() else None,
         "claimed_occurrence": row["claimed_occurrence"] if "claimed_occurrence" in row.keys() else None,
+        # Read back, or every attempt at an occurrence is attempt one and the
+        # retry limit is never reached (it was written but never hydrated).
+        "retry_count": int(row["retry_count"] or 0) if "retry_count" in row.keys() else 0,
     }
 
 
@@ -378,6 +381,19 @@ async def notify(user_id: str, title: str, body: str, kind: str = "task", task_i
     return item, True
 
 
+async def _occurrence_delivered(user_id: str, task_id: str, occurrence: str) -> bool:
+    """Whether this occurrence reached the inbox. The inbox row is the durable
+    delivery record, and it is what a refund decision has to consult: a debit
+    alone cannot tell "never delivered" from "delivered, then failed to record
+    it", and refunding the second case pays the customer for a brief they
+    have."""
+    pool = await get_pg_pool()
+    if pool is not None:
+        return bool(await pool.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM user_inbox WHERE task_id = $1 AND occurrence = $2)", task_id, occurrence))
+    return any(i.get("task_id") == task_id and i.get("occurrence") == occurrence for i in _inbox.get(user_id, []))
+
+
 async def inbox(user_id: str, limit: int = 50) -> list[dict]:
     pool = await get_pg_pool()
     if pool is not None:
@@ -578,14 +594,27 @@ async def run_task(task: dict) -> dict:
         # release the lease and put it back on its schedule (or retry soon).
         logger.warning("tasks: run failed for %s", task["id"], exc_info=True)
         now = _now()
+        ref = f"{task['id']}:{task['occurrence']}"
+        if await _occurrence_delivered(task["user_id"], task["id"], ref):
+            # The brief reached the inbox; what failed was the bookkeeping
+            # after it. The occurrence is finished here -- not re-composed,
+            # and never refunded as undelivered -- and the records the failed
+            # write should have made are made now.
+            updates = {"last_run_at": now, "last_result": "delivered (completion recorded after a failed write)",
+                       "claimed_until": None, "claimed_occurrence": None, "retry_count": 0,
+                       "fire_count": int(task.get("fire_count") or 0) + 1, **_reschedule(task, now, True)}
+            await update_task(task["id"], task["user_id"], **updates)
+            return {"id": task["id"], "fired": True, "result": updates["last_result"],
+                    "status": updates.get("status", "active"), "recovered": True}
         attempts = int(task.get("retry_count") or 0) + 1
         if attempts >= settings.task_retry_limit:
             # Enough. Refund the occurrence (idempotent on its key), drop its
             # identity so the next run is a new, separately paid occurrence,
-            # and put the task back on its ordinary schedule.
+            # and put the task back on its ordinary schedule. The inbox was
+            # consulted above: this refund is for an occurrence that never
+            # delivered.
             if task["kind"] == "brief" and settings.credit_cost_brief:
                 account_id = await _billing_account_for(user)
-                ref = f"{task['id']}:{task['occurrence']}"
                 if await credits.has_ref(account_id, "task_run", ref) and not await credits.has_ref(account_id, "task_refund", ref):
                     await credits.append(account_id, settings.credit_cost_brief, "task:brief-refund", "task_refund", ref, {"kind": "brief", "attempts": attempts})
             nxt = next_run(task["schedule"], task.get("tz_offset_min", 0), after=now)
@@ -603,6 +632,21 @@ async def run_task(task: dict) -> dict:
         await update_task(task["id"], task["user_id"], last_run_at=now, last_result=f"error: {str(exc)[:160] or exc.__class__.__name__}",
                           next_run_at=nxt, claimed_until=None, retry_count=attempts)
         return {"id": task["id"], "fired": False, "result": "error", "status": "active", "attempt": attempts}
+
+
+def _reschedule(task: dict, now: datetime, fired: bool) -> dict:
+    """Where the task goes once an occurrence is over: done for a one-shot
+    that fired, otherwise its next time (a price alert with no interval of
+    its own polls on the check interval). Shared by the ordinary completion
+    and the recovery of a delivered occurrence, so they cannot differ."""
+    one_shot = "at" in task["schedule"] or (task["kind"] == "price_alert" and not task["spec"].get("repeat"))
+    if fired and one_shot:
+        return {"status": "done", "next_run_at": None}
+    interval = task["schedule"] if not (task["kind"] == "price_alert" and "at" not in task["schedule"] and "every_minutes" not in task["schedule"]) else {"every_minutes": settings.task_alert_check_minutes}
+    nxt = next_run(interval, task.get("tz_offset_min", 0), after=now)
+    if nxt is None and task["kind"] == "price_alert":
+        nxt = now + timedelta(minutes=settings.task_alert_check_minutes)
+    return {"next_run_at": nxt, **({"status": "done"} if nxt is None else {})}
 
 
 async def _billing_account_for(user: dict) -> str:
@@ -669,18 +713,7 @@ async def _run_claimed(task: dict, user: dict) -> dict:
                 updates["last_result"] = f"{result} (email failed)"
         if delivered_now:
             updates["fire_count"] = int(task.get("fire_count") or 0) + 1
-    one_shot = "at" in task["schedule"] or (task["kind"] == "price_alert" and not task["spec"].get("repeat"))
-    if fired and one_shot:
-        updates["status"] = "done"
-        updates["next_run_at"] = None
-    else:
-        interval = task["schedule"] if not (task["kind"] == "price_alert" and "at" not in task["schedule"] and "every_minutes" not in task["schedule"]) else {"every_minutes": settings.task_alert_check_minutes}
-        nxt = next_run(interval, task.get("tz_offset_min", 0), after=now)
-        if nxt is None and task["kind"] == "price_alert":
-            nxt = now + timedelta(minutes=settings.task_alert_check_minutes)
-        updates["next_run_at"] = nxt
-        if nxt is None:
-            updates["status"] = "done"
+    updates.update(_reschedule(task, now, fired))
     await update_task(task["id"], task["user_id"], **updates)
     return {"id": task["id"], "fired": fired, "result": updates["last_result"], "status": updates.get("status", "active")}
 

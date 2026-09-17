@@ -20,6 +20,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from app import accounts, credits, notifications
 from app.billing_plans import PACKS, PLANS, get_pack, get_plan
@@ -59,8 +60,22 @@ def _api_create_customer(email: str, user_id: str) -> str:
 
 
 def _api_create_checkout(params: dict) -> dict:
+    # `idempotency_key` in params is a request option to the SDK, not a field
+    # of the session: a replay carrying the same key is answered with the
+    # session the first call created, never a second one.
     session = _stripe().checkout.Session.create(**params)
     return {"id": session["id"], "url": session["url"]}
+
+
+def _api_retrieve_checkout(session_id: str) -> dict:
+    session = _stripe().checkout.Session.retrieve(session_id)
+    return {"id": session["id"], "status": session.get("status"), "url": session.get("url"),
+            "subscription": session.get("subscription"), "expires_at": session.get("expires_at")}
+
+
+def _api_expire_checkout(session_id: str) -> dict:
+    session = _stripe().checkout.Session.expire(session_id)
+    return {"id": session["id"], "status": session.get("status")}
 
 
 def _api_list_active_subscriptions(customer_id: str) -> list[dict]:
@@ -172,16 +187,12 @@ async def create_checkout(user: dict, kind: str, item_id: str, base_url: str) ->
             raise ValueError(f"The {plan.name} plan has no Stripe price configured")
         # What the app has recorded is not enough: a new subscriber can start
         # a second checkout before the first one's webhook has arrived. Under
-        # the account's lock, refuse while a recent checkout is in flight, and
-        # ask Stripe whether the customer already has a live subscription the
-        # app has not heard about yet.
+        # the account's lock, ask Stripe whether the customer already has a
+        # live subscription the app has not heard about yet, then settle the
+        # checkout the account already has (see _checkout_intent) and record
+        # the intent for this one.
         async with accounts.user_row_lock(user["id"]) as (conn, fresh):
             fresh = fresh or user
-            started = fresh.get("checkout_started_at")
-            if fresh.get("checkout_session_id") and started and int(time.time()) - int(started) < settings.checkout_pending_seconds:
-                raise CheckoutPending(
-                    "A checkout for this account was started moments ago. Finish it, or wait a few minutes and try again."
-                )
             live = await asyncio.to_thread(_api_list_active_subscriptions, customer_id)
             if live:
                 await accounts.update_user(fresh["id"], db=conn, stripe_subscription_id=live[0]["id"],
@@ -189,10 +200,22 @@ async def create_checkout(user: dict, kind: str, item_id: str, base_url: str) ->
                 raise SubscriptionExists(
                     "This account already has a subscription. Change plans from the billing portal instead of starting another."
                 )
-            session = _api_create_checkout(_subscription_checkout_params(common, plan, user))
-            await accounts.update_user(fresh["id"], db=conn, checkout_session_id=session["id"],
-                                       checkout_started_at=int(time.time()))
-            return {"url": session["url"], "session_id": session["id"]}
+            intent = await _checkout_intent(conn, fresh)
+        if "reuse" in intent:
+            return {"url": intent["reuse"]["url"], "session_id": intent["reuse"]["id"], "reused": True}
+        # The intent is durable before the remote call (the lock's transaction
+        # has committed) and the call carries the intent's key, so an outcome
+        # that never gets recorded -- the process dies, the write fails -- is
+        # recovered by replaying the identical request: Stripe answers a replay
+        # with the session it created the first time. The session expires at
+        # the end of the pending window, so a local timer never outlives what
+        # Stripe would still let the customer pay.
+        params = _subscription_checkout_params(common, plan, user)
+        params["idempotency_key"] = intent["key"]
+        params["expires_at"] = intent["started"] + _checkout_window()
+        session = _api_create_checkout(params)
+        await accounts.update_user(user["id"], checkout_session_id=session["id"], checkout_started_at=intent["started"])
+        return {"url": session["url"], "session_id": session["id"]}
     elif kind == "pack":
         pack = get_pack(item_id)
         if pack is None:
@@ -228,6 +251,69 @@ class SubscriptionExists(Exception):
 
 class CheckoutPending(Exception):
     """A subscription checkout is already in flight for this account."""
+
+
+class ReconciliationUnavailable(Exception):
+    """A same-second event could not be reconciled against Stripe. The event is
+    left unprocessed so that Stripe's redelivery (or a replay) tries again;
+    marking it processed would turn a moment's outage into a silently dropped
+    entitlement change."""
+
+
+INTENT_PREFIX = "intent:"
+
+
+def _checkout_window() -> int:
+    # Stripe will not create a Checkout session that expires in under 30 minutes.
+    return max(int(settings.checkout_pending_seconds), 1800)
+
+
+async def _checkout_intent(conn, user: dict) -> dict:
+    """Settle the checkout this account has recorded, then record the intent
+    for the next one. Returns {"reuse": session} when the earlier session is
+    still the one to use, else {"key", "started"} for a new remote call.
+
+    The recorded value is one of three things. An INTENT whose remote call
+    was never recorded: within the window it is replayed with its own key
+    (same request, same session at Stripe); older than the window, the
+    session it may have made has expired and a new intent replaces it. A
+    SESSION ID: Stripe is asked for its state, because a local timer alone
+    cannot say whether a session is still payable -- open and within the
+    window it is handed back rather than duplicated; open past the window it
+    is expired at Stripe before anything replaces it; complete, the
+    subscription is being activated and no replacement is allowed; expired,
+    it is replaced. Anything Stripe cannot confirm fails closed."""
+    now = int(time.time())
+    recorded = user.get("checkout_session_id")
+    started = int(user.get("checkout_started_at") or 0)
+    within = bool(recorded) and now - started < _checkout_window()
+    if recorded and recorded.startswith(INTENT_PREFIX):
+        if within:
+            return {"key": recorded[len(INTENT_PREFIX):], "started": started}
+    elif recorded:
+        try:
+            session = await asyncio.to_thread(_api_retrieve_checkout, recorded)
+        except Exception as exc:
+            raise CheckoutPending(
+                "The state of an earlier checkout for this account could not be confirmed. Try again shortly."
+            ) from exc
+        status = session.get("status")
+        if status == "complete":
+            raise CheckoutPending(
+                "An earlier checkout for this account was completed and the subscription is being activated. Refresh in a moment."
+            )
+        if status == "open":
+            if within:
+                return {"reuse": session}
+            try:
+                await asyncio.to_thread(_api_expire_checkout, recorded)
+            except Exception as exc:
+                raise CheckoutPending(
+                    "An earlier checkout for this account is still open and could not be closed. Try again shortly."
+                ) from exc
+    key = uuid4().hex
+    await accounts.update_user(user["id"], db=conn, checkout_session_id=INTENT_PREFIX + key, checkout_started_at=now)
+    return {"key": key, "started": now}
 
 
 LIVE_STATUSES = {"active", "trialing", "past_due"}
@@ -448,32 +534,31 @@ async def _on_checkout_completed(event_id: str, session: dict, event_created: in
     if session.get("mode") == "subscription":
         plan_id = metadata.get("plan_id")
         if plan_id in PLANS:
-            # The same ordering rule as every other subscription-state writer.
-            # A redelivered or late checkout.session.completed for a
-            # subscription the customer has since replaced must not make it
-            # current again -- and this handler used to write unconditionally.
             async with accounts.user_row_lock(user["id"]) as (conn, fresh):
                 fresh = fresh or user
-                # Decided and written under the row lock, like every other
-                # subscription-state writer.
-                superseded = _superseded_subscription(
-                    fresh, {"id": session.get("subscription"), "created": session.get("created")}, event_created)
-                # A checkout tying with the last applied event agrees with it
-                # by construction (it is what created the subscription).
-                if superseded and superseded != TIE:
-                    return {"status": "ignored", "reason": superseded,
-                            "active_subscription": fresh.get("stripe_subscription_id"),
-                            "event_subscription": session.get("subscription")}
-                # `created` here is the checkout session's, which is the moment
-                # this subscription came into being. It is the ordering key every
-                # later subscription event is compared against. The pending
-                # checkout is cleared: Stripe has now reported it.
-                fields = {"plan_id": plan_id, "stripe_subscription_id": session.get("subscription"),
-                          "subscription_status": "active", "checkout_session_id": None, "checkout_started_at": None,
-                          **_event_stamp(event_created)}
-                if session.get("created") is not None:
-                    fields["subscription_created"] = int(session["created"])
-                await accounts.update_user(user["id"], db=conn, **fields)
+                # The checkout is over whatever is decided about the
+                # entitlement below: a pending record for this session, or the
+                # intent that made it, is cleared so the account is not held
+                # for the rest of the window.
+                recorded = fresh.get("checkout_session_id")
+                if recorded and (recorded == session.get("id") or recorded.startswith(INTENT_PREFIX)):
+                    await accounts.update_user(fresh["id"], db=conn, checkout_session_id=None, checkout_started_at=None)
+                # The same path as every other subscription-state writer. A
+                # checkout used to write unconditionally, then to treat a
+                # same-second tie as agreement "by construction" -- and a
+                # checkout tying with a recorded cancellation restored paid
+                # access. `created` is the session's: the moment this
+                # subscription came into being, the key later events for a
+                # different subscription are ordered against.
+                outcome = await _apply_subscription_event(conn, fresh, {
+                    "id": session.get("subscription"), "created": session.get("created"),
+                    "status": "active", "metadata": {"plan_id": plan_id},
+                }, event_created)
+            if not outcome["applied"]:
+                return {"status": "ignored", "reason": outcome["reason"],
+                        "active_subscription": fresh.get("stripe_subscription_id"),
+                        "event_subscription": session.get("subscription")}
+            return {"status": "subscribed", "plan_id": outcome["fields"].get("plan_id", plan_id)}
         return {"status": "subscribed", "plan_id": plan_id}
     return {"status": "ignored"}
 
@@ -535,22 +620,15 @@ async def _on_invoice_paid(event_id: str, invoice: dict, event_created: int | No
     async with accounts.user_row_lock(user["id"]) as (conn, fresh):
         fresh = fresh or user
         current = fresh.get("stripe_subscription_id")
-        stale = _superseded_subscription(fresh, {"id": subscription, "created": invoice.get("created")}, event_created)
-        if stale == TIE:
-            # An invoice for the current subscription in the same second as
-            # its last event: it entitles the plan its price buys, which
-            # agrees with the subscription's own state; a disagreement is
-            # reconciled the same way an update is.
-            stale = None if plan.id == fresh.get("plan_id") or not configured() else stale
-            if stale == TIE:
-                resolved = await _resolve_tie(fresh, {"id": subscription}, plan.id, None)
-                stale = None if resolved is not None else "same-second conflict"
-        if (not current or subscription == current) and not stale:
-            await accounts.update_user(
-                fresh["id"], db=conn, plan_id=plan.id, subscription_status="active", stripe_subscription_id=subscription,
-                **_event_stamp(event_created),
-            )
-            entitlement_written = True
+        outcome = {"applied": False, "reason": "an invoice for a subscription the account is not on"}
+        if not current or subscription == current:
+            # Through the one writer path: on a tie the authoritative
+            # subscription's own status and plan are what get written, not the
+            # invoice's "active" -- an invoice used to take the retrieval as a
+            # yes/no and then write its own plan over a cancellation.
+            outcome = await _apply_subscription_event(
+                conn, fresh, {"id": subscription, "status": "active", "metadata": {"plan_id": plan.id}}, event_created)
+        entitlement_written = outcome["applied"]
     applied = await credits.grant(
         credits.user_account_id(user["id"]), plan.monthly_credits, f"subscription:{plan.id}",
         "stripe_event", event_id, {"invoice": invoice.get("id"), "period_end": invoice.get("period_end")},
@@ -603,7 +681,7 @@ def _superseded_subscription(user: dict, subscription: dict, event_created: int 
             # Stripe does emit them: checkout completion and the first
             # subscription update usually share a second. "Last arrival is
             # newest" reordered state; "first wins" would drop legitimate
-            # events. The writer reconciles instead (see _resolve_tie).
+            # events. The writer reconciles instead (see _reconcile_tie).
             return TIE
     if user.get("subscription_status") in TERMINAL_STATUSES:
         if event_created is None or last_applied is None or int(event_created) <= int(last_applied):
@@ -618,26 +696,68 @@ def _api_retrieve_subscription(subscription_id: str) -> dict:
     return json.loads(json.dumps(_stripe().Subscription.retrieve(subscription_id)))
 
 
-async def _resolve_tie(user: dict, subscription: dict, event_plan: str | None, event_status: str | None) -> dict | None:
+async def _reconcile_tie(user: dict, subscription: dict) -> dict | None:
     """What to apply when an event ties on time with the last one applied.
 
     With Stripe configured, the subscription is retrieved and ITS state is what
-    gets applied: authoritative and independent of delivery order. Without
-    Stripe there is no authority to ask, so an event that agrees with the
-    recorded state passes through (it changes nothing) and one that conflicts
-    is ignored with a warning -- deterministic, and never last-arrival-wins.
-    Returns the subscription object to apply, or None to ignore."""
+    gets applied: authoritative and independent of delivery order. If Stripe
+    cannot answer, nothing is decided: ReconciliationUnavailable leaves the
+    event unprocessed for redelivery. Without Stripe there is no authority to
+    ask, so an event that agrees with the recorded state passes through (it
+    changes nothing) and one that conflicts is ignored with a warning --
+    deterministic, and never last-arrival-wins. Returns the subscription
+    object to apply, or None to ignore."""
     if configured():
         try:
             return await asyncio.to_thread(_api_retrieve_subscription, subscription["id"])
-        except Exception:
-            logger.warning("billing: could not reconcile a same-second event for %s", subscription.get("id"), exc_info=True)
-            return None
-    agrees = (event_plan in (None, user.get("plan_id"))) and (event_status in (None, user.get("subscription_status")))
+        except Exception as exc:
+            raise ReconciliationUnavailable(
+                f"Stripe could not be asked for subscription {subscription.get('id')} to reconcile a same-second event"
+            ) from exc
+    agrees = (_plan_from_subscription(subscription) in (None, user.get("plan_id"))
+              and subscription.get("status") in (None, user.get("subscription_status")))
     if not agrees:
         logger.warning("billing: same-second conflicting event for %s ignored (no Stripe to reconcile against)", subscription.get("id"))
         return None
     return subscription
+
+
+def _entitlement_fields(subscription: dict, event_created: int | None) -> dict:
+    """The account fields one subscription state maps to. The one mapping for
+    every writer: a live status carries the plan its price (or, failing that,
+    its metadata) names; a terminal status is the Free plan."""
+    status = subscription.get("status")
+    fields: dict[str, Any] = {"subscription_status": status, "stripe_subscription_id": subscription.get("id"),
+                              **_event_stamp(event_created)}
+    if subscription.get("created") is not None:
+        fields["subscription_created"] = int(subscription["created"])
+    plan_id = _plan_from_subscription(subscription)
+    if status in LIVE_STATUSES and plan_id:
+        fields["plan_id"] = plan_id
+    elif status in TERMINAL_STATUSES:
+        fields["plan_id"] = "free"
+    return fields
+
+
+async def _apply_subscription_event(conn, user: dict, subscription: dict, event_created: int | None) -> dict:
+    """Decide and write one subscription-state event, under the caller's row
+    lock. Every writer -- update, deletion, checkout completion, invoice --
+    goes through here, so ordering, tie reconciliation and the state mapping
+    cannot drift apart between them (they did: checkout took a tie as
+    agreement and invoice took the reconciliation as a boolean). Returns
+    {"applied": True, "fields": what was written} or {"applied": False,
+    "reason": why not}."""
+    superseded = _superseded_subscription(user, subscription, event_created)
+    if superseded == TIE:
+        subscription = await _reconcile_tie(user, subscription)
+        if subscription is None:
+            return {"applied": False,
+                    "reason": "same-second event conflicts with the recorded state and there is no Stripe to reconcile against"}
+    elif superseded:
+        return {"applied": False, "reason": superseded}
+    fields = _entitlement_fields(subscription, event_created)
+    await accounts.update_user(user["id"], db=conn, **fields)
+    return {"applied": True, "fields": fields}
 
 
 def _event_stamp(event_created: int | None) -> dict:
@@ -672,29 +792,14 @@ async def _on_subscription_updated(event_id: str, subscription: dict, event_crea
     async with accounts.user_row_lock(located["id"]) as (conn, user):
         if user is None:
             return {"status": "no_user"}
-        superseded = _superseded_subscription(user, subscription, event_created)
-        if superseded == TIE:
-            resolved = await _resolve_tie(user, subscription, _plan_from_subscription(subscription), subscription.get("status"))
-            if resolved is None:
-                return {"status": "ignored", "reason": "same-second event conflicts with the recorded state",
-                        "active_subscription": user.get("stripe_subscription_id"), "event_subscription": subscription.get("id")}
-            subscription = resolved
-        elif superseded:
-            return {"status": "ignored", "reason": superseded,
-                    "active_subscription": user.get("stripe_subscription_id"),
-                    "event_subscription": subscription.get("id")}
-        status = subscription.get("status")
-        plan_id = _plan_from_subscription(subscription)
-        fields: dict[str, Any] = {"subscription_status": status, "stripe_subscription_id": subscription.get("id"),
-                                  **_event_stamp(event_created)}
-        if subscription.get("created") is not None:
-            fields["subscription_created"] = int(subscription["created"])
-        if status in {"active", "trialing", "past_due"} and plan_id:
-            fields["plan_id"] = plan_id
-        elif status in {"canceled", "unpaid", "incomplete_expired"}:
-            fields["plan_id"] = "free"
-        await accounts.update_user(user["id"], db=conn, **fields)
-    return {"status": "updated", "plan_id": fields.get("plan_id", user.get("plan_id")), "subscription_status": status}
+        outcome = await _apply_subscription_event(conn, user, subscription, event_created)
+    if not outcome["applied"]:
+        return {"status": "ignored", "reason": outcome["reason"],
+                "active_subscription": user.get("stripe_subscription_id"),
+                "event_subscription": subscription.get("id")}
+    fields = outcome["fields"]
+    return {"status": "updated", "plan_id": fields.get("plan_id", user.get("plan_id")),
+            "subscription_status": fields.get("subscription_status")}
 
 
 async def _on_subscription_deleted(event_id: str, subscription: dict, event_created: int | None = None) -> dict:
@@ -704,21 +809,17 @@ async def _on_subscription_deleted(event_id: str, subscription: dict, event_crea
     async with accounts.user_row_lock(located["id"]) as (conn, user):
         if user is None:
             return {"status": "no_user"}
-        superseded = _superseded_subscription(user, subscription, event_created)
-        # A deletion tying with the last applied event is applied: it is the
-        # terminal state, and if it were wrong Stripe's later events say so.
-        if superseded and superseded != TIE:
-            return {"status": "ignored", "reason": superseded,
-                    "active_subscription": user.get("stripe_subscription_id"),
-                    "event_subscription": subscription.get("id")}
-        # Keep the id and its timestamps: clearing them meant a late event for
-        # this very subscription found "no current subscription" and restored
-        # paid access. The terminal status is what says it is over.
-        fields = {"plan_id": "free", "subscription_status": "canceled", **_event_stamp(event_created)}
-        if not user.get("stripe_subscription_id") and subscription.get("id"):
-            fields["stripe_subscription_id"] = subscription["id"]
-        await accounts.update_user(user["id"], db=conn, **fields)
-    return {"status": "downgraded", "plan_id": "free"}
+        # A deletion is terminal by definition, whatever status the object
+        # carries; the same writer path as everything else, so a tie is
+        # reconciled the same way. The id and its timestamps are kept: clearing
+        # them meant a late event for this very subscription found "no current
+        # subscription" and restored paid access.
+        outcome = await _apply_subscription_event(conn, user, {**subscription, "status": "canceled"}, event_created)
+    if not outcome["applied"]:
+        return {"status": "ignored", "reason": outcome["reason"],
+                "active_subscription": user.get("stripe_subscription_id"),
+                "event_subscription": subscription.get("id")}
+    return {"status": "downgraded", "plan_id": outcome["fields"].get("plan_id", "free")}
 
 
 async def _on_charge_refunded(event_id: str, charge: dict, event_created: int | None = None) -> dict:

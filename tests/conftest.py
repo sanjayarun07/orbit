@@ -45,6 +45,8 @@ def _reset_account_stores(monkeypatch):
     # subscriptions before creating a session. The suite never reaches Stripe;
     # the default answer is "none", and tests about reconciliation override it.
     monkeypatch.setattr(billing, "_api_list_active_subscriptions", lambda customer_id: [])
+    monkeypatch.setattr(billing, "_api_retrieve_checkout", lambda session_id: {"id": session_id, "status": "expired"})
+    monkeypatch.setattr(billing, "_api_expire_checkout", lambda session_id: {"id": session_id, "status": "expired"})
     # Never send real email from the suite; the dev link stands in for it.
     from app.settings import settings
 

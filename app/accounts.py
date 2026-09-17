@@ -793,18 +793,25 @@ async def accept_team_invite(user: dict, owner_id: str) -> dict | None:
     if pool is not None:
         # The user's row is locked first, so two simultaneous joins run one
         # after the other: the second sees the first's membership and removes
-        # it before activating its own. The partial unique index on active
+        # it before activating its own. The invitation is established, and
+        # locked, BEFORE anything is removed: a join with no valid invite used
+        # to delete the user's current membership and then return None from
+        # inside the transaction, committing that deletion while the user's
+        # team pointer still named the team they had just vanished from. A
+        # rejected join now writes nothing. The partial unique index on active
         # memberships is the backstop should anything bypass this path.
         async with user_row_lock(user["id"]) as (conn, _current):
-            await conn.execute(
-                "DELETE FROM team_members WHERE user_id = $1 AND owner_id <> $2", user["id"], owner_id,
+            invite = await conn.fetchrow(
+                "SELECT role FROM team_members WHERE owner_id = $1 AND email = $2 AND status = 'invited' FOR UPDATE",
+                owner_id, email,
             )
-            row = await conn.fetchrow(
-                "UPDATE team_members SET status = 'active', accepted_at = NOW(), user_id = $3 WHERE owner_id = $1 AND email = $2 AND status = 'invited' RETURNING role",
+            if invite is None:
+                return None
+            await conn.execute("DELETE FROM team_members WHERE user_id = $1 AND owner_id <> $2", user["id"], owner_id)
+            await conn.execute(
+                "UPDATE team_members SET status = 'active', accepted_at = NOW(), user_id = $3 WHERE owner_id = $1 AND email = $2 AND status = 'invited'",
                 owner_id, email, user["id"],
             )
-            if row is None:
-                return None
             await conn.execute("UPDATE users SET team_owner_id = $2 WHERE id = $1", user["id"], owner_id)
         return await get_user(user["id"])
     record = _team_members.get((owner_id, email))
