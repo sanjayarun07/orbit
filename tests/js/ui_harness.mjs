@@ -617,7 +617,148 @@ const CASES = {
       configLoaded: getScriptVar("executionConfigLoaded"),
     };
   },
+
+  // --- UI QA of 2026-09-17: the six confirmed findings, as browser-code cases ---
+
+  /** UI-01: a delete-all whose requests fail must not clear the list. `mode`
+   *  is "fail" (every DELETE answers 503) or "ok". */
+  async delete_all_keeps_what_the_server_did_not_delete() {
+    return runDeleteAll(false);
+  },
+  async delete_all_clears_the_list_when_the_server_confirms() {
+    return runDeleteAll(true);
+  },
+
+  /** UI-02: a failed preference save keeps the dialog open with the typed
+   *  value and says so; a confirmed one closes and applies it. */
+  async preference_save_reports_a_failed_server_write() {
+    return runSaveProfile(false);
+  },
+  async preference_save_applies_once_the_server_confirms() {
+    return runSaveProfile(true);
+  },
+
+  /** UI-03: a failed departure stays on Members with an error; a confirmed
+   *  one returns to Account. */
+  async leaving_a_team_reports_a_failed_departure() {
+    return runLeaveTeam(false);
+  },
+  async leaving_a_team_returns_to_account_when_confirmed() {
+    return runLeaveTeam(true);
+  },
+
+  /** UI-04: the menu's placement treats the header as unusable space. The
+   *  reviewed geometry: composer top at 356 with a 64px header and a 320px
+   *  list -- room above the composer only if the header counts as room. */
+  async mention_menu_never_opens_behind_the_header() {
+    return runPlaceMentions({ top: 356, bottom: 420 });
+  },
+  async mention_menu_opens_above_a_composer_at_the_bottom() {
+    return runPlaceMentions({ top: 900, bottom: 964 });
+  },
+
+  /** UI-05: text that cannot be an address is refused with the dialog kept
+   *  open; a real address is adopted and shown as view-only. */
+  async a_public_address_that_is_not_one_is_refused() {
+    return runUseAddress("not-a-wallet");
+  },
+  async a_real_public_address_is_adopted_as_view_only() {
+    return runUseAddress("So11111111111111111111111111111111111111112");
+  },
 };
+
+function answer(ok, body = {}) {
+  return { ok, status: ok ? 200 : 503, json: async () => (ok ? body : { detail: "QA failure" }) };
+}
+
+async function runDeleteAll(serverOk) {
+  const { dom, sandbox, setScriptVar, getScriptVar } = load();
+  const deletes = [];
+  sandbox.fetch = async (url, init = {}) => {
+    if (init.method === "DELETE") { deletes.push(String(url)); return answer(serverOk, { deleted: 2, busy: 0 }); }
+    if (String(url) === "/me/conversations") return answer(true, { conversations: serverOk ? [] : [{ session_id: "a", title: "kept", updated_at: new Date().toISOString() }] });
+    return answer(true, {});
+  };
+  setScriptVar("account", { authenticated: true, user: { id: "u1" } });
+  setScriptVar("chatRegistry", [{ id: "a", title: "A", owner: "u1", updatedAt: 2 }, { id: "b", title: "B", owner: "u1", updatedAt: 1 }]);
+  const outcome = await sandbox.deleteAllConversations(["a", "b"]);
+  return { outcome, deletes: deletes.length, remaining: getScriptVar("chatRegistry").map(c => c.id), status: dom.query("#deleteAllStatus").textContent };
+}
+
+async function runSaveProfile(serverOk) {
+  const { dom, sandbox, setScriptVar, getScriptVar } = load();
+  let put = null;
+  sandbox.fetch = async (url, init = {}) => {
+    if (String(url) === "/me/preferences" && init.method === "PUT") { put = JSON.parse(init.body); return answer(serverOk); }
+    if (String(url) === "/me") return answer(true, { authenticated: true, user: { id: "u1", display_name: serverOk ? "New name" : null, preferences: {} }, plan: {}, credits: {} });
+    return answer(true, {});
+  };
+  setScriptVar("account", { authenticated: true, user: { id: "u1", preferences: {} } });
+  setScriptVar("profile", { name: "Old name", riskProfile: "balanced", defaultWallet: "" });
+  sandbox.openDialog("profileDialog");
+  dom.query("#displayNameInput").value = "New name";
+  await sandbox.saveProfile();
+  return {
+    sent: put?.display_name ?? null,
+    dialogOpen: getScriptVar("dialogStack").includes("profileDialog"),
+    typedValueKept: dom.query("#displayNameInput").value,
+    storedName: JSON.parse(sandbox.localStorage.getItem("orbit_profile_v1") || "{}").name ?? null,
+    status: dom.query("#profileStatus").textContent,
+    saveEnabled: !dom.query("#saveProfileBtn").disabled,
+  };
+}
+
+async function runLeaveTeam(serverOk) {
+  const { dom, sandbox, setScriptVar } = load();
+  const tabs = [];
+  sandbox.settingsTab = (name) => tabs.push(name);
+  sandbox.fetch = async (url, init = {}) => {
+    if (String(url) === "/me/team/leave") return answer(serverOk, { left: true });
+    if (String(url) === "/me") return answer(true, { authenticated: true, user: { id: "u1", preferences: {} }, team: serverOk ? {} : { role: "member" }, plan: {}, credits: {} });
+    return answer(true, {});
+  };
+  setScriptVar("account", { authenticated: true, user: { id: "u1" }, team: { role: "member" } });
+  const button = dom.query("#teamLeaveBtn");
+  button.dataset.armed = "1";
+  await sandbox.leaveTeam();
+  return { tabsSwitchedTo: tabs, status: dom.query("#teamLeaveStatus").textContent, buttonEnabled: !button.disabled, buttonText: button.textContent };
+}
+
+async function runPlaceMentions(composerBox) {
+  const { dom, sandbox } = load();
+  const menu = dom.query("#mentionMenu");
+  const toggled = {};
+  menu.classList = { toggle: (cls, on) => { toggled[cls] = on; }, add() {}, remove() {}, contains: () => false };
+  menu.hidden = false;
+  menu.scrollHeight = 320;
+  menu.offsetParent = { getBoundingClientRect: () => ({ ...composerBox, left: 0, right: 800 }) };
+  dom.query(".topbar").getBoundingClientRect = () => ({ top: 0, bottom: 64, left: 0, right: 1440 });
+  sandbox.innerHeight = 1000;
+  sandbox.placeMentions();
+  const maxHeight = Number(String(menu.style.maxHeight).replace("px", ""));
+  // Where the list's top edge lands if it opens above: composer top - gap - height.
+  const topIfAbove = composerBox.top - 8 - Math.min(320, maxHeight);
+  return { below: toggled.below, maxHeight, topIfAbove, headerBottom: 64 };
+}
+
+async function runUseAddress(text) {
+  const { dom, sandbox, getScriptVar } = load();
+  const button = dom.query("#walletButton");
+  const classes = [];
+  button.classList = { add: (c) => classes.push(c), remove() {}, toggle() {}, contains: () => false };
+  sandbox.openDialog("walletDialog");
+  dom.query("#walletAddress").value = text;
+  dom.query("#useAddressBtn").dispatch("click");
+  return {
+    errorShown: !dom.query("#walletAddressError").hidden,
+    // Not `error`: the Python driver reads that key as a harness crash.
+    errorText: dom.query("#walletAddressError").textContent,
+    dialogOpen: getScriptVar("dialogStack").includes("walletDialog"),
+    adopted: getScriptVar("walletInput").value,
+    label: dom.query("#walletLabel").textContent,
+    classes,
+  };
+}
 
 const name = process.argv[2];
 const runner = CASES[name];

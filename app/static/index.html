@@ -116,6 +116,7 @@
       </div>
       <div class="manual-wallet">
         <div class="field"><label for="walletAddress">Or use a public wallet address</label><input id="walletAddress" placeholder="Enter a Solana wallet address" spellcheck="false" /><div class="field-help">View balances and activity without connecting a wallet.</div></div>
+        <div class="inline-note" id="walletAddressError" role="alert" hidden></div>
         <button class="secondary" id="useAddressBtn" type="button">Use address</button>
         <button class="secondary" id="disconnectWalletBtn" type="button" hidden>Disconnect</button>
       </div>
@@ -256,7 +257,7 @@
 
       <section class="tab-panel" data-panel="data" hidden>
         <div class="settings-section"><h3>Export</h3><div class="field-help">Download your profile, wallet links, API key names, credit history, and conversations as a JSON file.</div><div class="account-actions" style="margin-top:8px"><button class="secondary" id="exportDataBtn" type="button">Export my data</button></div></div>
-        <div class="settings-section"><h3>Conversations</h3><div class="danger-link" style="margin-top:0;padding-top:0;border-top:0"><button class="secondary danger" id="deleteAllChatsBtn" type="button">Delete all conversations</button><div class="field-help">Permanently delete your conversations from your account and this device. This cannot be undone.</div></div></div>
+        <div class="settings-section"><h3>Conversations</h3><div class="danger-link" style="margin-top:0;padding-top:0;border-top:0"><button class="secondary danger" id="deleteAllChatsBtn" type="button">Delete all conversations</button><div class="field-help">Permanently delete your conversations from your account and this device. This cannot be undone.</div><div class="inline-note" id="deleteAllStatus" role="status"></div></div></div>
         <div class="danger-zone" id="deleteAccountZone" hidden>
           <h3>Delete account</h3>
           <div class="field-help">Deletes your profile, linked wallets, API keys, sessions, team links and conversations. The credit ledger is kept as an anonymous financial record. Type your email to confirm.</div>
@@ -276,10 +277,11 @@
         </div>
         <div class="settings-section" id="teamMemberTools" hidden>
           <div class="account-actions"><button class="secondary danger" id="teamLeaveBtn" type="button">Leave team</button></div>
+          <div class="inline-note" id="teamLeaveStatus" role="status"></div>
         </div>
       </section>
     </div>
-    <div class="dialog-footer"><button class="secondary" data-close="profileDialog">Close</button><button class="primary" id="saveProfileBtn">Save changes</button></div>
+    <div class="dialog-footer"><span class="inline-note" id="profileStatus" role="status"></span><button class="secondary" data-close="profileDialog">Close</button><button class="primary" id="saveProfileBtn">Save changes</button></div>
   </div>
 </div>
 
@@ -746,11 +748,34 @@ $("#deleteAllChatsBtn").addEventListener("click", async () => {
     return;
   }
   deleteAllArmedUntil = 0; button.disabled = true; button.textContent = "Deleting…";
-  await Promise.allSettled(ids.map(id => fetch(`/chat/history/${encodeURIComponent(id)}`, { method: "DELETE" })));
-  if (account?.authenticated) { try { await fetch("/me/conversations", { method: "DELETE" }); } catch {} }
-  chatRegistry = []; saveChats(); startNewChat();
-  button.disabled = false; button.classList.remove("confirm"); button.textContent = "Delete all conversations"; closeDialog("profileDialog");
+  const outcome = await deleteAllConversations(ids);
+  button.disabled = false; button.classList.remove("confirm"); button.textContent = "Delete all conversations";
+  if (outcome.ok) { $("#deleteAllStatus").textContent = ""; closeDialog("profileDialog"); }
+  else $("#deleteAllStatus").textContent = outcome.message;
 });
+// Every response is checked and only what the server confirmed deleted leaves
+// the list. This used to clear the sidebar and close the dialog whatever the
+// server said: after a failed delete the account's conversations were still
+// stored while the interface showed none.
+async function deleteAllConversations(ids) {
+  const results = await Promise.allSettled(ids.map(id => fetch(`/chat/history/${encodeURIComponent(id)}`, { method: "DELETE" })));
+  const failed = new Set(ids.filter((id, i) => results[i].status !== "fulfilled" || !(results[i].value.ok || results[i].value.status === 404)));
+  let accountError = null, busy = 0;
+  if (account?.authenticated) {
+    try { const res = await fetch("/me/conversations", { method: "DELETE" }); const d = await res.json().catch(() => ({}));
+      if (!res.ok) accountError = normalizeError(d, res.status); else busy = Number(d.busy || 0); }
+    catch { accountError = "Could not reach the server."; }
+  }
+  chatRegistry = chatRegistry.filter(chat => failed.has(chat?.id));
+  saveChats();
+  if (!chatRegistry.some(chat => chat.id === sessionId)) startNewChat(); else renderChatList();
+  if (account?.authenticated) await loadConversations();   // what the server still holds comes back into view
+  const problems = [];
+  if (failed.size) problems.push(`${failed.size} conversation${failed.size === 1 ? "" : "s"} could not be deleted`);
+  if (accountError) problems.push(`account history was not cleared (${accountError})`);
+  else if (busy) problems.push(`${busy} conversation${busy === 1 ? " is" : "s are"} still processing a request and ${busy === 1 ? "was" : "were"} kept`);
+  return problems.length ? { ok: false, message: `${problems.join("; ")}. Try again.` } : { ok: true };
+}
 async function switchSession(id) {
   if (busy || !id || id === sessionId) return;
   chatTurnEpoch++;sessionId = id; sessionRevision=null;sessionStorage.setItem("orbit_session_id", id); renderChatList(); await hydrateHistory();
@@ -762,7 +787,9 @@ matchMedia("(max-width:720px)").addEventListener("change",syncSidebarAccessibili
 syncSidebarAccessibility();
 function closeSidebar() { setSidebar(false); }
 async function deleteChat(id) {
-  try { await fetch(`/chat/history/${encodeURIComponent(id)}`, { method: "DELETE" }); } catch {}
+  let deleted = false;
+  try { const res = await fetch(`/chat/history/${encodeURIComponent(id)}`, { method: "DELETE" }); deleted = res.ok || res.status === 404; } catch {}
+  if (!deleted) { const button = $("#deleteChatBtn"); button.classList.add("confirm"); button.textContent = "Could not delete — try again"; setTimeout(syncDeleteButton, 4000); return; }
   chatRegistry = chatRegistry.filter(chat => chat.id !== id); saveChats();
   if (sessionId === id) startNewChat(); else renderChatList();
 }
@@ -1179,8 +1206,16 @@ function closeMentions(){mentionMenu.hidden=true;mentionItems=[];mentionRange=nu
 function mentionQuery(){const pos=input.selectionStart;const before=input.value.slice(0,pos);const m=before.match(/(?:^|\s)\$([A-Za-z0-9]{1,10})$/);if(!m)return null;return {q:m[1],start:pos-m[1].length-1,end:pos};}
 function renderMentions(){mentionMenu.innerHTML=mentionItems.map((t,i)=>`<button class="mention-item ${i===mentionIndex?"active":""}" type="button" data-i="${i}"><span><b>$${escapeHtml(t.symbol)}</b> ${escapeHtml(t.name||"")}</span><small>${t.verified?"verified":""} ${t.chain==="solana"?"Solana":""}${t.price?" · $"+Number(t.price).toLocaleString(undefined,{maximumSignificantDigits:4}):""}</small></button>`).join("");mentionMenu.hidden=!mentionItems.length;placeMentions();mentionMenu.querySelectorAll("[data-i]").forEach(b=>b.addEventListener("mousedown",e=>{e.preventDefault();pickMention(Number(b.dataset.i));}));}
 // The list sits above the composer; when the composer is high on the page
-// (the home screen) there is no room there, so it opens below instead.
-function placeMentions(){if(mentionMenu.hidden)return;const box=mentionMenu.offsetParent?.getBoundingClientRect();if(!box)return;const need=mentionMenu.offsetHeight+8;mentionMenu.classList.toggle("below",box.top-need<8&&innerHeight-box.bottom>=need);}
+// (the home screen) there is no room there, so it opens below instead. The
+// usable space above ends at the header, not the viewport edge: measured
+// against the edge, the list opened behind the header and its first row could
+// not be clicked. Whichever side it opens on, it is capped to the space there.
+function placeMentions(){if(mentionMenu.hidden)return;const box=mentionMenu.offsetParent?.getBoundingClientRect();if(!box)return;
+  const gap=8,headerBottom=$(".topbar")?.getBoundingClientRect?.().bottom||0;
+  const above=Math.floor(box.top-headerBottom-gap),belowSpace=Math.floor(innerHeight-box.bottom-gap),need=mentionMenu.scrollHeight;
+  const below=above<need&&belowSpace>above;
+  mentionMenu.classList.toggle("below",below);
+  mentionMenu.style.maxHeight=`${Math.max(60,Math.min(320,below?belowSpace:above))}px`;}
 function pickMention(i){const t=mentionItems[i];if(!t||!mentionRange)return;const before=input.value.slice(0,mentionRange.start),after=input.value.slice(mentionRange.end);input.value=`${before}$${t.symbol} ${after}`;const pos=before.length+t.symbol.length+2;input.setSelectionRange(pos,pos);closeMentions();input.focus();input.dispatchEvent(new Event("input"));}
 input.addEventListener("input",()=>{const q=mentionQuery();if(!q){closeMentions();return;}mentionRange={start:q.start,end:q.end};clearTimeout(mentionTimer);mentionTimer=setTimeout(async()=>{try{const res=await fetch(`/tokens/search?q=${encodeURIComponent(q.q)}`);const d=await res.json();const still=mentionQuery();if(!still||still.q!==q.q)return;mentionItems=d.tokens||[];mentionIndex=0;renderMentions();}catch{closeMentions();}},220);});
 input.addEventListener("keydown",event=>{if(!mentionMenu.hidden&&mentionItems.length){if(event.key==="ArrowDown"){event.preventDefault();mentionIndex=(mentionIndex+1)%mentionItems.length;renderMentions();return;}if(event.key==="ArrowUp"){event.preventDefault();mentionIndex=(mentionIndex-1+mentionItems.length)%mentionItems.length;renderMentions();return;}if(event.key==="Enter"||event.key==="Tab"){event.preventDefault();pickMention(mentionIndex);return;}if(event.key==="Escape"){closeMentions();return;}}
@@ -1322,7 +1357,7 @@ async function executeRelayQuote(){
 
 async function hydrateHistory(){messagesEl.innerHTML="";if(!sessionId){sessionRevision=null;messagesEl.innerHTML=welcomeMarkup;return;}try{const res=await fetch(`/chat/history/${encodeURIComponent(sessionId)}`);if(!res.ok)throw new Error();const data=await res.json();sessionRevision=Number(data.context?.revision||0);syncTeamMode(data.context?.team_mode);syncPolicy(data.context?.risk_charter,data.context?.risk_charter_fields);if(!(data.messages||[]).length){chatRegistry=chatRegistry.filter(chat=>chat.id!==sessionId);saveChats();sessionId=null;sessionRevision=null;sessionStorage.removeItem("orbit_session_id");renderChatList();messagesEl.innerHTML=welcomeMarkup;return;}for(const msg of data.messages){if(msg.role==="user")addUserMessage(msg.content);else{const agentMessage=addAgentMessage(msg.content);if(msg.trajectory||msg.trade_plan||msg.quick_actions?.length||msg.suggestions?.length||msg.intent||msg.cross_chain_swap||msg.context_capsules?.length)finishAgentMessage(agentMessage,{answer:msg.content,trajectory:msg.trajectory,trade_plan:msg.trade_plan,quick_actions:msg.quick_actions,suggestions:msg.suggestions,session_revision:msg.session_revision,intent:msg.intent,capabilities:msg.capabilities,cross_chain_swap:msg.cross_chain_swap,context_capsules:msg.context_capsules,intent_lock:msg.intent_lock,evidence:msg.evidence,trade_readiness:msg.trade_readiness,gas_advisory:msg.gas_advisory});}}const groups=[...document.querySelectorAll(".quick-actions")];groups.slice(0,-1).forEach(group=>group.querySelectorAll(".followup-action").forEach(button=>{button.disabled=true;button.setAttribute("aria-disabled","true");}));scrollToBottom();}catch{sessionRevision=null;messagesEl.innerHTML=welcomeMarkup;}}   // history unreadable (e.g. signed out): keep the session, assert nothing
 
-function setReadOnlyWallet(address){walletInput.value=address;$("#walletButton").classList.add("connected");$("#walletLabel").textContent=shortAddress(address);syncIdentityDisplay();}
+function setReadOnlyWallet(address){walletInput.value=address;const button=$("#walletButton");button.classList.add("connected");button.classList.add("readonly");button.title="Public address, view only: this wallet cannot sign";$("#walletLabel").textContent=`${shortAddress(address)} · view only`;syncIdentityDisplay();}
 // One source of truth for "who is this, on screen" everywhere identity shows up
 // (the sidebar profile chip, Settings > Account): a connected wallet is the
 // clearest signal of who is using the app right now, so it wins over a signed-
@@ -1405,8 +1440,8 @@ async function privySolanaSignMessage(provider,message){
   const signature=result?.signature??result;
   return toHex(signature instanceof Uint8Array?signature:new Uint8Array(Object.values(signature)));
 }
-function setWalletConnected(address,label,addresses=[]){walletInput.value=address;walletInput.disabled=true;window.OrbitWalletContext={provider:activeProvider};syncPayChip();syncIdentityDisplay();$("#walletButton").classList.add("connected");$("#walletLabel").textContent=shortAddress(address);$("#connectedPanel").hidden=false;$("#connectedProvider").textContent=`Connected with ${label}`;$("#connectedAddress").textContent=addresses.length?addresses.join(" · "):address;$("#walletOptions").hidden=true;$("#disconnectWalletBtn").hidden=false;}
-function setWalletDisconnected(){activeProvider=null;metamaskWallet=null;metamaskAccount=null;window.OrbitSolanaWallet=null;window.OrbitWalletContext={provider:null};syncPayChip();walletInput.disabled=false;walletInput.value=profile.defaultWallet||"";$("#connectedPanel").hidden=true;$("#walletOptions").hidden=false;$("#privyAuth").hidden=true;$("#disconnectWalletBtn").hidden=true;if(walletInput.value)setReadOnlyWallet(walletInput.value);else{$("#walletButton").classList.remove("connected");$("#walletLabel").textContent="Connect wallet";}syncIdentityDisplay();}
+function setWalletConnected(address,label,addresses=[]){walletInput.value=address;walletInput.disabled=true;window.OrbitWalletContext={provider:activeProvider};syncPayChip();syncIdentityDisplay();$("#walletButton").classList.add("connected");$("#walletButton").classList.remove("readonly");$("#walletButton").title="";$("#walletLabel").textContent=shortAddress(address);$("#connectedPanel").hidden=false;$("#connectedProvider").textContent=`Connected with ${label}`;$("#connectedAddress").textContent=addresses.length?addresses.join(" · "):address;$("#walletOptions").hidden=true;$("#disconnectWalletBtn").hidden=false;}
+function setWalletDisconnected(){activeProvider=null;metamaskWallet=null;metamaskAccount=null;window.OrbitSolanaWallet=null;window.OrbitWalletContext={provider:null};syncPayChip();walletInput.disabled=false;walletInput.value=profile.defaultWallet||"";$("#connectedPanel").hidden=true;$("#walletOptions").hidden=false;$("#privyAuth").hidden=true;$("#disconnectWalletBtn").hidden=true;if(walletInput.value)setReadOnlyWallet(walletInput.value);else{$("#walletButton").classList.remove("connected");$("#walletButton").classList.remove("readonly");$("#walletButton").title="";$("#walletLabel").textContent="Connect wallet";}syncIdentityDisplay();}
 function getPhantomProvider(){return window.solana?.isPhantom?window.solana:null;}
 function setPrivyStatus(message,type=""){const el=$("#privyStatus");el.textContent=message;el.className=`privy-auth-status ${type}`.trim();}
 function applyPrivyState(state,close=false){const button=$("#connectPrivyBtn"),help=$("#privyOptionHelp");button.disabled=!state.configured;help.textContent=state.configured?"Email sign-in with Ethereum and Solana wallets":"Currently unavailable";if(!state.authenticated)return;activeProvider="privy";const primary=state.solanaAddress||state.evmAddress;const addresses=[state.solanaAddress&&`SOL ${shortAddress(state.solanaAddress)}`,state.evmAddress&&`EVM ${shortAddress(state.evmAddress)}`].filter(Boolean);if(primary)setWalletConnected(primary,"Privy",addresses);
@@ -1433,11 +1468,35 @@ $("#relayFromChain").addEventListener("change",()=>setRelayNativeToken("#relayFr
 $("#relayToChain").addEventListener("change",()=>setRelayNativeToken("#relayToToken","#relayToChain"));
 document.querySelectorAll("#relayDialog input").forEach(field=>field.addEventListener("input",invalidateRelayQuote));
 $("#connectPrivyBtn").addEventListener("click",connectPrivy);$("#connectCoinbaseBtn").addEventListener("click",connectCoinbase);$("#connectReownBtn").addEventListener("click",connectReown);$("#privySendCodeBtn").addEventListener("click",sendPrivyCode);$("#privyVerifyBtn").addEventListener("click",verifyPrivyCode);$("#connectPhantomBtn").addEventListener("click",connectPhantom);$("#connectMetaMaskBtn").addEventListener("click",connectMetaMask);$("#disconnectWalletBtn").addEventListener("click",disconnectWallet);
-$("#useAddressBtn").addEventListener("click",()=>{const address=walletInput.value.trim();if(address){setReadOnlyWallet(address);closeDialog("walletDialog");}});
+const SOLANA_ADDRESS=/^[1-9A-HJ-NP-Za-km-z]{32,44}$/,EVM_ADDRESS=/^0x[0-9a-fA-F]{40}$/;
+function isPublicAddress(value){return SOLANA_ADDRESS.test(value)||EVM_ADDRESS.test(value);}
+$("#walletAddress").addEventListener("input",()=>{$("#walletAddressError").hidden=true;});
+// Any text used to be adopted as a "connected" wallet. Only an address that
+// can be one is, and it is shown as view-only: a public address is not a
+// signing wallet and must not look like one.
+$("#useAddressBtn").addEventListener("click",()=>{const address=$("#walletAddress").value.trim();const error=$("#walletAddressError");
+  if(!address){error.textContent="Enter a wallet address.";error.hidden=false;return;}
+  if(!isPublicAddress(address)){error.textContent="That is not a valid wallet address. Enter a Solana address (32–44 base58 characters) or an Ethereum address (0x followed by 40 hex characters).";error.hidden=false;return;}
+  error.hidden=true;walletInput.value=address;setReadOnlyWallet(address);closeDialog("walletDialog");});
 
 $("#profileBtn").addEventListener("click",()=>openSettings("account"));
-$("#saveProfileBtn").addEventListener("click",async()=>{profile={name:$("#displayNameInput").value.trim(),riskProfile:$("#riskProfileSelect").value,defaultWallet:$("#defaultWalletInput").value.trim()};writeStorage(PROFILE_KEY,profile);writeStorage(AUTO_SCROLL_KEY,$("#prefAutoScroll").checked);writeStorage(THEME_KEY,$("#themeSelect").value);initProfile();closeDialog("profileDialog");
-  if(account?.authenticated){try{await fetch("/me/preferences",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({display_name:profile.name,risk_profile:profile.riskProfile,default_wallet:profile.defaultWallet,theme:$("#themeSelect").value,auto_scroll:$("#prefAutoScroll").checked,low_credit_alert:$("#notifLowCredit").checked,low_credit_threshold:Math.max(0,Number($("#notifThreshold").value)||0),receipts:$("#notifReceipts").checked,product_updates:$("#notifUpdates").checked})});await loadAccount();}catch{}}});
+$("#saveProfileBtn").addEventListener("click",saveProfile);
+// Appearance (theme, auto-scroll) is this browser's and is kept locally whatever
+// happens. Account preferences are the server's: written locally and applied
+// only once the server has confirmed them, and a failure keeps the dialog open
+// with the typed values in place and says what went wrong. This used to write
+// everything locally, close the dialog and ignore the response -- a failed
+// save looked successful on this device and never reached any other.
+async function saveProfile(){const status=$("#profileStatus"),button=$("#saveProfileBtn");
+  const pending={name:$("#displayNameInput").value.trim(),riskProfile:$("#riskProfileSelect").value,defaultWallet:$("#defaultWalletInput").value.trim()};
+  writeStorage(AUTO_SCROLL_KEY,$("#prefAutoScroll").checked);writeStorage(THEME_KEY,$("#themeSelect").value);applyTheme(themePreference());
+  if(account?.authenticated){button.disabled=true;status.textContent="Saving…";
+    try{const res=await fetch("/me/preferences",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({display_name:pending.name,risk_profile:pending.riskProfile,default_wallet:pending.defaultWallet,theme:$("#themeSelect").value,auto_scroll:$("#prefAutoScroll").checked,low_credit_alert:$("#notifLowCredit").checked,low_credit_threshold:Math.max(0,Number($("#notifThreshold").value)||0),receipts:$("#notifReceipts").checked,product_updates:$("#notifUpdates").checked})});
+      const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(normalizeError(data,res.status));}
+    catch(error){status.textContent=`Not saved: ${error.message}`;button.disabled=false;return;}
+    finally{button.disabled=false;}
+    await loadAccount();}
+  profile=pending;writeStorage(PROFILE_KEY,profile);initProfile();status.textContent="";closeDialog("profileDialog");}
 
 // ---------------------------------------------------------------------------
 // Account, credits, sign-in and API keys
@@ -1525,9 +1584,19 @@ async function loadTeam(){const team=account?.team||{};$("#teamOwnerTools").hidd
   if(team.role==="member"){$("#teamSummary").textContent=`You're a member of ${team.owner?.display_name||team.owner?.email||"a team"}'s team on the ${account.plan?.name} plan. Credits come from the shared pool.`;return;}
   const members=team.members||[];$("#teamSummary").textContent=`${account.plan?.name} includes ${team.seats} seats: you plus up to ${team.seats-1} members who share your plan and credit pool.`;
   $("#teamMembers").innerHTML=members.length?members.map(m=>`<div class="key-row"><span>${escapeHtml(m.email)} <span class="muted">· ${escapeHtml(m.role)} · ${escapeHtml(m.status)}</span></span><button class="secondary danger" type="button" data-remove="${escapeHtml(m.email)}">Remove</button></div>`).join(""):'<div class="field-help">No members yet.</div>';
-  $("#teamMembers").querySelectorAll("[data-remove]").forEach(b=>b.addEventListener("click",async()=>{b.disabled=true;await fetch(`/me/team/members/${encodeURIComponent(b.dataset.remove)}`,{method:"DELETE"});await loadAccount();loadTeam();}));}
+  $("#teamMembers").querySelectorAll("[data-remove]").forEach(b=>b.addEventListener("click",async()=>{b.disabled=true;const status=$("#teamStatus");
+    try{const res=await fetch(`/me/team/members/${encodeURIComponent(b.dataset.remove)}`,{method:"DELETE"});const d=await res.json().catch(()=>({}));if(!res.ok)throw new Error(normalizeError(d,res.status));status.textContent=`Removed ${b.dataset.remove}.`;await loadAccount();loadTeam();}
+    catch(error){status.textContent=`Could not remove ${b.dataset.remove}: ${error.message}`;b.disabled=false;}}));}
 $("#teamInviteBtn").addEventListener("click",async()=>{const email=$("#teamInviteEmail").value.trim();const status=$("#teamStatus");if(!email){status.textContent="Enter an email address.";return;}$("#teamInviteBtn").disabled=true;try{const res=await fetch("/me/team/invites",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,role:"member"})});const d=await res.json();if(!res.ok)throw new Error(normalizeError(d,res.status));status.textContent=`Invited ${d.email}. They accept by signing in with that email.`;$("#teamInviteEmail").value="";await loadAccount();loadTeam();}catch(error){status.textContent=error.message;}finally{$("#teamInviteBtn").disabled=false;}});
-$("#teamLeaveBtn").addEventListener("click",async()=>{const b=$("#teamLeaveBtn");if(b.dataset.armed!=="1"){b.dataset.armed="1";b.textContent="Click again to leave";setTimeout(()=>{b.dataset.armed="";b.textContent="Leave team";},5000);return;}b.disabled=true;await fetch("/me/team/leave",{method:"POST"});await loadAccount();b.disabled=false;b.dataset.armed="";b.textContent="Leave team";settingsTab("account");});
+$("#teamLeaveBtn").addEventListener("click",leaveTeam);
+// The panel changes only once the server says the membership ended. This used
+// to switch to Account whatever the response was, so a failed departure looked
+// like a successful one while the user was still on the team.
+async function leaveTeam(){const b=$("#teamLeaveBtn"),status=$("#teamLeaveStatus");if(b.dataset.armed!=="1"){b.dataset.armed="1";b.textContent="Click again to leave";setTimeout(()=>{b.dataset.armed="";b.textContent="Leave team";},5000);return;}
+  b.disabled=true;status.textContent="Leaving…";
+  try{const res=await fetch("/me/team/leave",{method:"POST"});const d=await res.json().catch(()=>({}));if(!res.ok)throw new Error(normalizeError(d,res.status));}
+  catch(error){status.textContent=`Could not leave the team: ${error.message}`;b.disabled=false;b.dataset.armed="";b.textContent="Leave team";return;}
+  await loadAccount();status.textContent="";b.disabled=false;b.dataset.armed="";b.textContent="Leave team";settingsTab("account");}
 $("#teamInviteEmail").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#teamInviteBtn").click();}});
 function openSignin(reason){$("#signinIntro").textContent=reason||"Enter your email to receive a secure sign-in link.";$("#signinStatus").textContent="";openDialog("signinDialog");setTimeout(()=>$("#signinEmail").focus(),50);}
 async function startSignin(){const email=$("#signinEmail").value.trim();const status=$("#signinStatus");if(!email){status.textContent="Enter your email address.";return;}$("#signinSendBtn").disabled=true;status.textContent="Sending…";

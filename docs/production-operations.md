@@ -689,3 +689,55 @@ no live Stripe call was made. The R05 reproduction's own stub returned a
 distinct session per create call regardless of key, which Stripe does not do;
 the regression test's stub honours the key, and the invariant proved is that
 the retry is the identical request under the same key.
+
+## UI QA of 2026-09-17: the six confirmed findings
+
+Browser QA (109 recorded checks) confirmed six interface defects. Three were
+the same shape: a handler that ignored the server's answer and showed
+success. Each is fixed and has a browser-code regression in
+`tests/test_ui_qa_20260917.py`, which runs the real inline script from
+`index.html` in `tests/js/ui_harness.mjs` with the server answering 503, plus
+the control that the confirmed path still completes.
+
+- **UI-01, delete all conversations.** Every response is checked. Only what
+  the server confirmed deleted leaves the list; conversations whose delete
+  failed stay, the account's list is re-read from the server, the dialog
+  stays open and a status line says what could not be deleted (including
+  conversations the server kept because a request was still running). The
+  single-conversation delete reports a failure on its button instead of
+  dropping the row.
+- **UI-02, preference saves.** Appearance settings (theme, auto-scroll) are
+  this browser's and are kept locally whatever happens. Account preferences
+  are written locally and applied only once the server has confirmed the PUT;
+  a failure keeps the dialog open with the typed values and a "Not saved"
+  status, and the button is re-enabled for a retry.
+- **UI-03, team departure and member removal.** The panel changes only after
+  the server confirms; a failure keeps Members open with a retryable error.
+  The remove-member handler, which had the same shape, reports its failure
+  too.
+- **UI-04, token suggestions behind the header.** `placeMentions` measured
+  the room above the composer against the viewport edge; the header is not
+  usable space. It now measures against the header's bottom edge, opens
+  below when there is not enough room above, and caps the list to the space
+  on the side it opens. Measured live at 1440×1000 with the composer at
+  y=314 (the QA geometry): the list opens below at y=455 and
+  `elementFromPoint` on the first row hits the row.
+- **UI-05, arbitrary text as a wallet address.** A public address must be a
+  Solana address (32–44 base58 characters) or an Ethereum address
+  (`0x` + 40 hex); anything else shows an inline error and the dialog stays
+  open. An adopted public address is labelled "view only" and the wallet
+  control carries a `readonly` class and title, so it cannot be mistaken for
+  a signing wallet.
+- **UI-06, admin pages at 320 px.** The outer layout could not shrink: nav
+  links were `nowrap`, the topbar and its children had no `min-width: 0`,
+  the footer could not wrap. Grid and flex children now shrink, long words
+  wrap, the body never scrolls sideways, and the provider table keeps its own
+  horizontal scroll. Measured in Chrome in a 320×844 viewport: with the
+  pre-fix stylesheet the QA's numbers reproduce (document 330 px; hero, auth
+  form and panel at 330); with the current one the document is 320 px and no
+  outer element exceeds it, on both the admin and the knowledge pages.
+
+Not established here: the QA's Playwright suite was not rerun (Playwright is
+not installed in this repository); UI-04 and UI-06 were re-measured with
+Chrome's DOM APIs rather than its scripts, and the four logic fixes are
+proved in the harness, not in a browser.

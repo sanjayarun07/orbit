@@ -30,6 +30,12 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand-borde
 .sidebar-footer select { width: 100%; padding: 5px; font-size: 11px; background: transparent; }
 .sidebar-footer a { grid-column: 1/-1; color: var(--muted); text-decoration: none; font-size: 12px; }
 .admin-workspace { margin-left: 232px; min-width: 0; }
+/* Nothing in the outer layout may be wider than the viewport: grid and flex
+   children shrink, long words wrap. The provider table keeps its own
+   horizontal scroll inside .table-wrap. */
+body { overflow-x: hidden; }
+main > *, .hero, .auth, .panel { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.topbar > * { min-width: 0; }
 .topbar { height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 32px; border-bottom: 1px solid var(--border); font-size: 12px; }
 .breadcrumb { color: var(--subtle); margin-left: 10px; }
 main { max-width: 1440px; margin: auto; padding: 36px 32px 64px; display: grid; gap: 24px; }
@@ -99,17 +105,19 @@ pre { margin: 0; padding: 14px; border: 1px solid var(--border); border-radius: 
  .brand { padding: 0; }
  .nav-label { display: none; }
  .admin-nav { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); margin-top: 16px; }
- .admin-nav a { white-space: nowrap; flex-shrink: 0; }
+ .admin-nav a { white-space: normal; min-width: 0; overflow-wrap: anywhere; }
  .admin-nav a span { display: none; }
- .sidebar-footer { margin-top: 14px; padding: 12px 0 0; display: flex; gap: 10px; }
+ .sidebar-footer { margin-top: 14px; padding: 12px 0 0; display: flex; flex-wrap: wrap; gap: 10px; }
  .sidebar-footer select { width: 85px; }
  .sidebar-footer a { margin-left: auto; }
  .admin-workspace { margin-left: 0; }
  .topbar { height: 52px; padding: 0 20px; }
  main { padding: 24px 16px 40px; gap: 20px; }
- .hero h1 { font-size: 25px; }
+ .hero h1 { font-size: 25px; overflow-wrap: anywhere; }
  .auth { padding: 16px; }
- .auth-field { flex: 1 1 180px; }
+ .auth-field { flex: 1 1 180px; width: auto; }
+ .topbar { flex-wrap: wrap; height: auto; min-height: 52px; padding: 8px 16px; }
+ .route-form input, .route-form select { flex-basis: 100%; }
  #connectionStatus { flex-basis: 100%; padding: 0; }
  .panel-head, .lab-body { padding: 16px; }
  .summary { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
