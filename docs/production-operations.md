@@ -809,3 +809,43 @@ card at 4.0 s, second at 12.3 s, first synthesis token at 13.6 s, done at
 
 Behind Caddy nothing needs configuring (it streams chunked responses); the
 `X-Accel-Buffering: no` header covers nginx if one is ever put in front.
+
+## Installable app and phone layout (2026-09-17)
+
+The chat UI is a progressive web app: `/ui/manifest.webmanifest` (standalone
+display, `/ui/` scope, 192/512 and maskable icons under `/ui/icons/`), the
+`apple-mobile-web-app-*` tags and `apple-touch-icon` for iOS Safari's Add to
+Home Screen, and a service worker at `/ui/sw.js`.
+
+What the worker does and does not do:
+
+- Precaches the shell (index, the four stylesheets, manifest, icons) on
+  install; navigations to `/ui/` are network-first with the cached shell as
+  the offline fallback; other files under `/ui/` are served from cache and
+  refreshed in the background.
+- Never intercepts anything outside `/ui/`: `/chat`, `/chat/stream`, `/auth`,
+  `/me`, `/billing` and every other API route reach the server exactly as
+  before. tests/js/sw_harness.mjs proves this by running the worker in a vm.
+- The `/ui` no-cache middleware also covers `sw.js`, so a deploy is picked up
+  on the next open. Bump `VERSION` in `sw.js` when the shell's file list
+  changes; the old cache is dropped on activate.
+
+The drawer shows an install card: on iOS Safari (not standalone) the
+Share -> Add to Home Screen steps; on browsers that fire
+`beforeinstallprompt`, a real Install button. "Not now" hides it for 30 days.
+
+`mobile.css` is loaded last on both pages and holds the touch and phone
+rules: 16px fields (iOS zooms on focus below that), 42px targets, safe-area
+insets for the topbar, composer, drawer and dialogs in standalone mode (the
+topbar grows by the status-bar inset instead of losing that height),
+full-width assistant messages with a small badge, bottom-sheet dialogs with
+side-by-side footer buttons, a fading settings tab strip, and the admin
+page's forms and tables at phone width.
+
+Phone audit: `node scripts/ui/mobile_audit.mjs <outDir> http://localhost:8000`
+drives every screen with Playwright's iPhone 13 emulation (home, drawer,
+history, tasks, each settings tab, plans, wallet, a streamed answer, a swap
+turn, sign-in, admin), saves a screenshot per screen and prints horizontal
+overflow, sub-32px targets and sub-16px fields as JSON; rerun it after any
+layout change. Icons are regenerated with
+`node scripts/ui/make_icons.mjs app/static/icons`.

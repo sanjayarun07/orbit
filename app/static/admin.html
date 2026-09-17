@@ -1,13 +1,23 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Orbit — Administration</title>
+<link rel="manifest" href="/ui/manifest.webmanifest">
+<meta name="theme-color" content="#111214" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Orbit">
+<link rel="apple-touch-icon" href="/ui/icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/ui/icons/icon-192.png">
 <script>(function(){try{var p=JSON.parse(localStorage.getItem("orbit_theme_v1")||'"system"');var t=p==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):p;document.documentElement.dataset.theme=t;}catch(e){document.documentElement.dataset.theme="dark";}})();</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="/ui/theme.css?v=1">
 <link rel="stylesheet" href="/ui/admin-theme.css?v=4">
+<link rel="stylesheet" href="/ui/mobile.css?v=1">
 </head>
 <body>
 <a class="skip-link" href="#mainContent">Skip to content</a>

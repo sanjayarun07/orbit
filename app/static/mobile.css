@@ -1,0 +1,100 @@
+/* Phone and touch layer for every screen (chat, dialogs, admin). Loaded last so
+   it wins ties with the desktop sheets. Two axes: `pointer: coarse` for what a
+   finger needs (44px targets, 16px fields so iOS Safari does not zoom on focus,
+   no tap highlight), `max-width` for what a narrow viewport needs (full-width
+   messages, bottom-sheet dialogs, safe-area insets in standalone mode). */
+
+@media (pointer: coarse) {
+  input, select, textarea, #messageInput, .composer textarea, .field input, .field select, .field textarea, .key-create input, .charter-grid textarea, .route-form input, .route-form select, .auth input, .ops-actions input, .ops-actions select, .lab-body textarea { font-size: 16px; }
+  button, a, .chip, .nav-item, .tab, .chat-item, .prompt-card, [role="button"] { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  .chip, .pay-chip, .policy-chip, .credits-chip, .team-toggle, .explore-toggle, .history-view, .tab, .nav-item, .new-chat, .wallet-button, .account-button { min-height: 42px; }
+  .composer-plus, .send, .msg-actions button, .chat-act, .icon-button, .mobile-menu, .close, .dialog-close, .chip-close { min-width: 42px; min-height: 42px; }
+  .dialog-head .close { width: 42px; height: 42px; }
+  .field input[type="checkbox"], input[type="checkbox"], input[type="radio"] { width: 22px; height: 22px; min-height: 0; }
+  .field label:has(> input[type="checkbox"]) { min-height: 44px; }
+  .chat-act { display: grid; }
+  .msg-actions { gap: 6px; }
+  .rendered-result a { display: inline-block; padding: 6px 0; }
+  .result-table-wrap th, .result-table-wrap td { padding: 10px 10px; font-size: 12px; }
+  .result-table-wrap table { min-width: 100%; }
+  .history .chat-item { min-height: 44px; }
+  ::-webkit-scrollbar { width: 0; height: 0; }
+}
+
+@media (max-width: 720px) {
+  html { -webkit-text-size-adjust: 100%; }
+  body { overscroll-behavior: none; }
+  /* Standalone on a notched iPhone: the status bar is drawn over the page, so
+     the topbar grows by the inset instead of losing that height to padding. */
+  .topbar { height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left)); }
+  .conversation { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+  .composer-shell { padding: 8px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+  .welcome { min-height: 0; }
+  .thread { padding: 8px 12px 24px; }
+  /* Messages take the whole width; the assistant mark shrinks to a badge. */
+  .message { padding: 10px 0; }
+  .message.assistant { grid-template-columns: 28px minmax(0, 1fr); gap: 8px; }
+  .message.assistant .avatar { width: 28px; height: 28px; box-shadow: none; }
+  .message.assistant .avatar .icon { width: 14px; height: 14px; }
+  .message.assistant .message-body { padding: 2px 0; font-size: 15px; }
+  .message.user .message-body { max-width: 94%; padding: 10px 14px; }
+  .answer.streaming .stream-status { font-size: 13px; }
+  .result-table-wrap { margin-left: -36px; width: calc(100% + 36px); }   /* tables use the badge column too */
+  .result-table-wrap table { min-width: 100%; }
+  .composer { padding: 12px 12px 10px 14px; }
+  .composer textarea { font-size: 16px; min-height: 40px; max-height: 40vh; }
+  .composer-tools { gap: 8px; }
+  .send, .composer-plus { width: 42px; height: 42px; }
+  /* Dialogs become bottom sheets: full width, rounded top, footer buttons
+     side by side and inside the home-indicator inset. */
+  .overlay { padding: 0; align-items: flex-end; }
+  .dialog, .settings-dialog .dialog, .swap-dialog { width: 100%; max-width: 100%; border-radius: 20px 20px 0 0; border-bottom: 0; max-height: calc(100dvh - env(safe-area-inset-top) - 12px); }
+  .settings-dialog .dialog { height: calc(100dvh - env(safe-area-inset-top) - 12px); }
+  .dialog-head { padding: 16px 18px; }
+  .dialog-body, .settings-dialog .dialog-body { padding: 18px 18px calc(18px + env(safe-area-inset-bottom)); }
+  .dialog-footer { padding: 12px 18px max(14px, env(safe-area-inset-bottom)); gap: 10px; }
+  .dialog-footer button { flex: 1 1 auto; min-height: 46px; }
+  /* The settings tab strip scrolls sideways; the fade says there is more. */
+  .tabs, .settings-dialog .tabs { padding: 6px 12px; gap: 4px; scroll-snap-type: x proximity; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); }
+  .tab { scroll-snap-align: start; padding: 10px 12px; font-size: 13px; }
+  .tabs .tab:last-child { margin-right: 36px; }
+  .field input, .field select, .field textarea { min-height: 44px; }
+  .key-create { flex-direction: column; }
+  .key-create input, .key-create button { width: 100%; }
+  /* Sidebar drawer: the whole height, inside the insets, with the account row reachable. */
+  .sidebar { height: 100dvh; padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); display: flex; flex-direction: column; }
+  .history { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .install-card { display: none; }
+  .install-card.show { display: grid; }
+}
+
+/* Install prompt card (drawer). Shown on iOS Safari outside standalone mode
+   with the Share -> Add to Home Screen steps, and on browsers that fire
+   beforeinstallprompt with a real Install button. Dismissable for 30 days. */
+.install-card { display: none; gap: 8px; margin: 8px 0 10px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+.install-card.show { display: grid; }
+.install-card strong { color: var(--text-strong); font-weight: 600; }
+.install-card .install-actions { display: flex; gap: 8px; }
+.install-card button { flex: 1 1 auto; min-height: 36px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; }
+.install-card button.primary { background: var(--brand); border-color: var(--brand); color: var(--on-brand); font-weight: 600; }
+.install-card kbd { font: inherit; padding: 1px 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); }
+
+/* Administration page on a phone. */
+@media (max-width: 760px) {
+  .admin-sidebar { padding: max(12px, env(safe-area-inset-top)) 16px 12px; }
+  .admin-nav a { min-height: 44px; display: flex; align-items: center; }
+  .admin-shell .topbar, body > .topbar { height: auto; min-height: 52px; padding: 8px 16px; flex-wrap: wrap; }
+  main { padding: 20px 16px calc(40px + env(safe-area-inset-bottom)); gap: 16px; }
+  .hero h1 { font-size: 26px; }
+  .auth { display: grid; gap: 10px; }
+  .auth .auth-field, .auth input, .auth button { width: 100%; }
+  .route-form { padding: 14px; }
+  .route-form input, .route-form select, .route-form button { flex: 1 1 100%; width: 100%; }
+  .lab-actions, .ops-actions { flex-wrap: wrap; gap: 8px; }
+  .ops-actions input, .ops-actions select { width: 100% !important; }
+  .panel-head { flex-wrap: wrap; gap: 8px; }
+  .table-wrap table { min-width: 640px; }
+  .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  select#themeChoice { min-height: 40px; font-size: 16px; }
+  .sidebar-footer a { min-height: 44px; display: inline-flex; align-items: center; }
+}

@@ -1,0 +1,22 @@
+{
+  "id": "/ui/",
+  "name": "Orbit — Research & markets",
+  "short_name": "Orbit",
+  "description": "Research assets, understand your portfolio, and review your next move.",
+  "start_url": "/ui/?source=pwa",
+  "scope": "/ui/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#111214",
+  "theme_color": "#111214",
+  "lang": "en",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    { "src": "/ui/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/ui/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/ui/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "New chat", "url": "/ui/?source=pwa&new=1", "icons": [{ "src": "/ui/icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

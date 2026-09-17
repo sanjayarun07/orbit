@@ -168,6 +168,7 @@
   .result-field span { display: block; color: var(--subtle); font-size: 9px; text-transform: uppercase; letter-spacing: .04em; }
   .result-field b { display: block; margin-top: 3px; color: var(--text-2); font-size: 10.5px; font-weight: 550; overflow-wrap: anywhere; }
   .result-table-wrap { overflow-x: auto; margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; }
+  .rendered-result hr { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
   .result-table-wrap table { min-width: 520px; }
   .result-table-wrap th, .result-table-wrap td { padding: 7px 8px; font-size: 9.5px; white-space: nowrap; }
   .tool-result-error { padding: 9px 10px; border-radius: 8px; color: var(--error-text); background: var(--red-soft); border: 1px solid var(--red-border); white-space: pre-wrap; }

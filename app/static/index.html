@@ -2,15 +2,28 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="color-scheme" content="dark light" />
 <title>Orbit — Research & markets</title>
+<!-- Installable app: manifest + icons for Android/desktop Chrome, the apple-* tags for iOS Safari's Add to Home Screen (standalone, no browser chrome, translucent status bar over the app's own topbar). -->
+<link rel="manifest" href="/ui/manifest.webmanifest">
+<meta name="theme-color" content="#111214" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="application-name" content="Orbit">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Orbit">
+<meta name="format-detection" content="telephone=no">
+<link rel="apple-touch-icon" href="/ui/icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/ui/icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <script>(function(){try{var p=JSON.parse(localStorage.getItem("orbit_theme_v1")||'"system"');var t=p==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):p;document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t;}catch(e){}})();</script>
 <link rel="stylesheet" href="/ui/theme.css?v=1">
 <link rel="stylesheet" href="/ui/chat.css?v=3">
 <link rel="stylesheet" href="/ui/product.css?v=4">
+<link rel="stylesheet" href="/ui/mobile.css?v=1">
 </head>
 <body>
 <div class="app">
@@ -25,6 +38,11 @@
     </nav>
     <div class="history-heading"><button class="history-view" id="historyView" type="button" aria-haspopup="menu" aria-expanded="false"><span id="historyViewLabel">Recents</span><svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button></div>
     <div class="history" id="chatList"></div>
+    <div class="install-card" id="installCard" hidden>
+      <strong>Add Orbit to your Home Screen</strong>
+      <span id="installHint">Tap <kbd>Share</kbd> in Safari, then <kbd>Add to Home Screen</kbd> for a full-screen app.</span>
+      <div class="install-actions"><button type="button" class="primary" id="installBtn" hidden>Install app</button><button type="button" id="installDismiss">Not now</button></div>
+    </div>
     <div class="sidebar-footer">
       <button class="account-button" id="profileBtn">
         <span class="account-avatar" id="profileAvatar">A</span>
@@ -441,6 +459,7 @@ function renderMarkdownHtml(value) {
       parts.push(`<div class="result-table-wrap"><table><thead><tr>${headers.map(h=>`<th>${renderInline(h)}</th>`).join("")}</tr></thead><tbody>${rows.slice(0,30).map(row=>`<tr>${row.map(cell=>`<td>${renderInline(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`); continue;
     }
     const heading = line.match(/^#{1,4}\s+(.+)$/); if (heading) { parts.push(`<h5>${renderInline(heading[1])}</h5>`); i++; continue; }
+    if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(line)) { parts.push("<hr>"); i++; continue; }   // a card separator, not the literal dashes
     if (/^[-*]\s+/.test(line)) {
       const items = []; while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*[-*]\s+/, "")); i++; }
       parts.push(`<ul>${items.map(item=>`<li>${renderInline(item)}</li>`).join("")}</ul>`); continue;
@@ -1692,6 +1711,21 @@ $("#navHome").addEventListener("click",startNewChat);
 $("#navTasks").addEventListener("click",()=>{closeSidebar();openSettings("tasks");});
 $("#navSettings").addEventListener("click",()=>{closeSidebar();openSettings("preferences");});
 $("#navLibrary").addEventListener("click",()=>{setNav("navLibrary");if(window.matchMedia("(max-width:720px)").matches)setSidebar(true);const first=$("#chatList .chat-item");if(first)first.focus();});
+// Installable app. The service worker caches the shell under /ui/ only (API
+// calls are never intercepted); the drawer card explains Add to Home Screen on
+// iOS Safari and offers a real Install button where the browser prompts.
+const STANDALONE=window.matchMedia("(display-mode: standalone)").matches||navigator.standalone===true;
+document.documentElement.classList.toggle("standalone",STANDALONE);
+if("serviceWorker" in navigator&&/^https?:$/.test(location.protocol)){addEventListener("load",()=>{navigator.serviceWorker.register("/ui/sw.js",{scope:"/ui/"}).catch(()=>{});});}
+let installPrompt=null;
+function installDismissed(){try{return Number(localStorage.getItem("orbit_install_dismissed")||0)>Date.now()-30*864e5;}catch{return false;}}
+function showInstallCard(){const card=$("#installCard");if(!card||STANDALONE||installDismissed())return;const ios=/iP(hone|ad|od)/.test(navigator.userAgent)&&!window.MSStream;if(installPrompt){$("#installHint").textContent="Install Orbit for a full-screen app with its own icon.";$("#installBtn").hidden=false;}else if(!ios)return;card.hidden=false;card.classList.add("show");}
+window.addEventListener("beforeinstallprompt",(e)=>{e.preventDefault();installPrompt=e;showInstallCard();});
+$("#installBtn").addEventListener("click",async()=>{if(!installPrompt)return;installPrompt.prompt();const choice=await installPrompt.userChoice.catch(()=>null);installPrompt=null;if(choice?.outcome==="accepted"){$("#installCard").hidden=true;}});
+$("#installDismiss").addEventListener("click",()=>{try{localStorage.setItem("orbit_install_dismissed",String(Date.now()));}catch{}$("#installCard").hidden=true;$("#installCard").classList.remove("show");});
+window.addEventListener("appinstalled",()=>{$("#installCard").hidden=true;});
+showInstallCard();
+if(new URLSearchParams(location.search).get("new")==="1"){history.replaceState(null,"",location.pathname);startNewChat();}
 $("#topAvatarBtn").addEventListener("click",()=>openSettings("account"));
 $("#composerPlus").addEventListener("click",()=>openDialog("walletDialog"));
 fillGreeting();$("#mobileMenu").addEventListener("click",()=>setSidebar(!$("#sidebar").classList.contains("open")));$("#sidebarBackdrop").addEventListener("click",closeSidebar);
