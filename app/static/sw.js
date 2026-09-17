@@ -9,8 +9,8 @@
      every other API route -- is never intercepted, so nothing about a turn,
      a session or a payment changes when the worker is installed.
    Bump VERSION when the shell changes shape; the old cache is dropped on activate. */
-const VERSION = "orbit-shell-v1";
-const SHELL = ["/ui/", "/ui/index.html", "/ui/theme.css?v=1", "/ui/chat.css?v=3", "/ui/product.css?v=4", "/ui/mobile.css?v=1", "/ui/manifest.webmanifest",
+const VERSION = "orbit-shell-v2";
+const SHELL = ["/ui/", "/ui/index.html", "/ui/theme.css?v=1", "/ui/chat.css?v=3", "/ui/product.css?v=4", "/ui/mobile.css?v=2", "/ui/manifest.webmanifest",
                "/ui/icons/icon-192.png", "/ui/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {

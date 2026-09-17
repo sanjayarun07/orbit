@@ -26,7 +26,8 @@
   body { overscroll-behavior: none; }
   /* Standalone on a notched iPhone: the status bar is drawn over the page, so
      the topbar grows by the inset instead of losing that height to padding. */
-  .topbar { height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left)); }
+  .topbar { height: calc(50px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left)); }
+  .jump-latest { bottom: calc(var(--composer-height) + 8px); }
   .conversation { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
   .composer-shell { padding: 8px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
   .welcome { min-height: 0; }

@@ -72,7 +72,7 @@ def test_a_navigation_is_network_first_with_the_shell_as_offline_fallback():
 def test_install_precaches_the_shell_the_pages_actually_load():
     r = _sw_case("install_precaches_the_shell_and_activate_drops_old_caches")
     html = (STATIC / "index.html").read_text()
-    for sheet in ("/ui/theme.css?v=1", "/ui/chat.css?v=3", "/ui/product.css?v=4", "/ui/mobile.css?v=1"):
+    for sheet in ("/ui/theme.css?v=1", "/ui/chat.css?v=3", "/ui/product.css?v=4", "/ui/mobile.css?v=2"):
         assert sheet in html and sheet in r["precached"], sheet
 
 
@@ -80,3 +80,13 @@ def test_touch_fields_are_16px_so_ios_does_not_zoom_and_targets_are_finger_sized
     css = (STATIC / "mobile.css").read_text()
     assert "@media (pointer: coarse)" in css and "font-size: 16px" in css and "min-height: 42px" in css
     assert "env(safe-area-inset-top)" in css and "env(safe-area-inset-bottom)" in css
+
+
+def test_the_app_height_follows_the_stylesheet_unless_the_keyboard_is_up():
+    """Seen on an installed iPhone app: a short visual-viewport reading at
+    launch was written into --app-height and never corrected, leaving a dead
+    band under the composer. The measured height now applies only while the
+    keyboard is up (visual viewport well shorter than the window)."""
+    from tests.test_ui_swap_flow import run_case
+    r = run_case("app_height_follows_the_stylesheet_unless_the_keyboard_is_up")
+    assert r == {"keyboard": "500px", "settled": "100dvh", "toolbars": "100dvh", "unknown": "100dvh"}, r

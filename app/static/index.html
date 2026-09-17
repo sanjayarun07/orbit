@@ -23,7 +23,7 @@
 <link rel="stylesheet" href="/ui/theme.css?v=1">
 <link rel="stylesheet" href="/ui/chat.css?v=3">
 <link rel="stylesheet" href="/ui/product.css?v=4">
-<link rel="stylesheet" href="/ui/mobile.css?v=1">
+<link rel="stylesheet" href="/ui/mobile.css?v=2">
 </head>
 <body>
 <div class="app">
@@ -1280,10 +1280,22 @@ input.addEventListener("focus",()=>setTimeout(()=>scrollToBottom(true),80));
 conversationEl.addEventListener("scroll",()=>{autoFollow=isNearLatest();updateJumpLatest();},{passive:true});
 jumpLatestBtn.addEventListener("click",()=>{autoFollow=true;scrollToBottom(true);input.focus({preventScroll:true});});
 
+// The app fills the stylesheet's 100dvh. Only while the keyboard is up (the
+// visual viewport is well shorter than the window) does the measured height
+// take over, so the composer sits above the keys. Using the measured height
+// unconditionally left a dead band under the composer on an installed iPhone
+// app, where iOS reports a short viewport at launch and does not always fire
+// a resize once it settles.
+function appHeightFor(visualHeight,windowHeight){return visualHeight&&windowHeight-visualHeight>120?`${Math.round(visualHeight)}px`:"100dvh";}
 function syncViewportLayout(){
-  const viewportHeight=Math.round(window.visualViewport?.height||window.innerHeight);document.documentElement.style.setProperty("--app-height",`${viewportHeight}px`);document.documentElement.style.setProperty("--composer-height",`${Math.ceil(composerShell.getBoundingClientRect().height)}px`);if(document.activeElement===input&&autoFollow)setTimeout(()=>scrollToBottom(true),0);
+  document.documentElement.style.setProperty("--app-height",appHeightFor(window.visualViewport?.height,window.innerHeight));document.documentElement.style.setProperty("--composer-height",`${Math.ceil(composerShell.getBoundingClientRect().height)}px`);if(document.activeElement===input&&autoFollow)setTimeout(()=>scrollToBottom(true),0);
 }
 window.addEventListener("resize",syncViewportLayout,{passive:true});
+window.addEventListener("orientationchange",()=>setTimeout(syncViewportLayout,250),{passive:true});
+window.addEventListener("pageshow",syncViewportLayout,{passive:true});
+input.addEventListener("focus",()=>setTimeout(syncViewportLayout,300));
+input.addEventListener("blur",()=>setTimeout(syncViewportLayout,300));
+setTimeout(syncViewportLayout,400);setTimeout(syncViewportLayout,1500);
 window.visualViewport?.addEventListener("resize",syncViewportLayout,{passive:true});
 window.visualViewport?.addEventListener("scroll",syncViewportLayout,{passive:true});
 new ResizeObserver(()=>{document.documentElement.style.setProperty("--composer-height",`${Math.ceil(composerShell.getBoundingClientRect().height)}px`);if(autoFollow)scrollToBottom();}).observe(composerShell);

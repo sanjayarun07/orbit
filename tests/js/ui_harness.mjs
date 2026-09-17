@@ -672,6 +672,12 @@ const CASES = {
     return runUseAddress("So11111111111111111111111111111111111111112");
   },
   /** Well-formed base58 of a plausible length that is not 32 bytes. */
+  // The app's height follows the stylesheet (100dvh) unless the keyboard is
+  // up; a short reading at launch never leaves a dead band under the composer.
+  async app_height_follows_the_stylesheet_unless_the_keyboard_is_up() {
+    const { sandbox } = load();
+    return { keyboard: sandbox.appHeightFor(500, 844), settled: sandbox.appHeightFor(844, 844), toolbars: sandbox.appHeightFor(780, 844), unknown: sandbox.appHeightFor(undefined, 844) };
+  },
   async a_base58_string_that_is_not_32_bytes_is_refused() {
     const { sandbox } = load();
     const probe = (v) => ({ regex: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v), bytes: sandbox.base58ByteLength(v), accepted: sandbox.isPublicAddress(v) });
