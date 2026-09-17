@@ -27,6 +27,7 @@ scripts/
 # ...except the operator scripts the runbook runs inside the image.
 !scripts/kb_ingest.py
 !scripts/routing_eval/
+scripts/routing_eval/__pycache__/
 scripts/routing_eval/runs/
 scripts/routing_eval/results*.json
 scripts/routing_eval/candidates.json

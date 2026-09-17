@@ -237,6 +237,23 @@ async def run_protocol(protocol_id: str, connectors: list | None = None, store=N
     return results
 
 
+async def ensure_registry(store, limit: int | None = None) -> int:
+    """The registry the ingester walks. On a fresh database it is empty --
+    it was only ever filled by the admin bootstrap endpoint -- so a first run
+    of the standalone ingester pulled nothing and said `pairs=0`. Bootstraps
+    the top protocols by TVL from DefiLlama when there are none; returns how
+    many protocols the registry now holds."""
+    from app.knowledge import registry
+
+    limit = limit or settings.knowledge_registry_limit
+    existing = await store.list_protocols(limit=limit)
+    if existing:
+        return len(existing)
+    result = await registry.bootstrap(limit=limit)
+    logger.info("knowledge: registry was empty; bootstrapped %s", result)
+    return len(await store.list_protocols(limit=limit))
+
+
 async def run_all(parallel: int = 3, limit: int | None = None, only_due: bool = True, connectors: list | None = None, derive: bool = True) -> list[IngestionResult]:
     """Every registry protocol, `parallel` at a time, most valuable first,
     then the derived edges (competitors, corroborated integrations). Meant

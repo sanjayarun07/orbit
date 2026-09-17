@@ -60,6 +60,8 @@ async def main(args: argparse.Namespace) -> int:
 
         print("derived:", await derive_all(store))
         return 0
+    count = await kb_ingest.ensure_registry(store, limit=args.limit)
+    print(f"registry: {count} protocols" + ("" if count else " -- nothing to ingest (DefiLlama unreachable?)"))
     while True:
         results = await kb_ingest.run_all(parallel=args.parallel, limit=args.limit)
         print(_summary(results))

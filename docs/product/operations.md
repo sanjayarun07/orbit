@@ -185,9 +185,13 @@ gets the beta one at once. Off by default; nothing changes for other setups.
    the corpus is loaded by hand (step 5) and refreshed by re-running that
    load, not by the background worker.
 5. Knowledge base: bulk-load once from the host, in its own process --
-   `docker compose exec api python scripts/kb_ingest.py` (see "Knowledge
-   Base preparation" above). The snapshot warms within two minutes and
-   `knowledge_snapshot` reports its entity count.
+   `docker compose -f docker-compose.yml -f docker-compose.prod.yml exec api python scripts/kb_ingest.py --parallel 4 -v`
+   (see "Knowledge Base preparation" above). On a fresh database the
+   script bootstraps the registry itself (top 50 protocols by TVL from
+   DefiLlama) before crawling; expect tens of minutes and a few dollars of
+   embedding calls. Then `... --derive` for the competitor/integration
+   edges. The snapshot warms within two minutes and `knowledge_snapshot`
+   reports its entity count.
 6. Sign in with your own email, confirm the magic link arrives, confirm the
    plan reads Beta with 5,000 credits, confirm the plans dialog shows the
    beta note and no prices. Then share the URL with the group.
