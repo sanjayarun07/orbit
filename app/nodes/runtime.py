@@ -36,6 +36,15 @@ _intent_lm = (
     if settings.intent_model and settings.intent_model != settings.model
     else None
 )
+_synthesis_lm = (
+    dspy.LM(
+        settings.synthesis_model,
+        timeout=settings.llm_request_timeout_seconds,
+        num_retries=settings.llm_num_retries,
+    )
+    if settings.synthesis_model and settings.synthesis_model != settings.model
+    else None
+)
 dspy.configure(lm=_primary_lm)
 
 # Provider-side failures worth retrying on a DIFFERENT model (a transient outage
@@ -455,6 +464,42 @@ async def _call_lm(program, **kwargs):
                 raise
             increment("llm_fallback_used")
             return result
+
+
+# When set, every synthesis call is reported here as (program name, kwargs)
+# before it runs: scripts/synthesis_eval/capture.py records the evidence
+# bundles the synthesis tier is given, so different models can be scored on
+# identical evidence. None in normal operation.
+synthesis_recorder = None
+
+
+async def _call_synthesis_lm(program, **kwargs):
+    """The synthesis tier: `synthesis_model` when configured, else the primary
+    path. Same backpressure and guard scope as _call_lm; a transient failure
+    on the synthesis model falls back to the primary path rather than the
+    fallback model, so a domain model under trial can never take an answer
+    down with it."""
+    if synthesis_recorder is not None:
+        synthesis_recorder(_program_name(program), kwargs)
+    if _synthesis_lm is None:
+        return await _call_lm(program, **kwargs)
+    async with _llm_slots:
+        increment("llm_calls")
+        try:
+            return await _run_guarded(program, _synthesis_lm, kwargs)
+        except Exception as exc:
+            if not _is_transient_lm_error(exc):
+                raise
+            increment("llm_synthesis_transient_failures")
+            logger.warning("synthesis model '%s' failed transiently (%s); using the primary path", settings.synthesis_model, type(exc).__name__)
+    return await _call_lm(program, **kwargs)
+
+
+def _program_name(program) -> str:
+    for name, value in globals().items():
+        if value is program:
+            return name
+    return type(program).__name__
 
 
 async def _call_intent_lm(program, **kwargs):

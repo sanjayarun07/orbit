@@ -175,3 +175,34 @@ misses are unchanged in kind: right act under the 0.90 gate on terse
 prompts, plus `advice` for "is X safe" and `quote` @0.42 for "can I sell".
 The `explain`-to-`research` mapping change considered earlier is not needed
 and was not made.
+
+## The synthesis tier, and how a domain model gets measured on it
+
+A domain model such as DMind-3-mini is not a routing candidate (it generates
+free text with a thinking mode; the decision seam wants a typed answer in a
+second) but it may write better answers from gathered evidence. That job is
+now its own tier: `settings.synthesis_model` (e.g. `hosted_vllm/DMind-3-mini`
+with `HOSTED_VLLM_API_BASE` set) is used by `runtime._call_synthesis_lm` for
+the three programs that write from evidence -- the equity brief, the
+knowledge-base answer, the token deep dive -- with a transient failure
+falling back to the primary path. Unset, nothing changes. Routing and the
+tool loops never see it.
+
+Measuring it isolates writing from retrieval:
+
+1. `scripts/synthesis_eval/capture.py --defaults|--file prompts.txt` runs
+   prompts through the real agent with a recorder on and saves each
+   synthesis program's exact inputs (the evidence the tools gathered) plus
+   the primary model's answer at the time, to `bundles.json`.
+2. `scripts/synthesis_eval/replay.py --model openai/gpt-4.1-mini --model hosted_vllm/DMind-3-mini`
+   has every model write from the identical evidence (DSPy cache off) and
+   scores each answer with the app's own step-7 validator -- grounding
+   (figures not in the evidence), provenance, freshness, consistency --
+   plus latency and tokens.
+
+Baseline, thirteen bundles (four token deep dives, seven knowledge-base
+answers, two equity briefs): gpt-4.1-mini 0% validator warnings, 4.8 s p50 /
+11.3 s p95, ~470 output tokens, ~2,300 characters. Run files stay untracked
+(they hold raw answers and evidence, full of addresses that trip the secrets
+scan); the numbers live here. The bar for a domain model is the same
+warn-rate at equal evidence; tone and vocabulary do not count, grounding does.

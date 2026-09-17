@@ -616,7 +616,7 @@ async def _equity_research(state: dict) -> dict:
             "trajectory": trajectory,
         }
 
-    synthesis = await runtime._call_lm(
+    synthesis = await runtime._call_synthesis_lm(
         runtime.equity_research_synthesizer,
         request=request,
         conversation_history=state.get("history", ""),
@@ -1143,7 +1143,7 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
     learned = "\n".join(f"- {lesson}" for lesson in lessons) if lessons else "none"
 
     try:
-        result = await runtime._call_lm(
+        result = await runtime._call_synthesis_lm(
             runtime.token_deepdive_agent,
             request=request, evidence=evidence,
             analysis_rules=ANALYSIS_RULES,
@@ -1188,7 +1188,7 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
 @trace(name="research", as_type="agent")
 async def _synthesize_knowledge(request: str, passages: str, history: str) -> str:
     try:
-        result = await runtime._call_lm(runtime.knowledge_synthesizer, request=request, conversation_history=history or "", passages=passages)
+        result = await runtime._call_synthesis_lm(runtime.knowledge_synthesizer, request=request, conversation_history=history or "", passages=passages)
         answer = (getattr(result, "answer", "") or "").strip()
     except Exception:
         logger.warning("knowledge synthesis failed; returning passages", exc_info=True)

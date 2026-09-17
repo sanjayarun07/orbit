@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     # resolver.py), so its latency is on the hot path: point it at a faster
     # tier than the answer model (e.g. "openai/gpt-4.1-nano"); empty = `model`.
     intent_model: str | None = None
+    # The synthesis tier: the programs that WRITE an answer from evidence the
+    # tools already gathered (equity brief, knowledge-base answer, token deep
+    # dive). Unset, they run on `model`. Set to try a domain model on exactly
+    # that job -- e.g. "hosted_vllm/DMind-3-mini" -- without touching routing
+    # or the tool loops; a transient failure falls back to `model`.
+    synthesis_model: str | None = None
     intent_classifier_cache_entries: int = 512
     # MCP server (app/mcp_server.py) mounted at /mcp for Claude / ChatGPT / any
     # MCP host. When MCP_API_KEY is set, /mcp requires `Authorization: Bearer`.
