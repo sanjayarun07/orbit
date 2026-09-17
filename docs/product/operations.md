@@ -181,9 +181,9 @@ gets the beta one at once. Off by default; nothing changes for other setups.
    Caddy only.
 4. `curl -s https://$ORBIT_DOMAIN/readyz | jq` -- `status: ready`, no
    `failed`; `degraded` may list `knowledge_snapshot` until step 5.
-   `knowledge_ingest` reads `running` (the refresher is on:
-   `KNOWLEDGE_INGEST_ENABLED=true`, 5 due pairs every 5 minutes -- it keeps
-   a loaded corpus fresh, it does not build one, so step 5 still comes first).
+   `knowledge_ingest` reads `disabled (KNOWLEDGE_INGEST_ENABLED=false)`, ok:
+   the corpus is loaded by hand (step 5) and refreshed by re-running that
+   load, not by the background worker.
 5. Knowledge base: bulk-load once from the host, in its own process --
    `docker compose exec api python scripts/kb_ingest.py` (see "Knowledge
    Base preparation" above). The snapshot warms within two minutes and
