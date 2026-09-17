@@ -9,7 +9,32 @@ from app.portfolio import build_portfolio_snapshot
 from app.provider_registry import get_provider_router
 from app.trade_context import complete_swap_fields
 from app.wallet_insights import portfolio_scenario, wallet_health
-from app.nodes.research import _nansen_wallet_tool_call, _provider_trajectory, _sanitize_react_answer, call_direct_mcp_tool
+from app.nodes.research import _goldrush_hyperliquid_supplement, _nansen_wallet_tool_call, _provider_trajectory, _sanitize_react_answer, call_direct_mcp_tool
+
+async def _perp_positions(wallet: str, request: str) -> dict:
+    """Open perps for a wallet, from the focused Hyperliquid positions tool.
+
+    Hyperliquid accounts are EVM (0x) addresses. A non-EVM wallet with a
+    perps ask is ambiguous -- a Solana wallet has no Hyperliquid account, and
+    guessing another venue would answer a question the user did not ask --
+    so it is a question back, not a substitution."""
+    if not wallet.startswith("0x"):
+        return {
+            "answer": (f"Perp positions on Hyperliquid belong to an EVM (0x) address, and `{wallet[:6]}…{wallet[-4:]}` "
+                       "is not one. Did you mean a different wallet, or perps on another venue? Tell me which and I'll look it up."),
+            "trajectory": None,
+        }
+    positions = await _goldrush_hyperliquid_supplement(wallet)
+    answer = positions or (f"# Hyperliquid positions\n\nI couldn't retrieve Hyperliquid account state for `{wallet}` right now "
+                           "(the Hyperliquid data source was unavailable). Please try again shortly.")
+    return {
+        "answer": answer,
+        "trajectory": {
+            "thought_0": "A perp-positions ask about a wallet maps to the focused Hyperliquid positions tool.",
+            "tool_name_0": "goldrush_hyperliquid_positions", "tool_args_0": {"wallet_address": wallet}, "observation_0": answer,
+        },
+    }
+
 
 @trace(name="portfolio", as_type="agent")
 async def portfolio_node(state: AgentState) -> dict:
@@ -24,6 +49,8 @@ async def portfolio_node(state: AgentState) -> dict:
         }
     capabilities = set(state.get("capabilities", []))
     request = _effective_request(state)
+    if "perp_positions" in capabilities:
+        return await _perp_positions(state["wallet_address"], request)
     if "wallet_transactions" in capabilities:
         wallet = state["wallet_address"]
         chains = tuple(state.get("chains", []))

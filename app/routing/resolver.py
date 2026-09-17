@@ -43,7 +43,7 @@ from .trade_parser import extract_cross_chain_draft
 _ANCHORED_REASONS = frozenset({
     "knowledge_base", "news_explainer", "conceptual", "trade_cancel", "trade_confirm", "risk_charter", "team_mode", "equity",
     "trade_simulation", "own_token_balance", "own_token_holdings", "own_wallet_activity",
-    "wallet_health", "portfolio_scenario", "token_address", "wallet_address", "url",
+    "wallet_health", "portfolio_scenario", "token_address", "wallet_address", "url", "perp_positions",
 })
 # "own_wallet" (bare "my wallet" + anything) is deliberately NOT anchored: "my
 # wallet policy?" is a policy question, "analyze my wallet" is a portfolio one;
@@ -241,6 +241,16 @@ async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> d
     if team_mode and is_content and update.get("route_source") != "quick_action":
         update["team_subintent"] = "trade" if intent0 == "trade" else "analysis"
         update["intent"] = "team"
+
+    # A portfolio ask that names an address is a read-only look at THAT
+    # wallet: the address becomes the turn's wallet when none is connected,
+    # so the portfolio node can run instead of asking to connect one. A
+    # connected wallet is never replaced by a pasted address.
+    if update.get("intent") == "portfolio" and not state.get("wallet_address"):
+        pasted = lx.ADDRESS.search(state.get("request") or "")
+        if pasted:
+            update["wallet_address"] = pasted.group(0)
+            metadata["wallet_source"] = "pasted_address"
 
     metadata["method"] = update.get("route_source", metadata["method"])
     metadata["intent"] = update["intent"]

@@ -119,13 +119,23 @@ def route_capabilities(request: str) -> CapabilityRoute | None:
             return _route("general", (), chains, reason="semantic_required", confidence=0.0, mode="collect")
         return plan_execution_route(request, chains)
 
-    if lx.OWN_TOKEN_BALANCE.search(request):
+    # Own-wallet phrasings, only when no address is pasted: "recent activity
+    # for this wallet 0x..." names an address, and that address is what the
+    # question is about, whatever "this wallet" says. With an address the
+    # request falls through to the address rules below (a lookup).
+    pasted_address = bool(lx.ADDRESS.search(request))
+    # Perp positions are a wallet's state: the user's own, or a pasted
+    # address looked up read-only. Before the market rule, whose perp
+    # vocabulary would otherwise make this a market-data lookup.
+    if lx.PERP_POSITIONS.search(request) and (pasted_address or lx.OWN_POSITION_OR_AMOUNT.search(request)):
+        return _route("portfolio", ("perp_positions", "wallet_intelligence"), chains, reason="perp_positions")
+    if lx.OWN_TOKEN_BALANCE.search(request) and not pasted_address:
         return _route("portfolio", ("token_balance", "portfolio", "wallet_intelligence"), chains, reason="own_token_balance")
-    if lx.OWN_TOKEN_HOLDINGS.search(request):
+    if lx.OWN_TOKEN_HOLDINGS.search(request) and not pasted_address:
         return _route("portfolio", ("token_holdings", "portfolio", "wallet_intelligence"), chains, reason="own_token_holdings")
-    if lx.OWN_WALLET_ACTIVITY.search(request):
+    if lx.OWN_WALLET_ACTIVITY.search(request) and not pasted_address:
         return _route("portfolio", ("wallet_transactions", "wallet_intelligence"), chains, reason="own_wallet_activity")
-    if lx.WALLET_HEALTH.search(request):
+    if lx.WALLET_HEALTH.search(request) and not pasted_address:
         return _route("portfolio", ("wallet_health", "portfolio", "wallet_intelligence"), chains, reason="wallet_health")
     if lx.PORTFOLIO_SCENARIO.search(request) and re.search(r"\b(?:my|connected)\b", request, re.I):
         return _route("portfolio", ("portfolio_scenario", "portfolio"), chains, reason="portfolio_scenario")

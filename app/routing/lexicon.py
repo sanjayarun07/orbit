@@ -55,6 +55,16 @@ OWN_WALLET_ACTIVITY = re.compile(
 WALLET_HEALTH = re.compile(r"\b(?:my|connected)\b.{0,30}\b(?:wallet health|wallet safety|approvals?|gas readiness)\b", re.I)
 PORTFOLIO_SCENARIO = re.compile(r"\b(?:what if|scenario|stress test|drops?|falls?|rises?|increases?)\b.{0,80}\b(?:portfolio|wallet|SOL|token|market)\b|\b(?:portfolio|wallet|SOL|token|market)\b.{0,80}\b(?:drops?|falls?|rises?|increases?)\b", re.I)
 WALLET = re.compile(r"\b(?:wallet|address|portfolio|holdings|balances?|pnl|transactions?|leverage|debt|liquidation|counterparties)\b", re.I)
+# A perpetual-positions ask about a wallet: "open perps for 0x...", "my open
+# perps", "hyperliquid positions for <address>". Positions are a wallet's
+# state, so this is a portfolio ask whichever wallet it names; market-data
+# perp vocabulary ("funding rate for BTC") has no wallet or "my" in it.
+PERP_POSITIONS = re.compile(
+    r"\b(?:open\s+)?(?:perps?|perpetuals?|perp\s+positions?|hyperliquid\s+positions?|positions?\s+on\s+hyperliquid)\b"
+    r".{0,40}\b(?:for|of|on|held\s+by|is|does)\b|\b(?:my|our)\s+(?:open\s+)?(?:perps?|perpetuals?|perp\s+positions?|hyperliquid\s+positions?)\b"
+    r"|\bwhat\s+perps?\s+(?:is|does|are)\b",
+    re.I,
+)
 WALLET_OWNER = re.compile(r"\b(?:wallet|portfolio|balances?|pnl|transactions?|counterparties)\b", re.I)
 ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}|(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])")
 TOKEN = re.compile(r"\b(?:tokens?|coins?|mints?|contracts?|memecoins?|meme\s+coins?|holders?|liquidity)\b", re.I)

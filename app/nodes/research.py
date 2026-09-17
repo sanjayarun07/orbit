@@ -1271,7 +1271,10 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     # A structured token due-diligence ask ("deep dive on X", "analyze X",
     # "thoughts on X") -> the multi-dimension analysis lens. Gated on a resolvable
     # token; a no-token analysis ask (or a bare single-metric lookup) falls through.
-    if _DEEPDIVE.search(request) and not TRENDING_TOKENS.search(request):
+    # Never for an equity ask: "is MSTR a good buy" is classed equity by the
+    # router, but this intercept ran first and resolved MSTR to a tokenized-
+    # stock namesake on Jupiter, so a stock question got a token deep dive.
+    if _DEEPDIVE.search(request) and not TRENDING_TOKENS.search(request) and "equity_research" not in set(state.get("capabilities", [])):
         deep_dive = await _run_token_deep_dive(state, request)
         if deep_dive is not None:
             return deep_dive

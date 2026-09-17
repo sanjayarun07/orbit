@@ -286,3 +286,26 @@ Verdict on both roles: not adopted for either. Routing: slower than both
 alternatives, less accurate than the current model, and miscalibrated
 toward `quote`. Synthesis: matches the current model on figure-dense
 material, fabricates mechanism on thin passages.
+
+## Three routing decisions settled (2026-09-17)
+
+1. **A pasted address wins over own-wallet phrasing.** "recent activity for
+   this wallet <address>" is a lookup about that address; the own-wallet
+   rules now yield when an address is present. Without one, "my recent
+   transactions" stays portfolio.
+2. **Perp positions are a wallet's state** -- "open perps for <address>",
+   "my open perps", "hyperliquid positions for <address>" are portfolio
+   asks (rule `perp_positions`, anchored). A pasted address becomes the
+   turn's read-only wallet, never replacing a connected one, and the
+   portfolio node answers from the focused Hyperliquid tool. Hyperliquid
+   accounts are EVM: a non-0x wallet with a perps ask gets a question back
+   ("did you mean a different wallet, or another venue?"), per the rule that
+   an ambiguous query is asked about, never guessed.
+3. **An equity ask never enters the token deep dive.** "is MSTR a good buy"
+   is classed equity by the router, but the deep-dive intercept ran first
+   and resolved MSTR to a tokenized-stock namesake; it now yields to the
+   equity path.
+
+Current backend, 100 cases, knowledge anchor present: **98/100** (was 97;
+`hyperliquid-positions` relabeled to portfolio under decision 2). The one
+remaining miss is "freeze authority on <mint>" going to `general`.

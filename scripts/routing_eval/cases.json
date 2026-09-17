@@ -238,8 +238,9 @@
     "forbidden_tools": [
       "jupiter"
     ],
-    "expected_intent": "research",
-    "router": true
+    "expected_intent": "portfolio",
+    "router": true,
+    "notes": "perp positions for a pasted address are a portfolio ask (user decision 2026-09-17, same as catalog-open-perps-for-addr); the address becomes the turn's read-only wallet"
   },
   {
     "id": "market-overview",
