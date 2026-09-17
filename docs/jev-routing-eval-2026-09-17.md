@@ -68,3 +68,36 @@ the same calibration, the design is a fast path with fallthrough to the
 current router below threshold -- never a replacement, and never a path to
 execution: `explicit_action` stays enforced in code as "an explicit crypto
 quote", whatever any model says.
+
+## Testing on more real-world prompts
+
+Labels are the expensive part, so the workflow finds the prompts worth
+labeling instead of labeling everything:
+
+1. **Collect** — `scripts/routing_eval/collect.py --catalog --file my_prompts.txt [--gaps 30]`
+   merges prompts with provenance into `candidates.json`: your own (one per
+   line, typed the way users type), every tool's `answers` examples from the
+   catalog (already labeled with their tool), and on a Postgres deployment the
+   `research_gaps` log of turns that fell through to web search. Already
+   labeled cases are skipped.
+2. **Disagree** — `harness.py --mode disagree` runs BOTH backends over the
+   unlabeled prompts and writes `to_label.json` with only the ones that can
+   change the table: where the backends disagree, or Jev is under the 0.90
+   gate. Prompts both agree on at high confidence almost never do.
+3. **Label** — fill `expected_intent` (and forbidden tools) on those entries
+   and append them to `cases.json`. Tens of these, from real phrasing, beat
+   thousands of synthetic ones.
+4. **Measure** — `harness.py --mode resolve --backend current` (DSPy cache
+   off) and `--backend jev`; compare the table.
+
+First disagree run, the 70 catalog example prompts: 64 agree, 6 disagree,
+21 agree with Jev under the gate. Nearly all of the 27 are one pattern: on
+terse, jargon-shaped prompts ("hot metas right now", "honeypot check",
+"freeze authority on <mint>") Jev puts mass on `abstain` at 0.4–0.7, and on
+the six disagreements it chose the right act (`research/crypto` for
+"background on Berachain", "Fed decision impact on crypto") at 0.39–0.60, so
+the gate sent them to `general`. Under-confidence on short prompts, not wrong
+choices -- the `abstain` criterion wording is the first thing to change and
+retest. Some catalog examples are templates (`<mint>`, `0x...`) or
+descriptions rather than prompts; realise them with real addresses before
+counting them as real-world.

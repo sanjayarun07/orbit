@@ -316,9 +316,67 @@ def run_resolve_mode(cases, backend: str = "current"):
     return {"mode": "resolve", "metrics": metrics, "rows": rows}
 
 
+# -------------------------------------------------------------- disagree mode
+
+def run_disagree_mode(prompts_path: str):
+    """Both backends over UNLABELED prompts (from collect.py), to find the ones
+    worth labeling: where the backends disagree, or Jev's confidence is under
+    the resolver's threshold. Prompts both backends agree on at high confidence
+    almost never change the table; these do. Writes to_label.json next to the
+    cases file: entries with expected_intent left blank for a human to fill,
+    then paste into cases.json."""
+    import asyncio
+    from app.nodes import runtime
+    from app.routing import jev_backend, resolver
+    from app.routing.resolver import resolve
+    from app.routing.semantic import embedding_router
+    from app.settings import settings
+
+    prompts = json.loads(Path(prompts_path).read_text())
+    if prompts and isinstance(prompts[0], str):
+        prompts = [{"query": p, "source": "list"} for p in prompts]
+    rows, to_label = [], []
+    for c in prompts:
+        state = {"request": c["query"], "history": "", "session_context": {}}
+        resolver._understanding_cache.clear()
+        try:
+            cur = asyncio.run(resolve(dict(state), runtime._call_intent_lm, embedding_factory=embedding_router))
+        except Exception as e:
+            cur = {"intent": f"ERR {str(e)[:30]}", "routing_decision": {}}
+        resolver._understanding_cache.clear()
+        jev_backend.CALLS.clear()
+        try:
+            jev = asyncio.run(resolve(dict(state), jev_backend.call_lm, embedding_factory=embedding_router))
+        except Exception as e:
+            jev = {"intent": f"ERR {str(e)[:30]}", "routing_decision": {}}
+        call = jev_backend.CALLS[-1] if jev_backend.CALLS else None
+        conf = call["speech_act_confidence"] if call else None
+        act = f"{call['understanding']['speech_act']}/{call['understanding']['domain']}" if call else "(rules)"
+        disagree = cur.get("intent") != jev.get("intent")
+        low = conf is not None and conf < settings.intent_model_confidence_threshold
+        flag = "DISAGREE" if disagree else ("LOW-CONF" if low else "")
+        rows.append((c["query"][:60], cur.get("intent"), (cur.get("routing_decision") or {}).get("method"), jev.get("intent"), act, f"{conf:.2f}" if conf is not None else "-", flag))
+        if flag:
+            entry = {"id": "label-me-" + str(len(to_label) + 1), "query": c["query"], "expected_tools": c.get("expected_tools", []),
+                     "forbidden_tools": [], "expected_intent": "", "router": bool(c.get("expected_tools")),
+                     "notes": f"{flag}: current={cur.get('intent')} jev={jev.get('intent')} ({act} @ {conf}); source={c.get('source')}"}
+            to_label.append(entry)
+    print(f"\n=== DISAGREE MODE ({len(prompts)} unlabeled prompts) ===")
+    print(f"{'prompt':60} {'current':13} {'by':14} {'jev':13} {'jev act/domain':18} {'conf':5} flag")
+    for r in rows:
+        print(f"{r[0]:60} {str(r[1]):13} {str(r[2]):14} {str(r[3]):13} {r[4]:18} {r[5]:5} {r[6]}")
+    n_dis = sum(1 for r in rows if r[6] == "DISAGREE"); n_low = sum(1 for r in rows if r[6] == "LOW-CONF")
+    print(f"\nagree: {len(rows) - n_dis} · disagree: {n_dis} · agree but Jev under threshold: {n_low}")
+    out = Path(CASES_PATH).with_name("to_label.json")
+    out.write_text(json.dumps(to_label, indent=2))
+    print(f"{len(to_label)} entries to label -> {out}  (fill expected_intent, then append to cases.json)")
+    return {"mode": "disagree", "metrics": {"prompts": len(rows), "disagree": n_dis, "low_conf": n_low}, "rows": rows}
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["router", "chat", "resolve", "both"], default="router")
+    ap.add_argument("--mode", choices=["router", "chat", "resolve", "both", "disagree"], default="router")
+    ap.add_argument("--prompts", default=str(Path(__file__).with_name("candidates.json")), help="disagree mode: unlabeled prompts (collect.py output, or a JSON list of strings)")
     ap.add_argument("--k", type=int, default=8)
     ap.add_argument("--backend", choices=["current", "jev"], default="current", help="resolve mode: what answers the classification seam")
     ap.add_argument("--semantic", action="store_true", help="router mode: allow embedding fallback in candidates")
@@ -336,6 +394,8 @@ def main():
         out["router"] = run_router_mode(cases, args.k, args.semantic, args.llm_select)
     if args.mode == "resolve":
         out["resolve"] = run_resolve_mode(cases, backend=args.backend)
+    if args.mode == "disagree":
+        out["disagree"] = run_disagree_mode(args.prompts)
     if args.mode in ("chat", "both"):
         out["chat"] = run_chat_mode(cases, args.base)
     Path(args.out).write_text(json.dumps(out, indent=1))
