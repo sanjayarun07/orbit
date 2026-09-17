@@ -853,3 +853,30 @@ turn, sign-in, admin), saves a screenshot per screen and prints horizontal
 overflow, sub-32px targets and sub-16px fields as JSON; rerun it after any
 layout change. Icons are regenerated with
 `node scripts/ui/make_icons.mjs app/static/icons`.
+
+## Review of 2026-09-18: two P1 findings
+
+**A new API-key secret outlived the account that made it.** The one-time
+secret box in Settings was never cleared, so after signing out, or after
+another account signed in on the same tab, the previous account's secret was
+still on screen. The secret now belongs to the account id that created it:
+`renderAccount` clears the box whenever the tab is signed out or a different
+account is rendered, and sign-out clears it before the request is sent.
+Browser-harness regression: `api_key_secret_is_cleared_on_sign_out_and_account_switch`.
+
+**Deleting an account left its open Checkout payable.** Cancelling the
+subscription was not enough: a Checkout session stays payable for up to 24
+hours, and paying it after the deletion created a subscription for a Stripe
+customer no account maps to. Closed on both sides:
+
+- `billing.expire_open_checkouts_for` runs during `DELETE /me`, after the
+  subscription cancel: Stripe is asked for every open session of the customer
+  (not only the id the account recorded) and each is expired; a session
+  Stripe will not confirm closed raises `CheckoutCloseFailed`, which stops
+  the deletion with a 409 the user can retry.
+- The `checkout.session.completed` handler, when no account maps to the
+  session, cancels the subscription the session created (`orphan_cancelled`)
+  rather than returning `no_user` and leaving it running.
+
+Tests: tests/test_review_20260918_p1.py (all four fail on the code before
+the fix and pass after).
