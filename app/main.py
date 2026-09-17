@@ -260,6 +260,23 @@ async def _check(name: str, coro, required: bool) -> dict:
             "latency_ms": round((time.monotonic() - started) * 1000)}
 
 
+async def _check_knowledge_snapshot() -> str:
+    """The router's knowledge-base anchor reads an in-memory resolver snapshot
+    warmed at startup and every two minutes. When it is empty -- before the
+    first warm, or after a refresh that failed and only logged -- every
+    protocol question silently falls to the speech model and is answered from
+    the model's memory instead of the indexed corpus. Reported as degraded, so
+    that state is visible instead of silent."""
+    pool = await get_pg_pool()
+    if pool is None:
+        return "not configured (no knowledge base without Postgres)"
+    res = kb_tool.snapshot()
+    count = len(res) if res is not None else 0
+    if not count:
+        raise RuntimeError("empty: the knowledge-base anchor is absent; protocol questions fall to the model")
+    return f"{count} entities"
+
+
 async def _check_postgres() -> str:
     pool = await get_pg_pool()
     if pool is None:
@@ -320,6 +337,7 @@ async def readyz(response: Response):
         _check("postgres", _check_postgres(), required=bool(settings.database_url)),
         _check("redis", _check_redis(), required=bool(settings.redis_url)),
         _check("model_credentials", _check_model(), required=True),
+        _check("knowledge_snapshot", _check_knowledge_snapshot(), required=False),
     ))
     checks.extend(_worker_health())
     failed = [c["name"] for c in checks if c["required"] and not c["ok"]]

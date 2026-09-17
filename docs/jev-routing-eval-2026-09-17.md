@@ -141,3 +141,37 @@ real traffic via `collect.py --gaps` once staging has Postgres. The
 adoption bar is unchanged: match the current backend's accuracy at ≥0.9
 confidence with this calibration, then a fast path with fallthrough, never
 a replacement.
+
+## Correction: the three "shared misses" were the harness, not the taxonomy
+
+The knowledge-base questions both backends "missed" (Morpho Blue, Aave
+E-mode, USDe) are anchored by the deterministic `knowledge_base` rule, which
+the speech model cannot override -- when its resolver snapshot is loaded. The
+app warms that snapshot at startup and every two minutes; a bare harness
+process never did, so `knowledge_tool.matches()` was False for everything and
+the harness measured a router missing its anchor. `harness.py` now warms the
+snapshot as the app does and prints how many entities it holds (2,652 here);
+zero means the KB cases are not meaningful for that run.
+
+The same empty-snapshot state exists in production before the first warm and
+after a refresh that failed (it only logged). In that state every protocol
+question silently falls to the speech model and is answered from the model's
+memory. `/readyz` now carries a `knowledge_snapshot` check, degraded when
+Postgres is configured and the snapshot is empty, so the state is visible.
+
+**100 cases, knowledge anchor present** (runs: `runs/2026-09-17-*-kb-warm.json`):
+
+|                                   | Current (gpt-4.1-mini, cold) | Jev 1.13.0 |
+|-----------------------------------|-----------------------------:|-----------:|
+| Intent accuracy                   | **97/100**                   | 87/100 |
+| Reaching the model                | 67                           | 55 |
+| Latency, model-decided, p50 / p95 | ~980 / 2660 ms               | 960 / 1085 ms |
+| Calibration                       | n/a                          | [0.9–1.0] 98% of 44 · below 0.9: 25 cases, 56% |
+
+The current backend's three remaining misses: two rules-decided cases to
+settle with the user ("recent activity for this wallet", "open perps for
+<address>") and "freeze authority on <mint>" (`general`). Jev's ten extra
+misses are unchanged in kind: right act under the 0.90 gate on terse
+prompts, plus `advice` for "is X safe" and `quote` @0.42 for "can I sell".
+The `explain`-to-`research` mapping change considered earlier is not needed
+and was not made.

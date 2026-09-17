@@ -253,6 +253,7 @@ def run_resolve_mode(cases, backend: str = "current"):
     else:
         call_lm = runtime._call_intent_lm
     resolver._understanding_cache.clear()   # a prior backend's answers must not be reused
+    warm_knowledge_snapshot()
 
     rows, agg = [], {"n": 0, "ok": 0, "methods": {}, "latency": [], "model_decided": []}
     for c in cases:
@@ -316,6 +317,26 @@ def run_resolve_mode(cases, backend: str = "current"):
     return {"mode": "resolve", "metrics": metrics, "rows": rows}
 
 
+def warm_knowledge_snapshot() -> int:
+    """The router's knowledge-base anchor reads an in-memory resolver snapshot
+    that the app warms at startup; a bare process has none, so every KB ask
+    fell to the model and the harness measured a router missing its anchor
+    (three 'shared misses' that were this, not routing). Warm it as the app
+    does and say how many entities it holds -- zero means the KB anchor is
+    absent from this run and its cases are not meaningful."""
+    import asyncio
+    from app.knowledge import tool as kb_tool
+    try:
+        asyncio.run(kb_tool.resolver(force=True))
+    except Exception as e:
+        print(f"knowledge snapshot: EMPTY ({str(e)[:60]}) -- the KB anchor is absent from this run")
+        return 0
+    res = kb_tool.snapshot()
+    n = len(res) if res is not None else 0
+    print(f"knowledge snapshot: {n} entities" + ("" if n else " -- the KB anchor is absent from this run"))
+    return n
+
+
 # -------------------------------------------------------------- disagree mode
 
 def run_disagree_mode(prompts_path: str):
@@ -332,6 +353,7 @@ def run_disagree_mode(prompts_path: str):
     from app.routing.semantic import embedding_router
     from app.settings import settings
 
+    warm_knowledge_snapshot()
     prompts = json.loads(Path(prompts_path).read_text())
     if prompts and isinstance(prompts[0], str):
         prompts = [{"query": p, "source": "list"} for p in prompts]
