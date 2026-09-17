@@ -658,6 +658,9 @@ async def public_config():
             "product_name": settings.product_name,
             "trial_credits": billing_plans.ANONYMOUS.trial_credits,
             "email_configured": bool(settings.resend_api_key),
+            # The browser hides prices and purchase controls, and says so.
+            "closed_beta": settings.closed_beta,
+            "closed_beta_monthly_credits": settings.closed_beta_monthly_credits if settings.closed_beta else None,
         },
         "execution_policy": {
             "live_trading": settings.live_trading,

@@ -7,6 +7,12 @@ class Settings(BaseSettings):
     model: str = "openai/gpt-4.1-mini"
     openai_api_key: str | None = None
     typesafe_api_key: str | None = None            # Jev routing backend, harness-only until it earns a place
+    # Closed beta: no payments, every signed-in account on the free Beta plan.
+    # Billing reports itself unconfigured whatever Stripe settings exist, the
+    # UI shows no prices or purchase controls, and the monthly allowance is
+    # the beta one. Off by default so nothing changes for existing setups.
+    closed_beta: bool = False
+    closed_beta_monthly_credits: int = 5000
     # LLM-hop resilience (app/nodes/runtime.py `_call_lm`). Without an explicit
     # timeout litellm waits up to 600s on a wedged provider call; retries below
     # are litellm's own exponential-backoff attempts against the SAME model, and

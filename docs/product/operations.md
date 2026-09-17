@@ -150,3 +150,53 @@ The default task worker claims occurrences before evaluation; a stale 15-minute 
 | Root-level pytest aborts during collection | Use `pytest -q tests`; see the live smoke-script finding in [verification](development.md) |
 
 Source: [settings](../../app/settings.py), [Dockerfile](../../Dockerfile), [Compose](../../docker-compose.yml), [production overlay](../../docker-compose.prod.yml), [ingester](../../scripts/kb_ingest.py), [production gates](../production-operations.md).
+
+## Closed beta: free, unlisted, on a VPS you control
+
+The decision of 2026-09-17: no payments, every signed-in account on the free
+Beta plan, open (unlisted) sign-up, execution on with signing only in the
+user's own wallet. Everything below is one env file on top of the existing
+compose stack. (The template lives under `deploy/`, not as a `.env.*` file: the secrets scan treats any tracked `.env.*` as live configuration, by design.)
+
+**What the flag does.** `CLOSED_BETA=true` makes `billing.configured()`
+answer false whatever Stripe settings exist (every billing endpoint answers
+503, account deletion has no subscription to cancel), puts every signed-in
+account on the `beta` plan (`CLOSED_BETA_MONTHLY_CREDITS`, default 5,000,
+API keys, MCP, the trading desk; the anonymous trial stays the trial), and
+tells the browser through `/config/public`, which hides every price and
+purchase control and turns the plans dialog into a note. The monthly grant is
+keyed by plan id, so a tester who already drew Free's allowance this month
+gets the beta one at once. Off by default; nothing changes for other setups.
+
+**Bring-up, in order.**
+
+1. Host: a VPS with Docker, DNS for `ORBIT_DOMAIN` pointing at it, ports 80
+   and 443 open. Caddy obtains the certificate.
+2. `cp deploy/beta.env.example .env` and fill every value marked with a comment. `SOLANA_PRIVATE_KEY`
+   must be absent. The template passes the production audit once filled;
+   the audit refuses to boot on any unsafe value and names them all.
+3. `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`.
+   Postgres is the pgvector image (the knowledge base stores native vectors
+   with it); Redis is `noeviction`; the API is read-only, non-root, behind
+   Caddy only.
+4. `curl -s https://$ORBIT_DOMAIN/readyz | jq` -- `status: ready`, no
+   `failed`; `degraded` may list `knowledge_snapshot` until step 5 and
+   `knowledge_ingest` (off by decision; a disabled worker, not a dead one).
+5. Knowledge base: bulk-load once from the host, in its own process --
+   `docker compose exec api python scripts/kb_ingest.py` (see "Knowledge
+   Base preparation" above). The snapshot warms within two minutes and
+   `knowledge_snapshot` reports its entity count.
+6. Sign in with your own email, confirm the magic link arrives, confirm the
+   plan reads Beta with 5,000 credits, confirm the plans dialog shows the
+   beta note and no prices. Then share the URL with the group.
+
+**What to watch during the beta.** `/readyz` for degraded checks; the admin
+page's accounts and credit usage (a runaway tester shows up as credit burn);
+`research_gaps` for turns that fell through to web search -- that log is the
+next round of routing-eval cases (`scripts/routing_eval/collect.py --gaps 7`).
+Provider bills: the per-turn paid-data cap and the per-IP trial budgets stay
+on precisely because sign-up is open.
+
+**To turn swaps off** at any point: `DEPLOYMENT_MODE=research` and
+`LIVE_TRADING=false`, restart. The browser hides the swap surfaces from
+`/config/public`, and the server refuses the routes.

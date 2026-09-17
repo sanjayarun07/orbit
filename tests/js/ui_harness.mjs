@@ -678,7 +678,28 @@ const CASES = {
       evm: probe("0x" + "ab".repeat(20)),
     };
   },
+
+  /** Closed beta: the public config's flag hides every purchase control and
+   *  turns the plans dialog into a note. `on` is "true"/"false". */
+  async closed_beta_hides_purchase_controls() {
+    return runClosedBeta(true);
+  },
+  async purchase_controls_show_when_billing_is_open() {
+    return runClosedBeta(false);
+  },
 };
+
+async function runClosedBeta(on) {
+  const { dom, sandbox, getScriptVar } = load();
+  const controls = ["plansBtn", "buyCreditsBtn", "changePlanBtn"];
+  for (const id of controls) dom.query("#" + id).hidden = false;
+  sandbox.applyClosedBeta({ accounts: { closed_beta: on, closed_beta_monthly_credits: on ? 5000 : null } });
+  const hidden = Object.fromEntries(controls.map(id => [id, dom.query("#" + id).hidden]));
+  const fetched = [];
+  sandbox.fetch = async (url) => { fetched.push(String(url)); return { ok: true, status: 200, json: async () => ({ plans: [], packs: [], configured: false }) }; };
+  await sandbox.openPlans();
+  return { hidden, plansBody: dom.query("#plansBody").innerHTML.slice(0, 200), plansFetched: fetched.some(u => u.includes("/billing/plans")), closedBeta: getScriptVar("closedBeta") };
+}
 
 function answer(ok, body = {}) {
   return { ok, status: ok ? 200 : 503, json: async () => (ok ? body : { detail: "QA failure" }) };

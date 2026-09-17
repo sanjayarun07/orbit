@@ -72,7 +72,16 @@ MAX = Plan(
     features=("7,500 credits / month", "Everything in Pro", "Higher rate limits", "Team: up to 5 members share the credit pool", "Priority support"),
 )
 
-PLANS: dict[str, Plan] = {plan.id: plan for plan in (ANONYMOUS, FREE, PRO, MAX)}
+# The closed-beta plan: free, generous, every entitlement a tester needs to
+# exercise the product (API keys, MCP, the trading desk). Only reachable when
+# settings.closed_beta is on; never purchasable.
+BETA = Plan(
+    "beta", "Beta", 0.0, settings.closed_beta_monthly_credits, api_keys=True, mcp=True, team_mode=True,
+    chat_requests_per_minute=30,
+    features=(f"{settings.closed_beta_monthly_credits:,} credits / month, free during the beta", "Conversation history",
+              "Wallet connection and trade review", "Risk charter", "API keys and MCP access", "Trading desk (team mode)"),
+)
+PLANS: dict[str, Plan] = {plan.id: plan for plan in (ANONYMOUS, FREE, PRO, MAX, BETA)}
 PAID_PLAN_IDS = ("pro", "max")
 
 
@@ -110,9 +119,19 @@ def get_pack(pack_id: str | None) -> Pack | None:
 
 
 def get_plan(plan_id: str | None) -> Plan:
-    return PLANS.get(plan_id or "", FREE)
+    plan = PLANS.get(plan_id or "", FREE)
+    # In the closed beta every signed-in account is on the Beta plan, however
+    # its row is labelled: a Free row from before, a Pro/Max row an admin set,
+    # a stale subscription. The anonymous trial stays the trial. The monthly
+    # grant is keyed by plan id, so a tester who already drew Free's allowance
+    # this month gets the beta one at once.
+    if settings.closed_beta and plan.id != ANONYMOUS.id:
+        return BETA
+    return plan
 
 
 def catalog() -> list[dict]:
     """The plans a signed-in user can be on (the trial is not a choice)."""
+    if settings.closed_beta:
+        return [BETA.public()]
     return [plan.public() for plan in (FREE, PRO, MAX)]

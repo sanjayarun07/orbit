@@ -34,7 +34,11 @@ services:
           memory: 2g
 
   postgres:
-    image: postgres:16-alpine
+    # pgvector's Postgres 16 image: the knowledge base stores embeddings as
+    # native vectors when the extension exists and falls back to a slower
+    # non-native path when it does not. Same data directory layout as
+    # postgres:16, so an existing volume keeps working.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: orbit
       POSTGRES_DB: orbit

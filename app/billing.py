@@ -116,6 +116,12 @@ def _api_construct_event(payload: bytes, signature: str) -> dict:
 
 
 def configured() -> bool:
+    # A closed beta has no payments at all, whatever Stripe settings exist:
+    # every billing endpoint answers "not configured" and the UI shows no
+    # purchase controls. Deleting an account then has no subscription to
+    # cancel (a Beta plan has no Stripe id).
+    if settings.closed_beta:
+        return False
     return bool(settings.stripe_secret_key)
 
 
