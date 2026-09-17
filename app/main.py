@@ -358,6 +358,7 @@ async def readyz(response: Response):
         response.status_code = 503
     return {"status": status, "failed": failed, "degraded": degraded, "checks": checks,
             "live_trading": settings.live_trading, "version": _release_version(),
+            "routing_backend": settings.routing_backend,
             "environment": settings.environment,
             "deployment": deployment.public_status(),
             # Warnings only: anything fatal stopped the process at startup, so a

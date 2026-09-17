@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     # the beta one. Off by default so nothing changes for existing setups.
     closed_beta: bool = False
     closed_beta_monthly_credits: int = 5000
+    # What answers the routing classification seam: speech_model (default),
+    # jev, or jev_fallthrough (Jev when confident, else the speech model).
+    # See app/routing/backends.py. A production instance on a jev backend
+    # without TYPESAFE_API_KEY refuses to boot.
+    routing_backend: str = "speech_model"
     # LLM-hop resilience (app/nodes/runtime.py `_call_lm`). Without an explicit
     # timeout litellm waits up to 600s on a wedged provider call; retries below
     # are litellm's own exponential-backoff attempts against the SAME model, and

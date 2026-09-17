@@ -348,3 +348,44 @@ balances tool's keywords tipped it over its sibling on an existing case.
 Gates decide reachability; keywords are not the place to fix ranking.
 
 Router mode: **66/66 top-1, 97% recall@8, 0 forbidden@1** (was 56/66).
+
+## Round two, and the deployable A/B build
+
+Jev's `abstain` criterion was narrowed ("ONLY when the act itself cannot be
+determined ... a terse, slang or fragmentary request is NOT abstain") and the
+criteria block cut from ~900 to ~590 tokens; the instructions now say that
+short, casual messages are normal, not ambiguous. Same 100 cases, knowledge
+anchor present:
+
+|                                   | Current (gpt-4.1-mini, cold) | Jev round 1 | Jev round 2 |
+|-----------------------------------|-----------------------------:|------------:|------------:|
+| Intent accuracy                   | 98                           | 87          | **91** |
+| Answers at >=0.9 confidence       | n/a                          | 98% of 44 right | **100% of 49 right** |
+| Model-call latency p50 / p95      | 1.1 / 1.8 s                  | 1.0 / 1.1 s | 0.94 / 1.24 s |
+
+Runs: `runs/2026-09-17-*-round2.json`. The rewording did what it was meant
+to: more answers above the gate, all of them right. The remaining misses are
+the same terse asks at 0.5-0.8 ("background on Berachain" 0.52, "Fed decision
+impact" 0.49), plus "is X safe" as `advice`.
+
+That shape decides the build. `ROUTING_BACKEND` (app/routing/backends.py)
+selects what answers the classification seam:
+
+- `speech_model` -- the default, unchanged.
+- `jev` -- Jev decides; a Jev outage hands the turn to the speech model.
+- `jev_fallthrough` -- Jev decides when its confidence is at or above the
+  resolver's threshold (0.90) and it is not abstaining; otherwise the speech
+  model decides. The variant the measurements recommend.
+
+Every turn's `intent_decision` log line carries `routing_backend` and
+`decided_by` (`jev`, `speech_model:jev_uncertain`, `speech_model:jev_unavailable`,
+or `none` for a cached or rule-anchored decision), and `/readyz` reports the
+configured backend, so two instances on two domains can be compared from
+their logs: share of turns Jev decided, and -- joined with `research_gaps`
+and the user's follow-ups -- whether those turns went better or worse. The
+audit refuses a production instance on a jev backend without
+`TYPESAFE_API_KEY`. Whatever the backend, `explicit_action` is enforced in
+code and nothing at this seam can authorize a swap.
+
+To run the B instance: a second stack on its own domain with the same
+template and `ROUTING_BACKEND=jev_fallthrough`, `TYPESAFE_API_KEY` set.

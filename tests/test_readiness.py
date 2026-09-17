@@ -115,7 +115,10 @@ def test_a_slow_dependency_fails_the_probe_instead_of_hanging_it(monkeypatch):
 
 
 def test_an_optional_worker_being_down_is_degraded_not_unready(monkeypatch):
-    """The knowledge ingester is off by default; that must not stop traffic."""
+    """An optional worker that exited while ENABLED is down: degraded, never
+    unready. (Exited because its flag is off is 'disabled', ok -- see
+    tests/test_readyz_knowledge.py.)"""
+    monkeypatch.setattr(main.settings, "knowledge_ingest_enabled", True)
     for name in main._REQUIRED_WORKERS:
         monkeypatch.setitem(main._workers, name, _FakeTask())
     monkeypatch.setitem(main._workers, "knowledge_ingest", _FakeTask(done=True))

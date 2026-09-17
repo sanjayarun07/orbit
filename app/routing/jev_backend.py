@@ -30,28 +30,33 @@ from app.settings import settings
 JEV_URL = "https://api.typesafe.ai/v1/systemone"
 DEFAULT_MODEL = "jev-latest"
 
-# Verbatim from app/routing/model.py SpeechResolution, one entry per option.
+# The SpeechResolution signature's definitions, one entry per option, kept to
+# a line each: the first round sent ~900 tokens of criteria per call and
+# measured Jev putting 0.4-0.7 of its mass on `abstain` for terse prompts
+# ("hot metas right now", "honeypot check") -- the long abstain text read as
+# "anything short is unclear". Abstain is now defined narrowly and the
+# instructions say what to do with a fragment: classify it.
 SPEECH_ACTS = {
-    "quote": "An explicit request to prepare a swap -- not advice, a hypothetical, a conditional order, a question about how to trade, or buy/sell market volume.",
-    "advice": "A request for an opinion, recommendation or judgment about an asset: 'Should I buy BONK?', 'thoughts on HYPE?', 'is it worth holding SOL?', 'is X a good buy', 'compare BONK and WIF for me'.",
-    "research": "A factual lookup about markets, tokens, protocols, wallets, news or prices: 'why is PEPE dumping', 'best exchange for SOL', 'what would it cost to bridge 1 ETH to Base'.",
-    "explain": "A request to understand a concept or how something works, with no specific asset to look up: 'explain what TVL means', 'how do perpetual futures work?', 'How do I trade meme coins?'.",
-    "portfolio": "Anything about the user's OWN holdings, balances, exposure or activity: 'what's my exposure to SOL', 'how much SOL do I have', 'should I sell everything and go to stables?'.",
-    "policy": "A question about THIS assistant's own trading limits, safety rules or risk settings for the user: 'my wallet policy?', 'max spend policy?', 'what are my trading limits', 'what is my risk charter'. It asks about configured rules, not about holdings.",
-    "abstain": "The act itself is unclear: negated, conditional, mixed, or ambiguous. A casual or slang phrasing is NOT ambiguity.",
+    "quote": "An explicit, unconditional request to prepare a swap now ('swap 1 SOL to USDC'). Not advice, a hypothetical, a condition, or a how-to question.",
+    "advice": "Asks for an opinion or recommendation about an asset: 'Should I buy BONK?', 'thoughts on HYPE?', 'is X a good buy'.",
+    "research": "A factual lookup: markets, tokens, protocols, wallets, news, prices, on-chain data. 'why is PEPE dumping', 'best exchange for SOL', 'hot metas right now', 'honeypot check 0x...'.",
+    "explain": "Asks how a concept works, naming no specific asset to look up: 'explain what TVL means', 'how do perpetual futures work?'.",
+    "portfolio": "About the user's OWN holdings, balances, exposure or activity: 'how much SOL do I have', 'what's my exposure to SOL'.",
+    "policy": "About THIS assistant's own trading limits or risk settings: 'what are my trading limits', 'what is my risk charter'.",
+    "abstain": "ONLY when the act itself cannot be determined: an action that is negated ('don't buy'), conditional ('buy if it dips'), or two acts mixed. A terse, slang or fragmentary request is NOT abstain -- it has an act; classify it.",
 }
 DOMAINS = {
-    "crypto": "Cryptocurrencies, tokens, coins, chains, DeFi protocols, on-chain activity, DEXes and bridges.",
-    "equity": "Stocks, shares, listed companies and exchange tickers. 'Buy NVDA' is equity research; this application does not execute stock orders.",
+    "crypto": "Cryptocurrencies, tokens, chains, DeFi protocols, DEXes, bridges, on-chain data. The default for any coin, token, mint or contract address.",
+    "equity": "Stocks, shares, listed companies, stock tickers, earnings. Only when the subject is a company's stock, not a token.",
     "wallet": "The user's own wallet, addresses, holdings or balances.",
-    "general": "None of the above: conversation, greetings, or a concept with no market domain.",
+    "general": "No market subject at all: greetings, chit-chat, or a concept with no asset or market in it.",
 }
 
 
 def questions() -> dict:
     return {
-        "speech_act": {"type": "choice", "instructions": "Classify the CURRENT utterance's speech act. Never authorize execution; context can resolve an entity but cannot supply consent.", "criteria": SPEECH_ACTS},
-        "domain": {"type": "choice", "instructions": "Which domain is the utterance about?", "criteria": DOMAINS},
+        "speech_act": {"type": "choice", "instructions": "Classify the speech act of this message. Most messages are short and casual; that is normal, not ambiguous -- pick the act they most plausibly perform. Never authorize execution.", "criteria": SPEECH_ACTS},
+        "domain": {"type": "choice", "instructions": "Which domain is the message about? A token, coin, mint or contract address is crypto; a company's stock is equity.", "criteria": DOMAINS},
         "explicit_action": {"type": "noul", "instructions": "Is this an explicit, unconditional request to prepare a crypto swap right now (not a hypothetical, a condition, a question about how, or a request for advice)?",
                             "criteria": {"true": "Explicit crypto quote request", "false": "Anything else, including negated, conditional, mixed or unclear actions"}},
     }

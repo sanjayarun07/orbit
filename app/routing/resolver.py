@@ -28,6 +28,7 @@ from collections import OrderedDict
 from app.settings import settings
 from . import lexicon as lx
 from .contracts import CapabilityRoute
+from .decided import decided_by
 from .controls import is_trade_cancellation, is_trade_confirmation, is_trade_modifier
 from .entities import extract_chains
 from .intent_router import route_capabilities, plan_execution_route, default_capabilities
@@ -254,6 +255,10 @@ async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> d
 
     metadata["method"] = update.get("route_source", metadata["method"])
     metadata["intent"] = update["intent"]
+    # Provenance for an A/B of routing backends: which backend is configured
+    # and which one actually decided this turn (none: cache or rules).
+    metadata["routing_backend"] = settings.routing_backend
+    metadata["decided_by"] = decided_by.get()
     logging.getLogger("orbit.routing").info("intent_decision %s", json.dumps(metadata, sort_keys=True))
     update["routing_decision"] = metadata
     return update

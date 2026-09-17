@@ -193,6 +193,17 @@ def audit(config: Settings | None = None) -> list[ConfigProblem]:
             "Set DEPLOYMENT_MODE explicitly in production.",
         )
 
+    backend = (getattr(config, "routing_backend", None) or "speech_model").strip()
+    if backend not in ("speech_model", "jev", "jev_fallthrough"):
+        add("routing-backend-unrecognised", FATAL, "ROUTING_BACKEND",
+            f"{backend!r} is not a routing backend. Use speech_model, jev, or jev_fallthrough.")
+    elif backend.startswith("jev") and not getattr(config, "typesafe_api_key", None):
+        # In production this is a vendor the router depends on with no way to
+        # reach it: every turn would fall through to the speech model and the
+        # A/B would silently measure nothing. In development, a warning.
+        add("routing-backend-key-missing", FATAL if production else WARNING, "TYPESAFE_API_KEY",
+            f"ROUTING_BACKEND={backend} needs TYPESAFE_API_KEY; without it every turn falls through to the speech model.")
+
     if config.live_trading and config.solana_private_key and not getattr(config, "allow_custodial_signing", False):
         add(
             "custodial-key-present", FATAL, "SOLANA_PRIVATE_KEY",
