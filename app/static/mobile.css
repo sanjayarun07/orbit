@@ -82,6 +82,17 @@
   .tabs.fade-left.fade-right { -webkit-mask-image: linear-gradient(90deg, transparent, #000 36px, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(90deg, transparent, #000 36px, #000 calc(100% - 36px), transparent); }
   .tab { scroll-snap-align: start; padding: 10px 12px; font-size: 13px; }
   .field input, .field select, .field textarea { min-height: 44px; }
+  /* Settings › Account rows: the label never breaks mid-phrase; a long value
+     (a linked wallet with its status) drops under it, right-aligned. */
+  .account-row { flex-wrap: wrap; row-gap: 4px; }
+  .account-row > :first-child { flex: 0 0 auto; white-space: nowrap; }
+  .account-row > :last-child { margin-left: auto; text-align: right; min-width: 0; overflow-wrap: anywhere; }
+  .account-row:has(#accountWallets) { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .account-row:has(#accountWallets) > :last-child { margin-left: 0; text-align: left; }
+  .settings-signin { padding: 20px 0; }           /* on the sheet's own gutter, not 4px inside it */
+  .stat-grid { grid-template-columns: 1fr 1fr; }
+  .stat-grid .stat:last-child:nth-child(odd) { grid-column: 1 / -1; }   /* no orphan card in a two-column grid */
+  .wallet-button { max-width: 210px; font-size: 13px; }
   .key-create { flex-direction: column; }
   .key-create input, .key-create button { width: 100%; }
   /* Sidebar drawer: the whole height, inside the insets, with the account row reachable. */
