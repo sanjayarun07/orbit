@@ -1216,6 +1216,40 @@ async def _synthesize_knowledge(request: str, passages: str, history: str) -> st
     return answer
 
 
+async def _gather_planned(request: str, capabilities: tuple[str, ...], chains: tuple[str, ...], state: AgentState) -> dict | None:
+    """Run the router's multi-tool plan when it has more than one tool;
+    None when a single tool is the plan (the ordinary route decides) or
+    fewer than two tools produced usable output."""
+    router = get_provider_router()
+    try:
+        plan = await asyncio.to_thread(router.plan_across, request, capabilities, chains)
+    except Exception:
+        logger.warning("multi-tool plan failed; single route", exc_info=True)
+        return None
+    if len(plan) < 2:
+        return None
+
+    async def one(tool):
+        try:
+            return await asyncio.to_thread(router.invoke, tool.name, request, chains)
+        except Exception:
+            logger.warning("planned tool %s failed", tool.name, exc_info=True)
+            return None
+
+    results = [r for r in await asyncio.gather(*(one(t) for t in plan)) if r is not None and r.output]
+    if len(results) < 2:
+        return None
+    parts = []
+    for result in results:
+        card = result.output
+        if result.tool == "knowledge_base_search":
+            card = await _synthesize_knowledge(request, result.output, state.get("history", ""))
+        parts.append((card, _provider_trajectory(result, request, "/".join(capabilities))))
+    cards, trajectory = composition.combine(parts)
+    answer = await composition.synthesize(request, cards, trajectory)
+    return {"answer": answer, "trajectory": {"thought_0": f"The request spans {len(results)} tools; run together and read together.", **trajectory}}
+
+
 async def research_node(state: AgentState) -> dict:
     sink: dict = {}
     request = _effective_request(state)
@@ -1512,6 +1546,14 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
             },
         }
     if eligible_capabilities:
+        # Several tools when the request needs them: the router plans the
+        # best tool plus the ones that claim this request and add ground
+        # (a security dossier AND the market overview for "is BONK safe");
+        # they run together and are read together. One tool when one is
+        # enough. Every invocation charges the per-turn budget as before.
+        gathered = await _gather_planned(request, eligible_capabilities, chains, state)
+        if gathered is not None:
+            return gathered
         result = await asyncio.to_thread(
             get_provider_router().try_route_across,
             request,

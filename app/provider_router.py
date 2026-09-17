@@ -557,6 +557,45 @@ class ProviderRouter:
             lambda: self._ranked_union(request, caps, chains, provider),
         )
 
+    def plan_across(
+        self,
+        request: str,
+        capabilities: tuple[str, ...],
+        chains: tuple[str, ...] = (),
+        limit: int = 3,
+    ) -> list[ProviderTool]:
+        """The tools one request should run, best first: the top-ranked tool,
+        then up to `limit - 1` more that (a) claim this request through their
+        OWN matcher -- never a catch-all riding along on its capability --
+        and (b) add ground the chosen set does not cover, by catalog
+        dimension (liquidity, holders, security, ...) or, without a spec, by
+        capability. "Is BONK safe" is a security dossier AND the market
+        overview the same mint resolves; "price of SOL" is one tool, because a
+        second price tool covers the same ground. Cost stays bounded by
+        `limit` and the per-turn budget every invocation charges."""
+        caps = tuple(dict.fromkeys(capabilities))
+        if not caps:
+            return []
+        ranked = self._ranked_union(request, caps, chains, None)
+        chosen: list[ProviderTool] = []
+        covered: set[str] = set()
+
+        def ground(tool: ProviderTool) -> set[str]:
+            dims = set(tool.spec.dimensions) if tool.spec is not None and tool.spec.dimensions else set()
+            return dims or set(tool.capabilities)
+
+        for tool in ranked:
+            if chosen:
+                if tool.matches is _always_match or not tool.matches(request):
+                    continue
+                if ground(tool) <= covered:
+                    continue
+            chosen.append(tool)
+            covered |= ground(tool)
+            if len(chosen) >= max(1, limit):
+                break
+        return chosen
+
     def _route_ranked(self, request, cache_capability, ranked_candidates):
         """Shared executor for try_route/try_route_across: cache + inflight
         coalescing, then attempt the ranked candidates best-first with the
