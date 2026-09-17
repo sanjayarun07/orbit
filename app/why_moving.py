@@ -22,9 +22,12 @@ logger = logging.getLogger(__name__)
 
 # "why is SOL down today", "why did $BONK pump", "why USELESS token was pumping
 # this week", "why has ETH been rallying": the verb may precede the symbol,
-# follow it, or be missing; the direction word takes any tense.
+# follow it, or be missing; the direction word takes any tense. Anywhere in
+# the message, not only at its start: "today market trend on crypto. why zec
+# is pumping" carried the question at the end and, anchored, it was never
+# seen -- the answer was a market brief that did not mention ZEC.
 PATTERN = re.compile(
-    r"^\s*(?:so\s+)?why\s+(?:(?:is|did|has|have|are|was|were|does|do)\s+)?(?:the\s+)?\$?(?P<sym>[A-Za-z][A-Za-z0-9]{1,9})"
+    r"(?<![A-Za-z])(?:so\s+)?why\s+(?:(?:is|did|has|have|are|was|were|does|do)\s+)?(?:the\s+)?\$?(?P<sym>[A-Za-z][A-Za-z0-9]{1,9})"
     r"(?:\s+(?:token|coin|stock|price|shares?))?(?:\s+(?:is|was|were|has\s+been|have\s+been|been|did|does|keeps?|kept))?\s+"
     r"(?P<dir>moving|up|down|pump(?:ing|ed|s)?|dump(?:ing|ed|s)?|rally(?:ing|ied|ies)?|falling|fell|crash(?:ing|ed)?|surg(?:ing|ed|es)?|"
     r"dropp?(?:ing|ed|s)?|rising|rose|tank(?:ing|ed)?|spik(?:ing|ed)?|jump(?:ing|ed)?|moon(?:ing|ed)?|soar(?:ing|ed)?|bleed(?:ing)?|"
@@ -48,7 +51,7 @@ _MIN_ORGANIC = 40
 
 
 def match(request: str) -> tuple[str, str] | None:
-    m = PATTERN.match(request or "")
+    m = PATTERN.search(request or "")
     if not m:
         return None
     sym = m.group("sym").upper()
@@ -86,7 +89,32 @@ async def _crypto_identity(sym: str) -> dict | None:
                 continue  # a namesake with no market is not "the token"
             return {"name": item.get("name") or sym, "symbol": sym, "mint": item.get("id"), "price": item.get("usdPrice"),
                     "change_24h": stats.get("priceChange"), "volume_24h": volume or None}
-    return None
+    # Not a major and not a Solana token: a coin on another chain (Zcash, say)
+    # used to fall through to the stock path. CoinGecko's search is ranked, and
+    # only a hit inside the top market-cap ranks counts: NVDA and TSLA also
+    # have exact-symbol hits there, tokenized-stock wrappers ranked 796 and
+    # below, and those must keep going to the stock path.
+    return await _coingecko_identity(sym)
+
+
+_MAX_COINGECKO_RANK = 250
+
+
+async def _coingecko_identity(sym: str) -> dict | None:
+    try:
+        found = await asyncio.to_thread(market_overview._get_json, f"{market_overview._CG}/search?query={sym}")
+        coin = next((c for c in (found or {}).get("coins", [])
+                     if str(c.get("symbol") or "").upper() == sym and (c.get("market_cap_rank") or 10**6) <= _MAX_COINGECKO_RANK), None)
+        if not coin:
+            return None
+        cid = coin["id"]
+        data = await asyncio.to_thread(market_overview._get_json, f"{market_overview._CG}/simple/price?ids={cid}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true")
+        entry = (data or {}).get(cid) or {}
+        return {"name": coin.get("name") or sym, "symbol": sym, "coingecko_id": cid, "price": entry.get("usd"),
+                "change_24h": entry.get("usd_24h_change"), "volume_24h": entry.get("usd_24h_vol")}
+    except Exception:
+        logger.debug("why_moving: coingecko search failed for %s", sym, exc_info=True)
+        return None
 
 
 def _market_section(identity: dict) -> list[str]:

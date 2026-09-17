@@ -115,3 +115,69 @@ def test_namesake_memecoins_do_not_count_as_the_token(monkeypatch):
     monkeypatch.setattr(why_moving.jupiter, "search_tokens", fake_search)
     assert asyncio.run(why_moving._crypto_identity("NVDA")) is None
     assert why_moving.prefers_stock("why is NVDA stock up") and not why_moving.prefers_stock("why is SOL down")
+
+
+# --- 2026-09-17: "today market trend on crypto. why zec is pumping" ----------
+
+def test_why_moving_matches_anywhere_in_the_message_not_only_at_the_start():
+    """Anchored to the start, the question at the end of a compound message
+    was invisible, and the answer was a market brief that never mentioned ZEC."""
+    assert why_moving.match("today market trend on crypto. why zec is pumping") == ("ZEC", "up")
+    assert why_moving.match("tell me why BTC dumped") == ("BTC", "down")
+    assert why_moving.match("why is zec up today") == ("ZEC", "up")
+    # Still not a "why is X moving" ask: no symbol, or the market as a whole.
+    assert why_moving.match("why the market is red") is None
+    assert why_moving.match("the market is up") is None
+
+
+def test_a_market_trend_ask_is_a_market_overview_ask():
+    for hit in ("today market trend on crypto", "crypto market trends", "what's the trend in the market"):
+        assert research_mod._MARKET_OVERVIEW.search(hit), hit
+
+
+def test_a_compound_ask_gets_the_overview_and_the_asset_card(monkeypatch):
+    """Both halves answered: the overview card first, then why ZEC is moving,
+    with the trajectory carrying both."""
+    async def fake_compose(sym, direction, prefer_stock=False):
+        return f"# Why is {sym} {direction}?\ncard", {"tool_name_0": "market_data", "observation_0": "zec data"}
+
+    monkeypatch.setattr(research_mod.why_moving, "compose", fake_compose)
+    monkeypatch.setattr(research_mod, "crypto_market_overview", lambda query: "# Crypto market overview\noverview")
+    out = asyncio.run(research_mod.research_node({"request": "today market trend on crypto. why zec is pumping",
+                                                  "capabilities": ["web_research"], "chains": [], "history": "", "session_context": {}}))
+    assert out["answer"].startswith("# Crypto market overview") and "# Why is ZEC up?" in out["answer"]
+    assert out["answer"].index("overview") < out["answer"].index("Why is ZEC")
+    assert out["trajectory"]["tool_name_0"] == "crypto_market_overview" and out["trajectory"]["tool_name_1"] == "market_data"
+    # A plain overview ask is still just the overview.
+    only = asyncio.run(research_mod.research_node({"request": "how's the crypto market today",
+                                                   "capabilities": ["web_research"], "chains": [], "history": "", "session_context": {}}))
+    assert only["answer"].startswith("# Crypto market overview") and "Why is" not in only["answer"]
+
+
+def test_a_coin_on_another_chain_is_identified_through_coingecko_not_treated_as_a_stock(monkeypatch):
+    """ZEC is not a major in the table and not a Solana token, so it fell to
+    the stock path ('Why is ZEC stock pumping?')."""
+    async def no_jupiter(query):
+        return []
+
+    monkeypatch.setattr(why_moving.jupiter, "search_tokens", no_jupiter)
+    calls = []
+
+    def fake_get_json(url):
+        calls.append(url)
+        if "/search?query=ZEC" in url:
+            return {"coins": [{"id": "zcash", "name": "Zcash", "symbol": "zec", "market_cap_rank": 10},
+                              {"id": "binance-peg-zcash-token", "name": "Binance-Peg ZEC", "symbol": "zec", "market_cap_rank": None}]}
+        if "/search?query=NVDA" in url:
+            # CoinGecko's real exact-symbol hits for NVDA: tokenized-stock wrappers, ranked 796 and below.
+            return {"coins": [{"id": "nvidia-robinhood-tokenized-stock", "name": "NVIDIA • Robinhood Token", "symbol": "nvda", "market_cap_rank": 796}]}
+        if "ids=zcash" in url:
+            return {"zcash": {"usd": 412.5, "usd_24h_change": 18.4, "usd_24h_vol": 900_000_000}}
+        raise AssertionError(url)
+
+    monkeypatch.setattr(why_moving.market_overview, "_get_json", fake_get_json)
+    identity = asyncio.run(why_moving._crypto_identity("ZEC"))
+    assert identity["name"] == "Zcash" and identity["coingecko_id"] == "zcash" and identity["price"] == 412.5
+    assert identity["change_24h"] == 18.4 and any("/search?query=ZEC" in c for c in calls)
+    # A tokenized-stock wrapper is not "the coin": NVDA still goes to the stock path.
+    assert asyncio.run(why_moving._crypto_identity("NVDA")) is None

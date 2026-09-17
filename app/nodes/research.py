@@ -114,7 +114,9 @@ _MARKET_OVERVIEW = re.compile(
     r"|\bhow(?:'?s| is| are)\s+the\s+(?:crypto\s+)?markets?\b"
     r"|\bstate\s+of\s+the\s+(?:crypto\s+)?market\b"
     r"|\bwhat(?:'?s| is)\s+(?:happening|going\s+on)\s+(?:in|with)\s+(?:crypto|the\s+markets?)\b"
-    r"|\bgive\s+me\s+(?:a\s+|the\s+)?(?:crypto\s+)?market\b",
+    r"|\bgive\s+me\s+(?:a\s+|the\s+)?(?:crypto\s+)?market\b"
+    r"|\b(?:crypto\s+)?markets?\s+trends?\b"
+    r"|\btrends?\s+(?:in|on|of|for)\s+(?:the\s+)?(?:crypto\s+)?markets?\b",
     re.IGNORECASE,
 )
 
@@ -1207,6 +1209,15 @@ async def research_node(state: AgentState) -> dict:
     return result
 
 
+def _shift_trajectory(trajectory: dict, by: int) -> dict:
+    """Renumber `<key>_<n>` entries so a card's steps follow another's."""
+    out = {}
+    for key, value in trajectory.items():
+        m = re.fullmatch(r"(.+?)_(\d+)", key)
+        out[f"{m.group(1)}_{int(m.group(2)) + by}" if m else key] = value
+    return out
+
+
 async def _research_node(state: AgentState, sink: dict) -> dict:
     request = _effective_request(state)
     # A broad "how's the crypto market" ask -> the compact overview card, composed
@@ -1214,12 +1225,31 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     # routing sends it to a web/equity search) but gated so a chain-scoped,
     # token-specific, or "trending tokens" request still falls through to its
     # ranked-list tools.
-    if (
+    broad_market = bool(
         _MARKET_OVERVIEW.search(request)
         and not _TOKEN_ADDRESS.search(request)
         and not tuple(state.get("chains", []))
         and not TRENDING_TOKENS.search(request)
-    ):
+    )
+    # "why is SOL down?" -> the composed market + news card (crypto first, stock
+    # otherwise). Checked BEFORE the overview: a message can carry both ("today
+    # market trend on crypto. why zec is pumping"), and the specific question
+    # is the part a brief alone silently dropped. Both cards are then composed.
+    moving = why_moving.match(request)
+    if moving and not _TOKEN_ADDRESS.search(request):
+        prefer_stock = why_moving.prefers_stock(request) or "equity_research" in set(state.get("capabilities", []))
+        answer, trajectory = await why_moving.compose(*moving, prefer_stock=prefer_stock)
+        trajectory = {"thought_0": "A 'why is X moving' ask maps to the composed market + news card.", **trajectory} if trajectory else None
+        if broad_market:
+            overview = await asyncio.to_thread(crypto_market_overview, request)
+            answer = f"{overview}\n\n---\n\n{answer}"
+            trajectory = {
+                "thought_0": "A market-status ask that also asks why one asset is moving: the overview card, then that asset's card.",
+                "tool_name_0": "crypto_market_overview", "tool_args_0": {"query": request}, "observation_0": overview,
+                **_shift_trajectory(trajectory or {}, 1),
+            }
+        return {"answer": answer, "trajectory": trajectory}
+    if broad_market:
         observation = await asyncio.to_thread(crypto_market_overview, request)
         return {
             "answer": observation,
@@ -1238,12 +1268,6 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
             "thought_0": "A market-events ask maps to the dated calendar card.", "tool_name_0": "market_event_calendar",
             "tool_args_0": {"days": days}, "observation_0": json.dumps(data.get("events", [])[:20]),
         }}
-    # "why is SOL down?" -> the composed market + news card (crypto first, stock otherwise).
-    moving = why_moving.match(request)
-    if moving and not _TOKEN_ADDRESS.search(request):
-        prefer_stock = why_moving.prefers_stock(request) or "equity_research" in set(state.get("capabilities", []))
-        answer, trajectory = await why_moving.compose(*moving, prefer_stock=prefer_stock)
-        return {"answer": answer, "trajectory": {"thought_0": "A 'why is X moving' ask maps to the composed market + news card.", **trajectory} if trajectory else None}
     # A structured token due-diligence ask ("deep dive on X", "analyze X",
     # "thoughts on X") -> the multi-dimension analysis lens. Gated on a resolvable
     # token; a no-token analysis ask (or a bare single-metric lookup) falls through.
