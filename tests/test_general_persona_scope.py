@@ -8,8 +8,10 @@ from app.nodes.runtime import GeneralAnswer
 
 
 def test_the_general_persona_is_multi_chain_markets_not_solana_only():
-    doc = GeneralAnswer.__doc__
-    assert "across chains" in doc and "never frame the assistant as Solana-only" in doc
+    doc = " ".join(GeneralAnswer.__doc__.split())   # the docstring wraps; match on words, not line breaks
+    assert "across chains" in doc and "never frame the assistant as Solana-only or crypto-only" in doc
     assert "conceptual questions about Solana" not in doc
-    for scope in ("market data", "wallets", "news", "swaps"):
+    # Equities are a real capability (equity_research, the instrument registry,
+    # "why is NVDA moving"), so the persona names them too.
+    for scope in ("market data", "equities", "stocks", "wallets", "news", "swaps"):
         assert scope in doc, f"the persona no longer mentions {scope}"
