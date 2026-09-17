@@ -316,7 +316,15 @@ def _worker_health() -> list[dict]:
             state, ok = "cancelled", False
         elif task.done():
             exc = task.exception() if not task.cancelled() else None
-            state, ok = (f"stopped: {type(exc).__name__}" if exc else "stopped"), False
+            disabled_by = _DISABLED_BY_FLAG.get(name)
+            if exc is None and disabled_by is not None and disabled_by():
+                # It returned at once because its feature flag is off: an
+                # operator's decision, not a death. Reporting it as degraded
+                # made "turned off" and "died" indistinguishable on the one
+                # page that exists to tell them apart.
+                state, ok = f"disabled ({_DISABLED_FLAG_NAMES[name]}=false)", True
+            else:
+                state, ok = (f"stopped: {type(exc).__name__}" if exc else "stopped"), False
         else:
             state, ok = "running", True
         rows.append({"name": name, "ok": ok, "required": name in _REQUIRED_WORKERS, "detail": state})
@@ -324,6 +332,9 @@ def _worker_health() -> list[dict]:
 
 
 _REQUIRED_WORKERS = {"reconciliation", "relay_reconciliation", "tasks"}
+# Optional workers that exit immediately when their flag is off.
+_DISABLED_BY_FLAG = {"knowledge_ingest": lambda: not settings.knowledge_ingest_enabled}
+_DISABLED_FLAG_NAMES = {"knowledge_ingest": "KNOWLEDGE_INGEST_ENABLED"}
 
 
 @app.get("/readyz")

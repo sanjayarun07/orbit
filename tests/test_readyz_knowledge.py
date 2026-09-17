@@ -43,3 +43,32 @@ def test_without_postgres_there_is_no_knowledge_base_to_report_on(monkeypatch):
     monkeypatch.setattr(main, "get_pg_pool", AsyncMock(return_value=None))
     _, check = _check(TestClient(main.app), "knowledge_snapshot")
     assert check["ok"] is True and "not configured" in check["detail"]
+
+
+# --- a flag-disabled worker is not a dead one ---------------------------------
+
+def _finished_task():
+    async def done():
+        return None
+    import asyncio
+    loop = asyncio.new_event_loop()
+    try:
+        task = loop.create_task(done()); loop.run_until_complete(task)
+    finally:
+        loop.close()
+    return task
+
+
+def test_the_ingest_worker_switched_off_by_its_flag_reports_disabled_not_degraded(monkeypatch):
+    monkeypatch.setattr(main.settings, "knowledge_ingest_enabled", False)
+    monkeypatch.setitem(main._workers, "knowledge_ingest", _finished_task())
+    body, check = _check(TestClient(main.app), "knowledge_ingest")
+    assert check["ok"] is True and check["detail"] == "disabled (KNOWLEDGE_INGEST_ENABLED=false)"
+    assert "knowledge_ingest" not in body["degraded"]
+
+
+def test_the_ingest_worker_that_exited_while_enabled_is_still_reported_stopped(monkeypatch):
+    monkeypatch.setattr(main.settings, "knowledge_ingest_enabled", True)
+    monkeypatch.setitem(main._workers, "knowledge_ingest", _finished_task())
+    body, check = _check(TestClient(main.app), "knowledge_ingest")
+    assert check["ok"] is False and check["detail"] == "stopped" and "knowledge_ingest" in body["degraded"]
