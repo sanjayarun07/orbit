@@ -672,6 +672,28 @@ const CASES = {
     return runUseAddress("So11111111111111111111111111111111111111112");
   },
   /** Well-formed base58 of a plausible length that is not 32 bytes. */
+  // A freshly created API-key secret must not outlive the account that made
+  // it: signing out, or another account signing in on the same tab, clears it.
+  async api_key_secret_is_cleared_on_sign_out_and_account_switch() {
+    const { dom, sandbox, setScriptVar } = load();
+    let me = { authenticated: false, plan: {}, credits: {} };
+    sandbox.fetch = async (url, init = {}) => {
+      if (String(url) === "/me/api-keys" && init.method === "POST") return answer(true, { id: "k1", name: "Claude Desktop", secret: "orb_sk_SECRET123" });
+      if (String(url) === "/me/api-keys") return answer(true, { keys: [] });
+      if (String(url) === "/me") return answer(true, me);
+      return answer(true, {});
+    };
+    setScriptVar("account", { authenticated: true, user: { id: "u1" }, plan: { entitlements: { api_keys: true } }, credits: {} });
+    const box = dom.query("#apiKeySecret"), value = dom.query("#apiKeySecretValue");
+    await sandbox.createApiKey();
+    const shown = { hidden: box.hidden, value: value.textContent };
+    await sandbox.loadAccount();                                   // signed out (the /me stub says so)
+    const afterSignOut = { hidden: box.hidden, html: box.innerHTML, value: value.textContent };
+    me = { authenticated: true, user: { id: "u2" }, plan: { entitlements: { api_keys: true } }, credits: {} };
+    await sandbox.loadAccount();                                   // another account on the same tab
+    const afterSwitch = { hidden: box.hidden, html: box.innerHTML, value: value.textContent };
+    return { shown, afterSignOut, afterSwitch };
+  },
   // The app's height follows the stylesheet (100dvh) unless the keyboard is
   // up; a short reading at launch never leaves a dead band under the composer.
   async app_height_follows_the_stylesheet_unless_the_keyboard_is_up() {

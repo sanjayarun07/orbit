@@ -1350,7 +1350,10 @@ async def delete_my_account(body: DeleteAccountRequest, request: Request, respon
     # swallowed -- the user can retry, and their data is still intact.
     try:
         await billing.cancel_subscription_for(user)
-    except billing.SubscriptionCancelFailed as exc:
+        # ...and close every checkout the account could still pay: a session
+        # paid after the deletion would create a subscription no account maps to.
+        await billing.expire_open_checkouts_for(user)
+    except (billing.SubscriptionCancelFailed, billing.CheckoutCloseFailed) as exc:
         raise HTTPException(409, str(exc)) from exc
     _deleted, busy = await _delete_conversations_under_lease(user["id"])
     if busy:

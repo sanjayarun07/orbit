@@ -149,6 +149,7 @@ def test_account_deletion_cancels_the_subscription_first(monkeypatch):
     # Deletion now asks Stripe for every live subscription first (R05), so the
     # listing is stubbed too; here it agrees with the recorded id.
     monkeypatch.setattr(billing, "_api_list_active_subscriptions", lambda customer_id: [{"id": "sub_live", "status": "active"}])
+    monkeypatch.setattr(billing, "_api_list_open_checkouts", lambda customer_id: [])   # deletion also closes open checkouts (2026-09-18)
     monkeypatch.setattr(billing, "_api_cancel_subscription",
                         lambda sid: (cancelled.append(sid), {"id": sid, "status": "canceled"})[1])
 

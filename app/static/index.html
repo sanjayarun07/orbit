@@ -1584,6 +1584,7 @@ function renderCredits(){const chip=$("#creditsChip");if(!account){chip.hidden=t
 function renderAccount(){
   renderCredits();fillGreeting();refreshInboxBadge();loadHighlights();loadSuggestions();
   const signedIn=Boolean(account?.authenticated);const user=account?.user||{};
+  if(!signedIn||(apiKeySecretOwner&&apiKeySecretOwner!==user.id))clearApiKeySecret();
   $("#accountEmail").textContent=signedIn?(user.email||(account.wallets?.[0]?`Signed in with wallet ${shortAddr(account.wallets[0].address)}`:"Signed in")):"Not signed in";$("#accountEmail").classList.toggle("muted",!signedIn);
   $("#accountPlan").textContent=account?.plan?.name||"Trial";
   $("#accountWallets").textContent=signedIn&&account.wallets?.length?account.wallets.map(w=>`${w.address.slice(0,6)}…${w.address.slice(-4)}`).join(", "):"No wallets linked";
@@ -1684,7 +1685,7 @@ async function startSignin(){const email=$("#signinEmail").value.trim();const st
     else status.textContent=`Check ${data.email} for your sign-in link. It expires in 15 minutes.`;
   }catch(error){status.textContent=error.message;}finally{$("#signinSendBtn").disabled=false;}}
 async function verifySignin(token){const res=await fetch("/auth/email/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})});const data=await res.json();if(!res.ok)throw new Error(normalizeError(data,res.status));account=data;renderAccount();closeDialog("signinDialog");hydrateHistory();}
-async function signOut(){try{await fetch("/auth/signout",{method:"POST"});}catch{}setWalletDisconnected();await loadAccount();closeDialog("profileDialog");}
+async function signOut(){clearApiKeySecret();try{await fetch("/auth/signout",{method:"POST"});}catch{}setWalletDisconnected();await loadAccount();closeDialog("profileDialog");}
 function attachAccountNotice(el,detail,status){const body=$(".message-body",el);if(!body)return;const box=document.createElement("div");box.className="notice-actions";
   if(!detail||typeof detail!=="object"||detail.signed_in===false||detail.error==="sign_in_required"){const b=document.createElement("button");b.className="primary";b.type="button";b.textContent="Sign in with email";b.addEventListener("click",()=>openSignin(status===402?"You've used your trial credits. Sign in to get 100 free credits every month.":"Sign in to continue."));box.appendChild(b);}
   else{const b=document.createElement("button");b.className="primary";b.type="button";b.textContent="Plans & credits";b.addEventListener("click",openPlans);box.appendChild(b);}
@@ -1709,7 +1710,12 @@ async function startCheckout(kind,item,button){if(account&&!account.authenticate
   catch(error){button.disabled=false;button.insertAdjacentHTML("afterend",`<span class="muted" style="font-size:11px">${escapeHtml(error.message)}</span>`);}}
 async function loadApiKeys(){const list=$("#apiKeysList");try{const data=await (await fetch("/me/api-keys")).json();list.innerHTML=(data.keys||[]).filter(k=>!k.revoked_at).map(k=>`<div class="key-row"><span>${escapeHtml(k.name)} <code>${escapeHtml(k.prefix)}…</code> <code>${(k.scopes||[]).join(", ")}</code></span><button class="secondary danger" type="button" data-revoke="${k.id}">Revoke</button></div>`).join("")||'<div class="field-help">No keys yet.</div>';
   list.querySelectorAll("[data-revoke]").forEach(b=>b.addEventListener("click",async()=>{await fetch(`/me/api-keys/${b.dataset.revoke}`,{method:"DELETE"});loadApiKeys();}));}catch{list.innerHTML="";}}
-async function createApiKey(){const name=$("#apiKeyName").value.trim()||"API key";const secretBox=$("#apiKeySecret");try{const res=await fetch("/me/api-keys",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});const data=await res.json();if(!res.ok)throw new Error(normalizeError(data,res.status));
+// The one-time secret belongs to the account that created it: it is cleared the
+// moment that account is no longer the one on this tab (sign-out, or another
+// account signing in), so it cannot be read by whoever uses the tab next.
+let apiKeySecretOwner=null;
+function clearApiKeySecret(){const box=$("#apiKeySecret");if(!box)return;const value=$("#apiKeySecretValue");if(value)value.textContent="";box.hidden=true;box.textContent="";apiKeySecretOwner=null;}
+async function createApiKey(){const name=$("#apiKeyName").value.trim()||"API key";const secretBox=$("#apiKeySecret");apiKeySecretOwner=account?.user?.id||null;try{const res=await fetch("/me/api-keys",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});const data=await res.json();if(!res.ok)throw new Error(normalizeError(data,res.status));
   secretBox.hidden=false;secretBox.innerHTML=`Copy this key now — it is shown once.<br><code id="apiKeySecretValue"></code> <button class="secondary" type="button" id="copyKeyBtn">Copy</button>`;$("#apiKeySecretValue").textContent=data.secret;$("#copyKeyBtn").addEventListener("click",()=>{navigator.clipboard?.writeText(data.secret);$("#copyKeyBtn").textContent="Copied";});$("#apiKeyName").value="";loadApiKeys();}
   catch(error){secretBox.hidden=false;secretBox.textContent=error.message;}}
 $("#signinBtn").addEventListener("click",()=>openSignin());

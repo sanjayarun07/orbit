@@ -419,6 +419,7 @@ def test_account_deletion_cancels_every_live_subscription_not_only_the_recorded_
     monkeypatch.setattr(settings, "stripe_secret_key", "sk_test_harness")
     monkeypatch.setattr(billing, "_api_list_active_subscriptions",
                         lambda customer_id: [{"id": "sub_known", "status": "active"}, {"id": "sub_overlap", "status": "active"}])
+    monkeypatch.setattr(billing, "_api_list_open_checkouts", lambda customer_id: [])   # deletion also closes open checkouts (2026-09-18)
     cancelled = []
     monkeypatch.setattr(billing, "_api_cancel_subscription", lambda sid: cancelled.append(sid) or {"id": sid, "status": "canceled"})
     assert client.request("DELETE", "/me", json={"confirm_email": "two-subs@example.com"}).status_code == 200

@@ -92,6 +92,12 @@ def _api_cancel_subscription(subscription_id: str) -> dict:
     return {"id": subscription["id"], "status": subscription["status"]}
 
 
+def _api_list_open_checkouts(customer_id: str) -> list[dict]:
+    """Every Checkout session Stripe still considers payable for this customer."""
+    page = _stripe().checkout.Session.list(customer=customer_id, status="open", limit=100)
+    return [{"id": item["id"], "status": item.get("status")} for item in page.get("data", [])]
+
+
 def _api_create_portal(customer_id: str, return_url: str) -> str:
     session = _stripe().billing_portal.Session.create(customer=customer_id, return_url=return_url)
     return session["url"]
@@ -251,6 +257,10 @@ class SubscriptionCancelFailed(Exception):
     """Stripe would not confirm the cancellation; the caller must not proceed."""
 
 
+class CheckoutCloseFailed(Exception):
+    """Stripe would not confirm that an open checkout is closed; the caller must not proceed."""
+
+
 class SubscriptionExists(Exception):
     """The account already has a live subscription; plan changes go through the portal."""
 
@@ -323,6 +333,51 @@ async def _checkout_intent(conn, user: dict) -> dict:
 
 
 LIVE_STATUSES = {"active", "trialing", "past_due"}
+
+
+async def expire_open_checkouts_for(user: dict) -> dict:
+    """Close every Checkout this account could still pay, before the account
+    is destroyed.
+
+    Cancelling the subscription was not enough (review of 2026-09-18): a
+    Checkout session stays payable for up to 24 hours, and paying it after
+    the deletion created a subscription for a Stripe customer no account
+    maps to -- a recurring charge with nobody to tie it to. Stripe is asked
+    for the customer's open sessions rather than trusting the one id the
+    account recorded, and a session Stripe will not confirm closed stops the
+    deletion (recoverable: retry, or expire it in the dashboard)."""
+    customer_id = user.get("stripe_customer_id")
+    recorded = user.get("checkout_session_id")
+    if not customer_id and not (recorded and not recorded.startswith(INTENT_PREFIX)):
+        return {"status": "none"}
+    if not configured():
+        return {"status": "none"}
+    targets: list[str] = []
+    if customer_id:
+        try:
+            targets = [item["id"] for item in await asyncio.to_thread(_api_list_open_checkouts, customer_id)]
+        except Exception as exc:
+            raise CheckoutCloseFailed(
+                "Stripe could not list this account's open checkouts, so the account was not deleted. Try again shortly."
+            ) from exc
+    if recorded and not recorded.startswith(INTENT_PREFIX) and recorded not in targets:
+        targets.append(recorded)
+    expired: list[str] = []
+    for target in targets:
+        try:
+            result = await asyncio.to_thread(_api_expire_checkout, target)
+            expired.append(result["id"])
+        except BillingNotConfigured:
+            raise
+        except Exception as exc:
+            text = str(exc)
+            # Already past being payable: nothing left to close.
+            if "No such checkout" in text or "resource_missing" in text or "already expired" in text or "not open" in text.lower():
+                continue
+            raise CheckoutCloseFailed(
+                "An open checkout for this account could not be closed, so the account was not deleted. Try again shortly."
+            ) from exc
+    return {"status": "expired" if expired else "none", "sessions": expired}
 
 
 async def cancel_subscription_for(user: dict) -> dict:
@@ -518,6 +573,18 @@ async def handle_event(event: dict) -> dict:
 async def _on_checkout_completed(event_id: str, session: dict, event_created: int | None = None) -> dict:
     user = await _user_for(session)
     if user is None:
+        # A subscription born for an account that no longer exists (the
+        # checkout outlived the deletion) is cancelled here rather than
+        # left running for a customer nobody maps to.
+        subscription_id = session.get("subscription")
+        if session.get("mode") == "subscription" and subscription_id:
+            try:
+                await asyncio.to_thread(_api_cancel_subscription, subscription_id)
+            except Exception:
+                logger.exception("checkout %s completed for no account; subscription %s could not be cancelled", session.get("id"), subscription_id)
+                return {"status": "orphan_uncancelled", "subscription": subscription_id}
+            logger.warning("checkout %s completed for no account; cancelled subscription %s", session.get("id"), subscription_id)
+            return {"status": "orphan_cancelled", "subscription": subscription_id}
         return {"status": "no_user"}
     metadata = session.get("metadata") or {}
     if session.get("customer") and not user.get("stripe_customer_id"):
