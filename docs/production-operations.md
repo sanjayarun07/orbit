@@ -550,3 +550,57 @@ typed error the chat path answers with 503, which is the safe failure. The
 regression test starts a real one-megabyte `redis-server` under each policy so
 the difference is demonstrated rather than asserted from documentation; it
 skips honestly when the binary is absent.
+
+## Verification of 8cbbd1bc: the eight partial closures
+
+The verification report and its evidence live in `reports/review-2026-09-17/8cbbd1bc/`.
+`tests/test_review_20260917_p3.py` and `tests/test_postgres_team_operations.py`
+assert the rules; the verification's twelve reproductions fail against the tree.
+
+**R02.** Preparing, submitting or having the server sign a transaction is a
+browser act. All three execution routes require a browser session; an API key
+may quote through chat and may not move funds, whatever its scope. Without
+this a data-only key belonging to an allowlisted account could have the server
+sign that account's plan, because scope was never consulted on the way to the
+custodial check.
+
+**R04.** Every entitlement writer now decides and writes under the account's
+row lock (`SELECT ... FOR UPDATE`, with the write on the same connection), so a
+slower older webhook cannot overwrite a newer one. Two events for the same
+subscription in the same second cannot be ordered by time, and Stripe does emit
+them: checkout completion and the first subscription update usually share a
+second. Neither last-arrival-wins (which reordered state) nor first-wins (which
+would drop legitimate events) is right, so a tie is reconciled: with Stripe
+configured the subscription is retrieved and its state applied, independent of
+delivery order; without Stripe, an event that agrees with the recorded state
+passes through and a conflicting one is ignored with a warning. A tying
+deletion is applied, since it is the terminal state and any later event says
+otherwise.
+
+**R05.** A subscription checkout is recorded on the account when it is created
+and cleared by its completion webhook; a second one is refused while the first
+is in flight. Before creating one, Stripe is asked whether the customer already
+has a live subscription the app has not heard about, and if so it is recorded
+and the checkout refused. Cancellation on deletion is now as cautious as
+checkout: a recorded subscription whose state is not known to be over is
+cancelled, and if Stripe is not configured the deletion does not proceed.
+
+**R08.** Transcript and ownership are removed together, inside the turn lease,
+so there is no instant at which a turn can commit private history to a
+conversation whose ownership is about to vanish. A turn that starts during
+deletion waits and finds an empty, unowned conversation. Account deletion
+uses the same transition and refuses with 409 while a conversation is mid-turn.
+
+**R09.** A retry keeps its payment: the occurrence's charge is not refunded on
+failure, and the retry, running as the same occurrence, delivers against it.
+Retries are bounded by `TASK_RETRY_LIMIT`; when exhausted, the occurrence is
+refunded and dropped, and the next run is a new, separately paid occurrence.
+
+**R10 and R11.** Every database operation inside a gate rides the gate's
+connection: invitations insert through it, and the effective plan a task
+limit needs is resolved before the gate is entered, not inside it. Team joins
+run under the user's row lock and the database itself refuses a second active
+membership through a partial unique index.
+
+**R12.** The pipeline fingerprint names the provider and the model, not only
+the provider, so a change between models of one provider forces fresh vectors.

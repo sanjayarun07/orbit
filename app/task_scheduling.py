@@ -33,12 +33,15 @@ async def update_task(task_id: str, user_id: str, user: dict | None = None, **fi
     if fields.get("status") == "active" and current["status"] != "active":
         fields["next_run_at"] = tasks.next_run(current["schedule"], current.get("tz_offset_min", 0))
         if user is not None:
+            from app.identity import resolve_billing
+
+            _user, _owner, plan = await resolve_billing(user)   # before the gate: it reads the pool
             # Counting the active tasks and activating one are two operations,
             # so they are done under the same per-account mutex creation uses --
             # otherwise two concurrent resumptions each see the last free slot.
             async with tasks.account_task_gate(user_id) as db:
                 try:
-                    await tasks.assert_can_activate(user, exclude_task_id=task_id, db=db)
+                    await tasks.assert_can_activate(user, exclude_task_id=task_id, db=db, plan=plan)
                 except ValueError as exc:
                     raise ServiceError(403, str(exc)) from exc
                 task = await tasks.update_task(task_id, user_id, db=db, **fields)

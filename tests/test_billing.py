@@ -68,9 +68,17 @@ def signed(payload: dict, secret: str = WEBHOOK_SECRET, timestamp: int | None = 
     return body, f"t={ts},v1={digest}"
 
 
+_event_clock = [int(time.time())]
+
+
 def event(event_id: str, event_type: str, obj: dict) -> dict:
+    """Each event a second later than the last. Same-second events are real
+    (checkout completion and the first subscription update share one) but they
+    agree; a plan CHANGE arrives later, and stamping every event with the same
+    second would make an upgrade look like an unorderable tie."""
+    _event_clock[0] += 1
     return {"id": event_id, "object": "event", "api_version": "2024-06-20", "type": event_type,
-            "created": int(time.time()), "livemode": False, "data": {"object": obj}}
+            "created": _event_clock[0], "livemode": False, "data": {"object": obj}}
 
 
 def post_event(client, ev: dict, **kwargs):

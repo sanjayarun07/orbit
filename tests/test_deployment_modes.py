@@ -97,6 +97,10 @@ def test_execution_mode_lets_the_same_routes_reach_their_handler(execution, monk
 
     monkeypatch.setattr(main_module, "_require_plan_access", _no_plan_gate)
     monkeypatch.setattr(main_module, work, _record if work == "get_lifi_quote" else _record_async)
+    # Moving funds is a browser act (R02 follow-up): the routes refuse an
+    # anonymous caller before anything else, so this is a signed-in browser.
+    from tests.conftest import sign_in
+    sign_in(execution)
     response = execution.request(method, path, json=body)
     assert response.status_code == 200, response.text
     assert reached["called"] == work

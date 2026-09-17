@@ -388,8 +388,9 @@ def test_an_unsubscribed_account_still_starts_a_checkout(monkeypatch):
 
     monkeypatch.setattr(billing, "configured", lambda: True)
     monkeypatch.setattr(settings, "stripe_price_max", "price_max_review")
+    monkeypatch.setattr(billing, "_api_list_active_subscriptions", lambda customer_id: [])
     created = []
-    monkeypatch.setattr(billing, "_api_create_checkout", lambda params: created.append(params) or {"id": "cs", "url": "https://example.com"})
+    monkeypatch.setattr(billing, "_api_create_checkout", lambda params: created.append(params) or {"id": f"cs_{len(created)}", "url": "https://example.com"})
     for user in ({"id": "u1", "stripe_customer_id": "cus_1", "plan_id": "free"},
                  {"id": "u2", "stripe_customer_id": "cus_2", "stripe_subscription_id": "sub_old", "subscription_status": "canceled", "plan_id": "free"}):
         asyncio.run(billing.create_checkout(user, "subscription", "max", "https://example.com"))

@@ -293,7 +293,7 @@ def test_a_failed_run_is_rescheduled_and_releases_its_lease(monkeypatch):
 
     monkeypatch.setattr(tasks, "evaluate", boom)
     result = asyncio.run(tasks.run_task(dict(task)))
-    assert result == {"id": task["id"], "fired": False, "result": "error", "status": "active"}
+    assert {k: v for k, v in result.items() if k != 'attempt'} == {"id": task["id"], "fired": False, "result": "error", "status": "active"}
     after = asyncio.run(tasks.get_task(task["id"]))
     assert after["last_result"].startswith("error: provider down") and after["claimed_until"] is None
     assert after["next_run_at"] and after["next_run_at"] > datetime.now(timezone.utc).isoformat()

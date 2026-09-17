@@ -209,7 +209,7 @@ def _advisory_key(user_id: str) -> int:
     return int.from_bytes(digest, "big") & ((1 << 63) - 1)
 
 
-async def assert_can_activate(user: dict, exclude_task_id: str | None = None, db=None) -> None:
+async def assert_can_activate(user: dict, exclude_task_id: str | None = None, db=None, plan=None) -> None:
     """The plan's active-task limit, checked wherever a task BECOMES active.
 
     Creation was the only place this ran, so pausing tasks and resuming them
@@ -220,9 +220,15 @@ async def assert_can_activate(user: dict, exclude_task_id: str | None = None, db
     # The effective plan -- a team member's owner's -- is what the UI shows
     # as the limit; enforcing the personal plan here stopped a Max member at
     # the Free count.
-    from app.identity import resolve_billing
+    if plan is None:
+        # Resolving the effective plan reads the owner's account from the
+        # pool. Inside the gate that is a second connection while holding one
+        # -- the deadlock class the gate exists to avoid -- so callers resolve
+        # it BEFORE entering and pass it in; this fallback is for callers that
+        # are not inside a gate.
+        from app.identity import resolve_billing
 
-    _user, _owner, plan = await resolve_billing(user)
+        _user, _owner, plan = await resolve_billing(user)
     limit = TASK_LIMITS.get(plan.id, 3)
     active = [
         t for t in await list_tasks(user["id"], include_done=False, db=db)
@@ -238,18 +244,21 @@ async def create_task(user: dict, kind: str, spec: dict, schedule: dict, channel
     when = next_run(schedule, tz_offset_min)
     if when is None:
         raise ValueError("That schedule has no future run (is the time in the past?)")
+    from app.identity import resolve_billing
+
+    _user, _owner, plan = await resolve_billing(user)   # outside the gate: it reads the pool
     async with account_task_gate(user["id"]) as db:
-        return await _create_task_locked(user, kind, spec, schedule, channel, tz_offset_min, title, when, db)
+        return await _create_task_locked(user, kind, spec, schedule, channel, tz_offset_min, title, when, db, plan)
 
 
 async def _create_task_locked(user: dict, kind: str, spec: dict, schedule: dict, channel: str,
-                              tz_offset_min: int, title: str | None, when, db=None) -> dict:
-    await assert_can_activate(user, db=db)
+                              tz_offset_min: int, title: str | None, when, db=None, plan=None) -> dict:
+    await assert_can_activate(user, db=db, plan=plan)
     task = {
         "id": str(uuid4()), "user_id": user["id"], "kind": kind, "title": (title or _default_title(kind, spec))[:140],
         "spec": dict(spec), "schedule": dict(schedule), "channel": channel if channel in ("inapp", "email") else "inapp",
         "status": "active", "tz_offset_min": int(tz_offset_min or 0), "created_at": _iso(_now()),
-        "next_run_at": _iso(when), "last_run_at": None, "last_result": None, "fire_count": 0,
+        "next_run_at": _iso(when), "last_run_at": None, "last_result": None, "fire_count": 0, "retry_count": 0,
     }
     pool = await get_pg_pool()
     if pool is not None:
@@ -276,7 +285,7 @@ def _default_title(kind: str, spec: dict) -> str:
 
 
 async def update_task(task_id: str, user_id: str, *, db=None, **fields) -> dict | None:
-    allowed = {"status", "next_run_at", "last_run_at", "last_result", "fire_count", "channel", "schedule", "spec", "claimed_until", "claimed_occurrence"}
+    allowed = {"status", "next_run_at", "last_run_at", "last_result", "fire_count", "channel", "schedule", "spec", "claimed_until", "claimed_occurrence", "retry_count"}
     changes = {k: v for k, v in fields.items() if k in allowed}
     pool = await get_pg_pool()
     if pool is not None:
@@ -569,14 +578,31 @@ async def run_task(task: dict) -> dict:
         # release the lease and put it back on its schedule (or retry soon).
         logger.warning("tasks: run failed for %s", task["id"], exc_info=True)
         now = _now()
-        nxt = next_run(task["schedule"], task.get("tz_offset_min", 0), after=now) or (now + timedelta(minutes=settings.task_alert_check_minutes))
+        attempts = int(task.get("retry_count") or 0) + 1
+        if attempts >= settings.task_retry_limit:
+            # Enough. Refund the occurrence (idempotent on its key), drop its
+            # identity so the next run is a new, separately paid occurrence,
+            # and put the task back on its ordinary schedule.
+            if task["kind"] == "brief" and settings.credit_cost_brief:
+                account_id = await _billing_account_for(user)
+                ref = f"{task['id']}:{task['occurrence']}"
+                if await credits.has_ref(account_id, "task_run", ref) and not await credits.has_ref(account_id, "task_refund", ref):
+                    await credits.append(account_id, settings.credit_cost_brief, "task:brief-refund", "task_refund", ref, {"kind": "brief", "attempts": attempts})
+            nxt = next_run(task["schedule"], task.get("tz_offset_min", 0), after=now)
+            await update_task(task["id"], task["user_id"], last_run_at=now,
+                              last_result=f"failed after {attempts} attempts: {str(exc)[:120] or exc.__class__.__name__}",
+                              next_run_at=nxt, claimed_until=None, claimed_occurrence=None, retry_count=0,
+                              **({"status": "done"} if nxt is None else {}))
+            return {"id": task["id"], "fired": False, "result": "failed", "status": "done" if nxt is None else "active"}
+        nxt = now + timedelta(minutes=settings.task_alert_check_minutes)
         # The occurrence identity is KEPT across the retry. Clearing it gave the
         # retry a fresh key, so a run that had already delivered and charged --
         # and failed only on its final bookkeeping write -- delivered and
         # charged again. With the same key, the charge is idempotent and the
         # inbox row is a no-op.
-        await update_task(task["id"], task["user_id"], last_run_at=now, last_result=f"error: {str(exc)[:160] or exc.__class__.__name__}", next_run_at=nxt, claimed_until=None)
-        return {"id": task["id"], "fired": False, "result": "error", "status": "active"}
+        await update_task(task["id"], task["user_id"], last_run_at=now, last_result=f"error: {str(exc)[:160] or exc.__class__.__name__}",
+                          next_run_at=nxt, claimed_until=None, retry_count=attempts)
+        return {"id": task["id"], "fired": False, "result": "error", "status": "active", "attempt": attempts}
 
 
 async def _billing_account_for(user: dict) -> str:
@@ -616,14 +642,14 @@ async def _run_claimed(task: dict, user: dict) -> dict:
     try:
         fired, result, body = await evaluate(task)
     except Exception:
-        # The work failed after the charge: give it back, keyed so a retry of
-        # the same occurrence cannot refund twice. The outer handler records
-        # the error and reschedules.
-        if charge:
-            await credits.append(account_id, charge, "task:brief-refund", "task_refund", ref, {"kind": "brief"})
+        # The charge STAYS with the occurrence across a retry. Refunding here
+        # and then letting the retry see the original debit as "already paid"
+        # delivered a brief with no net charge. The retry runs as the same
+        # occurrence and the same payment covers it; only when the bounded
+        # retries are exhausted (see run_task) is the occurrence refunded.
         raise
     now = _now()
-    updates: dict = {"last_run_at": now, "last_result": result, "claimed_until": None, "claimed_occurrence": None}
+    updates: dict = {"last_run_at": now, "last_result": result, "claimed_until": None, "claimed_occurrence": None, "retry_count": 0}
     if charge and not (fired and body):
         # Composed nothing deliverable (a condition that did not fire): refund.
         await credits.append(account_id, charge, "task:brief-refund", "task_refund", ref, {"kind": "brief"})

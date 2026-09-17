@@ -70,6 +70,11 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_created BIGINT;
 -- later-delivered but earlier-issued event for the SAME subscription is
 -- recognised as stale. A subscription's own creation time cannot do that.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_event_at BIGINT;
+-- A subscription checkout in flight: recorded when the session is created and
+-- cleared when its completion webhook lands, so a second subscription checkout
+-- cannot be started underneath the first before Stripe has reported either.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS checkout_session_id TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS checkout_started_at BIGINT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS team_owner_id UUID;
 ALTER TABLE users ALTER COLUMN email DROP NOT NULL;   -- a wallet-only account has none
 CREATE TABLE IF NOT EXISTS user_chat_sessions (
@@ -88,6 +93,9 @@ CREATE TABLE IF NOT EXISTS team_members (
     accepted_at TIMESTAMPTZ,
     PRIMARY KEY (owner_id, email)
 );
+-- One active membership per user, enforced by the database and not only by
+-- the code that tries to keep it so.
+CREATE UNIQUE INDEX IF NOT EXISTS team_members_one_active ON team_members (user_id) WHERE status = 'active' AND user_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS stripe_events (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,
@@ -112,6 +120,8 @@ CREATE TABLE IF NOT EXISTS user_tasks (
 CREATE INDEX IF NOT EXISTS user_tasks_due ON user_tasks (next_run_at) WHERE status = 'active';
 ALTER TABLE user_tasks ADD COLUMN IF NOT EXISTS claimed_until TIMESTAMPTZ;
 ALTER TABLE user_tasks ADD COLUMN IF NOT EXISTS claimed_occurrence TEXT;
+-- Attempts made at the current occurrence; a bounded retry refunds and moves on.
+ALTER TABLE user_tasks ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0;
 DO $$ BEGIN
     -- Scoped to the relation the search_path resolves (the one CREATE TABLE above targets), not every schema.
     IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'stripe_events'::regclass AND attname = 'processed_at' AND NOT attisdropped) THEN

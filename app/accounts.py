@@ -62,6 +62,8 @@ def _row_to_user(row) -> dict:
         "subscription_status": row.get("subscription_status") if hasattr(row, "get") else row["subscription_status"],
         "subscription_created": (row.get("subscription_created") if hasattr(row, "get") else row["subscription_created"]),
         "subscription_event_at": (row.get("subscription_event_at") if hasattr(row, "get") else row["subscription_event_at"]),
+        "checkout_session_id": (row.get("checkout_session_id") if hasattr(row, "get") else row["checkout_session_id"]),
+        "checkout_started_at": (row.get("checkout_started_at") if hasattr(row, "get") else row["checkout_started_at"]),
         "team_owner_id": str(row["team_owner_id"]) if (row.get("team_owner_id") if hasattr(row, "get") else row["team_owner_id"]) else None,
         "preferences": json.loads(row["preferences"]) if isinstance(row["preferences"], str) else (row["preferences"] or {}),
         "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else row["created_at"],
@@ -72,10 +74,37 @@ def _row_to_user(row) -> dict:
 # Users
 # ----------------------------------------------------------------------------
 
-async def get_user(user_id: str) -> dict | None:
+_user_locks: dict[tuple[int, str], "asyncio.Lock"] = {}
+
+
+@asynccontextmanager
+async def user_row_lock(user_id: str):
+    """Serialise state transitions on one account: yields (connection, user).
+
+    Every billing writer used to read a user snapshot, decide, and then write
+    unconditionally; two webhooks could both pass the check against the same
+    snapshot and the older one, finishing last, overwrote the newer plan. Team
+    joins had the same shape. Under Postgres this is `SELECT ... FOR UPDATE` on
+    the user row, and every write inside rides the same connection -- never a
+    second one from the pool, which is how the task gate once deadlocked. Without
+    Postgres it is an asyncio lock keyed by (loop, user)."""
     pool = await get_pg_pool()
     if pool is not None:
-        row = await pool.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow("SELECT * FROM users WHERE id = $1 FOR UPDATE", user_id)
+                yield conn, (_row_to_user(row) if row else None)
+        return
+    import asyncio
+    lock = _user_locks.setdefault((id(asyncio.get_running_loop()), user_id), asyncio.Lock())
+    async with lock:
+        yield None, (dict(_users[user_id]) if user_id in _users else None)
+
+
+async def get_user(user_id: str, db=None) -> dict | None:
+    pool = await get_pg_pool()
+    if pool is not None:
+        row = await (db or pool).fetchrow("SELECT * FROM users WHERE id = $1", user_id)
         return _row_to_user(row) if row else None
     return dict(_users[user_id]) if user_id in _users else None
 
@@ -146,6 +175,8 @@ async def get_or_create_user(email: str) -> tuple[dict, bool]:
         "subscription_status": None,
         "subscription_created": None,
         "subscription_event_at": None,
+        "checkout_session_id": None,
+        "checkout_started_at": None,
         "team_owner_id": None,
         "preferences": {},
         "created_at": _now(),
@@ -179,21 +210,23 @@ async def get_user_by_stripe_customer(customer_id: str) -> dict | None:
     return None
 
 
-async def update_user(user_id: str, **fields) -> dict | None:
-    """Update a whitelisted set of columns; preferences are merged, not replaced."""
-    allowed = {"display_name", "plan_id", "stripe_customer_id", "stripe_subscription_id", "subscription_status", "subscription_created", "subscription_event_at", "preferences", "team_owner_id"}
+async def update_user(user_id: str, db=None, **fields) -> dict | None:
+    """Update a whitelisted set of columns; preferences are merged, not replaced.
+    `db` is a connection already holding this user's row lock (see
+    user_row_lock); the write must ride it rather than ask the pool."""
+    allowed = {"display_name", "plan_id", "stripe_customer_id", "stripe_subscription_id", "subscription_status", "subscription_created", "subscription_event_at", "checkout_session_id", "checkout_started_at", "preferences", "team_owner_id"}
     changes = {key: value for key, value in fields.items() if key in allowed}
     if not changes:
         return await get_user(user_id)
     pool = await get_pg_pool()
     if pool is not None:
-        current = await get_user(user_id)
+        current = await get_user(user_id, db=db)
         if current is None:
             return None
         if "preferences" in changes:
             changes["preferences"] = json.dumps({**current.get("preferences", {}), **(changes["preferences"] or {})})
         assignments = ", ".join(f"{key} = ${index}" for index, key in enumerate(changes, start=2))
-        row = await pool.fetchrow(
+        row = await (db or pool).fetchrow(
             f"UPDATE users SET {assignments} WHERE id = $1 RETURNING *", user_id, *changes.values()
         )
         return _row_to_user(row) if row else None
@@ -683,16 +716,16 @@ async def invite_team_member_within_seats(owner_id: str, email: str, seats: int,
             taken = {k[1] for k in _team_members if k[0] == owner_id}
         if email not in taken and len(taken) + 1 >= seats:
             raise SeatsExhausted(f"All {seats} seats are in use (owner + {seats - 1} members)")
-        return await invite_team_member(owner_id, email, role)
+        return await invite_team_member(owner_id, email, role, db=conn)
 
 
-async def invite_team_member(owner_id: str, email: str, role: str = "member") -> dict:
+async def invite_team_member(owner_id: str, email: str, role: str = "member", db=None) -> dict:
     email = normalize_email(email)
     role = role if role in ("member", "owner") else "member"
     record = {"owner_id": owner_id, "email": email, "role": role, "status": "invited", "invited_at": _now(), "accepted_at": None, "user_id": None}
     pool = await get_pg_pool()
     if pool is not None:
-        await pool.execute(
+        await (db or pool).execute(
             """
             INSERT INTO team_members (owner_id, email, role, status) VALUES ($1, $2, $3, 'invited')
             ON CONFLICT (owner_id, email) DO UPDATE SET role = EXCLUDED.role
@@ -758,18 +791,21 @@ async def accept_team_invite(user: dict, owner_id: str) -> dict | None:
     email = user["email"]
     pool = await get_pg_pool()
     if pool is not None:
-        async with pool.acquire() as conn:
-            async with conn.transaction():
-                row = await conn.fetchrow(
-                    "UPDATE team_members SET status = 'active', accepted_at = NOW(), user_id = $3 WHERE owner_id = $1 AND email = $2 AND status = 'invited' RETURNING role",
-                    owner_id, email, user["id"],
-                )
-                if row is None:
-                    return None
-                await conn.execute(
-                    "DELETE FROM team_members WHERE user_id = $1 AND owner_id <> $2", user["id"], owner_id,
-                )
-                await conn.execute("UPDATE users SET team_owner_id = $2 WHERE id = $1", user["id"], owner_id)
+        # The user's row is locked first, so two simultaneous joins run one
+        # after the other: the second sees the first's membership and removes
+        # it before activating its own. The partial unique index on active
+        # memberships is the backstop should anything bypass this path.
+        async with user_row_lock(user["id"]) as (conn, _current):
+            await conn.execute(
+                "DELETE FROM team_members WHERE user_id = $1 AND owner_id <> $2", user["id"], owner_id,
+            )
+            row = await conn.fetchrow(
+                "UPDATE team_members SET status = 'active', accepted_at = NOW(), user_id = $3 WHERE owner_id = $1 AND email = $2 AND status = 'invited' RETURNING role",
+                owner_id, email, user["id"],
+            )
+            if row is None:
+                return None
+            await conn.execute("UPDATE users SET team_owner_id = $2 WHERE id = $1", user["id"], owner_id)
         return await get_user(user["id"])
     record = _team_members.get((owner_id, email))
     if record is None or record["status"] != "invited":

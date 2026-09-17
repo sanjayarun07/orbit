@@ -41,6 +41,10 @@ def _reset_account_stores(monkeypatch):
         return True, 0
 
     monkeypatch.setattr(main, "allow_auth_request", allow)
+    # Checkout now reconciles against Stripe's view of the customer's live
+    # subscriptions before creating a session. The suite never reaches Stripe;
+    # the default answer is "none", and tests about reconciliation override it.
+    monkeypatch.setattr(billing, "_api_list_active_subscriptions", lambda customer_id: [])
     # Never send real email from the suite; the dev link stands in for it.
     from app.settings import settings
 

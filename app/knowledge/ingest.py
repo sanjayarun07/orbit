@@ -131,7 +131,12 @@ def pipeline_fingerprint(embedder) -> str:
     a document whose graph writes had failed was never repaired (the retry saw
     the same hash and stopped), and changing the embedder left old vectors in
     place under a new query embedder."""
-    return f"{getattr(embedder, 'name', 'unknown')}:{int(settings.knowledge_embedding_dim)}:v{EXTRACTION_VERSION}"
+    # Provider AND model: the provider's embedder is named for the provider
+    # alone, so a change from one model to another within it left the
+    # fingerprint unchanged and the old vectors in place.
+    model = getattr(embedder, "model", None) or settings.knowledge_embedding_model
+    provider = getattr(embedder, "name", None) or settings.knowledge_embedding_provider
+    return f"{provider}:{model}:{int(settings.knowledge_embedding_dim)}:v{EXTRACTION_VERSION}"
 
 
 async def ingest_document(doc: NormalizedDocument, store=None, resolver: EntityResolver | None = None) -> tuple[bool, int, int]:

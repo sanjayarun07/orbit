@@ -169,6 +169,10 @@ def test_money_moving_endpoints_are_never_unguarded():
         if path in money:
             seen.add(path)
             assert "_require_plan_access" in _guards(route), f"{path} does not enforce plan ownership"
+            assert "require_browser_session" in _guards(route), (
+                f"{path} accepts an API key; moving funds is a browser act and a data-only key "
+                "belonging to an allowlisted account could otherwise have the server sign its plan"
+            )
     assert seen == money, f"a money-moving endpoint disappeared or was renamed: {money - seen}"
 
 
@@ -238,7 +242,15 @@ def test_another_caller_cannot_touch_someone_elses_trade_plan(monkeypatch):
     # gate can answer "no such plan" while the handler goes on to find one.
     monkeypatch.setattr("app.plans.get_plan", fake_get_plan)
     monkeypatch.setattr("app.main.get_plan", fake_get_plan)
-    intruder = TestClient(app)   # a different (anonymous) account
+    from tests.conftest import sign_in
+
+    # An anonymous caller never reaches ownership: the execution routes refuse
+    # it first (401), and that answer is the same for every plan id.
+    anonymous = TestClient(app)
+    for path in (f"/trade-plans/{plan.plan_id}/confirm", f"/trade-plans/{plan.plan_id}/wallet-transaction"):
+        assert anonymous.post(path, json={"confirmation_text": plan.confirmation_text}).status_code == 401
+    intruder = TestClient(app)   # a different, signed-in account: the real ownership test
+    sign_in(intruder, email="intruder@example.com")
     body = {"confirmation_text": plan.confirmation_text}
     for method, path in [
         ("GET", f"/trade-plans/{plan.plan_id}"),

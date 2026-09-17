@@ -1216,6 +1216,29 @@ async def my_conversations(identity: Identity = Depends(require_browser_session)
     return {"conversations": out}
 
 
+async def _delete_conversations_under_lease(user_id: str) -> tuple[list[str], list[str]]:
+    """Delete an account's conversations: transcript AND ownership go together,
+    inside the turn lease, so there is no instant at which a turn can commit
+    private history to a conversation whose ownership is about to vanish. A
+    turn that starts during deletion waits for the lease and then finds an
+    unowned, empty conversation. Conversations busy with a turn are kept and
+    reported; they remain the account's to delete again."""
+    deleted, busy = [], []
+    for session_id in await accounts.list_chat_sessions(user_id):
+        try:
+            lease = await acquire_session_turn(session_id)
+        except asyncio.TimeoutError:
+            busy.append(session_id)
+            continue
+        try:
+            await clear_history(session_id)
+            await accounts.forget_chat_sessions(user_id, [session_id])
+            deleted.append(session_id)
+        finally:
+            await lease.release()
+    return deleted, busy
+
+
 @app.delete("/me/conversations")
 async def delete_my_conversations(identity: Identity = Depends(require_browser_session)):
     """Delete every conversation the account owns -- with the same guarantee
@@ -1225,21 +1248,7 @@ async def delete_my_conversations(identity: Identity = Depends(require_browser_s
     while a running turn could still write. Now each conversation is deleted
     under its lease; ones busy with a turn are reported, kept, and remain the
     account's to delete again."""
-    session_ids = await accounts.list_chat_sessions(identity.user["id"])
-    deleted, busy = [], []
-    for session_id in session_ids:
-        try:
-            lease = await acquire_session_turn(session_id)
-        except asyncio.TimeoutError:
-            busy.append(session_id)
-            continue
-        try:
-            await clear_history(session_id)
-            deleted.append(session_id)
-        finally:
-            await lease.release()
-    if deleted:
-        await accounts.forget_chat_sessions(identity.user["id"], deleted)
+    deleted, busy = await _delete_conversations_under_lease(identity.user["id"])
     return {"deleted": len(deleted), "busy": len(busy),
             **({"message": f"{len(busy)} conversation(s) are still processing a request and were kept; delete again once they finish."} if busy else {})}
 
@@ -1267,8 +1276,9 @@ async def delete_my_account(body: DeleteAccountRequest, request: Request, respon
         await billing.cancel_subscription_for(user)
     except billing.SubscriptionCancelFailed as exc:
         raise HTTPException(409, str(exc)) from exc
-    for session_id in await accounts.list_chat_sessions(user["id"]):
-        await clear_history(session_id)
+    _deleted, busy = await _delete_conversations_under_lease(user["id"])
+    if busy:
+        raise HTTPException(409, f"{len(busy)} conversation(s) are still processing a request. Wait for them to finish, then delete the account.")
     for key in await api_keys.list_for_user(user["id"]):
         await api_keys.revoke(user["id"], key["id"])
     await accounts.revoke_user_sessions(user["id"])
@@ -1778,9 +1788,16 @@ async def _require_plan_access(plan_id: str, request: Request) -> None:
         raise HTTPException(404, "Trade plan not found") from exc
 
 
+# Preparing, submitting or having the server sign a transaction is a browser
+# act. An API key may quote through chat; it may not move funds. Without this a
+# data-only key belonging to an allowlisted account could have the server sign
+# that account's plan, because scope was never consulted on the way to the
+# custodial check -- only ownership and entitlement, both of which the key
+# inherits from its owner.
 @app.post("/trade-plans/{plan_id}/confirm")
 async def confirm(plan_id: str, body: ConfirmRequest, request: Request,
-                  _mode: None = Depends(_require_execution_mode)):
+                  _mode: None = Depends(_require_execution_mode),
+                  _browser: Identity = Depends(require_browser_session)):
     await _require_plan_access(plan_id, request)
     identity = await resolve_identity(request)
     try:
@@ -1791,7 +1808,8 @@ async def confirm(plan_id: str, body: ConfirmRequest, request: Request,
 
 @app.post("/trade-plans/{plan_id}/wallet-transaction")
 async def wallet_transaction(plan_id: str, body: ConfirmRequest, request: Request,
-                             _mode: None = Depends(_require_execution_mode)):
+                             _mode: None = Depends(_require_execution_mode),
+                  _browser: Identity = Depends(require_browser_session)):
     await _require_plan_access(plan_id, request)
     try:
         return await prepare_wallet_transaction(plan_id, body.confirmation_text)
@@ -1801,7 +1819,8 @@ async def wallet_transaction(plan_id: str, body: ConfirmRequest, request: Reques
 
 @app.post("/trade-plans/{plan_id}/submit-wallet-transaction")
 async def submit_signed_wallet_transaction(plan_id: str, body: SignedTransactionRequest, request: Request,
-                                           _mode: None = Depends(_require_execution_mode)):
+                                           _mode: None = Depends(_require_execution_mode),
+                  _browser: Identity = Depends(require_browser_session)):
     await _require_plan_access(plan_id, request)
     try:
         return await submit_wallet_transaction(

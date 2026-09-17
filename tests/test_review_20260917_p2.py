@@ -158,7 +158,10 @@ def test_a_brief_still_charges_once_and_delivers(monkeypatch):
 
 
 def test_a_brief_that_fails_to_compose_refunds_its_charge(monkeypatch):
-    """Reserve before the work, release when the work fails."""
+    """Reserve before the work, release when the work fails FOR GOOD. A retry
+    keeps the payment (a refunded retry used to deliver for free), so the
+    refund comes when the bounded retries are exhausted; limit 1 here."""
+    monkeypatch.setattr(settings, "task_retry_limit", 1)
 
     async def run():
         user, _ = await accounts.get_or_create_user("brief-refund@example.com")
@@ -171,7 +174,7 @@ def test_a_brief_that_fails_to_compose_refunds_its_charge(monkeypatch):
         return result, await credits.balance(account)
 
     result, balance = asyncio.run(run())
-    assert result["result"] == "error" and balance == 3
+    assert result["result"] == "failed" and balance == 3   # limit reached on the first failure: refunded, dropped
 
 
 def test_a_members_task_is_billed_by_the_same_rule_chat_uses():

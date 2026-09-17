@@ -327,6 +327,8 @@ class Settings(BaseSettings):
     # people behind one NAT do not share credits. That id is caller-controlled,
     # so on its own it is a resettable boundary: rotate it and the trial
     # renews. These are the server-controlled budgets layered on top.
+    checkout_pending_seconds: int = 1800            # a started subscription checkout blocks another for this long
+    task_retry_limit: int = 3                       # attempts at one occurrence before it is refunded and dropped
     trial_accounts_per_ip_per_day: int = 3          # new trial grants one IP may mint in 24h
     chat_requests_per_minute_per_ip: int = 120      # ceiling per IP regardless of device ids
     knowledge_search_max_query_chars: int = 400
