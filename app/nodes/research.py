@@ -1278,6 +1278,15 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         deep_dive = await _run_token_deep_dive(state, request)
         if deep_dive is not None:
             return deep_dive
+    # A security ask that names no token at all ("honeypot check", "is it a
+    # rug") cannot be answered by guessing a token; the tools need a contract
+    # and a chain. Asked, not guessed.
+    if "token_security" in set(state.get("capabilities", [])) and not _TOKEN_ADDRESS.search(request) and not _named_tickers(request):
+        return {
+            "answer": ("Which token should I check? Paste its contract address (or mint) and the chain it is on, "
+                       "or name the token with a $ticker, and I'll run the security checks."),
+            "trajectory": None,
+        }
     resolution = await _resolve_named_token(
         request, set(state.get("capabilities", [])), tuple(state.get("chains", []))
     )

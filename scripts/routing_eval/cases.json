@@ -1047,12 +1047,13 @@
     "id": "catalog-what-is-addr-on-base-(identity-+-price)",
     "query": "what is 0x940181a94A35A4569E4529A3CDfB74e38FD98631 on base",
     "expected_tools": [
-      "coingecko_token_by_contract"
+      "coingecko_token_by_contract",
+      "birdeye_token_overview"
     ],
     "forbidden_tools": [],
     "expected_intent": "research",
     "router": true,
-    "notes": "catalog example for coingecko_token_by_contract; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+    "notes": "catalog example for coingecko_token_by_contract; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user; either identity+price tool is a correct first pick for 'what is <address>' (2026-09-17)"
   },
   {
     "id": "catalog-recent-trades-of-addr-on-base",
@@ -1092,20 +1093,21 @@
   },
   {
     "id": "catalog-rug-check-addr",
-    "query": "rug check 0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+    "query": "rug check 0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82 on bsc",
     "expected_tools": [
       "goplus_token_security"
     ],
     "forbidden_tools": [],
     "expected_intent": "research",
     "router": true,
-    "notes": "catalog example for goplus_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+    "notes": "catalog example for goplus_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user; realised with a chain 2026-09-17: an 0x address is ambiguous across EVM chains and the node asks for one"
   },
   {
     "id": "catalog-can-i-sell-addr-on-ethereum",
     "query": "can I sell 0x6982508145454Ce325dDbE47a25d4ec3d2311933 on ethereum",
     "expected_tools": [
-      "honeypot_token_security"
+      "honeypot_token_security",
+      "goplus_token_security"
     ],
     "forbidden_tools": [
       "jupiter",
@@ -1113,18 +1115,19 @@
     ],
     "expected_intent": "research",
     "router": true,
-    "notes": "catalog example for honeypot_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+    "notes": "catalog example for honeypot_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user; GoPlus reports is_honeypot and sell tax too, either is a correct first pick (2026-09-17)"
   },
   {
     "id": "catalog-honeypot-check",
-    "query": "honeypot check",
+    "query": "honeypot check 0x6982508145454Ce325dDbE47a25d4ec3d2311933 on ethereum",
     "expected_tools": [
-      "honeypot_token_security"
+      "honeypot_token_security",
+      "goplus_token_security"
     ],
     "forbidden_tools": [],
     "expected_intent": "research",
     "router": true,
-    "notes": "catalog example for honeypot_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+    "notes": "catalog example for honeypot_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user; realised with an address 2026-09-17 (the tool needs one; a bare 'honeypot check' is asked for the contract, see tests); GoPlus reports is_honeypot and sell tax too, either is a correct first pick (2026-09-17)"
   },
   {
     "id": "catalog-is-mint-safe",

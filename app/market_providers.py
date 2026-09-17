@@ -69,11 +69,20 @@ def _address(request: str) -> str:
     return match.group(0)
 
 
+_SOLANA_SHAPED_ADDRESS = re.compile(r"(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])")
+
+
 def _chain(request: str) -> str:
     lowered = request.lower()
     for chain in _CHAIN_NAMES:
         if re.search(rf"\b{chain}\b", lowered):
             return "bsc" if chain == "bnb" else chain
+    # A base58 address of Solana's length can only be Solana; asking for the
+    # chain word made every Solana wallet tool unreachable for "recent
+    # transactions for <address>". An 0x address stays ambiguous across EVM
+    # chains and still needs the word (the lookbehind excludes the 0x body).
+    if _SOLANA_SHAPED_ADDRESS.search(request):
+        return "solana"
     raise ValueError("The token chain is required")
 
 
@@ -153,8 +162,8 @@ class DexScreenerProvider:
         ))
         router.register(ProviderTool(
             "dexscreener_latest_profiles", self.name, ("token_discovery",),
-            dexscreener_latest_profiles, keywords=("new", "latest", "recent", "launch", "profile", "pairs"),
-            matches=_matches(r"\b(?:(?:new|latest|recent)\s+(?:token\s+)?(?:profiles|pairs|launches)|new\s+tokens|token\s+launches)\b"),
+            dexscreener_latest_profiles, keywords=("new", "newest", "latest", "recent", "launch", "profile", "profiles", "pairs"),
+            matches=_matches(r"\b(?:(?:new|newest|latest|recent|fresh)\s+(?:token\s+)?(?:profiles?|pairs|launches)|new\s+tokens|token\s+launches|token\s+profiles)\b"),
             chains=_SUPPORTED_CHAINS, quota_per_minute=60, cache_ttl_seconds=45, priority=4,
         ))
         router.register(ProviderTool(
@@ -499,7 +508,7 @@ class BitqueryProvider:
             # GoldRush nor Helius is configured either.
             "bitquery_wallet_balances", self.name, ("wallet_intelligence",), self.wallet_balances,
             enabled=self.enabled,
-            matches=lambda request: _has_chain_and_address(request) and bool(re.search(r"\b(?:balances?|holdings?)\b", request, re.IGNORECASE)),
+            matches=lambda request: _has_chain_and_address(request) and bool(re.search(r"\b(?:balances?|holdings?|holds?|holding)\b", request, re.IGNORECASE)),
             keywords=("balances", "holdings", "wallet", "tokens"), chains=tuple(self._EVM_NETWORKS) + ("solana",),
             cost_usd=settings.bitquery_request_cost_usd, quota_per_minute=settings.bitquery_requests_per_minute,
             cache_ttl_seconds=30, priority=7,

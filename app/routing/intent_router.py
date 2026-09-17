@@ -81,6 +81,9 @@ def _knowledge_ask(request: str) -> bool:
 def route_capabilities(request: str) -> CapabilityRoute | None:
     """Resolve high-confidence chat requests without an extra model call."""
     chains = extract_chains(request)
+    # A bare Solana-shaped address names its chain; an 0x address does not.
+    if not chains and has_solana_address(request) and not has_evm_address(request):
+        chains = ("solana",)
     stripped = request.strip()
 
     # Control and conceptual messages have absolute priority over content rules.
@@ -110,6 +113,11 @@ def route_capabilities(request: str) -> CapabilityRoute | None:
     # shock stress test), and must catch past-tense phrasing ("sold") TRADE
     # doesn't match at all. Never reaches plan_execution_route -- this is a
     # dedicated read-only path (see app/plans.py's simulate_swap()).
+    # Security jargon is unambiguous and outranks both the trade verbs ("can I
+    # sell 0x..." is a honeypot question, not a sell order) and the generic
+    # address+check wallet rule ("rug check 0x..." is about the token).
+    if lx.SECURITY_STRONG.search(request):
+        return _route("research", ("token_security", "token_discovery"), chains, reason="token_security_jargon")
     if lx.SIMULATE_TRADE.search(request) and not (
         lx.ADVICE_QUESTION.search(request) and not lx.OWN_POSITION_OR_AMOUNT.search(request)
     ):

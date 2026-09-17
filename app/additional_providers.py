@@ -42,7 +42,7 @@ _GOLDRUSH_CHAINS = {
 # GoldRush chains that support the balances_v2 endpoint on a non-EVM
 # (base58) address -- today just Solana. Transactions stays EVM-only.
 _GOLDRUSH_NON_EVM_CHAINS = {"solana"}
-_SECURITY = re.compile(r"\b(?:safe(?:ty)?|secur(?:e|ity)|risky?|rugs?(?:\s?pulls?)?|scams?|honey\s?pots?|sellab\w*|audits?)\b", re.I)
+_SECURITY = re.compile(r"\b(?:safe(?:ty)?|secur(?:e|ity)|risky?|rugs?(?:\s?pulls?)?|scams?|honey\s?pots?|sellab\w*|un?sellable|audits?)\b|\bcan\s+(?:i|you|we|one|anyone)\s+(?:even\s+|still\s+|actually\s+)?sell\b", re.I)
 _WALLET_ACTIVITY = re.compile(r"\b(?:wallet|transactions?|activity|history|transfers?)\b", re.I)
 # CoinGecko's curated "ecosystem" category per chain -- the closest free,
 # keyless proxy for "tokens native to/associated with this chain" their
@@ -54,7 +54,10 @@ _GAINERS_CATEGORY = {
     "sui": "sui-ecosystem", "bsc": "binance-smart-chain",
 }
 _GAINERS_LOSERS = re.compile(
-    r"\bgainers?\b|\blosers?\b|\b(?:top|biggest|best|worst)\s+(?:movers?|performers?)\b|\bwinners?\b", re.I
+    r"\bgainers?\b|\blosers?\b|\b(?:top|biggest|best|worst)\s+(?:movers?|performers?)\b|\bwinners?\b"
+    # Slang for the same ranking: "what spiked hardest today", "biggest drops".
+    r"|\b(?:spiked|pumped|jumped|surged|mooned|dumped|crashed|tanked)\b"
+    r"|\b(?:moved|up|down)\s+the\s+most\b|\bbiggest\s+(?:moves?|jumps?|drops?|dumps?|pumps?)\b", re.I
 )
 _PEGGED_OR_WRAPPED = re.compile(r"^(?:usd\w*|\w*usd[cdtes]?|dai|fdusd|pyusd|tusd|busd|frax|w(?:sol|eth|btc|bnb|avax|pol|matic)|steth|cbbtc|weth)$", re.I)
 _LOSER_WORDS = re.compile(r"\blosers?\b|\bworst\b|\bdump(?:ing)?\b|\bdeclin\w*\b|\bfalling\b", re.I)
@@ -88,10 +91,14 @@ def _goldrush_balances_exact(request: str) -> bool:
 
 
 def _has_gainers_chain(request: str) -> bool:
+    """A chain with a curated ecosystem category, or no chain at all: "what
+    coins spiked hardest today" is a market-wide question the same endpoint
+    answers without a category (the overview card's movers list is the same
+    query). A chain WITHOUT a category is the one case the tool cannot serve."""
     try:
         return _chain(request) in _GAINERS_CATEGORY
     except ValueError:
-        return False
+        return True
 
 
 class CoinGeckoProvider:
@@ -176,19 +183,22 @@ class CoinGeckoProvider:
         return "\n".join(lines)
 
     def gainers_losers(self, request: str) -> str:
-        chain = _chain(request)
-        category = _GAINERS_CATEGORY.get(chain)
-        if not category:
+        try:
+            chain = _chain(request)
+        except ValueError:
+            chain = None    # market-wide: the top 250 by market cap, no category
+        category = _GAINERS_CATEGORY.get(chain) if chain else None
+        if chain and not category:
             raise ValueError(f"CoinGecko gainers/losers has no curated ecosystem category for {chain}")
         losers = bool(_LOSER_WORDS.search(request))
         headers = {"x-cg-pro-api-key": settings.coingecko_api_key} if settings.coingecko_api_key else {}
+        params = {"vs_currency": "usd", "per_page": 100 if category else 250, "page": 1, "price_change_percentage": "24h"}
+        if category:
+            params["category"] = category
         with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
             response = client.get(
                 f"{settings.coingecko_base_url}/coins/markets",
-                params={
-                    "vs_currency": "usd", "category": category, "per_page": 100, "page": 1,
-                    "price_change_percentage": "24h",
-                },
+                params=params,
                 headers=headers,
             )
             response.raise_for_status()
@@ -203,14 +213,15 @@ class CoinGeckoProvider:
         candidates.sort(key=lambda row: row["price_change_percentage_24h"], reverse=not losers)
         top = candidates[:10]
         label = "Losers" if losers else "Gainers"
+        scope = f"on {chain.title()}" if chain else "market-wide (top 250 by market cap)"
         if not top:
             return (
-                f"# {label} on {chain.title()}\n\nNo {chain.title()}-ecosystem coins with at least $10K in 24h "
+                f"# {label} {scope}\n\nNo coins with at least $10K in 24h "
                 "volume were returned by CoinGecko right now.\n\n"
                 "Source: [CoinGecko markets](https://docs.coingecko.com/reference/coins-markets)"
             )
         lines = [
-            f"# {label} on {chain.title()}",
+            f"# {label} {scope}",
             f"**Data freshness**: {_utc()}",
             "",
             "| Token | Price | 24h change | 24h volume |",
@@ -224,7 +235,7 @@ class CoinGeckoProvider:
             )
         lines.extend([
             "",
-            f"Source: [CoinGecko markets, {category} category](https://docs.coingecko.com/reference/coins-markets)",
+            f"Source: [CoinGecko markets{', ' + category + ' category' if category else ''}](https://docs.coingecko.com/reference/coins-markets)",
             "",
             "**Note**: CoinGecko's ecosystem category can include bridged/wrapped assets alongside "
             "natively-deployed tokens. A large 24h move on modest volume can reverse quickly -- check "
@@ -377,7 +388,7 @@ class HoneypotProvider:
         router.register(ProviderTool(
             "honeypot_token_security", self.name, ("token_security",), self.security,
             matches=lambda request: _evm_exact(request) and bool(_SECURITY.search(request)),
-            keywords=("honeypot", "sellability", "security", "risk"), chains=tuple(_EVM_CHAIN_IDS),
+            keywords=("honeypot", "sellability", "sellable", "can i sell", "security", "risk"), chains=tuple(_EVM_CHAIN_IDS),
             quota_per_minute=settings.honeypot_requests_per_minute, cache_ttl_seconds=60, priority=8,
             description="Honeypot simulation for an EVM token: buy/sell/transfer tax, sellability, proxy/open-source contract check",
         ))
@@ -947,8 +958,8 @@ class GoldRushProvider:
             "goldrush_hyperliquid_market", self.name, ("market_data",), self.hyperliquid_market,
             enabled=self.enabled,
             matches=lambda request: bool(re.search(r"\bhyperliquid\b", request, re.IGNORECASE))
-                and bool(re.search(r"\b(?:funding|mark\s*price|oracle\s*price|open\s*interest|market|price|rate)\b", request, re.IGNORECASE)),
-            keywords=("hyperliquid", "funding rate", "mark price", "open interest"),
+                and bool(re.search(r"\b(?:funding|mark\s*price|oracle\s*price|open\s*interest|oi|volume|perps?|perpetuals?|market|price|rate)\b", request, re.IGNORECASE)),
+            keywords=("hyperliquid", "funding rate", "mark price", "open interest", "oi", "perps"),
             quota_per_minute=settings.goldrush_requests_per_minute, cache_ttl_seconds=15, priority=10,
             description="Hyperliquid perpetual futures market data: mark price, oracle price, funding rate, open interest, 24h volume",
         ))
@@ -1022,7 +1033,7 @@ class ExchangeAnnouncementsProvider:
         router.register(ProviderTool(
             "exchange_listing_announcements", self.name, ("listing_events",), self.search,
             enabled=perplexity_available,
-            matches=lambda request: bool(re.search(r"\b(?:listing|listings|listed|delisting|delisted|exchange announcement)\b", request, re.I)),
+            matches=lambda request: bool(re.search(r"\b(?:listings?|listed|delistings?|delisted|exchange announcements?)\b", request, re.I)),
             keywords=("listing", "delisting", "announcement", "binance", "bybit", "okx"),
             cost_usd=settings.perplexity_web_search_cost_usd, quota_per_minute=settings.perplexity_requests_per_minute,
             cache_ttl_seconds=60, priority=10,

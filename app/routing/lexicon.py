@@ -54,7 +54,7 @@ OWN_WALLET_ACTIVITY = re.compile(
 )
 WALLET_HEALTH = re.compile(r"\b(?:my|connected)\b.{0,30}\b(?:wallet health|wallet safety|approvals?|gas readiness)\b", re.I)
 PORTFOLIO_SCENARIO = re.compile(r"\b(?:what if|scenario|stress test|drops?|falls?|rises?|increases?)\b.{0,80}\b(?:portfolio|wallet|SOL|token|market)\b|\b(?:portfolio|wallet|SOL|token|market)\b.{0,80}\b(?:drops?|falls?|rises?|increases?)\b", re.I)
-WALLET = re.compile(r"\b(?:wallet|address|portfolio|holdings|balances?|pnl|transactions?|leverage|debt|liquidation|counterparties)\b", re.I)
+WALLET = re.compile(r"\b(?:wallet|address|portfolio|holdings?|holds?|holding|balances?|pnl|transactions?|leverage|debt|liquidation|counterparties)\b", re.I)
 # A perpetual-positions ask about a wallet: "open perps for 0x...", "my open
 # perps", "hyperliquid positions for <address>". Positions are a wallet's
 # state, so this is a portfolio ask whichever wallet it names; market-data
@@ -76,6 +76,8 @@ SECURITY_STRONG = re.compile(
     r"\brug(?:ged|ging|s|\s?pull(?:ed|s)?)?\b"
     r"|\bhoney\s?pot(?:s|ted)?\b"
     r"|\bsellability\b"
+    # "can I sell X" / "is it sellable": a honeypot question, not a sell order.
+    r"|\bcan\s+(?:i|you|we|one|anyone)\s+(?:even\s+|still\s+|actually\s+)?sell\b|\b(?:un)?sellable\b"
     r"|\$[A-Za-z][A-Za-z0-9]{1,9}\b[^.\n?!]{0,24}\b(?:scam|safe|safety|legit|rug|honeypot)\b"
     r"|\b(?:scam|safe|safety|legit)\b[^.\n?!]{0,24}\$[A-Za-z][A-Za-z0-9]{1,9}\b",
     re.I,
@@ -119,7 +121,7 @@ FINANCE = re.compile(r"\b(?:stock|stocks|share price|ticker|equity|earnings|reve
 EQUITY = re.compile(r"\b(?:equity research|stock market|stocks?|shares?|equities|earnings|dividend|analyst ratings?|price target|fundamental analysis|nse|bse|nifty|sensex|nasdaq|nyse|s&p\s*500|dow jones|us market|indian? market)\b", re.I)
 EQUITY_TICKER = re.compile(r"(?:\$[A-Z]{1,6}|\b(?:NSE|BSE|NASDAQ|NYSE):[A-Z0-9.-]{1,16})\b", re.I)
 DEFI = re.compile(r"\b(?:defi|tvl|total value locked|protocol tvl|chain tvl)\b", re.I)
-LISTING = re.compile(r"\b(?:listing|listings|listed|delisting|delisted|exchange announcement)\b", re.I)
+LISTING = re.compile(r"\b(?:listings?|listed|delistings?|delisted|exchange announcements?)\b", re.I)
 CONCEPTUAL = re.compile(r"^(?:hi|hello|hey|thanks|thank you|what can you do)[!?. ]*$", re.I)
 # A last-resort deterministic fallback for plain information-seeking questions
 # that match none of the specific rules above (e.g. general trivia). Keeps

@@ -309,3 +309,42 @@ material, fabricates mechanism on thin passages.
 Current backend, 100 cases, knowledge anchor present: **98/100** (was 97;
 `hyperliquid-positions` relabeled to portfolio under decision 2). The one
 remaining miss is "freeze authority on <mint>" going to `general`.
+
+## Deterministic tool ranking: the ten catalog misses (2026-09-17)
+
+Router mode -- Layer-1 capabilities, then the provider router's ranking, no
+model -- missed ten of the 66 router cases. None was a scoring problem; each
+was a gap in what a rule or a tool's own gate could recognise, or a case that
+was itself underspecified:
+
+- **A bare Solana address never named its chain.** `_chain()` demanded a
+  chain word, so every Solana wallet tool's gate failed on "recent
+  transactions for <address>" and nothing was a candidate, Helius included.
+  A base58 address of Solana's length can only be Solana; it now infers the
+  chain, at the helper and at Layer-1. An 0x address stays ambiguous across
+  EVM chains and still needs the word.
+- **Vocabulary the gates lacked**: "oi" (Hyperliquid open interest),
+  "spiked/pumped/dumped" (gainers/losers), "newest ... profiles",
+  "hold/holds" (wallet balances), "delistings" (plural), "can I sell" and
+  "sellable" (a honeypot question, not a sell order).
+- **Rule order**: security jargon now outranks both the trade verbs and the
+  generic address+check wallet rule, so "can I sell 0x..." and "rug check
+  0x..." are token-security asks.
+- **A market-wide gainers ask** ("what coins spiked hardest today") had no
+  tool: the gainers tool required a chain category. It now runs market-wide
+  over CoinGecko's top 250 when no chain is named -- the same query the
+  overview card's movers list makes.
+- **Two cases were underspecified.** "honeypot check" with no token, and
+  "rug check 0x..." with no chain, cannot be ranked to a chain-specific
+  tool; the product asks (a security ask naming no token now gets "which
+  token?"; an 0x address with no chain already got "which chain?"). The
+  cases carry an address and a chain. "what is <address> on base" and the
+  two honeypot asks accept either of two tools that answer them (CoinGecko
+  or Birdeye for identity+price; honeypot.is or GoPlus, which reports
+  is_honeypot and sell tax).
+
+One keyword nudge tried along the way was reverted: adding "hold" to a
+balances tool's keywords tipped it over its sibling on an existing case.
+Gates decide reachability; keywords are not the place to fix ranking.
+
+Router mode: **66/66 top-1, 97% recall@8, 0 forbidden@1** (was 56/66).
