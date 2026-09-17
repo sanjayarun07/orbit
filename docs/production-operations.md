@@ -768,15 +768,37 @@ delivered as server-sent events instead of one JSON body at the end:
 
 The channel is a per-turn ContextVar (`app/streaming.py`); `emit` is a
 no-op when nobody is streaming, so the JSON route and the MCP server are
-untouched. The research path reports from its composition points (the
-multi-tool plan, the market bundle, a compound message's clauses) and the
-synthesis streams its `summary` field through DSPy's `streamify` on the
-synthesis tier's model, falling back to a whole answer on any failure.
+untouched.
+
+Every turn streams, not only a composed one (second pass, same day: the
+first pass streamed only multi-tool turns, so a general reply, a
+single-tool answer, a ReAct research turn, a deep dive and a knowledge
+answer still arrived whole and looked unchanged):
+
+- `runtime.answer(program, field="answer", tier=...)` is the one call a
+  node makes for the text the user reads. With a client listening it runs
+  the program through DSPy's `streamify`, hands the field over token by
+  token, and reports each tool the program runs as a status line;
+  otherwise it is the ordinary bounded call on the named tier. The general
+  node, the ReAct research agent, the portfolio and trade-simulation
+  agents, the trade planner, the knowledge synthesizer, the deep dive, the
+  equity brief, the composite summary and the team coordinator all go
+  through it.
+- `ProviderRouter._invoke_with_retry` emits `Running <tool>` -- every real
+  provider call passes there, so a status line precedes every card whatever
+  path chose the tool. Deterministic intercepts (market overview, events
+  calendar, wallet portfolio, direct MCP lookups, the Jupiter quote, the
+  charter check) announce themselves the same way.
+
+A single-tool turn still delivers its card with `done` (there is nothing to
+show before the one tool returns); what it gains is the status line and,
+when a model writes the answer, the tokens.
 
 The browser tries the stream first and falls back to the JSON route when
 the response is not an event stream (a proxy that buffers or strips it) or
 when x402 payment wrapping is on. It renders each card as it arrives, grows
-the summary token by token, and on `done` renders the final answer exactly
+the streamed text token by token (rendered as markdown as it grows, so lists
+and emphasis appear in place), and on `done` renders the final answer exactly
 as before. A streamed `error` is shaped like a failed fetch, so the existing
 404 (conversation gone -> retry fresh) and 409 (stale revision -> retry)
 handling still applies.

@@ -12,7 +12,7 @@ from typing import Any, Callable
 
 import httpx
 
-from app import tool_outcomes
+from app import streaming, tool_outcomes
 from app.call_budget import charge_and_check
 from app.metrics import increment
 from app.provider_analytics import emit_provider_event
@@ -452,7 +452,9 @@ class ProviderRouter:
         -- a ValueError or any other logic error propagates immediately, as
         does a transient failure that can't clear the same quota/budget
         checks route() already applies (a retry is an honest second call to
-        that paid API, not a free one)."""
+        that paid API, not a free one). Every real provider call passes here,
+        so this is where a streaming client learns which tool is running."""
+        streaming.emit("status", text=f"Running {tool.name.replace('_', ' ')}")
         try:
             return tool.handler(request)
         except Exception as exc:

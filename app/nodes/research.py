@@ -617,8 +617,8 @@ async def _equity_research(state: dict) -> dict:
             "trajectory": trajectory,
         }
 
-    synthesis = await runtime._call_synthesis_lm(
-        runtime.equity_research_synthesizer,
+    synthesis = await runtime.answer(
+        runtime.equity_research_synthesizer, tier="synthesis",
         request=request,
         conversation_history=state.get("history", ""),
         as_of_date=datetime.now().astimezone().isoformat(timespec="minutes"),
@@ -1145,6 +1145,7 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
         address = resolved.group(1) or resolved.group(2)
         chain = resolution.chain
 
+    streaming.emit("status", text=f"Composing the evidence bundle for {symbol or address}")
     bundle = await build_token_evidence(address, chain, symbol)
     evidence = format_evidence_bundle(bundle)
     charter = (state.get("session_context") or {}).get("risk_charter")
@@ -1158,8 +1159,9 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
     learned = "\n".join(f"- {lesson}" for lesson in lessons) if lessons else "none"
 
     try:
-        result = await runtime._call_synthesis_lm(
-            runtime.token_deepdive_agent,
+        streaming.emit("status", text="Writing the due-diligence verdict")
+        result = await runtime.answer(
+            runtime.token_deepdive_agent, tier="synthesis",
             request=request, evidence=evidence,
             analysis_rules=ANALYSIS_RULES,
             user_context=charter or "no profile set",
@@ -1201,9 +1203,16 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
 
 
 @trace(name="research", as_type="agent")
-async def _synthesize_knowledge(request: str, passages: str, history: str) -> str:
+async def _synthesize_knowledge(request: str, passages: str, history: str, *, stream: bool = True) -> str:
+    """The cited answer over knowledge-base passages. Streamed to the client
+    when it IS the answer; whole when it is one card of a composition (the
+    composite summary is what streams then)."""
     try:
-        result = await runtime._call_synthesis_lm(runtime.knowledge_synthesizer, request=request, conversation_history=history or "", passages=passages)
+        if stream:
+            streaming.emit("status", text="Reading the knowledge base")
+            result = await runtime.answer(runtime.knowledge_synthesizer, tier="synthesis", request=request, conversation_history=history or "", passages=passages)
+        else:
+            result = await runtime._call_synthesis_lm(runtime.knowledge_synthesizer, request=request, conversation_history=history or "", passages=passages)
         answer = (getattr(result, "answer", "") or "").strip()
     except Exception:
         logger.warning("knowledge synthesis failed; returning passages", exc_info=True)
@@ -1230,7 +1239,6 @@ async def _gather_planned(request: str, capabilities: tuple[str, ...], chains: t
         return None
 
     async def one(tool):
-        streaming.emit("status", text=f"Running {tool.name.replace('_', ' ')}")
         try:
             result = await asyncio.to_thread(router.invoke, tool.name, request, chains)
         except Exception:
@@ -1247,7 +1255,8 @@ async def _gather_planned(request: str, capabilities: tuple[str, ...], chains: t
     for result in results:
         card = result.output
         if result.tool == "knowledge_base_search":
-            card = await _synthesize_knowledge(request, result.output, state.get("history", ""))
+            card = await _synthesize_knowledge(request, result.output, state.get("history", ""), stream=False)
+            streaming.emit("card", markdown=card, tool=result.tool)
         parts.append((card, _provider_trajectory(result, request, "/".join(capabilities))))
     cards, trajectory = composition.combine(parts)
     answer = await composition.synthesize(request, cards, trajectory)
@@ -1325,6 +1334,7 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     moving = why_moving.match(request)
     if moving and not _TOKEN_ADDRESS.search(request):
         prefer_stock = why_moving.prefers_stock(request) or "equity_research" in set(state.get("capabilities", []))
+        streaming.emit("status", text="Reading the market data and the news for the move")
         answer, trajectory = await why_moving.compose(*moving, prefer_stock=prefer_stock)
         trajectory = {"thought_0": "A 'why is X moving' ask maps to the composed market + news card.", **trajectory} if trajectory else None
         if broad_market:
@@ -1337,6 +1347,7 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
             }
         return {"answer": answer, "trajectory": trajectory}
     if broad_market:
+        streaming.emit("status", text="Composing the market overview")
         observation = await asyncio.to_thread(crypto_market_overview, request)
         return {
             "answer": observation,
@@ -1350,6 +1361,7 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     # "what events are coming this week?" -> the dated calendar card.
     if event_calendar.TRIGGER.search(request) and not _TOKEN_ADDRESS.search(request):
         days = 14 if re.search(r"\b(?:next|two)\s+weeks?|fortnight|month\b", request, re.I) else 7
+        streaming.emit("status", text="Fetching the events calendar")
         data = await asyncio.to_thread(event_calendar.get_calendar, days)
         return {"answer": event_calendar.render(data), "trajectory": {
             "thought_0": "A market-events ask maps to the dated calendar card.", "tool_name_0": "market_event_calendar",
@@ -1441,12 +1453,14 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         and not _HYPERLIQUID_REQUEST.search(request)
     ):
         address, chain = detected_wallet
+        streaming.emit("status", text="Fetching the wallet's balances and positions")
         answer, trajectory = await _compose_wallet_portfolio(address, chain)
         return {"answer": answer, "trajectory": trajectory}
     direct = direct_mcp_request(request, token_subject=token_subject)
     failed_direct_tool: str | None = None
     if direct is not None:
         tool_name, arguments = direct
+        streaming.emit("status", text=f"Running {tool_name.removeprefix('mcp_').replace('_', ' ')}")
         observation = await call_direct_mcp_tool(tool_name, arguments)
         trajectory = {
             "thought_0": "The request maps directly to a known provider lookup.",
@@ -1542,6 +1556,7 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         # Returning it directly avoids a second model pass changing dates,
         # prices, or citations and avoids unrelated MCP attempts.
         arguments = {"query": state["request"]}
+        streaming.emit("status", text="Searching the live web for the market brief")
         observation = await asyncio.to_thread(crypto_market_brief, **arguments)
         return {
             "answer": observation,
@@ -1584,7 +1599,8 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
             "No usable provider across capabilities %s for %r; falling back to ReAct",
             eligible_capabilities, request,
         )
-    result = await runtime._call_lm(
+    streaming.emit("status", text="Researching with the live tools")
+    result = await runtime.answer(
         _research_agent(
             request,
             tuple(state.get("capabilities", [])),

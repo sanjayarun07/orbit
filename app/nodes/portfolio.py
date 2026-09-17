@@ -204,7 +204,7 @@ async def portfolio_node(state: AgentState) -> dict:
             "trajectory": {"thought_0": "Apply a deterministic price shock to current priced holdings.", "tool_name_0": "portfolio_scenario", "tool_args_0": {"change_pct": change, "symbol": report["target"]}, "observation_0": report},
         }
     if "trade_simulation" in capabilities:
-        result = await runtime._call_lm(
+        result = await runtime.answer(
             runtime.trade_simulator,
             request=request,
             wallet_address=state["wallet_address"],
@@ -260,7 +260,7 @@ async def portfolio_node(state: AgentState) -> dict:
                     },
                 }
         return {"answer": answer, "trajectory": trajectory}
-    result = await runtime._call_lm(
+    result = await runtime.answer(
         runtime.portfolio_agent,
         request=request,
         wallet_address=state["wallet_address"],

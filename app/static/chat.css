@@ -500,7 +500,7 @@
   /* A turn rendered as it happens: a quiet status line, the synthesis growing token by token, cards as they land. */
   .answer.streaming .stream-status { font-size: 12px; color: var(--subtle); margin-bottom: 8px; }
   .answer.streaming .stream-status[hidden] { display: none; }
-  .answer.streaming .stream-summary { white-space: pre-wrap; line-height: 1.55; margin-bottom: 12px; }
+  .answer.streaming .stream-summary { line-height: 1.55; margin-bottom: 12px; }
   .answer.streaming .stream-summary::after { content: '▍'; color: var(--brand); animation: orbit-blink 1s steps(2) infinite; }
   .answer.streaming .stream-sep { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }
   @keyframes orbit-blink { to { opacity: 0; } }

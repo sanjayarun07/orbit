@@ -112,7 +112,6 @@ async def compose_market_advice(request: str) -> tuple[str, dict]:
     router = get_provider_router()
 
     async def one(tool: str, probe: str):
-        streaming.emit("status", text=f"Running {tool.replace('_', ' ')}")
         for attempt in (1, 2):   # a second, sequential try after the concurrent burst
             try:
                 result = await asyncio.to_thread(router.invoke, tool, probe, ())

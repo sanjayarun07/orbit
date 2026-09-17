@@ -13,7 +13,7 @@ from app.nodes.research import _sanitize_react_answer
 from app.models import CrossChainSwapDraft, RiskAssessment, SwapProposal, TradePlan
 from app.plans import create_trade_plan, mark_plan_superseded
 from app.portfolio import build_portfolio_snapshot
-from app import deployment
+from app import deployment, streaming
 from app.settings import settings
 from app.trade_context import complete_swap_fields
 
@@ -71,7 +71,7 @@ async def trade_planner_node(state: AgentState) -> dict:
             "trajectory": None,
         }
     request = _effective_request(state)
-    result = await runtime._call_lm(
+    result = await runtime.answer(
         runtime.trade_planner,
         request=request,
         wallet_address=state["wallet_address"],
@@ -245,6 +245,7 @@ async def quote_and_simulate_node(state: AgentState) -> dict:
     proposal = state["proposal"]
     if state.get("execution_provider") != "jupiter":
         return {"error": "A resolved Jupiter route is required for a Solana trade plan."}
+    streaming.emit("status", text="Fetching a Jupiter quote and simulating the swap")
     try:
         plan = await create_trade_plan(state["wallet_address"], proposal)
         return {"trade_plan": plan}
@@ -393,6 +394,7 @@ async def charter_risk_node(state: AgentState) -> dict:
                 verdict="ok", summary="Within your risk rules (checked: " + ", ".join(c.replace("_", " ") for c in checked) + ").",
                 charter_applied=True)}
 
+    streaming.emit("status", text="Checking the plan against your risk charter")
     try:
         result = await runtime._call_lm(
             runtime.risk_agent,

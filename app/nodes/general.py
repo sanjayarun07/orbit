@@ -146,7 +146,7 @@ async def general_node(state: AgentState) -> dict:
             ),
             "trajectory": None,
         }
-    result = await runtime._call_lm(
+    result = await runtime.answer(
         runtime.general_agent, request=state["request"], conversation_history=state.get("history", "")
     )
     return {"answer": result.answer, "trajectory": None}

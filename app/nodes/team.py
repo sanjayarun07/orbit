@@ -13,6 +13,7 @@ import re
 
 from app.agent import search_verified_tokens
 from app.jupiter import WRAPPED_SOL_MINT
+from app import streaming
 from app.nodes.state import AgentState, effective_request as _effective_request
 from app.nodes import runtime
 from app.nodes.research import research_node, _TOKEN_ADDRESS
@@ -211,6 +212,7 @@ async def _market_research(state: AgentState, request: str) -> tuple[str, int | 
         # skip synthesis so the desk asks cleanly.
         return market_data, None, trajectory, pending_token
     try:
+        streaming.emit("status", text="Market Research is writing the thesis")
         result = await runtime._call_lm(runtime.market_research_agent, asset=request, market_data=market_data)
         thesis = (getattr(result, "thesis", "") or "").strip() or market_data
         conviction = getattr(result, "conviction", None)
@@ -254,6 +256,7 @@ async def team_node(state: AgentState) -> dict:
     trade_plan = None
     risk_assessment = None
     if subintent == "trade":
+        streaming.emit("status", text="Execution and Risk are drafting the order")
         execution_answer, trade_plan, risk_assessment = await _execution_and_risk(state)
         risk_line = (
             f"{risk_assessment.verdict}: {risk_assessment.summary}" if risk_assessment is not None else "not evaluated"
@@ -263,7 +266,8 @@ async def team_node(state: AgentState) -> dict:
         risk_line = f"User risk charter to respect when advising on sizing: {charter}" if charter else "No risk charter set (advisory)."
 
     try:
-        synth = await runtime._call_lm(
+        streaming.emit("status", text="The Coordinator is folding the desk's answers together")
+        synth = await runtime.answer(
             runtime.team_coordinator,
             request=request,
             market_research=thesis,

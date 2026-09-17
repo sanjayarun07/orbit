@@ -117,7 +117,16 @@ def test_the_client_renders_cards_and_tokens_as_they_arrive_and_returns_done():
     from tests.test_ui_swap_flow import run_case
     r = run_case("stream_renders_progressively_and_returns_the_done_payload")
     assert r["ok"] and r["status"] == 200 and r["data"]["answer"] == "final"
-    assert r["cards"] == ["# Shield\n| ok |"] and r["summary"] == "Safe by the dossier." and r["statusLine"] == "Running shield"
+    assert r["cards"] == ["# Shield\n| ok |"] and r["summaryHtml"] == "<p>Safe by the dossier.</p>"
+    assert r["statusHidden"] is True, "the status line gives way to the answer once it starts arriving"
+
+
+def test_the_client_renders_a_whole_streamed_answer_as_markdown():
+    from tests.test_ui_swap_flow import run_case
+    r = run_case("stream_renders_a_whole_answer_as_markdown_while_it_arrives")
+    assert r["ok"]
+    assert r["summaryHtml"] == "<p>I can help with <strong>markets</strong> and wallets:</p><ul><li>prices</li><li>swaps</li></ul>", r["summaryHtml"]
+    assert r["statusSeen"][:2] == ["Thinking…", "Routed: general"] and r["statusHidden"] is True
 
 
 def test_the_client_falls_back_to_the_json_route_without_a_stream():

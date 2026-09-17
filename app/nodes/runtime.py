@@ -2,6 +2,8 @@
 import asyncio
 import logging
 import dspy
+from dspy.streaming import StatusMessage, StatusMessageProvider, StreamListener, StreamResponse
+from app import streaming
 from app.agent import portfolio_snapshot, search_verified_tokens, sol_balance, spl_balances, token_safety_warnings
 from app.mcp_tools import get_mcp_registry
 from app.metrics import increment
@@ -489,35 +491,85 @@ async def _call_lm(program, **kwargs):
 synthesis_recorder = None
 
 
-async def stream_synthesis(program, field: str, on_delta, **kwargs):
-    """Run a synthesis program with its `field` streamed token by token to
-    `on_delta` as it is generated, on the synthesis tier's model. Returns the
-    final prediction. Any failure falls back to the ordinary call, so a
-    streaming client never gets less than a non-streaming one."""
-    import dspy
-    from dspy.streaming import StreamListener, StreamResponse
+class _ToolStatus(StatusMessageProvider):
+    """What a program's tool loop reports to the client: the tool it is about
+    to run, nothing else (DSPy's defaults narrate every LM call too)."""
 
-    lm = _synthesis_lm or _primary_lm
-    if synthesis_recorder is not None:
-        synthesis_recorder(_program_name(program), kwargs)
-    try:
-        streamer = dspy.streamify(program, stream_listeners=[StreamListener(signature_field_name=field)],
-                                  async_streaming=True, include_final_prediction_in_output_stream=True)
-        final = None
-        async with _llm_slots:
-            increment("llm_calls")
+    def tool_start_status_message(self, instance, inputs):
+        return f"Running {str(getattr(instance, 'name', 'tool')).replace('_', ' ')}"
+
+    def tool_end_status_message(self, outputs):
+        return None
+
+
+async def _stream(program, field: str, on_delta, lm, kwargs):
+    """Run `program` on `lm` with output `field` handed to `on_delta` token by
+    token and each tool call reported as a status line. The final prediction,
+    or None when the stream produced none (the caller then makes the ordinary
+    call). Same backpressure and repeat-guard scope as _run_guarded."""
+    streamer = dspy.streamify(program, stream_listeners=[StreamListener(signature_field_name=field)],
+                              status_message_provider=_ToolStatus(), async_streaming=True,
+                              include_final_prediction_in_output_stream=True)
+    final = None
+    async with _llm_slots:
+        increment("llm_calls")
+        token = start_guard()
+        try:
             with dspy.context(lm=lm):
                 async for chunk in streamer(**kwargs):
                     if isinstance(chunk, StreamResponse):
                         if chunk.chunk:
                             on_delta(chunk.chunk)
+                    elif isinstance(chunk, StatusMessage):
+                        streaming.emit("status", text=chunk.message)
                     elif isinstance(chunk, dspy.Prediction):
                         final = chunk
+        finally:
+            reset_guard(token)
+    return final
+
+
+async def stream_answer(program, field: str, on_delta, **kwargs):
+    """Run a program on the primary model with its `field` streamed token by
+    token to `on_delta` as it is generated. Returns the final prediction. Any
+    failure falls back to the ordinary call, so a streaming client never gets
+    less than a non-streaming one."""
+    try:
+        final = await _stream(program, field, on_delta, _primary_lm, kwargs)
+        if final is not None:
+            return final
+    except Exception:
+        logger.warning("streaming answer failed; falling back to a whole answer", exc_info=True)
+    return await _call_lm(program, **kwargs)
+
+
+async def stream_synthesis(program, field: str, on_delta, **kwargs):
+    """stream_answer on the synthesis tier's model."""
+    if synthesis_recorder is not None:
+        synthesis_recorder(_program_name(program), kwargs)
+    try:
+        final = await _stream(program, field, on_delta, _synthesis_lm or _primary_lm, kwargs)
         if final is not None:
             return final
     except Exception:
         logger.warning("streaming synthesis failed; falling back to a whole answer", exc_info=True)
     return await _call_synthesis_lm(program, **kwargs)
+
+
+async def answer(program, field: str = "answer", *, tier: str = "primary", **kwargs):
+    """The call a node makes for the text the user reads. When a client is
+    streaming this turn (app/streaming.py) the `field` reaches it token by
+    token and every tool the program runs is reported as a status line;
+    otherwise this is the ordinary bounded call on the named tier. Every
+    path that ends in model-written text goes through here, so a general
+    reply, a single-tool answer, a ReAct research turn and a deep dive all
+    stream the same way a composed answer does."""
+    if streaming.active():
+        stream = stream_synthesis if tier == "synthesis" else stream_answer
+        return await stream(program, field, lambda text: streaming.emit("delta", text=text), **kwargs)
+    if tier == "synthesis":
+        return await _call_synthesis_lm(program, **kwargs)
+    return await _call_lm(program, **kwargs)
 
 
 async def _call_synthesis_lm(program, **kwargs):

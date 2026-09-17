@@ -75,6 +75,14 @@ def test_the_three_synthesis_call_sites_go_through_the_tier():
     import inspect
     from app.nodes import research
     source = inspect.getsource(research)
+    # Each program is called through the tier: either the plain synthesis call
+    # or runtime.answer(..., tier="synthesis"), which streams on that tier.
     for program in ("equity_research_synthesizer", "token_deepdive_agent", "knowledge_synthesizer"):
-        assert f"_call_synthesis_lm(\n        runtime.{program}" in source or f"_call_synthesis_lm(\n            runtime.{program}" in source or f"_call_synthesis_lm(runtime.{program}" in source, program
+        tiered = (f"_call_synthesis_lm(\n        runtime.{program}" in source or f"_call_synthesis_lm(\n            runtime.{program}" in source
+                  or f"_call_synthesis_lm(runtime.{program}" in source)
+        streamed = (f'runtime.answer(\n        runtime.{program}, tier="synthesis"' in source or f'runtime.answer(\n            runtime.{program}, tier="synthesis"' in source
+                    or f'runtime.answer(runtime.{program}, tier="synthesis"' in source)
+        assert tiered or streamed, program
         assert f"_call_lm(runtime.{program}" not in source and f"_call_lm(\n        runtime.{program}" not in source and f"_call_lm(\n            runtime.{program}" not in source, program
+        assert f"runtime.answer(runtime.{program}," not in source.replace(f'runtime.answer(runtime.{program}, tier="synthesis"', "") \
+            and f"runtime.answer(\n            runtime.{program},\n" not in source and f"runtime.answer(\n        runtime.{program},\n" not in source, f"{program} streamed on the primary tier"

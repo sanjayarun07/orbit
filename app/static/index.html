@@ -429,6 +429,9 @@ function renderInline(value) {
 function splitMarkdownRow(line) { return line.trim().replace(/^\||\|$/g, "").split("|").map(cell => cell.trim()); }
 function isTableDivider(line) { return /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$/.test(line); }
 function renderMarkdownResult(value) {
+  const el = document.createElement("div"); el.className = "rendered-result"; el.innerHTML = renderMarkdownHtml(value); return el;
+}
+function renderMarkdownHtml(value) {
   const text = String(value ?? "").slice(0, 16000); const lines = text.split("\n"); const parts = [];
   for (let i = 0; i < lines.length;) {
     const line = lines[i].trim(); if (!line) { i++; continue; }
@@ -445,7 +448,7 @@ function renderMarkdownResult(value) {
     const field = line.match(/^\*\*([^*]+)\*\*:\s*(.*)$/); if (field) { parts.push(`<div class="result-grid"><div class="result-field"><span>${renderInline(field[1])}</span><b>${renderInline(field[2] || "—")}</b></div></div>`); i++; continue; }
     parts.push(`<p>${renderInline(line)}</p>`); i++;
   }
-  const el = document.createElement("div"); el.className = "rendered-result"; el.innerHTML = parts.join(""); return el;
+  return parts.join("");
 }
 function renderStructuredResult(value, failed = false) {
   const parsed = parseMaybeJson(value);
@@ -1179,10 +1182,14 @@ async function chatFetch(url,init){
 // with the same status and detail. If the stream cannot be opened the turn
 // falls back to the JSON route, so nothing is lost when a proxy strips it.
 function parseSse(buffer){const events=[];let idx;while((idx=buffer.indexOf("\n\n"))>=0){const block=buffer.slice(0,idx);buffer=buffer.slice(idx+2);let event="message",data="";for(const line of block.split("\n")){if(line.startsWith("event:"))event=line.slice(6).trim();else if(line.startsWith("data:"))data+=line.slice(5).trim();}if(data){try{events.push({event,data:JSON.parse(data)});}catch{}}}return {events,rest:buffer};}
-function streamView(typing){const body=$(".message-body",typing);body.innerHTML='<div class="answer streaming"><div class="stream-status"></div><div class="stream-summary" hidden></div><div class="stream-cards"></div></div>';return {
+// The text streamed token by token is the answer the model is writing (a general
+// reply, a research answer, the summary over composed cards), rendered as
+// markdown as it grows so lists and emphasis appear in place, not as raw marks.
+function streamView(typing){const body=$(".message-body",typing);body.innerHTML='<div class="answer streaming"><div class="stream-status"></div><div class="stream-summary rendered-result" hidden></div><div class="stream-cards"></div></div>';let text="";
+  return {
   status(text){const el=$(".stream-status",body);if(el){el.textContent=text;el.hidden=!text;}},
   card(markdown){const cards=$(".stream-cards",body);if(!cards)return;cards.appendChild(renderMarkdownResult(markdown));const sep=document.createElement("hr");sep.className="stream-sep";cards.appendChild(sep);scrollToBottom();},
-  delta(text){const el=$(".stream-summary",body);if(!el)return;el.hidden=false;el.textContent+=text;scrollToBottom();},
+  delta(chunk){text+=chunk;this.status("");const el=$(".stream-summary",body);if(!el)return;el.hidden=false;el.innerHTML=renderMarkdownHtml(text);scrollToBottom();},
 };}
 // Resolves to a fetch-shaped result ({ok,status,json()}) so the caller's handling is unchanged, or null to fall back.
 async function streamChat(payload,typing){

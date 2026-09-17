@@ -37,8 +37,14 @@ function makeDom() {
   const elements = new Map();
   const make = (key) => {
     const listeners = {};
+    // innerHTML reads back what was assigned, or the escaped textContent when
+    // only text was set -- the one derivation the script relies on
+    // (escapeHtml sets textContent on a scratch element and reads innerHTML).
+    let text = "", html = null;
     const el = {
-      __key: key, value: "", textContent: "", innerHTML: "", className: "",
+      __key: key, value: "", className: "",
+      get textContent() { return text; }, set textContent(v) { text = String(v ?? ""); html = null; },
+      get innerHTML() { return html ?? text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }, set innerHTML(v) { html = String(v ?? ""); },
       disabled: false, hidden: false, checked: false, dataset: {},
       style: { setProperty() {}, removeProperty() {}, getPropertyValue: () => "" },
       children: [], isConnected: true,
@@ -713,8 +719,29 @@ const CASES = {
     const rendered = [];
     sandbox.renderMarkdownResult = (md) => { rendered.push(md); return dom.query("#card-" + rendered.length); };
     const result = await sandbox.streamChat({ message: "is BONK safe" }, typing);
+    const status = dom.query("#typing >> .message-body >> .stream-status");
     return { ok: result.ok, status: result.status, data: await result.json(), cards: rendered,
-             summary: dom.query("#typing >> .message-body >> .stream-summary").textContent, statusLine: dom.query("#typing >> .message-body >> .stream-status").textContent };
+             summaryHtml: dom.query("#typing >> .message-body >> .stream-summary").innerHTML, statusLine: status.textContent, statusHidden: status.hidden };
+  },
+  // A general reply streams whole: markdown marks render as they arrive, and
+  // the status line gives way to the text.
+  async stream_renders_a_whole_answer_as_markdown_while_it_arrives() {
+    const { dom, sandbox } = load();
+    const frames = [
+      "event: status\ndata: {\"text\":\"Routed: general\"}\n\n",
+      "event: delta\ndata: {\"text\":\"I can help with **markets**\"}\n\nevent: delta\ndata: {\"text\":\" and wallets:\\n- prices\\n- swaps\"}\n\n",
+      "event: done\ndata: {\"data\":{\"answer\":\"final\",\"intent\":\"general\",\"session_id\":\"s2\"}}\n\n",
+    ];
+    let i = 0;
+    const reader = { read: async () => i < frames.length ? { value: new TextEncoder().encode(frames[i++]), done: false } : { value: undefined, done: true } };
+    sandbox.fetch = async () => ({ ok: true, status: 200, body: { getReader: () => reader }, headers: { get: () => "text/event-stream" } });
+    sandbox.ReadableStream = class {};
+    const statusSeen = [];
+    const typing = dom.query("#typing");
+    const status = dom.query("#typing >> .message-body >> .stream-status");
+    Object.defineProperty(status, "textContent", { set(v) { statusSeen.push(v); }, get() { return statusSeen[statusSeen.length - 1] ?? ""; } });
+    const result = await sandbox.streamChat({ message: "hi" }, typing);
+    return { ok: result.ok, summaryHtml: dom.query("#typing >> .message-body >> .stream-summary").innerHTML, statusSeen, statusHidden: status.hidden };
   },
   async stream_falls_back_to_json_when_the_response_is_not_a_stream() {
     const { dom, sandbox } = load();
