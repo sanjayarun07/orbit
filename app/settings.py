@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     model: str = "openai/gpt-4.1-mini"
     openai_api_key: str | None = None
+    typesafe_api_key: str | None = None            # Jev routing backend, harness-only until it earns a place
     # LLM-hop resilience (app/nodes/runtime.py `_call_lm`). Without an explicit
     # timeout litellm waits up to 600s on a wedged provider call; retries below
     # are litellm's own exponential-backoff attempts against the SAME model, and

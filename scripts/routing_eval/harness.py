@@ -223,26 +223,47 @@ def run_chat_mode(cases, base: str):
 
 # --------------------------------------------------------------- resolve mode
 
-def run_resolve_mode(cases):
+def _pct(values, q):
+    values = sorted(values)
+    return values[min(len(values) - 1, int(len(values) * q))] if values else 0.0
+
+
+def run_resolve_mode(cases, backend: str = "current"):
     """The routing DECISION layer (app/routing/resolver.resolve) in-process with
     the real embedding router and the real speech model: intent accuracy, which
     tier decided (method), and latency per case. This is the surface to measure
     when changing the order of the rules/embedding/model cascade -- router mode
-    only sees the deterministic rules and chat mode costs a full agent turn."""
+    only sees the deterministic rules and chat mode costs a full agent turn.
+
+    `backend` picks what answers the classification seam: "current" is the
+    speech model (runtime._call_intent_lm); "jev" is TypeSafe's decision model
+    (app.routing.jev_backend). Same cases, same rules ahead of the model, so
+    the two are comparable on accuracy, model-call latency, tokens, and -- for
+    Jev, which returns a distribution -- calibration of its stated confidence."""
     import asyncio
     from app.nodes import runtime
+    from app.routing import resolver
     from app.routing.resolver import resolve
     from app.routing.semantic import embedding_router
 
-    rows, agg = [], {"n": 0, "ok": 0, "methods": {}, "latency": []}
+    if backend == "jev":
+        from app.routing import jev_backend
+        jev_backend.CALLS.clear()
+        call_lm = jev_backend.call_lm
+    else:
+        call_lm = runtime._call_intent_lm
+    resolver._understanding_cache.clear()   # a prior backend's answers must not be reused
+
+    rows, agg = [], {"n": 0, "ok": 0, "methods": {}, "latency": [], "model_decided": []}
     for c in cases:
         if "expected_intent" not in c:
             continue
         agg["n"] += 1
         state = {"request": c["query"], "history": "", "session_context": {}}
+        calls_before = len(jev_backend.CALLS) if backend == "jev" else 0
         t0 = time.perf_counter()
         try:
-            out = asyncio.run(resolve(state, runtime._call_intent_lm, embedding_factory=embedding_router))
+            out = asyncio.run(resolve(state, call_lm, embedding_factory=embedding_router))
         except Exception as e:  # keep measuring the rest
             rows.append((c["id"], "ERR", str(e)[:40], "-", "-", "-"))
             continue
@@ -255,12 +276,15 @@ def run_resolve_mode(cases):
             out.get("intent") == "team" and out.get("team_subintent")
         )
         agg["ok"] += int(bool(ok))
+        if backend == "jev" and len(jev_backend.CALLS) > calls_before:
+            call = jev_backend.CALLS[-1]
+            agg["model_decided"].append({"id": c["id"], "ok": bool(ok), "confidence": call["speech_act_confidence"],
+                                         "latency_ms": call["latency_ms"], "tokens": call["usage"].get("input_tokens", 0),
+                                         "understanding": call["understanding"]})
         rows.append((c["id"], "OK" if ok else "MISS", out.get("intent"), c["expected_intent"], method, f"{ms:.0f}"))
     n = max(1, agg["n"])
-    lat = sorted(agg["latency"])
-    p50 = lat[len(lat) // 2] if lat else 0.0
-    p95 = lat[min(len(lat) - 1, int(len(lat) * 0.95))] if lat else 0.0
-    print("\n=== RESOLVE MODE (decision layer, in-process) ===")
+    p50, p95 = _pct(agg["latency"], 0.5), _pct(agg["latency"], 0.95)
+    print(f"\n=== RESOLVE MODE (decision layer, in-process; backend={backend}) ===")
     print(f"{'case':28} {'verdict':8} {'intent':14} {'expected':14} {'method':16} ms")
     for r in rows:
         print(f"{r[0]:28} {r[1]:8} {str(r[2]):14} {str(r[3]):14} {str(r[4]):16} {r[5]}")
@@ -269,14 +293,34 @@ def run_resolve_mode(cases):
     print(f"intent-accuracy  : {agg['ok']}/{n} = {agg['ok']/n:.1%}")
     print(f"decided by       : {agg['methods']}")
     print(f"latency p50/p95  : {p50:.0f} / {p95:.0f} ms")
-    return {"mode": "resolve", "metrics": {"cases": agg["n"], "intent_accuracy": agg["ok"] / n,
-                                           "methods": agg["methods"], "p50_ms": p50, "p95_ms": p95}, "rows": rows}
+    metrics = {"cases": agg["n"], "intent_accuracy": agg["ok"] / n, "methods": agg["methods"], "p50_ms": p50, "p95_ms": p95, "backend": backend}
+    if agg["model_decided"]:
+        md = agg["model_decided"]
+        tokens = sum(m["tokens"] for m in md)
+        bins = {}
+        for m in md:
+            b = min(9, int((m["confidence"] or 0) * 10)) / 10
+            bins.setdefault(b, []).append(m["ok"])
+        calibration = {f"{b:.1f}-{b + .1:.1f}": {"n": len(v), "accuracy": sum(v) / len(v)} for b, v in sorted(bins.items())}
+        metrics.update({"model_calls": len(md), "model_accuracy": sum(m["ok"] for m in md) / len(md),
+                        "model_latency_p50_ms": _pct([m["latency_ms"] for m in md], 0.5),
+                        "model_latency_p95_ms": _pct([m["latency_ms"] for m in md], 0.95),
+                        "input_tokens": tokens, "usd_per_1000_calls": tokens / len(md) * 1000 * 0.042 / 1_000_000,
+                        "calibration": calibration})
+        print(f"model calls      : {len(md)} · accuracy on those {metrics['model_accuracy']:.1%} · latency p50/p95 {metrics['model_latency_p50_ms']:.0f}/{metrics['model_latency_p95_ms']:.0f} ms")
+        print(f"tokens           : {tokens} in total · ${metrics['usd_per_1000_calls']:.4f} per 1,000 calls at $0.042/M")
+        print("calibration      : " + ", ".join(f"[{k}] {v['accuracy']:.0%} of {v['n']}" for k, v in calibration.items()))
+        for m in md:
+            if not m["ok"]:
+                print(f"  miss {m['id']:26} conf {m['confidence']:.2f} -> {m['understanding']['speech_act']}/{m['understanding']['domain']}")
+    return {"mode": "resolve", "metrics": metrics, "rows": rows}
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["router", "chat", "resolve", "both"], default="router")
     ap.add_argument("--k", type=int, default=8)
+    ap.add_argument("--backend", choices=["current", "jev"], default="current", help="resolve mode: what answers the classification seam")
     ap.add_argument("--semantic", action="store_true", help="router mode: allow embedding fallback in candidates")
     ap.add_argument("--llm-select", action="store_true", help="router mode: apply app.routing.tool_selector's model arbitration on top of the deterministic ranking (forces settings.llm_tool_selection_enabled=True for this run)")
     ap.add_argument("--base", default="http://localhost:8000/chat")
@@ -291,7 +335,7 @@ def main():
     if args.mode in ("router", "both"):
         out["router"] = run_router_mode(cases, args.k, args.semantic, args.llm_select)
     if args.mode == "resolve":
-        out["resolve"] = run_resolve_mode(cases)
+        out["resolve"] = run_resolve_mode(cases, backend=args.backend)
     if args.mode in ("chat", "both"):
         out["chat"] = run_chat_mode(cases, args.base)
     Path(args.out).write_text(json.dumps(out, indent=1))
