@@ -228,7 +228,11 @@ def _pct(values, q):
     return values[min(len(values) - 1, int(len(values) * q))] if values else 0.0
 
 
-def run_resolve_mode(cases, backend: str = "current"):
+LM_CALLS: list[dict] = []
+
+
+def run_resolve_mode(cases, backend: str = "current", lm_spec: dict | None = None):
+    lm_spec = lm_spec or {}
     """The routing DECISION layer (app/routing/resolver.resolve) in-process with
     the real embedding router and the real speech model: intent accuracy, which
     tier decided (method), and latency per case. This is the surface to measure
@@ -250,6 +254,26 @@ def run_resolve_mode(cases, backend: str = "current"):
         from app.routing import jev_backend
         jev_backend.CALLS.clear()
         call_lm = jev_backend.call_lm
+    elif backend == "lm":
+        # Any LiteLLM model at the classification seam, running the SAME
+        # SpeechResolution program the speech model runs -- so a candidate
+        # model is judged on our question, not a paraphrase of it.
+        import dspy
+        from app.settings import settings as _settings
+        dspy.configure_cache(enable_disk_cache=False, enable_memory_cache=False)
+        model, base = lm_spec["model"], lm_spec.get("api_base")
+        lm = (dspy.LM(f"openai/{model}", api_base=base, api_key="none", timeout=_settings.llm_request_timeout_seconds, num_retries=0, max_tokens=4000)
+              if base else dspy.LM(model, timeout=_settings.llm_request_timeout_seconds, num_retries=0))
+        LM_CALLS.clear()
+
+        async def call_lm(program, **kwargs):
+            t0 = time.perf_counter()
+            result = await runtime._run_guarded(program, lm, kwargs)
+            usage = (lm.history[-1].get("usage") or {}) if lm.history else {}
+            LM_CALLS.append({"request": kwargs.get("request"), "latency_ms": (time.perf_counter() - t0) * 1000,
+                             "usage": usage, "understanding": dict(result.understanding) if hasattr(result, "understanding") else None})
+            return result
+        backend = f"lm:{model}"
     else:
         call_lm = runtime._call_intent_lm
     resolver._understanding_cache.clear()   # a prior backend's answers must not be reused
@@ -261,7 +285,7 @@ def run_resolve_mode(cases, backend: str = "current"):
             continue
         agg["n"] += 1
         state = {"request": c["query"], "history": "", "session_context": {}}
-        calls_before = len(jev_backend.CALLS) if backend == "jev" else 0
+        calls_before = len(jev_backend.CALLS) if backend == "jev" else len(LM_CALLS) if backend.startswith("lm:") else 0
         t0 = time.perf_counter()
         try:
             out = asyncio.run(resolve(state, call_lm, embedding_factory=embedding_router))
@@ -282,6 +306,12 @@ def run_resolve_mode(cases, backend: str = "current"):
             agg["model_decided"].append({"id": c["id"], "ok": bool(ok), "confidence": call["speech_act_confidence"],
                                          "latency_ms": call["latency_ms"], "tokens": call["usage"].get("input_tokens", 0),
                                          "understanding": call["understanding"]})
+        elif backend.startswith("lm:") and len(LM_CALLS) > calls_before:
+            call = LM_CALLS[-1]
+            u_ = call["understanding"] or {}
+            agg["model_decided"].append({"id": c["id"], "ok": bool(ok), "confidence": u_.get("confidence"),
+                                         "latency_ms": call["latency_ms"], "tokens": call["usage"].get("prompt_tokens", 0) or 0,
+                                         "understanding": u_})
         rows.append((c["id"], "OK" if ok else "MISS", out.get("intent"), c["expected_intent"], method, f"{ms:.0f}"))
     n = max(1, agg["n"])
     p50, p95 = _pct(agg["latency"], 0.5), _pct(agg["latency"], 0.95)
@@ -309,7 +339,10 @@ def run_resolve_mode(cases, backend: str = "current"):
                         "input_tokens": tokens, "usd_per_1000_calls": tokens / len(md) * 1000 * 0.042 / 1_000_000,
                         "calibration": calibration})
         print(f"model calls      : {len(md)} · accuracy on those {metrics['model_accuracy']:.1%} · latency p50/p95 {metrics['model_latency_p50_ms']:.0f}/{metrics['model_latency_p95_ms']:.0f} ms")
-        print(f"tokens           : {tokens} in total · ${metrics['usd_per_1000_calls']:.4f} per 1,000 calls at $0.042/M")
+        if backend == "jev":
+            print(f"tokens           : {tokens} in total · ${metrics['usd_per_1000_calls']:.4f} per 1,000 calls at $0.042/M")
+        else:
+            print(f"tokens           : {tokens} prompt tokens in total ({tokens / max(1, len(md)):.0f} per call)")
         print("calibration      : " + ", ".join(f"[{k}] {v['accuracy']:.0%} of {v['n']}" for k, v in calibration.items()))
         for m in md:
             if not m["ok"]:
@@ -400,7 +433,9 @@ def main():
     ap.add_argument("--mode", choices=["router", "chat", "resolve", "both", "disagree"], default="router")
     ap.add_argument("--prompts", default=str(Path(__file__).with_name("candidates.json")), help="disagree mode: unlabeled prompts (collect.py output, or a JSON list of strings)")
     ap.add_argument("--k", type=int, default=8)
-    ap.add_argument("--backend", choices=["current", "jev"], default="current", help="resolve mode: what answers the classification seam")
+    ap.add_argument("--backend", choices=["current", "jev", "lm"], default="current", help="resolve mode: what answers the classification seam")
+    ap.add_argument("--lm-model", help="resolve mode with --backend lm: LiteLLM model id (or a served model id with --lm-api-base)")
+    ap.add_argument("--lm-api-base", help="OpenAI-compatible base URL serving --lm-model")
     ap.add_argument("--semantic", action="store_true", help="router mode: allow embedding fallback in candidates")
     ap.add_argument("--llm-select", action="store_true", help="router mode: apply app.routing.tool_selector's model arbitration on top of the deterministic ranking (forces settings.llm_tool_selection_enabled=True for this run)")
     ap.add_argument("--base", default="http://localhost:8000/chat")
@@ -415,7 +450,7 @@ def main():
     if args.mode in ("router", "both"):
         out["router"] = run_router_mode(cases, args.k, args.semantic, args.llm_select)
     if args.mode == "resolve":
-        out["resolve"] = run_resolve_mode(cases, backend=args.backend)
+        out["resolve"] = run_resolve_mode(cases, backend=args.backend, lm_spec={"model": args.lm_model, "api_base": args.lm_api_base})
     if args.mode == "disagree":
         out["disagree"] = run_disagree_mode(args.prompts)
     if args.mode in ("chat", "both"):

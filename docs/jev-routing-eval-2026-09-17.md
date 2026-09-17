@@ -249,3 +249,40 @@ check, so any next round needs a claim-level judge (a second model
 scoring "is each sentence supported by a passage") before the tier could
 be trusted to a smaller domain model. Reproduce with the command above;
 run files stay untracked.
+
+## DMind-3-mini on both jobs, side by side
+
+The routing harness gained `--backend lm --lm-model <id> --lm-api-base <url>`:
+any model at the classification seam, running the same SpeechResolution
+program. DMind-3-mini on the same 100 cases, knowledge anchor present:
+
+| Routing (100 cases)               | gpt-4.1-mini | Jev 1.13.0 | DMind-3-mini |
+|-----------------------------------|-------------:|-----------:|-------------:|
+| Intent accuracy                   | **97**       | 87         | 88 |
+| Model-call latency p50 / p95      | ~1.0 / 2.7 s | 1.0 / 1.1 s | 2.4 / 7.7 s |
+| Calls that failed to the embedding tier | 0      | 0          | 3 |
+| Stated confidence ≥0.9: accuracy  | n/a          | 98% of 44  | 92% of 53 |
+| Misses at ≥0.95 confidence        | n/a          | 1 (a wrong domain) | 4 -- three of them `quote` on lookups |
+
+| Synthesis (13 bundles)            | gpt-4.1-mini | DMind-3-mini |
+|-----------------------------------|-------------:|-------------:|
+| Validator warnings                | 0%           | 0% |
+| Numeric claims ungrounded         | 2%           | 1% |
+| KB answers citing passages        | 5 of 7       | 3 of 7 |
+| Mechanism fabrication observed    | no           | yes (Morpho Blue) |
+| Latency p50 / p95                 | 4.6 / 12.3 s | 6.3 / 23.5 s |
+
+The routing misses are the telling part. DMind labelled "what is <address>
+on base" `quote` at confidence 1.00, "honeypot check" `quote` at 0.95, and
+"last swaps for <mint>" `quote` at 0.89 -- lookups read as swap requests,
+stated with certainty. None reached execution (the domain was `wallet` or
+`general`, and `explicit_action` is gated in code), so they became
+clarifying questions rather than quotes; but a classifier that is confident
+in the dangerous direction is the opposite of what a fast path needs. Jev's
+one high-confidence miss was a wrong domain on a policy question; its
+under-confidence on terse prompts errs the safe way.
+
+Verdict on both roles: not adopted for either. Routing: slower than both
+alternatives, less accurate than the current model, and miscalibrated
+toward `quote`. Synthesis: matches the current model on figure-dense
+material, fabricates mechanism on thin passages.

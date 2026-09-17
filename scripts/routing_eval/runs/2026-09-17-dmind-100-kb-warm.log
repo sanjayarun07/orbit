@@ -1,0 +1,122 @@
+knowledge snapshot: 2652 entities
+
+=== RESOLVE MODE (decision layer, in-process; backend=lm:DMindAI/DMind-3-mini) ===
+case                         verdict  intent         expected       method           ms
+holders-base-aero            OK       research       research       rules            1
+holders-arb-arb              OK       research       research       rules            0
+holders-sol-mint             OK       research       research       rules            0
+holders-bonk-symbol          OK       research       research       rules+model      5636
+safety-sol-rug               OK       research       research       rules            1
+safety-evm-honeypot          OK       research       research       rules            1
+price-liq-base               OK       research       research       rules            1
+hyperliquid-funding          OK       research       research       rules+model      2422
+gainers-sol                  OK       research       research       rules+model      545
+trending-sol                 MISS     portfolio      research       speech_model     1755
+new-pairs-base               OK       research       research       rules            1752
+tvl-sol                      OK       research       research       rules+model      2241
+tvl-protocol                 OK       research       research       rules            3145
+sentiment                    OK       research       research       rules+model      5582
+listings                     OK       research       research       rules+model      1397
+wallet-balances-base         OK       research       research       rules            1
+wallet-txns-sol              OK       research       research       rules            1
+hyperliquid-positions        OK       research       research       rules            1
+market-overview              OK       research       research       rules+model      8754
+market-how                   OK       research       research       rules+model      2092
+research-news                OK       research       research       rules+model      1604
+trade-swap                   OK       trade          trade          rules            0
+trade-bridge                 OK       cross_chain_swap cross_chain_swap rules            0
+recent-trades-sol            OK       research       research       rules            0
+deepdive-bonk                OK       research       research       speech_model     2748
+adv-chain-named-usdc         OK       research       research       rules+model      3352
+advice-should-i-buy-hype     OK       research       research       speech_model     1450
+lt-explain-tvl               OK       general        general        speech_model     4994
+lt-explain-perps             OK       general        general        speech_model     2154
+lt-advice-hold-sol           OK       research       research       speech_model     1889
+lt-advice-thoughts-hype      MISS     general        research       speech_model     1729
+lt-advice-sell-all           OK       portfolio      portfolio      rules            1
+lt-safety-casual             OK       research       research       speech_model     2679
+lt-portfolio-exposure        OK       portfolio      portfolio      speech_model     1845
+lt-portfolio-howmuch         OK       portfolio      portfolio      rules            1
+lt-news-solana               OK       research       research       rules+model      1365
+lt-compare                   OK       research       research       speech_model     932
+lt-bridge-cost-question      OK       research       research       speech_model     2247
+lt-negated-buy               OK       research       research       speech_model     5617
+lt-conditional-order         OK       general        general        speech_model     1574
+lt-why-dump                  MISS     general        research       speech_model     3698
+lt-imperative-swap           OK       trade          trade          rules            1
+policy-wallet                OK       general        general        speech_model     9742
+policy-max-spend             OK       general        general        speech_model     2603
+policy-limits                OK       general        general        speech_model     2580
+kb-mechanism-aave-emode      OK       research       research       rules            211
+kb-what-is-protocol          OK       research       research       rules            178
+kb-incident                  OK       research       research       rules            177
+kb-investors                 OK       research       research       rules            177
+kb-governance                OK       research       research       rules            180
+kb-competitors               OK       research       research       rules            180
+kb-not-live-tvl              OK       research       research       rules+model      1248
+news-tile-explainer          OK       research       research       rules            1
+fees-named-protocol          OK       research       research       rules            944
+fees-leaderboard             OK       research       research       rules+model      1201
+yields-asset-chain           OK       research       research       speech_model     2575
+yields-staking               OK       research       research       rules+model      2178
+kb-stablecoin-backing        OK       research       research       rules            202
+kb-global-incident           OK       research       research       speech_model     1321
+trending-by-volume           OK       research       research       rules+model      1939
+slang-vol-1                  OK       research       research       rules+model      2774
+slang-vol-2                  OK       research       research       rules+model      2402
+slang-vol-3                  OK       research       research       rules+model      2481
+slang-boosts-1               OK       research       research       rules            6001
+slang-newlist-1              OK       research       research       rules+model      1482
+slang-newlist-2              OK       research       research       rules            2808
+slang-narrative-1            OK       research       research       rules+model      6436
+slang-perps-1                OK       research       research       rules            2070
+slang-social-1               OK       research       research       rules            206
+slang-pricechange-1          OK       research       research       rules            1882
+slang-security-1             OK       research       research       rules            1
+slang-balances-vs-tx-1       OK       research       research       rules            209
+slang-balances-vs-tx-2       MISS     portfolio      research       rules            1
+slang-liquidity-vs-holders-1 OK       research       research       rules+model      1953
+catalog-biggest-losers-on-base-today OK       research       research       rules+model      1829
+catalog-boosted-tokens-on-base OK       research       research       rules+model      2189
+catalog-hot-metas-right-now  OK       research       research       rules            2849
+catalog-newest-token-profiles OK       research       research       rules            2279
+catalog-useless-token-pairs  OK       research       research       rules+model      2052
+catalog-new-pairs-on-solana  OK       research       research       rules            2037
+catalog-new-pump.fun-launches OK       research       research       rules            4172
+catalog-overview-of-mint-on-solana OK       research       research       speech_model     5064
+catalog-what-is-addr-on-base-(identity-+-price) MISS     general        research       speech_model     1722
+catalog-recent-trades-of-addr-on-base OK       research       research       rules            2
+catalog-last-swaps-for-mint  MISS     general        research       speech_model     3019
+catalog-is-addr-on-bsc-safe  MISS     general        research       embedding        13014
+catalog-rug-check-addr       OK       research       research       rules            0
+catalog-can-i-sell-addr-on-ethereum MISS     general        research       embedding        7189
+catalog-honeypot-check       MISS     general        research       speech_model     7283
+catalog-is-mint-safe         MISS     general        research       speech_model     3672
+catalog-freeze-authority-on-mint OK       research       research       speech_model     3106
+catalog-what-does-addr-hold-on-ethereum OK       research       research       rules+model      7040
+catalog-recent-transactions-of-addr-on-arbitrum OK       research       research       rules            1
+catalog-open-perps-for-addr  MISS     research       portfolio      rules            1
+catalog-fear-and-greed-today OK       research       research       rules+model      7716
+catalog-is-it-altcoin-season OK       research       research       rules+model      3023
+catalog-recent-delistings    OK       research       research       rules+model      2360
+catalog-background-on-berachain OK       research       research       speech_model     9264
+catalog-a16z-crypto-portfolio MISS     general        research       embedding        2463
+catalog-fed-decision-impact-on-crypto OK       research       research       speech_model     1699
+
+-- resolve metrics --
+cases            : 100
+intent-accuracy  : 88/100 = 88.0%
+decided by       : {'rules': 42, 'rules+model': 28, 'speech_model': 27, 'embedding': 3}
+latency p50/p95  : 1882 / 7716 ms
+model calls      : 62 · accuracy on those 88.7% · latency p50/p95 2359/7714 ms
+tokens           : 48235 prompt tokens in total (778 per call)
+calibration      : [0.1-0.2] 100% of 1, [0.2-0.3] 100% of 1, [0.6-0.7] 100% of 1, [0.7-0.8] 50% of 2, [0.8-0.9] 50% of 4, [0.9-1.0] 92% of 53
+  miss trending-sol               conf 0.98 -> portfolio/crypto
+  miss lt-advice-thoughts-hype    conf 0.78 -> advice/crypto
+  miss lt-why-dump                conf 0.80 -> research/crypto
+  miss catalog-what-is-addr-on-base-(identity-+-price) conf 1.00 -> quote/wallet
+  miss catalog-last-swaps-for-mint conf 0.89 -> quote/wallet
+  miss catalog-honeypot-check     conf 0.95 -> quote/general
+  miss catalog-is-mint-safe       conf 0.98 -> abstain/wallet
+
+Saved /Users/arunmozhi/Downloads/solana-dspy-poc/scripts/routing_eval/results.json
