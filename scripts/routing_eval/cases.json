@@ -953,5 +953,297 @@
     "expected_intent": "research",
     "router": true,
     "notes": "slang stress: a liquidity ranking pulled in holders tools via the semantic fallback; tests whether tool arbitration filters them back out"
+  },
+  {
+    "id": "catalog-biggest-losers-on-base-today",
+    "query": "biggest losers on base today",
+    "expected_tools": [
+      "coingecko_gainers_losers"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for coingecko_gainers_losers; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-boosted-tokens-on-base",
+    "query": "boosted tokens on base",
+    "expected_tools": [
+      "dexscreener_boosted_tokens"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for dexscreener_boosted_tokens; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-hot-metas-right-now",
+    "query": "hot metas right now",
+    "expected_tools": [
+      "dexscreener_trending_metas"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for dexscreener_trending_metas; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-newest-token-profiles",
+    "query": "newest token profiles",
+    "expected_tools": [
+      "dexscreener_latest_profiles"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for dexscreener_latest_profiles; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-useless-token-pairs",
+    "query": "USELESS token pairs",
+    "expected_tools": [
+      "dexscreener_pair_search"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for dexscreener_pair_search; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-new-pairs-on-solana",
+    "query": "new pairs on solana",
+    "expected_tools": [
+      "geckoterminal_pools"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for geckoterminal_pools; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-new-pump.fun-launches",
+    "query": "new pump.fun launches",
+    "expected_tools": [
+      "geckoterminal_pools"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for geckoterminal_pools; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-overview-of-mint-on-solana",
+    "query": "overview of DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 on solana",
+    "expected_tools": [
+      "birdeye_token_overview"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for birdeye_token_overview; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-what-is-addr-on-base-(identity-+-price)",
+    "query": "what is 0x940181a94A35A4569E4529A3CDfB74e38FD98631 on base",
+    "expected_tools": [
+      "coingecko_token_by_contract"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for coingecko_token_by_contract; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-recent-trades-of-addr-on-base",
+    "query": "recent trades of 0x940181a94A35A4569E4529A3CDfB74e38FD98631 on base",
+    "expected_tools": [
+      "bitquery_recent_dex_trades"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for bitquery_recent_dex_trades; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-last-swaps-for-mint",
+    "query": "last swaps for DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "expected_tools": [
+      "bitquery_recent_dex_trades"
+    ],
+    "forbidden_tools": [
+      "jupiter",
+      "relay"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for bitquery_recent_dex_trades; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-is-addr-on-bsc-safe",
+    "query": "is 0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82 on bsc safe",
+    "expected_tools": [
+      "goplus_token_security"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for goplus_token_security; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user"
+  },
+  {
+    "id": "catalog-rug-check-addr",
+    "query": "rug check 0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+    "expected_tools": [
+      "goplus_token_security"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for goplus_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-can-i-sell-addr-on-ethereum",
+    "query": "can I sell 0x6982508145454Ce325dDbE47a25d4ec3d2311933 on ethereum",
+    "expected_tools": [
+      "honeypot_token_security"
+    ],
+    "forbidden_tools": [
+      "jupiter",
+      "relay"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for honeypot_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-honeypot-check",
+    "query": "honeypot check",
+    "expected_tools": [
+      "honeypot_token_security"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for honeypot_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-is-mint-safe",
+    "query": "is DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 safe",
+    "expected_tools": [
+      "solana_token_security"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for solana_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-freeze-authority-on-mint",
+    "query": "freeze authority on DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "expected_tools": [
+      "solana_token_security"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for solana_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-what-does-addr-hold-on-ethereum",
+    "query": "what does 0xd8dA6BF26964aF9D7eEd9e03E51415D2aA6f0c8f hold on ethereum",
+    "expected_tools": [
+      "bitquery_wallet_balances"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for bitquery_wallet_balances; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user"
+  },
+  {
+    "id": "catalog-recent-transactions-of-addr-on-arbitrum",
+    "query": "recent transactions of 0xd8dA6BF26964aF9D7eEd9e03E51415D2aA6f0c8f on arbitrum",
+    "expected_tools": [
+      "goldrush_wallet_transactions"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for goldrush_wallet_transactions; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-open-perps-for-addr",
+    "query": "open perps for 0xd8dA6BF26964aF9D7eEd9e03E51415D2aA6f0c8f",
+    "expected_tools": [
+      "goldrush_hyperliquid_positions"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "portfolio",
+    "router": true,
+    "notes": "catalog example for goldrush_hyperliquid_positions; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user as portfolio"
+  },
+  {
+    "id": "catalog-fear-and-greed-today",
+    "query": "fear and greed today",
+    "expected_tools": [
+      "market_sentiment_snapshot"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for market_sentiment_snapshot; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-is-it-altcoin-season",
+    "query": "is it altcoin season",
+    "expected_tools": [
+      "market_sentiment_snapshot"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for market_sentiment_snapshot; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-recent-delistings",
+    "query": "recent delistings",
+    "expected_tools": [
+      "exchange_listing_announcements"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for exchange_listing_announcements; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+  },
+  {
+    "id": "catalog-background-on-berachain",
+    "query": "background on Berachain",
+    "expected_tools": [
+      "rootdata_project_search"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for rootdata_project_search; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user"
+  },
+  {
+    "id": "catalog-a16z-crypto-portfolio",
+    "query": "a16z crypto portfolio",
+    "expected_tools": [
+      "rootdata_vc_search"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for rootdata_vc_search; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user"
+  },
+  {
+    "id": "catalog-fed-decision-impact-on-crypto",
+    "query": "Fed decision impact on crypto",
+    "expected_tools": [
+      "perplexity_finance_search"
+    ],
+    "forbidden_tools": [],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "catalog example for perplexity_finance_search; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user"
   }
 ]

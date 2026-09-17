@@ -101,3 +101,43 @@ choices -- the `abstain` criterion wording is the first thing to change and
 retest. Some catalog examples are templates (`<mint>`, `0x...`) or
 descriptions rather than prompts; realise them with real addresses before
 counting them as real-world.
+
+## Second measurement: 100 labeled cases (26 added from the disagree run, labels approved by the user)
+
+|                                   | Current (gpt-4.1-mini, cold) | Jev 1.13.0 |
+|-----------------------------------|-----------------------------:|-----------:|
+| Intent accuracy (100 cases)       | **93/100**                   | 84/100 |
+| Cases reaching the model          | 74                           | 62 (Jev abstains push more to rules) |
+| Latency, model-decided, p50 / p95 | 979 / 1634 ms                | 996 / 1111 ms |
+| Cost per 1,000 calls              | ≈ $0.3 (estimate)            | $0.038 measured (~910 tokens/call) |
+| Calibration                       | n/a                          | [0.9–1.0] **98% of 48** · [0.8–0.9) 50% of 10 · below 0.8: 19 cases, 47% |
+
+Runs: `scripts/routing_eval/runs/2026-09-17-*-100.json`.
+
+The gap widened, and almost entirely for one reason: on the added prompts --
+short, jargon-shaped, address-bearing -- Jev picks the right act at low
+confidence (background on Berachain 0.53, Fed decision impact 0.37, what does
+<address> hold 0.68), the 0.90 gate rejects it, and the resolver falls to
+`general`. Its ≥0.9 answers are 98% right; everything under 0.8 is a coin
+flip. So the calibration is real and the gate is correct; what Jev lacks is
+confidence on terse prompts. Three of its misses are genuine act
+disagreements worth noting: "is <token> safe" and "is <address> on bsc safe"
+as `advice` (we label the security dossier `research`), and "can I sell
+<address> on ethereum" as `quote` at 0.42 -- a honeypot question that must
+never become a swap quote; the current backend also misses it, as `general`,
+and the case now forbids the swap tools for both.
+
+Shared by both backends and unchanged from the first run: the three
+knowledge-base `explain`-vs-`research` cases (a taxonomy question), and two
+rules-decided cases the model never sees -- "recent activity for this wallet"
+(rules say portfolio, label says research) and "open perps for <address>"
+(rules say research; the user labeled it portfolio). Those two are rule
+decisions to settle with the user, not backend questions.
+
+Next, in order: (1) reword Jev's `abstain` criterion and shorten the
+criteria block, rerun -- this is the Qwen lesson again, spec before model;
+(2) settle the two rule cases and the KB taxonomy; (3) more prompts from
+real traffic via `collect.py --gaps` once staging has Postgres. The
+adoption bar is unchanged: match the current backend's accuracy at ≥0.9
+confidence with this calibration, then a fast path with fallthrough, never
+a replacement.
