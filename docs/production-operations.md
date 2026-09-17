@@ -737,7 +737,14 @@ the control that the confirmed path still completes.
   form and panel at 330); with the current one the document is 320 px and no
   outer element exceeds it, on both the admin and the knowledge pages.
 
-Not established here: the QA's Playwright suite was not rerun (Playwright is
-not installed in this repository); UI-04 and UI-06 were re-measured with
-Chrome's DOM APIs rather than its scripts, and the four logic fixes are
-proved in the harness, not in a browser.
+Rerun: Playwright is now a dev dependency (`npm install`; it drives the
+installed Chrome), and the QA's own proof scripts were rerun unmodified against
+an in-memory instance. Every finding's check inverts -- the delete-all dialog
+stays open with its status line and the conversation kept; the preferences
+dialog stays open with the error visible and nothing persisted; the team
+departure stays on Members with the error visible and the membership intact;
+the first suggestion row is hit-testable; `not-a-wallet` is not adopted; the
+admin document measures 320 px with nothing overflowing. The two followup
+checks still failing are the reviewer's own noted harness problem in the
+team-leave step (superseded by their team-retest, which passes) and the swap
+shortcut waiting for a relay card absent from the live news set.
