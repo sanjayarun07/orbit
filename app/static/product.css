@@ -96,7 +96,8 @@ body.home .home-below { display: block; animation: orbit-enter var(--motion-ente
 .dialog-head { padding: 22px 24px; }
 .dialog-head h2 { font-family: var(--font-sans); font-size: 18px; letter-spacing: -.4px; font-weight: 600; }
 .dialog-body { padding: 24px; }
-.dialog-footer { padding: 16px 24px; background: var(--surface); }
+.dialog-footer { padding: 16px 24px; background: var(--surface); border-bottom-left-radius: inherit; border-bottom-right-radius: inherit; }   /* the opaque footer follows the frame's corners */
+.dialog-head { border-top-left-radius: inherit; border-top-right-radius: inherit; }
 .field { margin-bottom: 20px; }
 .field label { font-size: 12px; font-weight: 500; }
 .field input, .field select, .field textarea, .key-create input { min-height: 40px; border-radius: 7px; background: var(--bg); padding: 10px 12px; font-size: 13px; min-width: 0; }
