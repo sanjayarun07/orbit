@@ -171,3 +171,15 @@ body.home .home-below { display: block; animation: orbit-enter var(--motion-ente
 @media(max-width:720px) { .dialog { max-height: calc(100dvh - 24px); } }
 .field input[type="checkbox"] { width: 16px; height: 16px; min-height: 0; padding: 0; flex: none; }
 .field label:has(> input[type="checkbox"]) { display: flex; align-items: center; gap: 8px; }
+
+/* Alignment pass (2026-09-18). The message column shares the composer's edges
+   (both are the 820px content column; the thread's own side padding pushed
+   messages 24px in and the assistant avatar a further 54px). The composer's
+   credits and trade-preference chips sit next to the send button instead of
+   floating mid-row (two auto margins were splitting the leftover space). */
+@media (min-width: 721px) {
+  .thread { padding-left: 0; padding-right: 0; }
+  body.home .thread { padding-left: 24px; padding-right: 24px; }
+  .send, :root[data-theme="light"] .send { margin-left: 0; }
+  .credits-chip { margin-left: auto; }
+}

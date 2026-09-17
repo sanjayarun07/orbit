@@ -30,21 +30,40 @@
   .jump-latest { bottom: calc(var(--composer-height) + 8px); }
   .conversation { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
   .composer-shell { padding: 8px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
-  .welcome { min-height: 0; }
-  .thread { padding: 8px 12px 24px; }
-  /* Messages take the whole width; the assistant mark shrinks to a badge. */
+  /* One gutter for everything on the page: the topbar glyphs, the greeting,
+     the composer card, the section headers and the message column all start
+     at the same x. */
+  :root { --gutter: 16px; }
+  .topbar { padding-left: max(4px, calc(env(safe-area-inset-left) - 8px)); padding-right: max(6px, env(safe-area-inset-right)); }   /* 42px buttons: glyph lands on the gutter */
+  .top-actions { gap: 2px; }
+  .welcome { min-height: 0; padding: 0 0 8px; }
+  .thread, body.home .thread { padding: 12px var(--gutter) 24px; }
+  body.home .thread { padding-top: 28px; }
+  .welcome .tagline { font-size: 30px; letter-spacing: -.8px; }
+  .welcome .tagline-sub { margin-top: 10px; }
+  .home-below { margin-top: 20px; }
+  .composer-shell { padding: 8px var(--gutter) max(12px, env(safe-area-inset-bottom)); }
+  /* Messages take the whole width; the user's bubble keeps its side. */
   .message { padding: 10px 0; }
-  .message.assistant { grid-template-columns: 28px minmax(0, 1fr); gap: 8px; }
-  .message.assistant .avatar { width: 28px; height: 28px; box-shadow: none; }
-  .message.assistant .avatar .icon { width: 14px; height: 14px; }
+  .message.assistant { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .message.assistant .avatar { display: none; }
   .message.assistant .message-body { padding: 2px 0; font-size: 15px; }
-  .message.user .message-body { max-width: 94%; padding: 10px 14px; }
+  .message.user .message-body { max-width: 92%; padding: 10px 14px; }
   .answer.streaming .stream-status { font-size: 13px; }
-  .result-table-wrap { margin-left: -36px; width: calc(100% + 36px); }   /* tables use the badge column too */
+  .result-table-wrap { margin-left: 0; width: 100%; }
   .result-table-wrap table { min-width: 100%; }
   .composer { padding: 12px 12px 10px 14px; }
   .composer textarea { font-size: 16px; min-height: 40px; max-height: 40vh; }
-  .composer-tools { gap: 8px; }
+  /* The toolbar is one row: wallet, In-depth, Trade preferences ... send.
+     Credits live in the drawer's account row on a phone. */
+  .composer-tools { gap: 8px; flex-wrap: nowrap; margin-top: 8px; }
+  .composer-tools > * { flex: 0 0 auto; }
+  .credits-chip { display: none; }
+  .policy-chip { margin-left: 0; max-width: none; flex: 0 1 auto; min-width: 0; padding: 0 8px; }
+  .policy-chip b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .policy-chip #policyText { display: none; }
+  .team-toggle { padding: 0 10px; }
+  .send { margin-left: auto; }
   .send, .composer-plus { width: 42px; height: 42px; }
   /* Dialogs become bottom sheets: full width, rounded top, footer buttons
      side by side and inside the home-indicator inset. */
@@ -84,8 +103,11 @@
 @media (max-width: 760px) {
   .admin-sidebar { padding: max(12px, env(safe-area-inset-top)) 16px 12px; }
   .admin-nav a { min-height: 44px; display: flex; align-items: center; }
-  .admin-shell .topbar, body > .topbar { height: auto; min-height: 52px; padding: 8px 16px; flex-wrap: wrap; }
-  main { padding: 20px 16px calc(40px + env(safe-area-inset-bottom)); gap: 16px; }
+  .admin-workspace .topbar { height: auto; min-height: 52px; padding: 8px 16px; flex-wrap: wrap; }
+  /* Scoped to the admin page's <main id="mainContent">: a bare `main` here
+     also matched the chat page's <main class="main"> and put 20px above the
+     topbar and 40px under the composer on every phone. */
+  main#mainContent { padding: 20px 16px calc(40px + env(safe-area-inset-bottom)); gap: 16px; }
   .hero h1 { font-size: 26px; }
   .auth { display: grid; gap: 10px; }
   .auth .auth-field, .auth input, .auth button { width: 100%; }

@@ -820,9 +820,13 @@ Home Screen, and a service worker at `/ui/sw.js`.
 What the worker does and does not do:
 
 - Precaches the shell (index, the four stylesheets, manifest, icons) on
-  install; navigations to `/ui/` are network-first with the cached shell as
-  the offline fallback; other files under `/ui/` are served from cache and
-  refreshed in the background.
+  install; navigations under `/ui/` are network-first, each page cached
+  under its own path (query strings ignored) so Admin never replaces the
+  offline chat shell and offline Admin comes back as Admin; an error
+  response never replaces a cached page; other files under `/ui/` are
+  served from cache and refreshed in the background.
+- Activation deletes only Orbit's own older caches (`orbit-shell-*`); another
+  app's caches on the same origin are left alone.
 - Never intercepts anything outside `/ui/`: `/chat`, `/chat/stream`, `/auth`,
   `/me`, `/billing` and every other API route reach the server exactly as
   before. tests/js/sw_harness.mjs proves this by running the worker in a vm.

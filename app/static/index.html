@@ -21,9 +21,9 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <script>(function(){try{var p=JSON.parse(localStorage.getItem("orbit_theme_v1")||'"system"');var t=p==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):p;document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t;}catch(e){}})();</script>
 <link rel="stylesheet" href="/ui/theme.css?v=1">
-<link rel="stylesheet" href="/ui/chat.css?v=3">
-<link rel="stylesheet" href="/ui/product.css?v=4">
-<link rel="stylesheet" href="/ui/mobile.css?v=2">
+<link rel="stylesheet" href="/ui/chat.css?v=4">
+<link rel="stylesheet" href="/ui/product.css?v=5">
+<link rel="stylesheet" href="/ui/mobile.css?v=3">
 </head>
 <body>
 <div class="app">
@@ -339,6 +339,7 @@ const conversationEl = $("#conversation");
 const form = $("#composer");
 const composerShell = $(".composer-shell");
 const input = $("#messageInput");
+if(window.matchMedia("(max-width:720px)").matches){input.placeholder="Ask about markets or your portfolio…";$("#policyChip b").textContent="Prefs";}   // one line on a phone; the toolbar stays one row
 const sendBtn = $("#sendBtn");
 const jumpLatestBtn = $("#jumpLatest");
 const walletInput = $("#walletAddress");
@@ -1204,10 +1205,12 @@ function parseSse(buffer){const events=[];let idx;while((idx=buffer.indexOf("\n\
 // The text streamed token by token is the answer the model is writing (a general
 // reply, a research answer, the summary over composed cards), rendered as
 // markdown as it grows so lists and emphasis appear in place, not as raw marks.
-function streamView(typing){const body=$(".message-body",typing);body.innerHTML='<div class="answer streaming"><div class="stream-status"></div><div class="stream-summary rendered-result" hidden></div><div class="stream-cards"></div></div>';let text="";
+// Cards and text stream in the answer's own type and column (answer-result), so
+// nothing jumps in size or position when the final answer replaces the view.
+function streamView(typing){const body=$(".message-body",typing);body.innerHTML='<div class="answer streaming"><div class="stream-status"></div><div class="stream-summary rendered-result answer-result" hidden></div><div class="stream-cards"></div></div>';let text="";
   return {
   status(text){const el=$(".stream-status",body);if(el){el.textContent=text;el.hidden=!text;}},
-  card(markdown){const cards=$(".stream-cards",body);if(!cards)return;cards.appendChild(renderMarkdownResult(markdown));const sep=document.createElement("hr");sep.className="stream-sep";cards.appendChild(sep);scrollToBottom();},
+  card(markdown){const cards=$(".stream-cards",body);if(!cards)return;cards.appendChild(renderAnswerResult(markdown));const sep=document.createElement("hr");sep.className="stream-sep";cards.appendChild(sep);scrollToBottom();},
   delta(chunk){text+=chunk;this.status("");const el=$(".stream-summary",body);if(!el)return;el.hidden=false;el.innerHTML=renderMarkdownHtml(text);scrollToBottom();},
 };}
 // Resolves to a fetch-shaped result ({ok,status,json()}) so the caller's handling is unchanged, or null to fall back.

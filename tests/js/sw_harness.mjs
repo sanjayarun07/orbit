@@ -9,9 +9,10 @@ import vm from "node:vm";
 const here = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(here, "..", "..", "app", "static", "sw.js"), "utf8");
 
-function load() {
+function load({ fetchImpl, cacheNames } = {}) {
   const listeners = {};
   const cacheStore = new Map();
+  const names = new Set(cacheNames || ["orbit-shell-v0", "orbit-shell-v1"]);
   const cache = {
     addAll: async (urls) => { for (const u of urls) cacheStore.set(u, `cached:${u}`); },
     match: async (req) => cacheStore.get(typeof req === "string" ? req : req.url) ?? undefined,
@@ -22,10 +23,11 @@ function load() {
     addEventListener: (type, fn) => { (listeners[type] ||= []).push(fn); },
     skipWaiting: async () => {}, clients: { claim: async () => {} },
   };
-  const sandbox = { self, caches: { open: async () => cache, match: (k) => cache.match(k), keys: async () => ["orbit-shell-v0", "orbit-shell-v1"], delete: async () => true }, URL, fetch: async (req) => ({ ok: true, clone: () => "net", url: req.url }), console };
+  const sandbox = { self, caches: { open: async () => cache, match: (k) => cache.match(k), keys: async () => [...names], delete: async (k) => names.delete(k) }, URL,
+    fetch: fetchImpl || (async (req) => ({ ok: true, clone: () => `net:${req.url}`, url: req.url })), console };
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox);
-  return { listeners, cacheStore };
+  return { listeners, cacheStore, names };
 }
 
 function fetchEvent(url, { method = "GET", mode = "cors" } = {}) {
@@ -78,6 +80,43 @@ const cases = {
     for (const fn of l2.fetch_off) fn(e2);
     const offline = await e2.responded;
     return { online: online && online.url, offline };
+  },
+  // PWA-01: a page is cached under its own path; Admin never overwrites the chat shell, and offline Admin is Admin.
+  async each_page_keeps_its_own_offline_copy() {
+    const { listeners, cacheStore } = load();
+    cacheStore.set("/ui/", "cached:chat");
+    const admin = fetchEvent("https://orbit.example/ui/admin.html", { mode: "navigate" });
+    for (const fn of listeners.fetch) fn(admin);
+    await admin.responded; await new Promise((r) => setTimeout(r, 0));
+    const chat = fetchEvent("https://orbit.example/ui/?source=pwa", { mode: "navigate" });
+    for (const fn of listeners.fetch) fn(chat);
+    await chat.responded; await new Promise((r) => setTimeout(r, 0));
+    // offline: each page comes back as itself; an unknown page falls back to the chat shell
+    const offline = load({ fetchImpl: () => Promise.reject(new Error("offline")) });
+    offline.cacheStore.set("/ui/", "cached:chat"); offline.cacheStore.set("/ui/admin.html", "cached:admin");
+    const out = {};
+    for (const [name, url] of [["chat", "https://orbit.example/ui/?source=pwa"], ["admin", "https://orbit.example/ui/admin.html"], ["other", "https://orbit.example/ui/knowledge.html"]]) {
+      const e = fetchEvent(url, { mode: "navigate" });
+      for (const fn of offline.listeners.fetch) fn(e);
+      out[name] = await e.responded;
+    }
+    return { chatKey: cacheStore.get("/ui/"), adminKey: cacheStore.get("/ui/admin.html"), offline: out };
+  },
+  async an_error_page_never_replaces_a_cached_page() {
+    const { listeners, cacheStore } = load({ fetchImpl: async (req) => ({ ok: false, status: 502, clone: () => "net:502", url: req.url }) });
+    cacheStore.set("/ui/", "cached:chat");
+    const e = fetchEvent("https://orbit.example/ui/", { mode: "navigate" });
+    for (const fn of listeners.fetch) fn(e);
+    const served = await e.responded; await new Promise((r) => setTimeout(r, 0));
+    return { servedStatus: served.status, chatKey: cacheStore.get("/ui/") };
+  },
+  // PWA-02: activation drops only Orbit's own older shells.
+  async activate_keeps_caches_that_belong_to_other_apps() {
+    const { listeners, names } = load({ cacheNames: ["orbit-shell-v1", "orbit-shell-v2", "other-app-cache", "workbox-precache"] });
+    const activate = { waitUntil(p) { this.p = p; } };
+    for (const fn of listeners.activate) fn(activate);
+    await activate.p;
+    return { remaining: [...names].sort() };
   },
   async install_precaches_the_shell_and_activate_drops_old_caches() {
     const { listeners, cacheStore } = load();

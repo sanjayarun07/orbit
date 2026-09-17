@@ -72,7 +72,7 @@ def test_a_navigation_is_network_first_with_the_shell_as_offline_fallback():
 def test_install_precaches_the_shell_the_pages_actually_load():
     r = _sw_case("install_precaches_the_shell_and_activate_drops_old_caches")
     html = (STATIC / "index.html").read_text()
-    for sheet in ("/ui/theme.css?v=1", "/ui/chat.css?v=3", "/ui/product.css?v=4", "/ui/mobile.css?v=2"):
+    for sheet in ("/ui/theme.css?v=1", "/ui/chat.css?v=4", "/ui/product.css?v=5", "/ui/mobile.css?v=3"):
         assert sheet in html and sheet in r["precached"], sheet
 
 
@@ -90,3 +90,24 @@ def test_the_app_height_follows_the_stylesheet_unless_the_keyboard_is_up():
     from tests.test_ui_swap_flow import run_case
     r = run_case("app_height_follows_the_stylesheet_unless_the_keyboard_is_up")
     assert r == {"keyboard": "500px", "settled": "100dvh", "toolbars": "100dvh", "unknown": "100dvh"}, r
+
+
+# --- review of 2026-09-18: two service-worker defects -------------------------------
+
+def test_each_page_keeps_its_own_offline_copy_so_admin_never_replaces_the_chat_shell():
+    """PWA-01: every navigation was cached under the one /ui/ key, so after a
+    visit to Admin the app opened offline as Admin."""
+    r = _sw_case("each_page_keeps_its_own_offline_copy")
+    assert r["chatKey"].endswith("/ui/?source=pwa") and r["adminKey"].endswith("/ui/admin.html")
+    assert r["offline"] == {"chat": "cached:chat", "admin": "cached:admin", "other": "cached:chat"}, r
+
+
+def test_an_error_page_never_replaces_a_cached_page():
+    r = _sw_case("an_error_page_never_replaces_a_cached_page")
+    assert r == {"servedStatus": 502, "chatKey": "cached:chat"}, r
+
+
+def test_activation_drops_only_orbits_own_older_caches():
+    """PWA-02: activation deleted every cache on the origin, another app's included."""
+    r = _sw_case("activate_keeps_caches_that_belong_to_other_apps")
+    assert r["remaining"] == ["other-app-cache", "workbox-precache"], r
