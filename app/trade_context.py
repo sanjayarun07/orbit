@@ -107,5 +107,14 @@ def complete_swap_fields(
         slippage = _SLIPPAGE_BPS.search(request)
         if slippage:
             slippage_bps = int(slippage.group(1))
+        else:
+            # The planner asked for slippage and the user answered with just a
+            # number. Only when the amount is already known: with the amount
+            # still open a bare number could be either, and guessing is worse
+            # than asking (the planner asks).
+            from app.routing.speech import bare_number_bps
+            bare = bare_number_bps(request)
+            if bare is not None and amount_atomic is not None:
+                slippage_bps = bare
 
     return resolved_input, resolved_output, amount_atomic, slippage_bps

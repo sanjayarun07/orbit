@@ -24,6 +24,15 @@ from app.routing import resolver
 from app.routing.trade_parser import parse_execution_draft
 
 
+@pytest.fixture(autouse=True)
+def _execution_mode(monkeypatch):
+    """These tests drive the swap planners; the planners refuse in research
+    mode (the test default), so they run in execution mode with custody off."""
+    from app.settings import settings as _settings
+    monkeypatch.setattr(_settings, "deployment_mode", "execution")
+    monkeypatch.setattr(_settings, "live_trading", True)
+
+
 @pytest.mark.parametrize("request_text, amount, source, output, bps", [
     (".01sol", "0.01", "sol", None, None),
     ("0.5 ETH", "0.5", "ETH", None, None),

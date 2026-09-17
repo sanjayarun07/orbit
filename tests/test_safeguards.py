@@ -37,6 +37,15 @@ from app.settings import settings
 from tests.conftest import sign_in
 
 
+@pytest.fixture(autouse=True)
+def _execution_mode(monkeypatch):
+    """These tests drive the swap planners; the planners refuse in research
+    mode (the test default), so they run in execution mode with custody off."""
+    from app.settings import settings as _settings
+    monkeypatch.setattr(_settings, "deployment_mode", "execution")
+    monkeypatch.setattr(_settings, "live_trading", True)
+
+
 @pytest.fixture
 def fake_agent(monkeypatch):
     async def fake_run(message, wallet, history, session_context, action):

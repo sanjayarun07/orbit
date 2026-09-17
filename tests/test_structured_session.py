@@ -5,6 +5,16 @@ from app.experience import advance_session_context
 from app.context_entities import resolve_contextual_request
 from app.models import ContextCapsule, IntentLock
 from app.suggestions import suggested_actions, structured_quick_actions
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _execution_mode(monkeypatch):
+    """These tests drive the swap planners; the planners refuse in research
+    mode (the test default), so they run in execution mode with custody off."""
+    from app.settings import settings as _settings
+    monkeypatch.setattr(_settings, "deployment_mode", "execution")
+    monkeypatch.setattr(_settings, "live_trading", True)
 
 
 def test_session_context_persists_independently_of_prompt_history(monkeypatch):

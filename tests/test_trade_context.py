@@ -4,6 +4,16 @@ from app.trade_context import clean_mint, complete_swap_fields
 from app import graph
 import asyncio
 from types import SimpleNamespace
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _execution_mode(monkeypatch):
+    """These tests drive the swap planners; the planners refuse in research
+    mode (the test default), so they run in execution mode with custody off."""
+    from app.settings import settings as _settings
+    monkeypatch.setattr(_settings, "deployment_mode", "execution")
+    monkeypatch.setattr(_settings, "live_trading", True)
 
 
 ANSEM_MINT = "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump"

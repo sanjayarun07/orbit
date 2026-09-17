@@ -8,14 +8,34 @@ import re
 import httpx
 
 from app.capability_router import extract_cross_chain_draft, is_trade_modifier
+from app.routing.speech import bare_number_bps
 from app.nodes.research import _sanitize_react_answer
 from app.models import CrossChainSwapDraft, RiskAssessment, SwapProposal, TradePlan
 from app.plans import create_trade_plan, mark_plan_superseded
 from app.portfolio import build_portfolio_snapshot
+from app import deployment
 from app.settings import settings
 from app.trade_context import complete_swap_fields
 
 logger = logging.getLogger(__name__)
+
+def _research_mode_answer(draft_text: str) -> dict:
+    """A swap request in research mode. The HTTP routes refuse to move funds
+    and the browser card said so -- but this node still wrote "I'm preparing
+    a quote", locked the intent and warned about destination gas above that
+    card, promising in one breath what it refused in the next. The server
+    knows the mode before it writes a word, so it says so first and offers
+    what this deployment can do."""
+    return {
+        "answer": (
+            f"This deployment is running in research mode, so I can't prepare or sign swaps -- including {draft_text}. "
+            "No quote was prepared and nothing was locked. I can still research the route: ask for the tokens' prices, "
+            "liquidity and safety, or the bridges and fees between the two chains, and you can execute elsewhere."
+        ),
+        "trajectory": None,
+        "cross_chain_swap": None,
+    }
+
 
 _NO_WALLET_ANSWER = (
     "I need a connected wallet to prepare a swap. Connect one with **Connect wallet** "
@@ -24,6 +44,8 @@ _NO_WALLET_ANSWER = (
 
 @trace(name="trade_planner", as_type="agent")
 async def trade_planner_node(state: AgentState) -> dict:
+    if not deployment.execution_enabled():
+        return _research_mode_answer("this one")
     if not state.get("wallet_address"):
         return {"answer": _NO_WALLET_ANSWER, "trajectory": None, "pending_wallet_request": state["request"]}
     if state.get("execution_provider") is None and "chain" in state.get("missing_fields", []):
@@ -88,6 +110,10 @@ async def trade_planner_node(state: AgentState) -> dict:
 @trace(name="cross_chain_swap", as_type="agent")
 async def cross_chain_swap_node(state: AgentState) -> dict:
     """Prepare a chat-native Relay quote without server-side signing."""
+    if not deployment.execution_enabled():
+        values = extract_cross_chain_draft(state["request"], tuple(state.get("chains", [])))
+        what = " ".join(str(values.get(k)) for k in ("amount", "input_token") if values.get(k)) or "this swap"
+        return _research_mode_answer(f"{what} to {values.get('output_token')} on {values.get('destination_chain')}" if values.get("output_token") else what)
     if not state.get("wallet_address"):
         # trade_planner_node (the Solana/Jupiter path) has always gated on
         # this; this path did not, so a request could reach "I'm preparing a
@@ -131,6 +157,13 @@ async def cross_chain_swap_node(state: AgentState) -> dict:
             "slippage_bps": active.get("max_slippage_bps", active.get("slippage_bps")),
         }
         values = {key: value if value is not None else prior.get(key) for key, value in values.items()}
+        # "what slippage?" answered with just a number: slippage, in basis
+        # points (a percent converts) -- only while the amount is known, so a
+        # bare number can never be mistaken for one.
+        if values.get("slippage_bps") is None and prior.get("amount") is not None:
+            bare = bare_number_bps(state["request"])
+            if bare is not None:
+                values["slippage_bps"] = bare
     # A single explicit non-Solana chain means an intra-chain Relay swap.
     if values.get("source_chain") and not values.get("destination_chain"):
         values["destination_chain"] = values["source_chain"]
