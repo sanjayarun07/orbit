@@ -1234,15 +1234,34 @@ async function streamChat(payload,typing){
   if(!res.ok||!res.body||!(res.headers.get("content-type")||"").includes("text/event-stream"))return null;
   const view=streamView(typing);view.status("Thinking…");const reader=res.body.getReader();const decoder=new TextDecoder();let buffer="";
   const shaped=(ok,status,data)=>({ok,status,json:async()=>data});
-  while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const parsed=parseSse(buffer);buffer=parsed.rest;
-    for(const {event,data} of parsed.events){if(event==="status")view.status(data.text||"");else if(event==="card")view.card(data.markdown||"");else if(event==="delta")view.delta(data.text||"");else if(event==="done")return shaped(true,200,data.data);else if(event==="error")return shaped(false,Number(data.status)||500,{detail:data.detail});}}
-  return shaped(false,0,{detail:"The response stream ended before the answer arrived."});
+  try{
+    while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const parsed=parseSse(buffer);buffer=parsed.rest;
+      for(const {event,data} of parsed.events){if(event==="status")view.status(data.text||"");else if(event==="card")view.card(data.markdown||"");else if(event==="delta")view.delta(data.text||"");else if(event==="done")return shaped(true,200,data.data);else if(event==="error")return shaped(false,Number(data.status)||500,{detail:data.detail});}}
+  }catch(error){
+    // The connection went away mid-turn (a phone locking its screen, a tunnel
+    // hiccup). The server keeps working and saves the answer; the caller
+    // recovers it from history rather than reporting a failure.
+    return {...shaped(false,0,{detail:"stream_interrupted"}),interrupted:true,view};
+  }
+  return {...shaped(false,0,{detail:"stream_interrupted"}),interrupted:true,view};
 }
+// After a dropped stream: wait for the turn's answer to land in this
+// conversation's history, then render it exactly as `done` would have.
+async function recoverTurn(session,text,view,{interval=3000,limit=120000}={}){const started=Date.now();view?.status("Connection dropped. Waiting for the answer…");
+  while(Date.now()-started<limit){await new Promise(r=>setTimeout(r,interval));
+    let data;try{const res=await fetch(`/chat/history/${encodeURIComponent(session)}`);if(!res.ok)continue;data=await res.json();}catch{continue;}
+    const messages=data.messages||[];let userIndex=-1;for(let i=messages.length-1;i>=0;i--){if(messages[i].role==="user"&&messages[i].content===text){userIndex=i;break;}}
+    const reply=userIndex>=0?messages.slice(userIndex+1).find(m=>m.role!=="user"):null;
+    if(reply)return {answer:reply.content,chart:reply.chart,trajectory:reply.trajectory,trade_plan:reply.trade_plan,quick_actions:reply.quick_actions,suggestions:reply.suggestions,intent:reply.intent,capabilities:reply.capabilities,cross_chain_swap:reply.cross_chain_swap,context_capsules:reply.context_capsules,session_id:session,session_revision:reply.session_revision??Number(data.context?.revision||0),team_mode:data.context?.team_mode,risk_charter:data.context?.risk_charter,risk_charter_fields:data.context?.risk_charter_fields};}
+  return null;}
 async function sendMessage(text,quickAction=null,extra={},retryTyping=null) {
   if (busy || !text.trim()) return;retireQuickActions();chatTurnEpoch++;retirePendingTradeCards();busy=true; sendBtn.disabled=true;
   const typing=retryTyping||(addUserMessage(text),addTyping());
   const requestSession=sessionId || undefined;
-  try { const payload={message:text,tz_offset_min:-new Date().getTimezoneOffset(),wallet_address:walletInput.value.trim() || null,session_id:requestSession,context_revision:(requestSession&&sessionRevision!=null)?sessionRevision:null,quick_action:quickAction,team_mode:teamModePending,...extra};const streamed=await streamChat(payload,typing);
+  try { const payload={message:text,tz_offset_min:-new Date().getTimezoneOffset(),wallet_address:walletInput.value.trim() || null,session_id:requestSession,context_revision:(requestSession&&sessionRevision!=null)?sessionRevision:null,quick_action:quickAction,team_mode:teamModePending,...extra};let streamed=await streamChat(payload,typing);
+    if(streamed?.interrupted){const recovered=requestSession?await recoverTurn(requestSession,text,streamed.view):null;
+      if(recovered)streamed={ok:true,status:200,json:async()=>recovered};
+      else throw new Error(requestSession?"the connection dropped and the answer did not arrive in time. Open this chat again to see it.":"the connection dropped. Open History to find the answer, then try again.");}
     const res=streamed||await chatFetch("/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}); const data=await res.json();
     if(!res.ok){
       // The session this tab remembers belongs to an account we're no longer

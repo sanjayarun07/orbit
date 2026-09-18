@@ -672,6 +672,26 @@ const CASES = {
     return runUseAddress("So11111111111111111111111111111111111111112");
   },
   /** Well-formed base58 of a plausible length that is not 32 bytes. */
+  // A stream that breaks mid-turn is reported as interrupted, not as an error,
+  // and recoverTurn finds the finished answer in the conversation's history.
+  async a_broken_stream_is_recovered_from_history() {
+    const { dom, sandbox } = load();
+    let reads = 0;
+    const reader = { read: async () => { reads++; if (reads === 1) return { value: new TextEncoder().encode("event: status\ndata: {\"text\":\"Running x\"}\n\n"), done: false }; throw new TypeError("Load failed"); } };
+    let polls = 0;
+    sandbox.fetch = async (url) => {
+      if (String(url) === "/chat/stream") return { ok: true, status: 200, body: { getReader: () => reader }, headers: { get: () => "text/event-stream" } };
+      if (String(url).startsWith("/chat/history/s1")) { polls++; return answer(true, polls < 2 ? { messages: [{ role: "user", content: "NVDA fundamentals" }], context: { revision: 3 } }
+        : { messages: [{ role: "user", content: "NVDA fundamentals" }, { role: "assistant", content: "NVDA brief", chart: { symbol: "NASDAQ:NVDA" }, intent: "research", session_revision: 4 }], context: { revision: 4 } }); }
+      return answer(true, {});
+    };
+    sandbox.ReadableStream = class {};
+    sandbox.setTimeout = (fn) => globalThis.setTimeout(fn, 0);   // the sandbox's timers never fire; recovery waits between polls
+    const typing = dom.query("#typing");
+    const streamed = await sandbox.streamChat({ message: "NVDA fundamentals", session_id: "s1" }, typing);
+    const recovered = await sandbox.recoverTurn("s1", "NVDA fundamentals", streamed.view, { interval: 1, limit: 2000 });
+    return { interrupted: streamed.interrupted === true, polls, answer: recovered && recovered.answer, chart: recovered && recovered.chart, revision: recovered && recovered.session_revision, status: dom.query("#typing >> .message-body >> .stream-status").textContent };
+  },
   // Privy's embedded Solana provider signs a base64 message and answers with
   // a base64 signature; the page hands the server hex.
   async privy_sign_message_uses_base64_in_and_out() {

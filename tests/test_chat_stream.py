@@ -138,3 +138,67 @@ def test_a_streamed_error_keeps_the_existing_404_handling_reachable():
     from tests.test_ui_swap_flow import run_case
     r = run_case("stream_error_event_is_fetch_shaped_for_the_existing_handling")
     assert r["ok"] is False and r["status"] == 404 and r["data"]["detail"] == "Conversation not found"
+
+
+# --- a client that goes away mid-turn (installed iPhone app, 2026-09-18) ----------
+
+def test_a_turn_finishes_and_is_saved_when_the_streaming_client_leaves(monkeypatch):
+    """Seen on the phone: "Could not reach the assistant: Load failed" -- the
+    connection dropped mid-turn and the server cancelled the turn, so there
+    was nothing to recover. The turn now completes on its own and lands in
+    history like a JSON turn."""
+    _quiet_turn(monkeypatch)
+    finished = asyncio.Event()
+
+    async def slow_agent(message, wallet, history, context, action):
+        streaming.emit("status", text="Running a slow tool")
+        await asyncio.sleep(0.6)
+        finished.set()
+        return AgentRun(answer="NVDA brief", trajectory={"tool_name_0": "perplexity_finance_search", "observation_0": "x"}, trade_plan=None, intent="research", capabilities=["equity_research"])
+
+    monkeypatch.setattr(execution_policy, "run_agent", slow_agent)
+    client = TestClient(main.app)
+    from tests.conftest import sign_in
+    sign_in(client, email="dropped@example.com")
+    session_id = None
+    with client.stream("POST", "/chat/stream", json={"message": "NVDA fundamentals"}, headers={"X-Orbit-Device": "drop-test"}) as response:
+        first = next(response.iter_lines())
+        assert "status" in (first.decode() if isinstance(first, bytes) else first)
+        # leave without reading the rest: the client is gone
+    # the turn keeps running after the client left
+    import time as _time
+    deadline = _time.time() + 5
+    while _time.time() < deadline and not finished.is_set():
+        _time.sleep(0.05)
+    assert finished.is_set(), "the turn was cancelled when the client left"
+    # ...and its answer is in the account's newest conversation
+    _time.sleep(0.3)
+    convs = client.get("/me/conversations").json()
+    items = convs if isinstance(convs, list) else convs.get("conversations") or convs.get("items") or []
+    assert items, convs
+    session_id = items[0].get("session_id") or items[0].get("id")
+    history = client.get(f"/chat/history/{session_id}", headers={"X-Orbit-Device": "drop-test"}).json()
+    assert history["messages"][-1]["role"] != "user" and history["messages"][-1]["content"] == "NVDA brief"
+
+
+def test_the_stream_sends_keepalives_while_a_slow_tool_runs(monkeypatch):
+    _quiet_turn(monkeypatch)
+    monkeypatch.setattr(settings, "stream_keepalive_seconds", 0.1)
+
+    async def slow_agent(message, wallet, history, context, action):
+        await asyncio.sleep(0.35)
+        return AgentRun(answer="done", trajectory=None, trade_plan=None, intent="general", capabilities=[])
+
+    monkeypatch.setattr(execution_policy, "run_agent", slow_agent)
+    with TestClient(main.app).stream("POST", "/chat/stream", json={"message": "hi"}, headers={"X-Orbit-Device": "keepalive-test"}) as response:
+        lines = [(l.decode() if isinstance(l, bytes) else l) for l in response.iter_lines()]
+    assert sum(1 for l in lines if l.startswith(": keepalive")) >= 2, lines
+    assert any(l.startswith("event: done") for l in lines)
+
+
+def test_the_browser_recovers_a_broken_stream_from_history():
+    from tests.test_ui_swap_flow import run_case
+    r = run_case("a_broken_stream_is_recovered_from_history")
+    assert r["interrupted"] is True and r["polls"] == 2
+    assert r["answer"] == "NVDA brief" and r["chart"] == {"symbol": "NASDAQ:NVDA"} and r["revision"] == 4
+    assert "Waiting for the answer" in r["status"]

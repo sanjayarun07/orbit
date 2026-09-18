@@ -365,6 +365,9 @@ class Settings(BaseSettings):
     chat_requests_per_minute: int = 60
     auth_requests_per_minute: int = 30
     chat_execution_timeout_seconds: float = 120.0
+    # /chat/stream writes an SSE comment when nothing else has been sent for
+    # this long, so proxies and phones see a live connection during a slow tool.
+    stream_keepalive_seconds: float = 15.0
     request_queue_timeout_seconds: float = 10.0
     rpc_requests_per_minute: int = 120
     rpc_max_batch_size: int = 10

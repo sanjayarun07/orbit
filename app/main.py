@@ -1002,6 +1002,11 @@ async def chat(body: ChatRequest, request: Request):
     return await execution_policy.execute_chat_turn(body, await resolve_identity(request))
 
 
+# Turns whose streaming client left: kept referenced until they finish, so
+# the event loop does not garbage-collect a running turn.
+_detached_turns: set[asyncio.Task] = set()
+
+
 @app.post("/chat/stream")
 async def chat_stream(body: ChatRequest, request: Request):
     """The same turn as POST /chat, streamed as server-sent events: `status`
@@ -1027,17 +1032,30 @@ async def chat_stream(body: ChatRequest, request: Request):
             queue.put_nowait(None)
 
     task = asyncio.create_task(run())
+    _detached_turns.add(task)
+    task.add_done_callback(_detached_turns.discard)
 
     async def events():
+        # A keepalive comment when nothing has been sent for a while: a slow
+        # tool must not look like a dead connection to a proxy or a phone.
+        # And when the client does go away (a phone locking its screen, a
+        # tunnel hiccup) the turn is NOT cancelled: it was admitted and
+        # charged, it finishes and persists like a JSON turn, and the client
+        # recovers the answer from history. Cancelling here (the earlier
+        # behaviour) threw the work away and left nothing to recover.
         try:
             while True:
-                item = await queue.get()
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=settings.stream_keepalive_seconds)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
                 if item is None:
                     break
                 yield f"event: {item['event']}\ndata: {json.dumps(item)}\n\n"
         finally:
             if not task.done():
-                task.cancel()
+                logger.info("stream client left before the turn finished; the turn completes on its own")
 
     return StreamingResponse(events(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"})

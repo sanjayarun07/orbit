@@ -810,6 +810,16 @@ card at 4.0 s, second at 12.3 s, first synthesis token at 13.6 s, done at
 Behind Caddy nothing needs configuring (it streams chunked responses); the
 `X-Accel-Buffering: no` header covers nginx if one is ever put in front.
 
+A client that goes away mid-turn (an iPhone locking its screen, a tunnel
+hiccup -- seen as "Could not reach the assistant: Load failed" on the
+installed app, 2026-09-18) does not cancel the turn: it was admitted and
+charged, it finishes and persists like a JSON turn, and the browser recovers
+the answer by polling the conversation's history for up to two minutes,
+rendering it exactly as `done` would have. The stream also writes a
+`: keepalive` comment whenever nothing has been sent for
+`STREAM_KEEPALIVE_SECONDS` (15), so a slow tool never looks like a dead
+connection to a proxy.
+
 ## Installable app and phone layout (2026-09-17)
 
 The chat UI is a progressive web app: `/ui/manifest.webmanifest` (standalone
