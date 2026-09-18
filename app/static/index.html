@@ -22,8 +22,8 @@
 <script>(function(){try{var p=JSON.parse(localStorage.getItem("orbit_theme_v1")||'"system"');var t=p==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):p;document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t;}catch(e){}})();</script>
 <link rel="stylesheet" href="/ui/theme.css?v=1">
 <link rel="stylesheet" href="/ui/chat.css?v=6">
-<link rel="stylesheet" href="/ui/product.css?v=5">
-<link rel="stylesheet" href="/ui/mobile.css?v=5">
+<link rel="stylesheet" href="/ui/product.css?v=6">
+<link rel="stylesheet" href="/ui/mobile.css?v=6">
 </head>
 <body>
 <div class="app">
@@ -74,8 +74,8 @@
       <div class="thread" id="messages">
         <div class="welcome" id="welcome">
           <div class="welcome-mark" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M5 15.5 9.5 11l3 3L19 7.5"/><path d="M19 12v7H5V5h8"/></svg></div>
-          <h1 class="tagline">A clearer view of the market.</h1>
-          <p class="tagline-sub">Research assets, understand your portfolio, and review your next move.</p>
+          <h1 class="tagline">Research. Trade. Stay ahead.</h1>
+          <p class="tagline-sub">Ask about any token, wallet or protocol. Orbit checks the data first, then answers.</p>
         </div>
       </div>
     </section>
@@ -85,7 +85,7 @@
     <div class="composer-shell">
       <form class="composer" id="composer">
         <div class="mention-menu" id="mentionMenu" hidden role="listbox"></div>
-        <textarea aria-label="Message Orbit" id="messageInput" rows="1" maxlength="2000" placeholder="Ask about markets, assets, or your portfolio…"></textarea>
+        <textarea aria-label="Message Orbit" id="messageInput" rows="1" maxlength="2000" placeholder="Ask about a token, wallet, protocol or trade — type $ to mention a token"></textarea>
         <div class="composer-tools">
           <button class="composer-plus" id="composerPlus" type="button" aria-label="Connect a wallet" title="Connect a wallet"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
           <span class="composer-context"><svg class="icon" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg><span>Live tools</span></span>
@@ -100,7 +100,7 @@
         <div class="mono-cap" id="highlightsCaption" hidden></div>
         <div class="prompts" id="homePrompts" hidden></div>
         <section class="explore" id="exploreMore">
-          <button class="explore-toggle" id="exploreToggle" type="button" aria-expanded="false" aria-controls="exploreBody"><span>Explore more</span><svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+          <button class="explore-toggle" id="exploreToggle" type="button" aria-expanded="false" aria-controls="exploreBody"><span class="explore-spark" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.2 2.2M16.2 16.2l2.2 2.2M5.6 18.4l2.2-2.2M16.2 7.8l2.2-2.2"/></svg></span><span class="explore-label"><b>Explore more</b><small>What Orbit can do: trending tokens, whale moves, deep dives, swaps</small></span><svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
           <div class="explore-body" id="exploreBody">
             <div class="explore-inner">
               <div class="chips" id="homeChips" hidden></div>
@@ -348,7 +348,7 @@ const conversationEl = $("#conversation");
 const form = $("#composer");
 const composerShell = $(".composer-shell");
 const input = $("#messageInput");
-if(window.matchMedia("(max-width:720px)").matches){input.placeholder="Ask about markets or your portfolio…";$("#policyChip b").textContent="Prefs";}   // one line on a phone; the toolbar stays one row
+if(window.matchMedia("(max-width:720px)").matches){input.placeholder="Ask about a token, wallet or trade — $ mentions a token";$("#policyChip b").textContent="Prefs";}   // one line on a phone; the toolbar stays one row
 const sendBtn = $("#sendBtn");
 const jumpLatestBtn = $("#jumpLatest");
 const walletInput = $("#walletAddress");

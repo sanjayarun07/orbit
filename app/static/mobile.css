@@ -42,6 +42,8 @@
   .welcome .tagline { font-size: 30px; letter-spacing: -.8px; }
   .welcome .tagline-sub { margin-top: 10px; }
   .home-below { margin-top: 20px; }
+  .explore-toggle { max-width: none; }
+  .explore-label small { display: none; }
   .composer-shell { padding: 8px var(--gutter) max(12px, env(safe-area-inset-bottom)); }
   /* Messages take the whole width; the user's bubble keeps its side. */
   .message { padding: 10px 0; }
