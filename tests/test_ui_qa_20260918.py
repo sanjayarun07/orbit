@@ -33,3 +33,11 @@ def test_dialog_head_and_footer_follow_the_frames_corners():
     assert "border-bottom-left-radius: inherit" in footer and "border-bottom-right-radius: inherit" in footer
     head = next(line for line in css.splitlines() if line.startswith(".dialog-head {") and "radius" in line)
     assert "border-top-left-radius: inherit" in head
+
+
+def test_the_sign_in_sheet_says_when_the_email_was_not_sent():
+    """Seen on the phone (2026-09-18): Resend refused the placeholder sender
+    and the sheet still said "Check your inbox"."""
+    from tests.test_ui_swap_flow import run_case
+    r = run_case("signin_sheet_reports_a_send_that_did_not_happen")
+    assert "could not be sent" in r["false"] and "Check a@b.co" in r["true"], r

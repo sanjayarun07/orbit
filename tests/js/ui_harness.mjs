@@ -672,6 +672,19 @@ const CASES = {
     return runUseAddress("So11111111111111111111111111111111111111112");
   },
   /** Well-formed base58 of a plausible length that is not 32 bytes. */
+  // The sign-in sheet tells the truth about the email: "check your inbox"
+  // only when the server sent one; a failed send says so.
+  async signin_sheet_reports_a_send_that_did_not_happen() {
+    const { dom, sandbox } = load();
+    const out = {};
+    for (const sent of [false, true]) {
+      sandbox.fetch = async () => answer(true, { sent, email: "a@b.co" });
+      dom.query("#signinEmail").value = "a@b.co";
+      await sandbox.startSignin();
+      out[String(sent)] = dom.query("#signinStatus").textContent;
+    }
+    return out;
+  },
   // The chart card: TradingView's widget for the server-resolved symbol, in
   // the page's theme, with the attribution TradingView's terms require.
   async chart_card_embeds_the_resolved_symbol_with_attribution() {

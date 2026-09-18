@@ -1696,6 +1696,7 @@ function openSignin(reason){$("#signinIntro").textContent=reason||"Enter your em
 async function startSignin(){const email=$("#signinEmail").value.trim();const status=$("#signinStatus");if(!email){status.textContent="Enter your email address.";return;}$("#signinSendBtn").disabled=true;status.textContent="Sending…";
   try{const res=await fetch("/auth/email/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});const data=await res.json();if(!res.ok)throw new Error(normalizeError(data,res.status));
     if(data.dev_link){status.textContent="Development mode: signing you in…";const token=data.dev_link.split("signin=")[1];await verifySignin(token);}
+    else if(data.sent===false){status.textContent="The sign-in email could not be sent right now. Check the address and try again in a moment.";}
     else status.textContent=`Check ${data.email} for your sign-in link. It expires in 15 minutes.`;
   }catch(error){status.textContent=error.message;}finally{$("#signinSendBtn").disabled=false;}}
 async function verifySignin(token){const res=await fetch("/auth/email/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})});const data=await res.json();if(!res.ok)throw new Error(normalizeError(data,res.status));account=data;renderAccount();closeDialog("signinDialog");hydrateHistory();}
