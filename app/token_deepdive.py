@@ -39,9 +39,6 @@ from app.integrations import tradingview
 # metadata.token is "chain:address" -- so a symbol-guessed slug is VERIFIED by the
 # resolved address before its unlocks are trusted. Unlocks are the most
 # deterministic near-term headwind, so this closes the highest-value evidence gap.
-_UNLOCK_LIST_URL = "https://defillama-datasets.llama.fi/emissionsProtocolsList"
-_UNLOCK_SLUG_URL = "https://defillama-datasets.llama.fi/emissions/{slug}"
-_unlock_list_cache: tuple[float, list[str]] | None = None
 _unlock_cache: dict[str, tuple[float, str | None]] = {}
 _UNLOCK_TTL = 3600.0
 
@@ -105,24 +102,9 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def _http_json(url: str, timeout: float = 20.0):
-    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-        resp = client.get(url, headers={"User-Agent": "Orbit-Web3-Copilot/0.2"})
-        resp.raise_for_status()
-        return resp.json()
-
-
-def _unlock_slug_list() -> list[str]:
-    global _unlock_list_cache
-    if _unlock_list_cache and time.monotonic() - _unlock_list_cache[0] < _UNLOCK_TTL:
-        return _unlock_list_cache[1]
-    try:
-        data = _http_json(_UNLOCK_LIST_URL)
-        slugs = [str(s) for s in data] if isinstance(data, list) else []
-    except Exception:
-        slugs = []
-    _unlock_list_cache = (time.monotonic(), slugs)
-    return slugs
+# The DefiLlama emissions client lives in app/token_unlocks.py (the router
+# registers that tool and this module imports the router).
+from app.token_unlocks import _UNLOCK_SLUG_URL, _http_json, _unlock_slug_list  # noqa: E402
 
 
 def token_unlocks(symbol: str | None, address: str, chain: str) -> str | None:

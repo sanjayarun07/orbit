@@ -36,6 +36,11 @@ def _reset_account_stores(monkeypatch):
         return None
 
     monkeypatch.setattr(limits, "get_redis", no_redis)
+    # Related questions call the model after every eligible turn; the suite
+    # opts in per test (tests/test_followups.py) rather than paying for it.
+    from app.settings import settings as _settings
+
+    monkeypatch.setattr(_settings, "followups_enabled", False)
     monkeypatch.setattr(_tradingview, "get_redis", no_redis)
     # The subject probe looks a name up on the web when the router is unsure;
     # the suite never reaches Perplexity for that. Tests of the probe itself

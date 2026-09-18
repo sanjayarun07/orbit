@@ -1002,3 +1002,49 @@ mechanisms:
 
 Also: a security follow-up with no token named ("is it audited?") takes the
 token in the conversation's focus instead of asking.
+
+## Search first, then the tools; unlock schedules; related questions (2026-09-18)
+
+Three changes from one transcript ("OPEN token unlock schedule" answered
+with a DEX pair search, compared side by side with Perplexity's answer).
+
+**Search first when the router is unsure.** User rule: "if we are not
+confident enough, route to Perplexity search or finance search, synthesize,
+and then decide the tools later." The uncertain branch of the resolver now
+runs two look-ups at once: the strict-JSON subject probe (which decides the
+route, as before) and `subject_probe.context_search`, the question itself
+put to Perplexity (finance search for a market-shaped message, web search
+otherwise, cached fifteen minutes). The web's answer travels with the route
+as `web_context`; the research node shows it as the first card the moment
+the turn starts, runs the tools the probe chose, and synthesizes the web
+card and the tools' cards together (`perplexity_context_search` is the first
+trajectory step). When nothing settles the subject but the web answered,
+that answer stands on its own with `web_research` capabilities instead of a
+clarifying question; only with neither does the turn ask the user back. An
+anchored rule or a confident classifier never triggers either look-up, so
+the ordinary turn costs nothing extra.
+
+**Unlock schedules.** `defillama_token_unlocks` (app/token_unlocks.py) owns
+unlock/vesting/emissions/cliff questions that name a token. It finds the
+slug by ticker in DefiLlama's emissions index (`emissionsIndex`: slug, name,
+ticker, token reference), so ARB is `arbitrum` and never the
+`arbitrum-exchange` namesake the old prefix match picked; a request that
+carries a contract is verified against the entry's token reference and a
+namesake is never shown. When DefiLlama lists nothing for the ticker
+(OpenLedger's OPEN), the tool answers from Perplexity finance search with
+the project's published vesting terms, marked as web-sourced, with the
+DefiLlama gap stated in one line. The catalog's `unlocks` dimension keeps
+the pair-search tool out of these asks.
+
+**Related questions.** The quick-action chips removed on 2026-09-14 for
+being generic are not back. Instead, app/followups.py writes 3-5 candidate
+follow-ups from the question and the answer on the primary model and keeps
+only the ones grounded in the answer (a name, ticker, domain or figure the
+answer actually contains; never a pronoun subject; never the user's own
+question); fewer than two survivors means no section. Only research and
+general answers with substance get them: never a trade turn, a clarifying
+question, or an error. They run alongside the chart card, bounded to eight
+seconds, and reach the browser as `suggestions` on the response and in
+history; the browser renders a "Related" list under the answer and a tap
+sends the question. `FOLLOWUPS_ENABLED=false` turns the whole thing off. The
+suite runs with it off and opts in per test.

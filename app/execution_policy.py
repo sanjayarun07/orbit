@@ -17,7 +17,7 @@ from app.experience import (advance_session_context, build_context_capsules, bui
     with_resolved_token, build_gas_advisory, build_intent_lock, build_trade_readiness)
 from app.graph import run_agent
 from app.identity import Identity, current_identity, service_identity
-from app import charts
+from app import charts, followups
 from app.integrations import tradingview
 from app.limits import acquire_chat_slot, allow_chat_request, allow_chat_request_from_ip, release_chat_slot
 from app.metrics import increment
@@ -287,9 +287,9 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         increment(f"intent_{run.intent}")
         answer, trajectory, plan = run
         client_trajectory = trajectory if settings.expose_tool_trajectory else public_activity(trajectory)
-        # Quick-action / suggestion chips are disabled: they were often generic
-        # and unrelated to the query. Empty lists render nothing (the UI only
-        # shows the "Quick next actions" section when quick_actions is non-empty).
+        # Quick-action chips stay off (generic, 2026-09-14). Related questions
+        # are different: written from this answer and kept only when grounded
+        # in it (app/followups.py); [] renders nothing.
         suggestions: list[str] = []
         intent_lock = build_intent_lock(plan, run.cross_chain_swap, body.wallet_address)
         context_capsules = with_resolved_token(
@@ -349,11 +349,14 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         # The chart the browser draws under the answer: the resolved token's
         # spot pair, or the equity's listing. Best effort and bounded; never
         # a reason for a turn to fail.
-        try:
-            chart = await asyncio.wait_for(asyncio.to_thread(charts.chart_for, run, body.message), timeout=6)
-        except Exception:
-            logger.debug("chart card skipped", exc_info=True)
-            chart = None
+        async def _chart():
+            try:
+                return await asyncio.wait_for(asyncio.to_thread(charts.chart_for, run, body.message), timeout=6)
+            except Exception:
+                logger.debug("chart card skipped", exc_info=True)
+                return None
+
+        chart, suggestions = await asyncio.gather(_chart(), followups.generate(body.message, answer, run.intent, plan))
         assistant_metadata = {
             "chart": chart,
             "routing_decision": getattr(run, "routing_decision", None),

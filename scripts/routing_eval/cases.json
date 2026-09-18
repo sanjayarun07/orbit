@@ -354,6 +354,34 @@
     "notes": "structured 10-dimension token deep-dive lens (research_node intercept)"
   },
   {
+    "id": "token-unlock-schedule",
+    "query": "OPEN token unlock schedule",
+    "expected_tools": [
+      "defillama_token_unlocks"
+    ],
+    "forbidden_tools": [
+      "dexscreener_pair_search",
+      "jupiter"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "an unlock ask is the vesting schedule, not a pair search (2026-09-18 transcript)"
+  },
+  {
+    "id": "token-unlock-next",
+    "query": "when is the next ARB unlock",
+    "expected_tools": [
+      "defillama_token_unlocks"
+    ],
+    "forbidden_tools": [
+      "dexscreener_pair_search",
+      "jupiter"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "same ask, other wording"
+  },
+  {
     "id": "audit-report-symbol",
     "query": "Audit report on ANSEM",
     "expected_tools": [

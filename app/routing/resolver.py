@@ -180,11 +180,23 @@ async def _model_first(request: str, candidate: CapabilityRoute | None, call_lm,
         # search to get the context, then follow") and the answer routes it.
         if _strong_rule(candidate):
             return route_fields(candidate, source), {**meta, "method": "rules", "reason": f"model_uncertain:{hint}"}
-        found = await asyncio.to_thread(subject_probe.probe, request)
+        # Two look-ups at once: what the subject is (a strict-JSON probe,
+        # which decides the route) and what the web answers to the question
+        # itself (kept as the first evidence card, so the tools' cards are
+        # read together with it -- "search first, synthesize, then the
+        # tools", user rule 2026-09-18). With no settled subject the web's
+        # answer still stands on its own before we ask the user anything.
+        found, context = await asyncio.gather(asyncio.to_thread(subject_probe.probe, request),
+                                              asyncio.to_thread(subject_probe.context_search, request))
         probed = subject_probe.route_from(found, request) if found else None
         if probed:
+            if context:
+                probed["web_context"] = context
             return probed, {**meta, "method": "subject_probe", "reason": f"probe:{found.get('kind')}", "subject": found.get("subject"),
-                            "probe_confidence": found.get("confidence")}
+                            "probe_confidence": found.get("confidence"), "web_context": bool(context)}
+        if context:
+            return ({"intent": "research", "capabilities": ["web_research"], "chains": [], "route_source": "subject_probe", "web_context": context},
+                    {**meta, "method": "web_context", "reason": "model_uncertain:web_context" + (f":probe_{found.get('kind')}" if found else "")})
         return _clarify_route("speech_model"), {**meta, "reason": "model_uncertain" + (f":probe_{found.get('kind')}" if found else "")}
     if understanding.speech_act == "quote":
         return _quote_route(understanding, request, "speech_model"), meta

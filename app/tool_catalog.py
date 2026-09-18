@@ -48,6 +48,7 @@ DIMENSION_PATTERNS: dict[str, re.Pattern] = {
     # Subjects TradingView's tools answer on the user's own account (2026-09-18).
     "technicals": re.compile(r"\btechnicals?\b|\brsi\b|\bmacd\b|\bmoving\s+averages?\b|\bindicators?\b|\boscillators?\b", re.I),
     "fundamentals": re.compile(r"\bfundamentals?\b|\bp/e\b|\bvaluation\b|\bmargins?\b|\brevenue\b|\beps\b|\banalyst\s+(?:targets?|consensus|ratings?)\b|\bprice\s+targets?\b", re.I),
+    "unlocks": re.compile(r"\bunlocks?\b|\bunlocking\b|\bvesting\b|\bcliff\b|\bemissions?\s+schedule\b|\brelease\s+schedule\b|\bsupply\s+schedule\b", re.I),
     "earnings": re.compile(r"\bearnings\s+(?:date|call|report|calendar)\b|\breport(?:s|ing)?\s+earnings\b|\bnext\s+earnings\b", re.I),
     "holders": re.compile(r"\bholders?\b|\bwhales?\b|\bconcentration\b|\btop\s+wallets\b|\bdistribution\b", re.I),
     "security": re.compile(SECURITY_WORDS, re.I),          # the one security vocabulary (app/routing/lexicon.py)
@@ -148,7 +149,7 @@ TOOL_SPECS: dict[str, ToolSpec] = {spec.name: spec for spec in [
           summary="Newest token profiles published on DEX Screener (fresh launches with metadata)"),
     _spec("dexscreener_pair_search", "DEX Screener search", ["GET /latest/dex/search?q=<symbol or name>"],
           ["symbol"], ["pair", "chain", "dex", "price", "24h volume", "liquidity", "24h change", "pair age"], {"liquidity"},
-          not_for={"holders", "security", "balances", "transactions", "boosts", "price_change", "narratives", "new_listings"},
+          not_for={"holders", "security", "balances", "transactions", "boosts", "price_change", "narratives", "new_listings", "unlocks"},
           coverage="every DEX Screener chain", freshness="live",
           answers=["price and liquidity of BONK", "USELESS token pairs"], not_answers=["tokens ranked by volume (a ranking, not one token)", "boosted tokens (a list)"],
           summary="Trading pairs for one token by symbol or name: price, liquidity, volume and 24h change per pair"),
@@ -276,6 +277,11 @@ TOOL_SPECS: dict[str, ToolSpec] = {spec.name: spec for spec in [
           ["fear & greed", "altcoin season", "classification"], {"sentiment"}, not_for={"volume", "price_change", "boosts"},
           coverage="market-wide", freshness="daily", answers=["fear and greed today", "is it altcoin season"],
           summary="Market mood snapshot: Fear & Greed index and Altcoin Season index"),
+    _spec("defillama_token_unlocks", "DefiLlama emissions", ["GET /emissions (slug list)", "GET /emission/<slug>"], ["symbol"],
+          ["upcoming and recent unlock events: date, amount, unlock type, recipient category"], {"unlocks"},
+          not_for={"volume", "holders", "security", "liquidity", "price_change"}, coverage="tokens with a documented vesting schedule on DefiLlama", freshness="hourly",
+          answers=["OPEN token unlock schedule", "when is the next ARB unlock", "JUP vesting"], not_answers=["price of OPEN", "OPEN pairs"],
+          summary="A token's unlock and vesting schedule from DefiLlama emissions"),
     _spec("x_social_trending", "LunarCrush + X search (market-wide)", ["GET https://lunarcrush.com/api4/public/coins/list/v1?sort=interactions_24h", "Perplexity web search over X posts"], ["query"],
           ["tokens and memes ranked by social interactions or by what posts are about, accounts, links, themes"], {"social", "narratives"},
           not_for={"volume", "holders", "security", "price_change"}, coverage="crypto Twitter, market-wide", freshness="hours",

@@ -11,6 +11,9 @@ class AgentState(TypedDict, total=False):
     capabilities: list[str]
     chains: list[str]
     route_source: str
+    # The web's answer to the message, gathered before routing when the
+    # router was unsure (app/routing/subject_probe.context_search).
+    web_context: str
     execution_provider: Literal["jupiter", "relay"] | None
     missing_fields: list[str]
     routing_decision: dict

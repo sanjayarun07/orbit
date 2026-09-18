@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     # itself as an OAuth client at first use; the redirect is
     # PUBLIC_BASE_URL + /integrations/tradingview/callback.
     tradingview_enabled: bool = True
+    # Related questions under an answer (app/followups.py): model-written,
+    # kept only when grounded in the answer; off means the section never shows.
+    followups_enabled: bool = True
     tradingview_mcp_url: str = "https://mcp.tradingview.com/mcp"
     # x402 pay-per-message on POST /chat (app/x402_gate.py). Off by default;
     # when on, an unpaid request gets HTTP 402 with the payment requirements

@@ -14,6 +14,7 @@ def _utc() -> str:
 
 from app.additional_providers import ADDITIONAL_PROVIDERS
 from app.routing import lexicon
+from app import token_unlocks
 from app.integrations import tradingview
 from app.tool_catalog import TOOL_SPECS
 from app.market_providers import MARKET_PROVIDERS
@@ -269,6 +270,12 @@ def get_provider_router() -> ProviderRouter:
         keywords=("what is", "explain", "how does", "docs", "governance", "liquidation", "tokenomics", "competitors"),
         chains=(), cache_ttl_seconds=300, priority=8,
         description="Dopamint knowledge base: protocol docs, GitHub and governance passages with citations for 'what is / how does / who competes with' questions",
+    ))
+    router.register(ProviderTool(
+        "defillama_token_unlocks", "defillama", ("listing_events", "market_data"), token_unlocks.unlock_schedule,
+        matches=token_unlocks.matches, keywords=("unlock", "unlocks", "vesting", "emissions", "cliff", "release schedule", "supply schedule"),
+        chains=(), cache_ttl_seconds=3600, priority=9, spec=TOOL_SPECS.get("defillama_token_unlocks"),
+        description="A token's unlock / vesting schedule from DefiLlama emissions: upcoming and recent unlock events with dates, amounts, type and recipient; verified against the contract when one is given",
     ))
     router.register(ProviderTool(
         "x_social_trending", "social", ("market_sentiment", "token_discovery"), social_sentiment.social_trending,

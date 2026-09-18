@@ -866,6 +866,18 @@ const CASES = {
     const result = await sandbox.streamChat({ message: "hi" }, dom.query("#typing"));
     return { fallback: result === null };
   },
+  // Related questions (2026-09-18): rendered under the answer as a list, a
+  // tap sends the question as a new message; fewer than two means no section.
+  async related_questions_render_under_the_answer_and_send_on_tap() {
+    const { sandbox } = load();
+    const sent = [];
+    sandbox.sendMessage = async (text) => { sent.push(text); };
+    const items = ["What percentage of OPEN tokens are allocated to investors?", "How much OPEN unlocks when the 12-month cliff ends?"];
+    const section = sandbox.renderRelated(items);
+    const rendered = section.children.map(child => child.textContent);
+    section.children[1].dispatch("click");
+    return { rendered, sent, none: sandbox.renderRelated(["only one"]) !== null };
+  },
   async stream_error_event_is_fetch_shaped_for_the_existing_handling() {
     const { dom, sandbox } = load();
     sandbox.ReadableStream = class {};

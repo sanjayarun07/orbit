@@ -808,6 +808,9 @@ _NAMED_TOKEN = re.compile(
     r"|\b\$?((?-i:[A-Z][A-Z0-9]{1,9}))\s+is\s+(?:a\s+)?(?:safe|rug|honeypot|scam|legit)\b"
     # "audit report on ANSEM", "security check for BONK", "due diligence on WIF".
     r"|\b(?:audit(?:s|ed|ing)?(?:\s+reports?)?|security\s+(?:report|check|audit|review)|due[\s-]*diligence)\s+(?:on|of|for)\s+(?:the\s+)?(?:\$([A-Za-z][A-Za-z0-9]{1,9})|((?-i:[A-Z][A-Z0-9]{1,9})))\b"
+    # "next ARB unlock", "JUP vesting", "unlock schedule for OPEN", "OPEN emissions".
+    r"|\b\$?((?-i:[A-Z][A-Z0-9]{1,9}))\s+(?:token\s+)?(?:unlocks?|unlocking|vesting|emissions?|cliff)\b"
+    r"|\b(?:unlocks?|vesting|emissions?|cliff)\s+(?:schedule\s+)?(?:for|of)\s+(?:the\s+)?\$?([A-Za-z][A-Za-z0-9]{1,9})\b"
     # "is BONK audited", "was WIF audited".
     r"|\b(?:is|was|been)\s+\$?([A-Za-z][A-Za-z0-9]{1,9})\s+audited\b"
     # "ANSEM token", "Solana ANSEM token": an upper-case symbol named as a token.
@@ -1331,9 +1334,25 @@ async def _gather_planned(request: str, capabilities: tuple[str, ...], chains: t
     return {"answer": answer, "trajectory": {"thought_0": f"The request spans {len(results)} tools; run together and read together.", **trajectory}}
 
 
+WEB_CONTEXT_TOOL = "perplexity_context_search"
+
+
+def _web_context_part(state: AgentState) -> tuple[str, dict] | None:
+    """The pre-routing web answer as an evidence card + trajectory step, or None."""
+    context = (state.get("web_context") or "").strip()
+    if not context:
+        return None
+    card = subject_probe.context_card(state["request"], context)
+    return card, {"thought_0": "The router was unsure, so the question went to the web first; its answer is read with the tools' cards.",
+                  "tool_name_0": WEB_CONTEXT_TOOL, "tool_args_0": {"query": state["request"]}, "observation_0": card}
+
+
 async def research_node(state: AgentState) -> dict:
     sink: dict = {}
     request = _effective_request(state)
+    web_part = _web_context_part(state)
+    if web_part:
+        streaming.emit("card", markdown=web_part[0], tool=WEB_CONTEXT_TOOL)
     clauses = composition.split_asks(request)
     if len(clauses) >= 2:
         # A compound message: every ask answered, each through the same
@@ -1354,6 +1373,14 @@ async def research_node(state: AgentState) -> dict:
         result = {"answer": answer, "trajectory": trajectory or None, **extras}
     else:
         result = await _research_node(state, sink)
+    if web_part and result.get("answer") and not result.get("pending_token"):
+        # Search first, then the tools, read together: the web's answer is the
+        # first card unless the tools' turn was that same answer already.
+        trajectory = result.get("trajectory") or {}
+        if trajectory.get("tool_name_0") != WEB_CONTEXT_TOOL:
+            cards, combined = composition.combine([web_part, (result["answer"], trajectory)])
+            answer = await composition.synthesize(request, cards, combined)
+            result = {**result, "answer": answer, "trajectory": combined or None}
     if sink.get("resolved_token") and not result.get("resolved_token"):
         result = {**result, "resolved_token": sink["resolved_token"]}
     return result
@@ -1676,6 +1703,11 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
             "No usable provider across capabilities %s for %r; falling back to ReAct",
             eligible_capabilities, request,
         )
+    web_part = _web_context_part(state)
+    if web_part and not [c for c in eligible_capabilities if c != "web_research"]:
+        # No tool claims the question and the web already answered it: that
+        # answer, grounded and cited, rather than a second search for the same.
+        return {"answer": web_part[0], "trajectory": web_part[1]}
     streaming.emit("status", text="Researching with the live tools")
     result = await runtime.answer(
         _research_agent(

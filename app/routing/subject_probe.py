@@ -22,13 +22,19 @@ import re
 import threading
 import time
 
-from app.perplexity_tools import _invoke as perplexity_invoke, perplexity_available
+from app.perplexity_tools import _invoke as perplexity_invoke, perplexity_available, perplexity_finance_search, perplexity_web_search
 
 logger = logging.getLogger(__name__)
 
 _TTL_SECONDS = 3600
+_CONTEXT_TTL_SECONDS = 900
 _cache: dict[str, tuple[float, dict | None]] = {}
+_context_cache: dict[str, tuple[float, str | None]] = {}
 _lock = threading.Lock()
+# A message asking for a price or a financial figure goes to the finance-tuned
+# search for its context (it insists on a live quote in its answer, which is
+# right there and wrong everywhere else); anything else to the plain one.
+_FINANCE_HINT = re.compile(r"\b(?:price|prices|quote|trading at|worth|market cap|mcap|valuation|earnings|revenue|eps|dividend|p/e|pe ratio|share price|stock price)\b", re.I)
 
 # Something that could be a name: $TICKER, an all-caps word, or a capitalised
 # word. Sentence starters, market jargon and chain names are not subjects.
@@ -87,6 +93,40 @@ def probe(request: str) -> dict | None:
     return result
 
 
+def context_search(request: str) -> str | None:
+    """The web's answer to the message itself, for a turn the router could
+    not place: finance search for a market-shaped question, web search
+    otherwise. User rule (2026-09-18): when we are not confident, search
+    first, synthesize, and decide the tools from what came back. Cached per
+    message for fifteen minutes; None when search is off or fails."""
+    text = (request or "").strip()
+    if not text or not perplexity_available():
+        return None
+    key = re.sub(r"\s+", " ", text.lower())
+    now = time.monotonic()
+    with _lock:
+        hit = _context_cache.get(key)
+        if hit and hit[0] > now:
+            return hit[1]
+    result = None
+    try:
+        search = perplexity_finance_search if _FINANCE_HINT.search(text) else perplexity_web_search
+        result = search(text) or None
+    except Exception:
+        logger.info("context search failed for %r", text[:80], exc_info=True)
+    with _lock:
+        _context_cache[key] = (now + _CONTEXT_TTL_SECONDS, result)
+    return result
+
+
+def context_card(request: str, context: str) -> str:
+    """The context search as an evidence card the research node can read with
+    the tools' cards."""
+    subject = subject_of(request)
+    title = f"# Web context — {subject}" if subject else "# Web context"
+    return f"{title}\n**Provider**: Perplexity search (the question as asked)\n\n{context.strip()}"
+
+
 def route_from(found: dict, request: str) -> dict | None:
     """A route decision from a probe result, or None when it does not settle
     the question (low confidence, or a kind the router has no path for)."""
@@ -116,3 +156,4 @@ def route_from(found: dict, request: str) -> dict | None:
 def reset() -> None:
     with _lock:
         _cache.clear()
+        _context_cache.clear()

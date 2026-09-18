@@ -239,6 +239,14 @@
   .followup-action { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 8px 12px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; transition: border-color .15s, background .15s; }
   .followup-action:hover { border-color: var(--brand); background: var(--surface-2); }
   .followup-action:disabled { cursor: default; opacity: .46; border-color: var(--border); background: var(--surface); }
+  /* Related questions: one row per question, the way a reader scans a list of
+     next asks; only present when at least two are grounded in the answer. */
+  .related { margin-top: 18px; padding-top: 6px; border-top: 1px solid var(--border); display: flex; flex-direction: column; }
+  .related-title { padding: 8px 0 4px; color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .055em; }
+  .related-item { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; padding: 10px 2px; border: 0; border-top: 1px solid var(--border); background: transparent; color: var(--text); font: inherit; font-size: 14px; line-height: 1.4; cursor: pointer; transition: color .15s; }
+  .related-item::before { content: "↳"; flex: 0 0 auto; color: var(--muted); font-size: 13px; line-height: 1.5; }
+  .related-item:hover, .related-item:focus-visible { color: var(--brand); outline: none; }
+  .related-item:focus-visible::before { color: var(--brand); }
   .route-badge { margin-top: 13px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--subtle); font-size: 9.5px; }
   .route-badge strong { color: var(--brand-text); background: var(--brand-soft); border-radius: 999px; padding: 4px 8px; font-weight: 650; }
   .route-capability { border: 1px solid var(--border); border-radius: 999px; padding: 3px 7px; }
