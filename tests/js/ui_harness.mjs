@@ -672,6 +672,22 @@ const CASES = {
     return runUseAddress("So11111111111111111111111111111111111111112");
   },
   /** Well-formed base58 of a plausible length that is not 32 bytes. */
+  // The status line speaks in the product's voice: the server's "Running
+  // perplexity web search" becomes a phrase for that kind of work, the raw
+  // text stays as the tooltip, and the phrase rotates while the step lasts.
+  async status_line_speaks_in_phrases_and_keeps_the_raw_text_as_a_tooltip() {
+    const { dom, sandbox, getScriptVar } = load();
+    const phrases = getScriptVar("STATUS_PHRASES");   // a top-level const lives in the script's scope, not on the sandbox
+    const families = {};
+    for (const raw of ["Running perplexity web search", "Running birdeye token overview", "Running solana token security", "Running solana rpc token top holders", "Running knowledge base search", "Running tradingview snapshot", "Running market sentiment snapshot", "Fetching the wallet's balances and positions", "Reading the cards together", "Routed: research · finance_data, web_research", "Thinking…"]) families[raw] = sandbox.statusFamily(raw);
+    const view = sandbox.streamView(dom.query("#typing"));
+    view.status("Running perplexity web search");
+    const el = dom.query("#typing >> .message-body >> .stream-status");
+    const first = el.textContent, title = el.title;
+    view.status("Running perplexity web search");
+    const second = el.textContent;
+    return { families, first, second, title, rotates: first !== second, phraseFor: phrases.search.includes(first) && phrases.search.includes(second) };
+  },
   // A stream that breaks mid-turn is reported as interrupted, not as an error,
   // and recoverTurn finds the finished answer in the conversation's history.
   async a_broken_stream_is_recovered_from_history() {

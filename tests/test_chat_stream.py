@@ -7,6 +7,7 @@ a turn changes when nobody is streaming: `emit` is a no-op without a channel.
 """
 import asyncio
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
@@ -126,7 +127,21 @@ def test_the_client_renders_a_whole_streamed_answer_as_markdown():
     r = run_case("stream_renders_a_whole_answer_as_markdown_while_it_arrives")
     assert r["ok"]
     assert r["summaryHtml"] == "<p>I can help with <strong>markets</strong> and wallets:</p><ul><li>prices</li><li>swaps</li></ul>", r["summaryHtml"]
-    assert r["statusSeen"][:2] == ["Thinking…", "Routed: general"] and r["statusHidden"] is True
+    assert len(r["statusSeen"]) >= 2 and all(seen.endswith("…") for seen in r["statusSeen"][:2]) and r["statusHidden"] is True, r["statusSeen"]
+
+
+def test_the_status_line_speaks_in_phrases_with_the_raw_text_as_tooltip():
+    """User ask (2026-09-18): "Running perplexity web search" should read like
+    Claude's cooking / noodling, with an animated mark beside it."""
+    from tests.test_ui_swap_flow import run_case
+    r = run_case("status_line_speaks_in_phrases_and_keeps_the_raw_text_as_a_tooltip")
+    assert r["families"] == {"Running perplexity web search": "search", "Running birdeye token overview": "market", "Running solana token security": "security",
+                             "Running solana rpc token top holders": "holders", "Running knowledge base search": "knowledge", "Running tradingview snapshot": "chart",
+                             "Running market sentiment snapshot": "sentiment", "Fetching the wallet's balances and positions": "wallet", "Reading the cards together": "synthesis",
+                             "Routed: research · finance_data, web_research": "think", "Thinking…": "think"}, r["families"]
+    assert r["phraseFor"] and r["rotates"] and r["title"] == "Running perplexity web search"
+    css = (Path(__file__).resolve().parents[1] / "app" / "static" / "chat.css").read_text()
+    assert ".stream-status::before" in css and "orbit-spin" in css and "prefers-reduced-motion" in css
 
 
 def test_the_client_falls_back_to_the_json_route_without_a_stream():

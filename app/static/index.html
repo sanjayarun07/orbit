@@ -21,7 +21,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <script>(function(){try{var p=JSON.parse(localStorage.getItem("orbit_theme_v1")||'"system"');var t=p==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):p;document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t;}catch(e){}})();</script>
 <link rel="stylesheet" href="/ui/theme.css?v=1">
-<link rel="stylesheet" href="/ui/chat.css?v=5">
+<link rel="stylesheet" href="/ui/chat.css?v=6">
 <link rel="stylesheet" href="/ui/product.css?v=5">
 <link rel="stylesheet" href="/ui/mobile.css?v=5">
 </head>
@@ -1216,16 +1216,41 @@ async function chatFetch(url,init){
 // with the same status and detail. If the stream cannot be opened the turn
 // falls back to the JSON route, so nothing is lost when a proxy strips it.
 function parseSse(buffer){const events=[];let idx;while((idx=buffer.indexOf("\n\n"))>=0){const block=buffer.slice(0,idx);buffer=buffer.slice(idx+2);let event="message",data="";for(const line of block.split("\n")){if(line.startsWith("event:"))event=line.slice(6).trim();else if(line.startsWith("data:"))data+=line.slice(5).trim();}if(data){try{events.push({event,data:JSON.parse(data)});}catch{}}}return {events,rest:buffer};}
+// What the status line says while the turn works. The server reports what it
+// is doing in its own words ("Running perplexity web search"); the person
+// reading gets a phrase in ours, chosen by what kind of work it is, and
+// rotated while the same step goes on. The raw text stays on the element as
+// a tooltip, so nothing is hidden from anyone who wants it.
+const STATUS_PHRASES={
+  search:["Reading the web…","Scouring the news…","Skimming the sources…"],
+  market:["Checking the tape…","Pulling the numbers…","Watching the order books…"],
+  security:["Kicking the tyres…","Checking for traps…","Reading the fine print…"],
+  holders:["Counting the whales…","Sizing up the holders…"],
+  knowledge:["Flipping through the docs…","Reading the protocol docs…"],
+  chart:["Peeking at the charts…","Reading the candles…"],
+  sentiment:["Reading the room…","Taking the temperature…"],
+  wallet:["Opening the wallet…","Tallying the holdings…"],
+  synthesis:["Putting it together…","Connecting the dots…","Writing it up…"],
+  think:["Noodling…","Cooking…","Mulling it over…","Thinking…"],
+};
+const statusPhraseIndex={};
+function statusFamily(raw){const t=String(raw||"").toLowerCase();if(!t||t.startsWith("routed")||t==="thinking…")return "think";
+  if(/security|shield|goplus|honeypot|rug|safety/.test(t))return "security";if(/holder|whale/.test(t))return "holders";if(/knowledge/.test(t))return "knowledge";if(/tradingview|technical|candle/.test(t))return "chart";if(/sentiment|fear|greed/.test(t))return "sentiment";if(/wallet|portfolio|balance|hyperliquid/.test(t))return "wallet";
+  if(/reading the cards|writing|verdict|composing|evidence|together|synth|coordinator|thesis/.test(t))return "synthesis";if(/perplexity|web search|openai|news|search|researching/.test(t))return "search";if(/birdeye|dexscreener|coingecko|gecko|market|price|volume|pairs|overview|gainers|jupiter|quote|calendar|events|defillama/.test(t))return "market";return "think";}
+function statusPhrase(raw){const family=statusFamily(raw);const list=STATUS_PHRASES[family];const index=(statusPhraseIndex[family]=((statusPhraseIndex[family]??-1)+1)%list.length);return list[index];}
 // The text streamed token by token is the answer the model is writing (a general
 // reply, a research answer, the summary over composed cards), rendered as
 // markdown as it grows so lists and emphasis appear in place, not as raw marks.
 // Cards and text stream in the answer's own type and column (answer-result), so
 // nothing jumps in size or position when the final answer replaces the view.
-function streamView(typing){const body=$(".message-body",typing);body.innerHTML='<div class="answer streaming"><div class="stream-status"></div><div class="stream-summary rendered-result answer-result" hidden></div><div class="stream-cards"></div></div>';let text="";
+function streamView(typing){const body=$(".message-body",typing);body.innerHTML='<div class="answer streaming"><div class="stream-status"></div><div class="stream-summary rendered-result answer-result" hidden></div><div class="stream-cards"></div></div>';let text="";let raw="";let ticker=null;
+  const stopTicker=()=>{if(ticker){clearInterval(ticker);ticker=null;}};
   return {
-  status(text){const el=$(".stream-status",body);if(el){el.textContent=text;el.hidden=!text;}},
+  status(next,{literal=false}={}){const el=$(".stream-status",body);if(!el)return;raw=next||"";stopTicker();if(!raw){el.hidden=true;el.textContent="";return;}el.hidden=false;el.title=raw;if(literal){el.textContent=raw;return;}el.textContent=statusPhrase(raw);
+    ticker=setInterval(()=>{if(el.hidden||!raw)return stopTicker();el.textContent=statusPhrase(raw);},2800);},
   card(markdown){const cards=$(".stream-cards",body);if(!cards)return;cards.appendChild(renderAnswerResult(markdown));const sep=document.createElement("hr");sep.className="stream-sep";cards.appendChild(sep);scrollToBottom();},
   delta(chunk){text+=chunk;this.status("");const el=$(".stream-summary",body);if(!el)return;el.hidden=false;el.innerHTML=renderMarkdownHtml(text);scrollToBottom();},
+  stop(){stopTicker();},
 };}
 // Resolves to a fetch-shaped result ({ok,status,json()}) so the caller's handling is unchanged, or null to fall back.
 async function streamChat(payload,typing){
@@ -1236,7 +1261,7 @@ async function streamChat(payload,typing){
   const shaped=(ok,status,data)=>({ok,status,json:async()=>data});
   try{
     while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const parsed=parseSse(buffer);buffer=parsed.rest;
-      for(const {event,data} of parsed.events){if(event==="status")view.status(data.text||"");else if(event==="card")view.card(data.markdown||"");else if(event==="delta")view.delta(data.text||"");else if(event==="done")return shaped(true,200,data.data);else if(event==="error")return shaped(false,Number(data.status)||500,{detail:data.detail});}}
+      for(const {event,data} of parsed.events){if(event==="status")view.status(data.text||"");else if(event==="card")view.card(data.markdown||"");else if(event==="delta")view.delta(data.text||"");else if(event==="done"){view.stop();return shaped(true,200,data.data);}else if(event==="error"){view.stop();return shaped(false,Number(data.status)||500,{detail:data.detail});}}}
   }catch(error){
     // The connection went away mid-turn (a phone locking its screen, a tunnel
     // hiccup). The server keeps working and saves the answer; the caller
@@ -1247,7 +1272,7 @@ async function streamChat(payload,typing){
 }
 // After a dropped stream: wait for the turn's answer to land in this
 // conversation's history, then render it exactly as `done` would have.
-async function recoverTurn(session,text,view,{interval=3000,limit=120000}={}){const started=Date.now();view?.status("Connection dropped. Waiting for the answer…");
+async function recoverTurn(session,text,view,{interval=3000,limit=120000}={}){const started=Date.now();view?.status("Connection dropped. Waiting for the answer…",{literal:true});
   while(Date.now()-started<limit){await new Promise(r=>setTimeout(r,interval));
     let data;try{const res=await fetch(`/chat/history/${encodeURIComponent(session)}`);if(!res.ok)continue;data=await res.json();}catch{continue;}
     const messages=data.messages||[];let userIndex=-1;for(let i=messages.length-1;i>=0;i--){if(messages[i].role==="user"&&messages[i].content===text){userIndex=i;break;}}
