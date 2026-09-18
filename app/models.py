@@ -310,6 +310,14 @@ class AnswerValidation(BaseModel):
     age_minutes: float | None = None
 
 
+class ChartCard(BaseModel):
+    """What the browser's TradingView chart widget should draw for this answer."""
+    symbol: str                       # exchange-qualified, e.g. BINANCE:SOLUSDT or NASDAQ:AAPL
+    label: str
+    interval: str = "60"
+    kind: Literal["crypto", "equity"] = "crypto"
+
+
 class AgentResponse(BaseModel):
     answer: str
     # What this turn cost the caller's credit balance (absent for service callers).
@@ -334,6 +342,7 @@ class AgentResponse(BaseModel):
     team_mode: bool = False
     risk_charter: str | None = None
     risk_charter_fields: dict | None = None
+    chart: ChartCard | None = None
 
 
 class IntentPreviewRequest(BaseModel):

@@ -17,6 +17,8 @@ from app.experience import (advance_session_context, build_context_capsules, bui
     with_resolved_token, build_gas_advisory, build_intent_lock, build_trade_readiness)
 from app.graph import run_agent
 from app.identity import Identity, current_identity, service_identity
+from app import charts
+from app.integrations import tradingview
 from app.limits import acquire_chat_slot, allow_chat_request, allow_chat_request_from_ip, release_chat_slot
 from app.metrics import increment
 from app.models import AgentResponse, ChatRequest, RiskCharterFields
@@ -265,16 +267,23 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             # No trajectory: a task control is a plain (1-credit) turn, not a tool turn.
             run = AgentRun(answer=task_reply, trajectory=None, trade_plan=None, intent="general", capabilities=[])
         else:
-            run = await asyncio.wait_for(
-                run_agent(
-                    body.message,
-                    effective_wallet,
-                    history,
-                    session_context,
-                    action,
-                ),
-                timeout=settings.chat_execution_timeout_seconds,
-            )
+            # The user's TradingView token is bound to this turn (None when
+            # they have no connection), so the TradingView tools can match
+            # and act on their behalf, and only theirs.
+            tv_bound = await tradingview.bind_turn(identity.user["id"] if getattr(identity, "signed_in", False) and identity.user else None)
+            try:
+                run = await asyncio.wait_for(
+                    run_agent(
+                        body.message,
+                        effective_wallet,
+                        history,
+                        session_context,
+                        action,
+                    ),
+                    timeout=settings.chat_execution_timeout_seconds,
+                )
+            finally:
+                tradingview.current_token.reset(tv_bound)
         increment(f"intent_{run.intent}")
         answer, trajectory, plan = run
         client_trajectory = trajectory if settings.expose_tool_trajectory else public_activity(trajectory)
@@ -337,7 +346,16 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             await mark_plan_superseded(superseded_plan)
         next_context["active_workflow"] = next_workflow.as_context() if next_workflow else None
         quick_actions: list = []
+        # The chart the browser draws under the answer: the resolved token's
+        # spot pair, or the equity's listing. Best effort and bounded; never
+        # a reason for a turn to fail.
+        try:
+            chart = await asyncio.wait_for(asyncio.to_thread(charts.chart_for, run, body.message), timeout=6)
+        except Exception:
+            logger.debug("chart card skipped", exc_info=True)
+            chart = None
         assistant_metadata = {
+            "chart": chart,
             "routing_decision": getattr(run, "routing_decision", None),
             "trajectory": client_trajectory,
             "trade_plan": plan.model_dump(mode="json") if plan else None,
@@ -392,6 +410,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             risk_assessment=run.risk_assessment,
             team_report=run.team_report,
             validation=validation,
+            chart=chart,
             team_mode=bool(next_context.get("team_mode")),
             risk_charter=next_context.get("risk_charter") or None,
             risk_charter_fields=next_context.get("risk_charter_fields") or None,

@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 import httpx
 
 from app.provider_registry import get_provider_router
+from app.integrations import tradingview
 
 # DefiLlama emissions (free): a protocol-slug list + per-slug unlock schedule whose
 # metadata.token is "chain:address" -- so a symbol-guessed slug is VERIFIED by the
@@ -225,6 +226,11 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
         dims.append(DimensionEvidence(
             "unlocks", "Token unlocks / emissions", "unavailable",
             "Not tracked by DefiLlama emissions (typical for memecoins / no vesting schedule)."))
+
+    # Technical-indicator rating from the user's own TradingView, when connected.
+    technicals = await asyncio.to_thread(tradingview.technicals_for, symbol or address) if symbol and tradingview.available() else None
+    if technicals:
+        dims.append(DimensionEvidence("technicals", "Technical indicators (TradingView)", "available", technicals, "tradingview_snapshot", _now()))
 
     # Dimensions that need paid data (no free source) -- disclosed as explicit gaps.
     for name, label, reason in (

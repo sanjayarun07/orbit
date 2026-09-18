@@ -21,9 +21,11 @@ from uuid import uuid4
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse, FileResponse, Response
+from fastapi.responses import RedirectResponse, StreamingResponse, FileResponse, Response
 from fastapi.responses import JSONResponse
 from app.limits import allow_auth_request
+from app.integrations import tradingview
+from urllib.parse import quote
 from app.public_activity import public_activity
 from app.reconciliation import reconciliation_worker
 from app import relay_tracking
@@ -1073,6 +1075,7 @@ async def _me_payload(identity: Identity) -> dict:
         "credits": {"balance": balance},
         "wallets": await accounts.list_wallets(user["id"]),
         "api_key": {"id": identity.api_key["id"], "name": identity.api_key["name"]} if identity.api_key else None,
+        "integrations": {"tradingview": {**(await tradingview.status(user["id"])), "enabled": tradingview.enabled()}},
         "billing": {
             "configured": billing.configured(),
             "has_billing_account": bool(user.get("stripe_customer_id")),
@@ -1141,6 +1144,49 @@ async def signout(request: Request, response: Response):
 @app.get("/me")
 async def me(request: Request):
     return await _me_payload(await resolve_identity(request))
+
+
+@app.get("/integrations/tradingview/connect")
+async def tradingview_connect(identity: Identity = Depends(require_browser_session)):
+    """Send the signed-in user to TradingView to approve Orbit on their own
+    account (OAuth 2.1 with PKCE). Orbit registers itself as an OAuth client
+    on first use."""
+    if identity.api_key is not None:
+        raise HTTPException(403, "Connect TradingView from a signed-in browser session")
+    try:
+        url = await tradingview.begin(identity.user["id"])
+    except tradingview.TradingViewError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        logger.warning("TradingView connect could not start", exc_info=True)
+        raise HTTPException(503, "TradingView could not be reached to start the connection. Try again shortly.") from exc
+    return RedirectResponse(url, status_code=302)
+
+
+@app.get("/integrations/tradingview/callback", include_in_schema=False)
+async def tradingview_callback(state: str = "", code: str = "", error: str = "", error_description: str = ""):
+    """TradingView sends the user back here. The state binds the code to the
+    user who started, so no session is needed to finish -- and the token is
+    stored for that user only."""
+    if error or not state or not code:
+        detail = error_description or error or "TradingView did not return an authorization code"
+        return RedirectResponse(f"/ui/?connect_error={quote(detail[:160])}", status_code=302)
+    try:
+        await tradingview.complete(state, code)
+    except tradingview.TradingViewError as exc:
+        return RedirectResponse(f"/ui/?connect_error={quote(str(exc)[:160])}", status_code=302)
+    except Exception:
+        logger.warning("TradingView connect could not finish", exc_info=True)
+        return RedirectResponse("/ui/?connect_error=TradingView%20could%20not%20complete%20the%20connection", status_code=302)
+    return RedirectResponse("/ui/?connected=tradingview", status_code=302)
+
+
+@app.delete("/integrations/tradingview")
+async def tradingview_disconnect(identity: Identity = Depends(require_browser_session)):
+    if identity.api_key is not None:
+        raise HTTPException(403, "Disconnect TradingView from a signed-in browser session")
+    removed = await tradingview.disconnect(identity.user["id"])
+    return {"connected": False, "removed": removed}
 
 
 @app.get("/me/credits")

@@ -16,6 +16,9 @@ def _reset_account_stores(monkeypatch):
 
     for module in (accounts, credits, api_keys, billing, tasks):
         monkeypatch.setattr(module, "get_pg_pool", no_pool)
+    from app.integrations import tradingview as _tradingview
+
+    monkeypatch.setattr(_tradingview, "get_pg_pool", no_pool)
     billing.reset()
     tasks.reset()
     # Rate-limit and daily-budget windows are module state too. Every test
@@ -33,6 +36,7 @@ def _reset_account_stores(monkeypatch):
         return None
 
     monkeypatch.setattr(limits, "get_redis", no_redis)
+    monkeypatch.setattr(_tradingview, "get_redis", no_redis)
     # The /auth/ rate limit is per IP and lives in Redis when configured; every
     # test signs in from the same client IP, so it must not carry across tests.
     from app import main

@@ -15,6 +15,7 @@ from app.capability_router import extract_chains
 from app.market_brief import crypto_market_brief
 from app.market_overview import crypto_market_overview
 from app import composition, streaming
+from app.integrations import tradingview
 from app import event_calendar, why_moving
 from app.market_providers import TRENDING_TOKENS
 from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available
@@ -615,7 +616,20 @@ async def _equity_research(state: dict) -> dict:
             trajectory[f"tool_sources_{index}"] = extract_source_cards(result.output)
             evidence.append(f"{label}:\n{result.output}")
 
-    if all(isinstance(result, Exception) for result in (finance, news)):
+    # The user's own TradingView, when connected: fundamentals, analyst
+    # targets and the live quote sit beside the search evidence, so the brief
+    # is written from figures rather than from a summary of figures.
+    tv_evidence = await asyncio.to_thread(tradingview.equity_evidence, request) if tradingview.available() else None
+    if tv_evidence:
+        index = len(tasks)
+        trajectory[f"thought_{index}"] = "Fundamentals, forecasts and the quote from the user's TradingView account."
+        trajectory[f"tool_name_{index}"] = "tradingview_financials"
+        trajectory[f"tool_args_{index}"] = {"query": request}
+        trajectory[f"observation_{index}"] = tv_evidence
+        trajectory[f"tool_sources_{index}"] = []
+        evidence[0] = evidence[0] + "\n\nTradingView (the user's account):\n" + tv_evidence
+
+    if all(isinstance(result, Exception) for result in (finance, news)) and not tv_evidence:
         return {
             "answer": (
                 "Perplexity could not retrieve the financial or news evidence needed for "

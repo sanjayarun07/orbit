@@ -61,6 +61,12 @@ EXPECTED: dict[tuple[str, str], str] = {
     ("GET", "/executions/solana/{signature}"): "public",
     # --- bound to the resource's own owner ---------------------------------
     ("GET", "/me"): "owner_scoped",          # answers for anonymous callers too; returns only the CALLER's own state
+    # TradingView on the user's own account: connect and disconnect are a
+    # browser's job; the callback is where TradingView sends the user back,
+    # bound to the user who started by the OAuth state, so it needs no session.
+    ("GET", "/integrations/tradingview/connect"): "browser",
+    ("GET", "/integrations/tradingview/callback"): "public",
+    ("DELETE", "/integrations/tradingview"): "browser",
     ("GET", "/home/suggestions"): "public",
     # Public on-chain data for an address the caller supplies explicitly.
     ("GET", "/portfolio/{wallet_address}"): "key:data",

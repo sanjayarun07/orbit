@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     # connect a wallet and confirm a quote in the web UI.
     mcp_api_key: str | None = None
     public_base_url: str = "http://localhost:8000"
+    # TradingView connector (app/integrations/tradingview.py): each user links
+    # their own TradingView account (OAuth 2.1, Essential plan or higher) so
+    # research can read live quotes, technicals, fundamentals, news and
+    # calendars from TradingView's MCP server on their behalf. Orbit registers
+    # itself as an OAuth client at first use; the redirect is
+    # PUBLIC_BASE_URL + /integrations/tradingview/callback.
+    tradingview_enabled: bool = True
+    tradingview_mcp_url: str = "https://mcp.tradingview.com/mcp"
     # x402 pay-per-message on POST /chat (app/x402_gate.py). Off by default;
     # when on, an unpaid request gets HTTP 402 with the payment requirements
     # and the browser pays in USDC from the connected EVM wallet. The default

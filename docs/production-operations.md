@@ -880,3 +880,49 @@ customer no account maps to. Closed on both sides:
 
 Tests: tests/test_review_20260918_p1.py (all four fail on the code before
 the fix and pass after).
+
+## TradingView: charts under answers, and data on the user's own account (2026-09-18)
+
+Two separate things, one provider.
+
+**Charts.** A research answer that resolved a token, or researched an
+equity, carries `chart` in the response (`ChartCard`: exchange-qualified
+symbol, label, interval, kind) and the browser draws it with TradingView's
+embeddable Advanced Chart widget under the answer -- no account, no key,
+attributed per TradingView's widget terms. `app/charts.py` names the symbol
+through TradingView's public symbol search (most liquid USD-quoted spot pair
+for a coin, primary listing for a stock; cached six hours) and falls back to
+TradingView's aggregate index (`CRYPTO:SOLUSD`) or the bare ticker, both of
+which the widget resolves itself. The card is stored with the turn, so a
+reopened conversation draws it again.
+
+**Data.** TradingView's MCP server (https://www.tradingview.com/mcp/docs)
+answers quotes, technicals, fundamentals, forecasts, news, filings and
+calendars for crypto and equities -- for a signed-in TradingView user over
+OAuth 2.1, with no service credential. Orbit therefore never holds one
+TradingView login for everyone (that would be one paid seat serving many
+users, and against the platform's terms). Each user links their own account:
+
+- Settings › Account › Connections › TradingView › Connect sends the user
+  to `/integrations/tradingview/connect`, which registers Orbit as an OAuth
+  client at TradingView on first use (dynamic client registration; the record
+  is in `oauth_clients` and re-registered when `PUBLIC_BASE_URL` changes),
+  then to TradingView's authorization page (authorization code + PKCE +
+  the MCP resource indicator). The callback stores the tokens in
+  `user_integrations` for that user only; refresh happens a minute before
+  expiry; Disconnect revokes and forgets. Deleting the account cascades.
+- Every chat turn binds the user's access token to a ContextVar
+  (`app/integrations/tradingview.py`); the four router tools
+  (`tradingview_snapshot`, `tradingview_financials`, `tradingview_news`,
+  `tradingview_earnings`) match only while a token is bound, so a user
+  without a connection never sees them chosen. The equity research brief
+  adds TradingView fundamentals, forecasts and the quote to its evidence,
+  and the token deep dive gains a technical-indicator dimension, when the
+  user is connected.
+- Rate limit: about 100 requests per minute per user at TradingView. Beta:
+  market data may be delayed and the tool list may change.
+
+`TRADINGVIEW_ENABLED=false` hides the whole feature. `PUBLIC_BASE_URL` must
+be the public HTTPS origin: it is the OAuth redirect. Tests:
+tests/test_tradingview.py; the real registration and authorize URL were
+verified against TradingView from the dev instance.

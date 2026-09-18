@@ -672,6 +672,15 @@ const CASES = {
     return runUseAddress("So11111111111111111111111111111111111111112");
   },
   /** Well-formed base58 of a plausible length that is not 32 bytes. */
+  // The chart card: TradingView's widget for the server-resolved symbol, in
+  // the page's theme, with the attribution TradingView's terms require.
+  async chart_card_embeds_the_resolved_symbol_with_attribution() {
+    const { dom, sandbox } = load();
+    sandbox.document.documentElement.dataset.theme = "light";
+    const card = sandbox.renderChartCard({ symbol: "BINANCE:SOLUSDT", label: "SOL / USDT · Binance", interval: "60", kind: "crypto" });
+    const frame = card.children[0], caption = card.children[1];
+    return { className: card.className, src: frame.src, title: frame.title, caption: caption.innerHTML, none: sandbox.renderChartCard(null) };
+  },
   // A freshly created API-key secret must not outlive the account that made
   // it: signing out, or another account signing in on the same tab, clears it.
   async api_key_secret_is_cleared_on_sign_out_and_account_switch() {

@@ -224,6 +224,23 @@ CREATE TABLE IF NOT EXISTS api_keys (
     revoked_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS api_keys_user ON api_keys (user_id);
+CREATE TABLE IF NOT EXISTS oauth_clients (
+    provider TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL,
+    client_secret TEXT,
+    redirect_uri TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS user_integrations (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT,
+    expires_at DOUBLE PRECISION,
+    scope TEXT,
+    connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, provider)
+);
 CREATE TABLE IF NOT EXISTS tool_outcomes (
     tool_name TEXT NOT NULL,
     day DATE NOT NULL,

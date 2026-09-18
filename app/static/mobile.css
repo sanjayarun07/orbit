@@ -51,6 +51,7 @@
   .message.user .message-body { max-width: 92%; padding: 10px 14px; }
   .answer.streaming .stream-status { font-size: 13px; }
   .result-table-wrap { margin-left: 0; width: 100%; }
+  .chart-card iframe { height: 300px; }
   .result-table-wrap table { min-width: 100%; }
   .composer { padding: 12px 12px 10px 14px; }
   .composer textarea { font-size: 16px; min-height: 40px; max-height: 40vh; }

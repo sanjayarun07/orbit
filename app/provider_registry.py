@@ -13,6 +13,8 @@ def _utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 from app.additional_providers import ADDITIONAL_PROVIDERS
+from app.integrations import tradingview
+from app.tool_catalog import TOOL_SPECS
 from app.market_providers import MARKET_PROVIDERS
 from app.perplexity_tools import (
     perplexity_available,
@@ -321,6 +323,24 @@ def get_provider_router() -> ProviderRouter:
         cost_usd=settings.openai_web_search_cost_usd,
         quota_per_minute=settings.openai_web_search_requests_per_minute, priority=1,
     ))
+    # TradingView, on the user's own account (app/integrations/tradingview.py).
+    # Each matcher requires a token bound to the turn, so these are invisible
+    # to a user without a TradingView connection. Priority above the web
+    # searches: a live quote, rating or filing beats a search summary of one.
+    for name, caps, handler, matcher, keywords in (
+        ("tradingview_snapshot", ("market_data", "finance_data"), tradingview.snapshot, tradingview.matches_market,
+         ("price", "quote", "technicals", "rsi", "chart", "volume", "market cap")),
+        ("tradingview_financials", ("finance_data", "equity_research"), tradingview.financials, tradingview.matches_equity,
+         ("fundamentals", "valuation", "p/e", "earnings", "revenue", "analyst", "forecast", "target")),
+        ("tradingview_news", ("news", "web_research"), tradingview.news, tradingview.matches_news,
+         ("news", "headlines", "latest")),
+        ("tradingview_earnings", ("finance_data", "listing_events"), tradingview.earnings, tradingview.matches_earnings,
+         ("earnings", "calendar", "report date")),
+    ):
+        router.register(ProviderTool(
+            name, "tradingview", caps, handler, enabled=tradingview.enabled, matches=matcher, keywords=keywords,
+            priority=7, cost_usd=0.0, quota_per_minute=60, spec=TOOL_SPECS.get(name),
+        ))
     path = Path(settings.provider_overrides_path)
     if path.exists():
         try:
