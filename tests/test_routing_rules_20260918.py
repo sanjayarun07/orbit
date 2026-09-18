@@ -132,3 +132,48 @@ def test_with_no_token_named_and_nothing_in_focus_the_question_is_still_asked(mo
     _stub_downstream(monkeypatch, seen)
     out = asyncio.run(research_mod.research_node(_security_state("is it audited?")))
     assert "Which token should I check" in out["answer"] and "gathered" not in seen
+
+
+# --- look it up before guessing or asking (user rule, 2026-09-18) --------------------
+# The token resolver: a ticker Jupiter and Bitquery do not know is looked up on
+# the web for its chain and resolved there; a ticker that lives on two chains
+# takes the chain the web says the message means, before asking.
+
+def _resolver_stubs(monkeypatch, *, mint=None, ds=(), canonical=None):
+    monkeypatch.setattr(research_mod, "_jupiter_solana_mint", lambda ticker: mint)
+    monkeypatch.setattr(research_mod, "token_candidates", lambda ticker: list(ds))
+
+    async def on_chain(ticker, chain, strict=False):
+        return canonical(ticker, chain) if canonical else None
+
+    monkeypatch.setattr(research_mod, "_canonical_on_chain", on_chain)
+
+
+def test_an_unknown_ticker_is_resolved_on_the_chain_the_web_names(monkeypatch):
+    from app.routing import subject_probe
+    _resolver_stubs(monkeypatch, canonical=lambda ticker, chain: {"chain": chain, "address": "0xbase" + ticker.lower(), "symbol": ticker} if chain == "base" else None)
+    monkeypatch.setattr(subject_probe, "probe", lambda request: {"kind": "token", "symbol": "NEWCOIN", "chain": "base", "confidence": 0.9, "subject": "NEWCOIN"})
+    out = asyncio.run(research_mod._resolve_named_token("top holders of NEWCOIN", {"token_discovery"}, ()))
+    assert out.chain == "base" and "0xbasenewcoin on base" in out.request and not out.clarification
+
+
+def test_an_unknown_ticker_the_web_cannot_place_is_left_to_the_router(monkeypatch):
+    from app.routing import subject_probe
+    _resolver_stubs(monkeypatch)
+    monkeypatch.setattr(subject_probe, "probe", lambda request: {"kind": "other", "confidence": 0.9})
+    out = asyncio.run(research_mod._resolve_named_token("top holders of NEWCOIN", {"token_discovery"}, ()))
+    assert out.chain is None and out.request == "top holders of NEWCOIN" and not out.clarification
+
+
+def test_a_cross_chain_tie_takes_the_chain_the_web_means_instead_of_asking(monkeypatch):
+    from app.routing import subject_probe
+    _resolver_stubs(monkeypatch, mint="So1anaMintOfDUP", ds=[
+        {"chain": "base", "address": "0xdup", "symbol": "DUP", "liquidity_usd": 2_000_000.0, "volume_24h_usd": 500_000.0},
+        {"chain": "solana", "address": "So1anaMintOfDUP", "symbol": "DUP", "liquidity_usd": 800_000.0, "volume_24h_usd": 400_000.0}],
+        canonical=lambda ticker, chain: {"chain": "base", "address": "0xdup", "symbol": ticker, "liquidity_usd": 2_000_000.0} if chain == "base" else None)
+    monkeypatch.setattr(subject_probe, "probe", lambda request: {"kind": "token", "symbol": "DUP", "chain": "base", "confidence": 0.95, "subject": "DUP"})
+    out = asyncio.run(research_mod._resolve_named_token("top holders of DUP", {"token_discovery"}, ()))
+    assert out.chain == "base" and not out.clarification, out.clarification
+    monkeypatch.setattr(subject_probe, "probe", lambda request: None)
+    asked = asyncio.run(research_mod._resolve_named_token("top holders of DUP", {"token_discovery"}, ()))
+    assert asked.clarification and "several chains" in asked.clarification, "with nothing from the web the question is still asked"

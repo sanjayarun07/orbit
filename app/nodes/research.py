@@ -16,7 +16,7 @@ from app.market_brief import crypto_market_brief
 from app.market_overview import crypto_market_overview
 from app import composition, streaming
 from app.integrations import tradingview
-from app.routing import lexicon
+from app.routing import lexicon, subject_probe
 from app import event_calendar, why_moving
 from app.market_providers import TRENDING_TOKENS
 from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available
@@ -1063,10 +1063,19 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
     if not entries:
         # No verified Solana token and no real EVM activity -- best effort for a
         # non-verified Solana-only token (e.g. a brand-new memecoin) via the DEX
-        # Screener Solana pick; otherwise leave it for the router.
+        # Screener Solana pick; then a web look-up of the name (user rule,
+        # 2026-09-18: look it up before guessing or asking) for the chain to
+        # resolve on; otherwise leave it for the router.
         sol = [c for c in ds_candidates if _chain_key(c["chain"]) == "solana"]
         winner = clear_winner(sol)
-        return _resolved(winner) if winner else _TokenResolution(request)
+        if winner:
+            return _resolved(winner)
+        probed_chain = await _probe_chain(request)
+        if probed_chain:
+            candidate = await _canonical_on_chain(ticker, probed_chain)
+            if candidate:
+                return _resolved(candidate)
+        return _TokenResolution(request)
     if len(entries) == 1:
         return _resolved(entries[0])
     # Several real same-ticker tokens across chains. A verified-Solana entry
@@ -1076,7 +1085,28 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
         winner = clear_winner(entries)
         if winner is not None:
             return _resolved(winner)
+    # Before asking which chain: the web may already know which one this
+    # message means (the same ticker on Base and Solana, and the request is
+    # about the Base one everyone posts about).
+    probed_chain = await _probe_chain(request)
+    if probed_chain:
+        for entry in entries:
+            if _chain_key(entry["chain"]) == _chain_key(probed_chain):
+                return _resolved(entry)
     return _build_ask(request, ticker, entries)
+
+
+async def _probe_chain(request: str) -> str | None:
+    """The chain a web look-up says this message's token lives on, or None."""
+    try:
+        found = await asyncio.to_thread(subject_probe.probe, request)
+    except Exception:
+        logger.info("subject probe failed in the token resolver", exc_info=True)
+        return None
+    if not found or str(found.get("kind", "")).lower() != "token" or float(found.get("confidence") or 0) < 0.6:
+        return None
+    chain = str(found.get("chain") or "").lower()
+    return chain if chain and chain != "other" else None
 
 
 def _build_ask(request: str, ticker: str, candidates: list[dict]) -> _TokenResolution:
