@@ -153,6 +153,35 @@
     "notes": "discovery, must NOT be read as a ticker -> holders"
   },
   {
+    "id": "social-trending-memes",
+    "query": "Trending meme on twitter socials",
+    "expected_tools": [
+      "x_social_trending"
+    ],
+    "forbidden_tools": [
+      "dexscreener_trending_metas",
+      "coingecko_top_volume",
+      "jupiter"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "a social-attention ask about the market, not a market table (2026-09-18 transcript: answered with narrative categories by volume)"
+  },
+  {
+    "id": "social-trending-ct",
+    "query": "what memecoins are trending on crypto twitter today",
+    "expected_tools": [
+      "x_social_trending"
+    ],
+    "forbidden_tools": [
+      "dexscreener_trending_metas",
+      "jupiter"
+    ],
+    "expected_intent": "research",
+    "router": true,
+    "notes": "same ask, other wording"
+  },
+  {
     "id": "new-pairs-base",
     "query": "New token launches on Base today",
     "expected_tools": [
@@ -1295,4 +1324,4 @@
     "router": false,
     "notes": "market-wide advice with no asset: composed from movers, volume, sentiment and news, read together; never a quote (2026-09-17)"
   }
-]
+]\n

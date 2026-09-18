@@ -293,6 +293,119 @@ def _parse(text: str) -> dict | None:
     return data
 
 
+# ----------------------------------------------------------------------------
+# Market-wide: what is trending on crypto Twitter right now (no token named)
+# ----------------------------------------------------------------------------
+# "Trending meme on twitter socials" (2026-09-18) was answered with DEX
+# Screener's narrative categories by trading volume -- a market table for a
+# social question. This is the social answer: which coins and memes the
+# posts are about right now, from LunarCrush's measured social volume when a
+# key is configured, else from a web search over X posts with the accounts
+# and links, and it is labelled as reported rather than measured.
+
+_SOCIAL_WORDS = re.compile(r"\b(?:twitter|x\.com|on\s+x|tweets?|socials?|social\s+media|crypto\s+twitter|\bct\b|kols?|influencers?|degens?)\b", re.IGNORECASE)
+_TRENDING_WORDS = re.compile(r"\b(?:trend\w*|hot|buzz\w*|talk\w*|popular|memes?|meme\s*coins?|viral|hype\w*|mindshare|attention|narratives?)\b", re.IGNORECASE)
+_TRENDING_INSTRUCTIONS = (
+    "You are reading crypto Twitter (X) for the last 24 hours. Return ONLY strict JSON: "
+    '{"as_of": "<date>", "items": [{"symbol": "...", "name": "...", "chain": "... or null", "why": "one line: the post, event or joke driving it", '
+    '"accounts": ["@handle", ...], "url": "https://x.com/... or null", "stance": "bullish|bearish|mixed"}], "themes": ["...", ...]}. '
+    "Rank items by how much they are being posted about, not by price. Only tokens actually being discussed on X; no advice."
+)
+
+
+def matches_trending(request: str) -> bool:
+    """A social-trending ask about the market, not about one token."""
+    text = request or ""
+    return bool(_SOCIAL_WORDS.search(text)) and bool(_TRENDING_WORDS.search(text)) and extract_symbol(text) is None
+
+
+def social_trending(request: str) -> str:
+    memes_key = bool(re.search(r"\bmemes?\b|\bmeme\s*coins?\b|\bdegen", request or "", re.IGNORECASE))
+    key = "__trending_memes__" if memes_key else "__trending__"
+    now = time.monotonic()
+    with _lock:
+        cached = _cache.get(key)
+        if cached and cached[0] > now:
+            return cached[1]
+    memes = bool(re.search(r"\bmemes?\b|\bmeme\s*coins?\b|\bdegen", request or "", re.IGNORECASE))
+    card = _trending_from_lunarcrush() if settings.lunarcrush_api_key else None
+    if card is None:
+        card = _trending_from_perplexity(memes=memes)
+    if card is None:
+        raise RuntimeError("No social data source is configured (set LUNARCRUSH_API_KEY or PERPLEXITY_API_KEY)")
+    with _lock:
+        _cache[key] = (now + max(60, settings.social_sentiment_ttl_seconds), card)
+    return card
+
+
+def _trending_from_lunarcrush() -> str | None:
+    try:
+        with httpx.Client(timeout=12) as client:
+            coins = _lc_get(client, "/coins/list/v1?sort=interactions_24h&limit=15&desc=true") or []
+    except Exception:
+        logger.warning("social_sentiment: LunarCrush trending failed; falling back", exc_info=True)
+        return None
+    rows = [c for c in coins if isinstance(c, dict) and c.get("symbol")][:15]
+    if not rows:
+        return None
+    lines = [
+        "# Trending on crypto Twitter",
+        f"**Provider**: LunarCrush API v4 (coins by 24h social interactions) · **As of**: {_utc()}",
+        "",
+        "| # | Token | Interactions (24h) | Social dominance | Galaxy Score™ | 24h change |",
+        "|---:|---|---:|---:|---:|---:|",
+    ]
+    for i, c in enumerate(rows, start=1):
+        def num(v):
+            try:
+                return f"{float(v):,.0f}"
+            except (TypeError, ValueError):
+                return "—"
+        change = c.get("percent_change_24h")
+        lines.append(f"| {i} | {c.get('symbol')} ({c.get('name', '')}) | {num(c.get('interactions_24h'))} | {c.get('social_dominance', '—')} | {c.get('galaxy_score', '—')} | "
+                     f"{('%+.1f%%' % float(change)) if change not in (None, '') else '—'} |")
+    lines += ["", "*Measured social volume, not price. Attention is not endorsement: check each token's safety before acting.*"]
+    return "\n".join(lines)
+
+
+def _trending_from_perplexity(memes: bool = False) -> str | None:
+    if not perplexity_available():
+        return None
+    # An ask about memes gets memecoins, not the majors that always lead a
+    # mention count.
+    subject = "which memecoins are trending on crypto Twitter (X) right now" if memes else "which crypto tokens and memes are trending on crypto Twitter (X) right now"
+    try:
+        text = perplexity_invoke("web_search", f"{subject}, in the last 24 hours, and why", _TRENDING_INSTRUCTIONS)
+    except Exception:
+        logger.warning("social_sentiment: perplexity trending failed", exc_info=True)
+        return None
+    match = re.search(r"\{.*\}", text or "", re.S)
+    try:
+        data = json.loads(match.group(0)) if match else None
+    except ValueError:
+        data = None
+    items = [i for i in (data or {}).get("items") or [] if isinstance(i, dict) and i.get("symbol")]
+    if not items:
+        return None
+    lines = [
+        "# Trending on crypto Twitter",
+        f"**Provider**: Perplexity web search over X posts (last 24h) · **As of**: {_utc()}",
+        "",
+        "| # | Token | Chain | Why it is trending | Accounts | Stance |",
+        "|---:|---|---|---|---|---|",
+    ]
+    for i, item in enumerate(items[:12], start=1):
+        url = str(item.get("url") or "")
+        link = url if url.startswith("https://x.com/") or url.startswith("https://twitter.com/") else ""
+        sym = f"[{item['symbol']}]({link})" if link else str(item["symbol"])
+        accounts = ", ".join(str(a) for a in (item.get("accounts") or [])[:3]) or "—"
+        lines.append(f"| {i} | {sym} | {item.get('chain') or '—'} | {str(item.get('why') or '').replace('|', '/')} | {accounts} | {item.get('stance') or '—'} |")
+    if data.get("themes"):
+        lines += ["", "**Themes**: " + " · ".join(str(t) for t in data["themes"][:6])]
+    lines += ["", "*Reported, not measured: what search finds people posting, with the accounts named. Loud accounts can be paid or positioned; verify a token's safety before acting.*"]
+    return "\n".join(lines)
+
+
 def _utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 

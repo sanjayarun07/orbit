@@ -955,3 +955,17 @@ Email delivery itself: with Resend in testing mode only the Resend account
 owner's address receives mail, and the sender must be `onboarding@resend.dev`
 or a verified domain. For the beta, verify a domain in Resend and set
 `EMAIL_FROM` to an address on it. Accepted sends log Resend's message id.
+
+## Social-trending asks (2026-09-18)
+
+"Trending meme on twitter socials" was answered with DEX Screener's narrative
+categories by trading volume: a market table for a social question. The
+router now has `x_social_trending` (capabilities market_sentiment,
+token_discovery; dimensions social, narratives): what crypto Twitter is
+posting about, market-wide, measured by 24h interactions when
+`LUNARCRUSH_API_KEY` is set, else reported from a web search over X posts
+with the accounts and links, labelled as such; a "meme" ask asks for
+memecoins rather than the majors that always lead a mention count. The
+narratives tool is `not_for` social, so it no longer claims these asks;
+`x_kol_sentiment` still takes the one-token form ("what is CT saying about
+BONK"). Eval cases social-trending-memes and social-trending-ct.

@@ -274,6 +274,14 @@ def get_provider_router() -> ProviderRouter:
         description="Dopamint knowledge base: protocol docs, GitHub and governance passages with citations for 'what is / how does / who competes with' questions",
     ))
     router.register(ProviderTool(
+        "x_social_trending", "social", ("market_sentiment", "token_discovery"), social_sentiment.social_trending,
+        enabled=lambda: bool(settings.lunarcrush_api_key or settings.perplexity_api_key),
+        matches=social_sentiment.matches_trending,
+        keywords=("twitter", "crypto twitter", "socials", "social", "trending", "meme", "memes", "buzz", "viral", "kol"),
+        chains=(), cache_ttl_seconds=900, priority=9, spec=TOOL_SPECS.get("x_social_trending"),
+        description="What is trending on crypto Twitter right now, market-wide: tokens and memes by social interactions (LunarCrush) or by what X posts are about (web search), with accounts and links",
+    ))
+    router.register(ProviderTool(
         "x_kol_sentiment", "social", ("market_sentiment",), social_sentiment.x_kol_sentiment,
         enabled=lambda: bool(settings.lunarcrush_api_key or settings.x_bearer_token or settings.perplexity_api_key),
         matches=social_sentiment.matches,
