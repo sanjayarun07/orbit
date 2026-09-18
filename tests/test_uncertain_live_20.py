@@ -297,3 +297,22 @@ def test_only_the_web_tools_get_the_market_scoped_question(monkeypatch):
 
     out = asyncio.run(research._research_node({"request": "Is M safe?", "capabilities": ["web_research"], "chains": [], "session_context": {}}, {}))
     assert out["answer"].startswith("Which token is **M**?")
+
+
+def test_an_off_market_web_card_is_dropped_whatever_the_probe_called_the_subject(monkeypatch):
+    """Gated re-run: the probe read "Mercury outlook" as Mercury General
+    (NYSE: MCY) and the web answered about the planet's visibility; the card
+    rode along because "company" was exempt, and the turn answered about the
+    planet."""
+    company = {"kind": "company", "name": "Mercury General Corporation", "symbol": "MCY", "exchange": "NYSE", "confidence": 0.86}
+    planet = ("Mercury's outlook for September 2026 is mixed, with the best viewing at the end of the month: early in the month it is "
+              "effectively invisible from the Northern Hemisphere because it stays low in bright twilight.")
+    assert not subject_probe.agrees(company, planet)
+    assert subject_probe.agrees(company, "Mercury General (NYSE: MCY) trades at $71; the insurer's combined ratio improved this quarter.")
+    assert not subject_probe.agrees({"kind": "person", "name": "Ansem"}, "A planet is a large body orbiting a star.")
+    assert subject_probe.agrees({"kind": "person", "name": "Ansem"}, "Ansem is a crypto trader known for memecoin calls on Solana.")
+
+    monkeypatch.setattr(subject_probe, "perplexity_invoke", lambda tool, prompt, instructions: json.dumps(company))
+    monkeypatch.setattr(subject_probe, "perplexity_web_search", lambda q: planet)
+    out = asyncio.run(resolver.resolve({"request": "Mercury outlook", "history": "", "session_context": {}}, _abstaining_model(), embedding_factory=embedding_router))
+    assert "web_context" not in out and out["routing_decision"]["web_context"] == "dropped:off_subject"

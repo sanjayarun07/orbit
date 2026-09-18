@@ -25,7 +25,8 @@ _TRAILING_QUESTION = re.compile(r"\?\s*(?:\*[^*\n]{0,160}\*\s*|_[^_\n]{0,160}_\s
 
 MARKET = re.compile(
     r"\b(?:token|tokens|coin|coins|crypto|cryptocurrency|blockchain|memecoin|meme coin|solana|ethereum|base|arbitrum|bsc|bnb chain|polygon|"
-    r"defi|protocol|dex|exchange|listed|listing|ticker|stock|shares|equity|nasdaq|nyse|nse|price|market cap|mcap|liquidity|trading|traded|"
+    r"defi|protocol|dex|exchange|listed|listing|ticker|stock|shares|equity|nasdaq|nyse|nse|price|market cap|mcap|liquidity|trading|traded|trades|"
+    r"earnings|revenue|dividend|valuation|guidance|quarter|etf|bond|yield|index|fund|investors?|insurer|"
     r"holders|supply|circulating|vesting|unlock|unlocks|cliff|tge|tokenomics|allocation|emissions|airdrop|tvl|wallet|onchain|on-chain|mint|contract address)\b",
     re.I,
 )

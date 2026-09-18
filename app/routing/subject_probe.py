@@ -173,17 +173,16 @@ def route_from(found: dict, request: str) -> dict | None:
 
 def agrees(found: dict | None, context: str | None) -> bool:
     """Whether the web's answer to the question is about the same thing the
-    probe identified. A token, equity or protocol needs market text; the
-    TRUMP case (probe: the Solana memecoin; web: the politician) is the
-    disagreement this catches. A person or company accepts any context."""
+    probe identified -- and about markets at all. The web card is merged into
+    the answer, so an off-subject one becomes the answer: TRUMP (probe: the
+    Solana memecoin; web: the politician) and Mercury (probe: Mercury General
+    on the NYSE; web: the planet's visibility) are both caught here. Every
+    kind is held to the same test, because every kind routes a markets turn."""
     from app.clarify import is_market_text
 
     if not found or not context:
         return False
-    kind = str(found.get("kind") or "").lower()
-    if kind in {"token", "equity", "protocol"}:
-        return is_market_text(context)
-    return True
+    return is_market_text(context)
 
 
 def clarify_text(found: dict | None, request: str) -> str:

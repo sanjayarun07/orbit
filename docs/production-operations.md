@@ -1186,3 +1186,30 @@ source named. Only when all three fail does the answer say what was tried
 and ask for the text or the token. Token pages never reach it: the
 research node turns CoinMarketCap, CoinGecko, DEX Screener and explorer
 links into token questions first.
+
+### The gated re-run of the twenty prompts (2026-09-18)
+
+`reports/uncertain-live-20-gated/` re-runs the reviewer's twenty prompts
+with the answer gate on: 19 pass, 1 partial, 0 fail (was 7/6/7), median
+turn 12.9s (was 16.1s) because fewer turns fan out to tools that cannot
+answer them. The gate blocked three answers (HYPE wrong subject, KITE
+incomplete, Mercury the planet) and passed fifteen untouched.
+
+Two fixes came out of that run and are in the suite:
+
+- **A ticker means the crypto asset the market lists.** `app/symbol_registry.py`
+  reads CoinGecko's ranked listings for a symbol: one clear leader is the
+  token (OpenLedger at rank 673 over the OPEN at 1,963 and the index at
+  4,991), close ranks become the question naming each coin and its rank.
+  DEX Screener's pool dust is never offered as a candidate.
+- **The web is asked in market terms.** `subject_probe.market_scoped` rewrites
+  a ticker-like question for a web search; only web tools receive it, data
+  tools keyed on a symbol or address get the request verbatim, and the
+  answer gate's own web fallback is scoped the same way. A one-letter name
+  is asked about rather than searched. `subject_probe.agrees` now holds
+  every probe kind to the market-text test, so a company-kind probe no
+  longer lets an off-subject web card (Mercury the planet) into the answer.
+
+Test hygiene: `tests/conftest.py` clears the learned tool-outcome counts and
+the singleton router's health and overrides per test. Both are module state
+that had been reordering ranking assertions between tests.

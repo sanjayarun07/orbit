@@ -57,6 +57,15 @@ def _reset_account_stores(monkeypatch):
 
     with _outcomes._lock:
         _outcomes._counts.clear()
+
+    # The provider router is an lru_cache singleton, so its per-tool health
+    # (degraded by a failed call) and its admin overrides outlive the test
+    # that caused them and reorder a later test's ranking.
+    from app.provider_registry import get_provider_router as _router
+
+    _live = _router()
+    _live._health.clear()
+    _live._overrides.clear()
     monkeypatch.setattr(_settings, "warm_caches_on_start", False)
     monkeypatch.setattr(_tradingview, "get_redis", no_redis)
     # The subject probe looks a name up on the web when the router is unsure;
