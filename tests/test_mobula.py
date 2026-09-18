@@ -269,7 +269,8 @@ def test_an_unknown_deployer_says_what_that_does_and_does_not_mean(monkeypatch):
 
 @pytest.mark.parametrize("request_text,expected", [
     (f"top holders of {FARTCOIN} on solana", "mobula_token_holders"),
-    (f"is {FARTCOIN} bundled on solana", "mobula_token_holders"),
+    (f"is {FARTCOIN} bundled on solana", "mobula_token_bundle"),
+    (f"insiders holding {FARTCOIN} on solana", "mobula_token_holders"),
     (f"who deployed {WALLET} on base", "mobula_wallet_deployer"),
 ])
 def test_the_meme_tools_claim_their_own_questions(request_text, expected):
@@ -383,3 +384,57 @@ def test_the_security_card_warns_about_copycat_logos(monkeypatch):
     card = _REAL_SECURITY(f"is {FARTCOIN} safe on solana")
     assert "**260 other token(s) reuse this exact logo.** Highest-volume lookalikes: FARTCOIN on evm:196" in card
     assert "Verify the contract, not the picture." in card
+
+
+# --- bundle reconstruction ----------------------------------------------------
+
+_REAL_BUNDLE = mobula_meme.token_bundle_check
+
+
+def _buyer(addr, second, initial="1000", current="1000", tags=None):
+    return {"address": addr, "initialAmount": initial, "currentBalance": current, "firstHoldingDate": f"2026-09-18T12:00:{second:02d}.000Z", "tags": tags or []}
+
+
+def test_a_bundled_launch_shows_same_second_groups_funded_by_one_wallet(monkeypatch):
+    buyers = [_buyer(f"W{i:02d}" + "A" * 30, 5, current="0") for i in range(4)]            # four in the same second, all exited
+    buyers += [_buyer(f"S{i:02d}" + "A" * 30, 10 + i) for i in range(6)]                    # six strangers, spread out
+    funding = {b["address"]: {"from": "FUNDER" + "F" * 30} for b in buyers[:4]}
+    funding[buyers[4]["address"]] = {"from": "CEXHOT" + "C" * 30, "fromWalletTag": "Binance hot wallet"}
+    funding[buyers[5]["address"]] = {"from": "CEXHOT" + "C" * 30, "fromWalletTag": "Binance hot wallet"}
+    monkeypatch.setattr(mobula_meme, "_get_v1", lambda path, params: buyers)
+    monkeypatch.setattr(mobula_meme, "_get", lambda path, params: funding.get(params["wallet"]))
+    card = _REAL_BUNDLE(f"is {FARTCOIN} bundled on solana")
+    assert "Bundle evidence: **Strong**" in card
+    assert "| 2026-09-18 12:00:05 | 4 | 0 | 0% | 0 |" in card, "the same-second group, all exited"
+    assert "| `FUND…FFFF` | — | 4 | 4 |" in card and "| `CEXH…CCCC` | Binance hot wallet (not counted) | 2 | 1 |" in card
+    assert "evidence, not proof of intent" in card
+
+
+def test_the_system_program_and_exchanges_never_make_a_cluster(monkeypatch):
+    """Live on FARTCOIN: nine early buyers were "funded" by 1111…1114 (a
+    system transfer) and the verdict said Strong."""
+    buyers = [_buyer(f"W{i:02d}" + "A" * 30, 5) for i in range(4)] + [_buyer(f"S{i:02d}" + "A" * 30, 20 + i) for i in range(3)]
+    system = {"from": "1" * 32 + "4"}
+    cex = {"from": "CEXHOT" + "C" * 30, "fromWalletTag": "OKX hot wallet"}
+    funding = {b["address"]: system for b in buyers[:4]} | {b["address"]: cex for b in buyers[4:]}
+    monkeypatch.setattr(mobula_meme, "_get_v1", lambda path, params: buyers)
+    monkeypatch.setattr(mobula_meme, "_get", lambda path, params: funding.get(params["wallet"]))
+    card = _REAL_BUNDLE(f"is {FARTCOIN} bundled on solana")
+    assert "Bundle evidence: **None found**" in card, card
+    assert "| `1111…1114` | system / burn (not counted) | 4 | 4 |" in card and "OKX hot wallet (not counted)" in card
+    assert "**0** share a personal funder" in card
+
+
+def test_an_organic_launch_reports_none_found(monkeypatch):
+    buyers = [_buyer(f"O{i:02d}" + "A" * 30, i * 3) for i in range(8)]
+    monkeypatch.setattr(mobula_meme, "_get_v1", lambda path, params: buyers)
+    monkeypatch.setattr(mobula_meme, "_get", lambda path, params: None)
+    card = _REAL_BUNDLE(f"bundle check {FARTCOIN} on solana")
+    assert "Bundle evidence: **None found**" in card and "## Same-second groups" not in card and "## Shared funding" not in card
+
+
+def test_bundle_questions_reach_the_check():
+    caps = ("token_security", "token_holdings")
+    ranked = [t.name for t in get_provider_router()._ranked_union(f"is {FARTCOIN} bundled on solana", caps, ("solana",), None)]
+    assert ranked and ranked[0] == "mobula_token_bundle", ranked
+    assert not mobula_meme.BUNDLE_ASK.search("top holders of BONK")

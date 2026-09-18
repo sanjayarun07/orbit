@@ -61,12 +61,15 @@ def address_in(request: str) -> str | None:
 # them. "recent trades of 0x940181… on base" is that token's trades, not a
 # wallet's activity (2026-09-18), so a token-shaped phrasing with no explicit
 # wallet word is left to the token tools.
-_WALLET_WORD = re.compile(r"\b(?:wallet|portfolio|holdings?|holds?|net\s*worth|pnl|p&l|allocation|exposure|account|address|my\b|this\s+wallet)\b", re.I)
-_TOKEN_SHAPED = re.compile(r"\b(?:trades?|holders?|volume|price|liquidity|pairs?|chart|market\s*cap|supply)\s+(?:of|for)\b", re.I)
+_WALLET_WORD = re.compile(r"\b(?:wallet|portfolio|net\s*worth|pnl|p&l|allocation|exposure|account|address|my\b|this\s+wallet)\b", re.I)
+_TOKEN_SHAPED = re.compile(r"\b(?:trades?|holders?|volume|price|liquidity|pairs?|chart|market\s*cap|supply)\s+(?:of|for)\b"
+                           r"|\b(?:holders?|insiders?|snip\w+|bundl\w+|whales?|concentration|distribution|top\s*\d+|liquidity|lp|rug\w*|honeypot|deployer|dev)\b", re.I)
 
 
 def matches(request: str) -> bool:
-    """A wallet question about a concrete address."""
+    """A wallet question about a concrete address. "insiders holding <mint>"
+    is about the token's holders, not a wallet: token words veto unless an
+    explicit wallet word is present."""
     text = request or ""
     if not address_in(text) or not WALLET_ASK.search(text):
         return False

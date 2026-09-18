@@ -84,6 +84,7 @@ def _reset_account_stores(monkeypatch):
     monkeypatch.setattr(_mmeme, "_get_v1", _offline)
     monkeypatch.setattr(_mmeme, "token_trades", _offline)
     monkeypatch.setattr(_mmeme, "token_first_buyers", _offline)
+    monkeypatch.setattr(_mmeme, "token_bundle_check", _offline)
     monkeypatch.setattr(_msec, "_logo_reuses", lambda address, chain: None)
     monkeypatch.setattr(_settings, "warm_caches_on_start", False)
     monkeypatch.setattr(_tradingview, "get_redis", no_redis)

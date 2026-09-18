@@ -1350,3 +1350,26 @@ live before it was written:
 Not built: `/api/2/token/dev-history` is alpha and returned nothing for the
 sample token; the deployer card stands in for it. Everything above is
 research and monitoring data; no execution.
+
+### Bundle reconstruction (2026-09-18)
+
+The first piece of the proprietary layer the feasibility review called
+for. `mobula_token_bundle` reconstructs a bundle from two independent
+signals and reports their overlap:
+
+1. **Same second.** First buyers grouped by the second they first held;
+   groups of three or more are listed with how many still hold, the share
+   they retain of what they first bought, and how many are tagged. On
+   Solana a shared second approximates a shared block.
+2. **Shared funder.** The first twenty-five buyers' funding sources
+   (`/api/2/wallet/funding`, six concurrent lookups); funders feeding two or
+   more early buyers are listed with any known entity tag.
+
+Verdict is deterministic: **Strong** when at least three wallets share both
+a funder and a second; **Some** when either a same-second group of five or
+a three-wallet funding cluster exists alone; **None found** otherwise. A
+funder tagged as an exchange is called out as one that funds strangers.
+Every card states that this is evidence from indexed data, not proof of
+intent. Live on FARTCOIN's first hundred buyers: groups of ten and eight
+entered in the same second. Cost: one first-buyers call plus twenty-five
+funding calls, cached five minutes.
