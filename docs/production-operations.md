@@ -1373,3 +1373,22 @@ Every card states that this is evidence from indexed data, not proof of
 intent. Live on FARTCOIN's first hundred buyers: groups of ten and eight
 entered in the same second. Cost: one first-buyers call plus twenty-five
 funding calls, cached five minutes.
+
+### The meme live set (2026-09-18) and the Memes chip
+
+`reports/meme-live-20260918/` runs 22 live cases over the eight most-
+followed trader wallets in the user's sheet, FARTCOIN/BONK/WIF, three
+pump.fun tokens taken from Pulse at run time, the top Robinhood-Chain
+memecoin and a Hyperliquid wallet: 16/4/2 on the first run, 20/2/0 after
+five fixes it found (the wallet-portfolio intercept now asks Mobula first
+with a twenty-second bound; an address is never an equity question and the
+deep-dive lens runs on it; "deploy" reaches the deployer tool; card titles
+no longer carry the provider after a dash; Robinhood Chain memecoins are no
+longer filtered as stock mirrors, a decoy-pool rule replaces that filter).
+
+The home screen has a **Memes** chip second after Trending. Its rows are
+today's two memecoin headlines from the news look-up (the JSON now asks for
+a `memes` array; the four market tiles are unchanged and meme cards ride
+separately as `meme_cards`) followed by prompts every one of which a live
+tool answers: what's bonding on pump.fun, new launches on Solana and on
+Robinhood chain, a FARTCOIN deep dive, BONK's LP locks, WIF's holders.

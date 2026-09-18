@@ -42,7 +42,7 @@ HOLDERS_ASK = re.compile(
 TRADES_ASK = re.compile(
     r"\b(?:trades?|trading|swaps?|transactions?|buys?|sells?|activity|flow|volume\s+recent|latest|recent)\b", re.IGNORECASE)
 DEPLOYER_ASK = re.compile(
-    r"\b(?:deployer|developer|dev\b|creator|deployed|launched|team\s+wallet|who\s+(?:made|created|launched|deployed))\b", re.IGNORECASE)
+    r"\b(?:deployer|developer|dev\b|creator|deploy\w*|launch(?:ed)?|team\s+wallet|who\s+(?:made|created|launched|deployed))\b", re.IGNORECASE)
 # Labels Mobula attaches that a memecoin buyer should see spelled out.
 _RISK_LABELS = {"sniper", "bundler", "insider", "rug", "scam", "bot", "mev", "team", "dev", "deployer"}
 
@@ -130,8 +130,8 @@ def token_holders(request: str) -> str:
                 flagged[label] = flagged.get(label, 0) + 1
 
     lines = [
-        "# Token holders — Mobula",
-        f"**Contract**: `{address}` · **Chain**: {chain} · **Checked**: {_stamp()}",
+        "# Token holders",
+        f"**Provider**: Mobula · **Contract**: `{address}` · **Chain**: {chain} · **Checked**: {_stamp()}",
         "",
         f"**Top 10 wallets hold {top10:.2f}% of supply** (of the {len(rows)} largest positions indexed). "
         "Wallets are not necessarily distinct owners: one person can hold through many.",
@@ -167,8 +167,8 @@ def token_trades(request: str) -> str:
     buy_usd = sum(_num(r.get("baseTokenAmountUSD")) for r in rows if str(r.get("type")).lower() == "buy")
     sell_usd = sum(_num(r.get("baseTokenAmountUSD")) for r in rows if str(r.get("type")).lower() == "sell")
     lines = [
-        "# Latest trades — Mobula",
-        f"**Contract**: `{address}` · **Chain**: {chain} · **Checked**: {_stamp()}",
+        "# Latest trades",
+        f"**Provider**: Mobula · **Contract**: `{address}` · **Chain**: {chain} · **Checked**: {_stamp()}",
         "",
         f"Of the last {len(rows)} indexed swaps: **{buys} buys** ({_usd(buy_usd)}) and **{len(rows) - buys} sells** ({_usd(sell_usd)}).",
         "",
@@ -199,8 +199,8 @@ def wallet_deployer(request: str) -> str:
     rows = payload if isinstance(payload, list) else (payload.get("data") or [])
     rows = [r for r in rows if isinstance(r, dict)]
     lines = [
-        "# Deployer track record — Mobula",
-        f"**Wallet**: `{wallet}` · **Chain**: {chain} · **Checked**: {_stamp()}",
+        "# Deployer track record",
+        f"**Provider**: Mobula · **Wallet**: `{wallet}` · **Chain**: {chain} · **Checked**: {_stamp()}",
         "",
     ]
     if rows:
@@ -222,7 +222,7 @@ def wallet_deployer(request: str) -> str:
 
 
 _V1 = "https://production-api.mobula.io/api/1"
-PULSE_CHAINS = {"solana": "solana:solana", "base": "evm:8453", "bsc": "evm:56", "bnb": "evm:56", "ethereum": "evm:1", "hyperevm": "evm:999"}
+PULSE_CHAINS = {"solana": "solana:solana", "base": "evm:8453", "bsc": "evm:56", "bnb": "evm:56", "ethereum": "evm:1", "hyperevm": "evm:999", "robinhood": "evm:4663"}
 LAUNCH_ASK = re.compile(
     r"\b(?:new\s+(?:launch\w*|tokens?|memes?|coins?|pairs?|listings?)|(?:just|recently|freshly)\s+launch\w*|fresh\s+launch\w*|launchpad|pump\.?fun|"
     r"bonding|bonded|graduat\w+|migrat\w+\s+to\s+raydium|latest\s+(?:launch\w*|memes?)|what'?s\s+launching|new\s+on\s+(?:solana|base|bsc|bnb))\b", re.I)
@@ -260,8 +260,8 @@ def token_first_buyers(request: str) -> str:
                 tagged[text] = tagged.get(text, 0) + 1
     retention = (current / initial * 100) if initial else 0.0
     lines = [
-        "# First buyers — Mobula",
-        f"**Contract**: `{address}` · **Chain**: {chain} · **Checked**: {_stamp()}",
+        "# First buyers",
+        f"**Provider**: Mobula · **Contract**: `{address}` · **Chain**: {chain} · **Checked**: {_stamp()}",
         "",
         f"Of the first **{len(rows)}** buyers, **{still_in} still hold** something, **{added} added** to their position, and "
         f"**{len(rows) - still_in} exited**. Early buyers retain about **{retention:.0f}%** of what they first bought.",
@@ -323,7 +323,7 @@ def new_launches(request: str) -> str:
     tokens, each with the GMGN-style risk columns Pulse carries -- dev,
     sniper, bundler and insider holdings and top-10 concentration."""
     text = (request or "").lower()
-    chain = next((name for name in ("solana", "base", "bsc", "bnb", "ethereum", "hyperevm") if re.search(rf"\b{name}\b", text)), "solana")
+    chain = next((name for name in ("solana", "base", "bsc", "bnb", "ethereum", "hyperevm", "robinhood") if re.search(rf"\b{name}\b", text)), "solana")
     data = _get("/pulse", {"chainId": PULSE_CHAINS[chain], "limit": 10})
     if not isinstance(data, dict):
         raise RuntimeError("Mobula returned no launch feed")
@@ -445,8 +445,8 @@ def token_bundle_check(request: str) -> str:
     else:
         verdict = "**None found** among the first buyers Mobula indexed."
     lines = [
-        "# Bundle check — Mobula first buyers + funding",
-        f"**Contract**: `{address}` · **Chain**: {chain} · **Checked**: {_stamp()}",
+        "# Bundle check",
+        f"**Provider**: Mobula · **Contract**: `{address}` · **Chain**: {chain} · **Checked**: {_stamp()}",
         "",
         f"Bundle evidence: {verdict}",
         "",
@@ -478,7 +478,7 @@ def token_bundle_check(request: str) -> str:
 class MobulaMemeProvider:
     name = "mobula"
 
-    _CHAINS = ("solana", "ethereum", "base", "arbitrum", "bsc", "bnb", "polygon", "avalanche", "optimism", "hyperevm")
+    _CHAINS = ("solana", "ethereum", "base", "arbitrum", "bsc", "bnb", "polygon", "avalanche", "optimism", "hyperevm", "robinhood")
 
     def enabled(self) -> bool:
         return enabled()

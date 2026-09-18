@@ -21,7 +21,7 @@ def test_a_cashtag_is_a_stock_only_for_a_known_instrument_or_exchange_prefix(tex
 
 
 OPEN = [
-    {"chain": "robinhood", "symbol": "OPEN", "name": "OPEN", "address": "0x4b1Bb375" + "0" * 32, "liquidity_usd": 67_403_399.0},   # a mirror chain: never offered
+    {"chain": "robinhood", "symbol": "OPENB", "name": "Opendoor Technologies Inc.", "address": "0x4b1Bb375" + "0" * 32, "liquidity_usd": 67_403_399.0},   # a tokenized stock: never offered
     {"chain": "bsc", "symbol": "OPEN", "name": "OpenLedger", "address": "0xA227Cc36" + "0" * 32, "liquidity_usd": 464_779.0},
     {"chain": "ethereum", "symbol": "OPEN", "name": "Open Stablecoin Index", "address": "0x323c03c4" + "0" * 32, "liquidity_usd": 294_762.0},
     {"chain": "base", "symbol": "OPEN", "name": "Open tokens", "address": "0xeeB88c57" + "0" * 32, "liquidity_usd": 109_315.0},
@@ -44,7 +44,7 @@ def test_a_ticker_shared_by_several_tokens_is_asked_not_dumped(monkeypatch):
     out = asyncio.run(research._resolve_named_token("open token details and current price details", {"market_data", "token_discovery"}))
     assert out.clarification and "several different tokens" in out.clarification
     assert "bsc (OpenLedger) `0xA227Cc36" in out.clarification and "(Open Stablecoin Index)" in out.clarification and "(Open tokens)" in out.clarification
-    assert "robinhood" not in out.clarification, "mirror-chain listings are not tokens to pick"
+    assert "robinhood" not in out.clarification, "a tokenized-stock mirror is not a token to pick"
     assert out.pending["symbol"] == "OPEN" and out.pending["candidates"][0]["name"] == "OpenLedger", "the follow-up reply picks from these"
 
 
@@ -60,3 +60,17 @@ def test_one_unsettled_candidate_still_goes_to_the_router(monkeypatch):
     _quiet(monkeypatch, OPEN[1:2])
     out = asyncio.run(research._resolve_named_token("price of OPEN", {"market_data"}))
     assert not out.clarification and out.request == "price of OPEN"
+
+
+@pytest.mark.parametrize("candidate,mirror", [
+    ({"chain": "robinhood", "symbol": "NVDAB", "name": "NVIDIA Corporation Common Stock"}, True),
+    ({"chain": "robinhood", "symbol": "AAPLB", "name": "Apple Inc."}, True),
+    ({"chain": "robinhood", "symbol": "ROBINHOOD", "name": "Robinhood"}, False),
+    ({"chain": "robinhood", "symbol": "ROBIN", "name": "Robinhood"}, False),
+    ({"chain": "hyperliquid", "symbol": "PURR", "name": "Purr"}, True),
+    ({"chain": "solana", "symbol": "WIF", "name": "dogwifhat"}, False),
+])
+def test_only_tokenized_stocks_on_robinhood_chain_are_mirrors(candidate, mirror):
+    """Robinhood Chain carries native memecoins as well as stock mirrors
+    (user focus, 2026-09-18); the whole chain was being filtered."""
+    assert research._is_mirror(candidate) is mirror

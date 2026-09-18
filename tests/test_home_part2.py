@@ -21,7 +21,7 @@ def _fresh(monkeypatch):
 def test_suggestions_have_categories_and_wallet_rows_when_linked(monkeypatch):
     client = TestClient(main.app)
     anon = client.get("/home/suggestions").json()["categories"]
-    assert [c["id"] for c in anon] == ["trending", "week", "crypto", "stocks", "macro"]
+    assert [c["id"] for c in anon] == ["trending", "memes", "week", "crypto", "stocks", "macro"]   # Memes chip added 2026-09-18
     assert anon[0]["rows"][0] == "What does this mean for the market: BTC tops $120k"   # same words as the tile, no "?" after a headline
     assert "Why is BTC moving today?" in anon[0]["rows"]
     sign_in(client, email="chips@example.com")

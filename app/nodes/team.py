@@ -16,7 +16,7 @@ from app.jupiter import WRAPPED_SOL_MINT
 from app import streaming
 from app.nodes.state import AgentState, effective_request as _effective_request
 from app.nodes import runtime
-from app.nodes.research import research_node, _TOKEN_ADDRESS, _MIRROR_CHAINS, _chain_key, _resolve_named_token, _mentions_asset, _named_tickers, _SYMBOL_LIKE, _SYMBOL_STOP
+from app.nodes.research import research_node, _TOKEN_ADDRESS, _is_mirror, _chain_key, _resolve_named_token, _mentions_asset, _named_tickers, _SYMBOL_LIKE, _SYMBOL_STOP
 from app import answer_gate
 from app.token_resolve import clear_winner, token_candidates
 from app.nodes.trading import (
@@ -44,6 +44,15 @@ _ASSET = re.compile(
 )
 _STABLES = {"USDC", "USDT", "DAI", "USD", "USDE", "PYUSD", "FDUSD", "USDS", "USDBC"}
 _ASSET_STOP = {"SOME", "MORE", "THE", "A", "AN", "IT", "THIS", "THAT", "ME", "MY", "TOKEN", "COIN", "CRYPTO", "NOW"}
+
+
+def _decoy(candidate: dict) -> bool:
+    """A listing with a fortune in "liquidity" and almost no trading is a
+    decoy pool, not a market (live: a Robinhood-chain WIF with $779M listed
+    and $10K traded). The research resolver applies the same volume rule."""
+    liquidity = float(candidate.get("liquidity_usd") or 0)
+    volume = candidate.get("volume_24h_usd")
+    return volume is not None and liquidity >= 1_000_000 and float(volume) < 0.01 * liquidity
 
 
 async def _resolve_research_asset(request: str, chains: tuple[str, ...] = ()) -> tuple[str | None, str | None]:
@@ -87,7 +96,7 @@ async def _resolve_research_asset(request: str, chains: tuple[str, ...] = ()) ->
     # Mirror-chain listings (Robinhood's tokenized-stock chain, Hyperliquid)
     # are not the token: live (2026-09-18) the desk wrote a WIF thesis on a
     # Robinhood/Uniswap listing with $779M "liquidity" and $0.01M volume.
-    candidates = [c for c in candidates if _chain_key(c["chain"]) not in _MIRROR_CHAINS]
+    candidates = [c for c in candidates if not _is_mirror(c) and not _decoy(c)]
     winner = clear_winner(candidates)
     if winner is not None:
         return winner["address"], winner["chain"]

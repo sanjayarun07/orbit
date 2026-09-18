@@ -38,13 +38,15 @@ STATIC_CARDS = [
 _NEWS_INSTRUCTIONS = (
     "Return ONLY a JSON object (no prose, no code fences): "
     '{"crypto":[{"headline":"","summary":"","source":""},{"headline":"","summary":"","source":""}],'
-    '"stocks":[{"headline":"","summary":"","source":""},{"headline":"","summary":"","source":""}]}. '
-    "Fill it with the two most market-moving crypto stories and the two most market-moving US stock-market "
-    "stories from your search results (latest available: prices, ETFs, regulation, earnings, the Fed). "
+    '"stocks":[{"headline":"","summary":"","source":""},{"headline":"","summary":"","source":""}],'
+    '"memes":[{"headline":"","summary":"","source":""},{"headline":"","summary":"","source":""}]}. '
+    "Fill it with the two most market-moving crypto stories, the two most market-moving US stock-market "
+    "stories, and the two biggest memecoin stories (a launch, a rug, a listing, a whale, a viral token on "
+    "Solana, Base or BNB Chain) from your search results (latest available: prices, ETFs, regulation, earnings, the Fed). "
     "Headline under 90 characters, summary one sentence with the key number, source a bare domain. "
     "Never leave the arrays empty."
 )
-_NEWS_QUERY = "latest crypto market news and latest US stock market news"
+_NEWS_QUERY = "latest crypto market news, latest US stock market news, and latest memecoin news (pump.fun, Solana, Base, BNB Chain)"
 # Perplexity answers with a placeholder rather than nothing when its search
 # came back empty; those must not become tiles.
 _PLACEHOLDER = re.compile(r"unavailable|no current|not available|could not retrieve|no verified", re.I)
@@ -61,7 +63,7 @@ def _parse_news(text: str) -> dict | None:
     if not isinstance(data, dict):
         return None
     out = {}
-    for key in ("crypto", "stocks"):
+    for key in ("crypto", "stocks", "memes"):
         items = []
         for item in (data.get(key) or [])[:2]:
             if isinstance(item, dict) and item.get("headline") and not _PLACEHOLDER.search(str(item.get("headline")) + " " + str(item.get("summary") or "")):
@@ -71,7 +73,7 @@ def _parse_news(text: str) -> dict | None:
                     "source": str(item.get("source") or "").strip().lower()[:60],
                 })
         out[key] = items
-    return out if (out.get("crypto") or out.get("stocks")) else None
+    return out if (out.get("crypto") or out.get("stocks") or out.get("memes")) else None
 
 
 def _news_cards() -> list[dict] | None:
@@ -90,12 +92,13 @@ def _news_cards() -> list[dict] | None:
         logger.warning("home highlights: news answer was not the expected JSON")
         return None
     cards: list[dict] = []
-    for kind, tone in (("crypto", "teal"), ("stocks", "blue")):
+    for kind, tone in (("crypto", "teal"), ("stocks", "blue"), ("memes", "violet")):
         for index, item in enumerate(parsed.get(kind) or []):
             cards.append({
                 "id": f"{kind}-{index}", "kind": kind, "tone": tone if index == 0 else ("violet" if kind == "crypto" else "amber"),
                 "title": item["headline"], "summary": item["summary"], "source": item["source"],
-                "prompt": f"What does this mean for the market: {item['headline']}",
+                "prompt": (f"What does this mean for memecoins: {item['headline']}" if kind == "memes"
+                           else f"What does this mean for the market: {item['headline']}"),
             })
     return cards or None
 
@@ -154,7 +157,9 @@ def build() -> dict:
     if len(cards) < 4:
         used = {c["id"] for c in cards}
         cards += [c for c in STATIC_CARDS if c["id"] not in used][: 4 - len(cards)]
-    return {"as_of": datetime.now(timezone.utc).isoformat(), "source": source, "cards": cards[:4]}
+    memes = [c for c in cards if c.get("kind") == "memes"]
+    market = [c for c in cards if c.get("kind") != "memes"]
+    return {"as_of": datetime.now(timezone.utc).isoformat(), "source": source, "cards": market[:4], "meme_cards": memes[:2]}
 
 
 # ----------------------------------------------------------------------------
@@ -174,6 +179,16 @@ CURATED = {
         "Which earnings this week could move the market?",
         "How did US stocks close today and why?",
         "What are the most anticipated IPOs in the next 6 months?",
+    ],
+    # Memecoins (user focus 2026-09-18): every row is answerable by a live
+    # tool -- Pulse, the deep dive, LP locks, holder positions, first buyers.
+    "memes": [
+        "What's bonding on pump.fun right now?",
+        "New launches on Solana",
+        "Deep dive on FARTCOIN",
+        "Is BONK's liquidity locked?",
+        "Top holders of WIF",
+        "New launches on Robinhood chain",
     ],
     "macro": [
         "How will the next Fed decision affect risk assets?",
@@ -205,8 +220,12 @@ def suggestions(wallet_holdings: list[str] | None = None) -> list[dict]:
             week_rows.insert(0, f"What does {event['title']} on {event['date']} mean for crypto and stocks?")
     except Exception:
         logger.debug("home highlights: calendar unavailable", exc_info=True)
+    # Memes: today's two memecoin headlines first, then the live-tool prompts.
+    meme_rows = [c["prompt"] for c in data.get("meme_cards", []) if c.get("prompt")]
+    meme_rows += [row for row in CURATED["memes"] if row not in meme_rows]
     categories = [
         {"id": "trending", "label": "Trending", "rows": trending[:5]},
+        {"id": "memes", "label": "Memes", "rows": meme_rows[:6]},
         {"id": "week", "label": "This week", "rows": week_rows[:5]},
         {"id": "crypto", "label": "Crypto", "rows": CURATED["crypto"]},
         {"id": "stocks", "label": "Stocks", "rows": CURATED["stocks"]},

@@ -17,8 +17,9 @@ from app.market_overview import crypto_market_overview
 from app import composition, streaming
 from app.integrations import tradingview
 from app.routing import lexicon, subject_probe
-from app import answer_gate, event_calendar, symbol_registry, token_pages, token_unlocks, why_moving
+from app import answer_gate, event_calendar, mobula_wallet, symbol_registry, token_pages, token_unlocks, why_moving
 from app.clarify import is_clarification
+from app.settings import settings
 from app.market_providers import TRENDING_TOKENS
 from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available, perplexity_web_search
 from app.provider_registry import get_provider_router
@@ -280,21 +281,39 @@ async def _compose_wallet_portfolio(wallet: str, chain: str | None) -> tuple[str
         # tier first) rather than guessing one, same as the standalone
         # Nansen-Token-Holdings-failure fallback used elsewhere.
         balances_coro = _bitquery_balances_supplement_all_chains(wallet)
-    balances, hyperliquid, defi = await asyncio.gather(
-        balances_coro,
+    async def _holdings() -> tuple[str | None, str]:
+        # Mobula first for wallet tracking (user decision 2026-09-18): every
+        # chain in one call, priced, spam filtered. The per-chain path stays
+        # as the fallback when Mobula is off or returns nothing.
+        if mobula_wallet.enabled():
+            try:
+                # Bounded: most wallets answer in about two seconds, a very
+                # large Solana wallet can take over ninety (live, 2026-09-18);
+                # the per-chain path answers rather than the turn stalling.
+                card = await asyncio.wait_for(
+                    asyncio.to_thread(mobula_wallet.portfolio, f"{wallet} wallet portfolio" + (f" on {chain}" if chain else "")),
+                    timeout=settings.mobula_portfolio_timeout_seconds)
+                if card and "No priced holdings were returned" not in card:
+                    return card, "mobula_wallet_portfolio"
+            except Exception:
+                logger.info("mobula portfolio unavailable or slow for %s; per-chain fallback", wallet[:8], exc_info=True)
+        return await balances_coro, "goldrush_wallet_balances"
+
+    (balances, balances_tool), hyperliquid, defi = await asyncio.gather(
+        _holdings(),
         _goldrush_hyperliquid_supplement(wallet),
         _nansen_defi_positions(wallet, chain),
     )
 
     sections = []
     trajectory: dict = {
-        "thought_0": "Compose a wallet portfolio from GoldRush balances/Hyperliquid, with Nansen DeFi Positions as optional enrichment.",
+        "thought_0": "Compose a wallet portfolio: Mobula cross-chain holdings (GoldRush per chain as fallback) + Hyperliquid, with Nansen DeFi Positions as optional enrichment.",
         "tool_args_0": {"wallet_address": wallet, "chain": resolved_chain},
     }
     index = 0
     if balances:
         sections.append(f"# Token Holdings\n\n{balances}")
-        trajectory[f"tool_name_{index}"] = "goldrush_wallet_balances"
+        trajectory[f"tool_name_{index}"] = balances_tool
         trajectory[f"observation_{index}"] = balances
         index += 1
     else:
@@ -920,7 +939,38 @@ def _candidate_line(candidate: dict) -> str:
 # Derivative / mirror venues (perp DEXes, Robinhood's Solana mirror) are not the
 # native chain a token's holders/security live on, so they are excluded from
 # identity resolution unless the user explicitly names them.
-_MIRROR_CHAINS = {"robinhood", "hyperliquid"}
+_MIRROR_CHAINS = {"hyperliquid"}
+# Robinhood Chain carries tokenized stocks (mirrors of NVDA, AAPL ...) AND
+# native memecoins (user focus, 2026-09-18). Only the stock mirrors are
+# filtered, by the way they are named; a meme called "Robinhood" stays.
+_STOCK_MIRROR = re.compile(r"\b(?:common\s+stock|class\s+[abc]\b|inc\.?$|inc\b|corp(?:oration)?\b|\betf\b|trust\b|holdings?\s+(?:inc|plc|ltd)|plc\b|xstock|tokeni[sz]ed)\b", re.I)
+
+
+try:
+    from app.routing.instruments import REGISTRY as _EQUITY_REGISTRY
+    _EQUITY_SYMBOLS = {str(row.get("symbol") or "").lower() for row in _EQUITY_REGISTRY} | {a.lower() for row in _EQUITY_REGISTRY for a in (row.get("aliases") or [])}
+except Exception:            # the registry is a convenience, never a dependency
+    _EQUITY_SYMBOLS = set()
+
+
+def _decoy_pool(candidate: dict) -> bool:
+    """Listed liquidity of $1M or more with under 1% of it traded in a day."""
+    liquidity = float(candidate.get("liquidity_usd") or 0)
+    volume = candidate.get("volume_24h_usd")
+    return volume is not None and liquidity >= 1_000_000 and float(volume) < 0.01 * liquidity
+
+
+def _is_mirror(candidate: dict) -> bool:
+    """A listing that mirrors an asset from elsewhere: anything on Hyperliquid's
+    spot index, or a tokenized stock on Robinhood Chain."""
+    chain = _chain_key(str(candidate.get("chain") or ""))
+    if chain in _MIRROR_CHAINS:
+        return True
+    if chain == "robinhood":
+        name = f"{candidate.get('name') or ''}"
+        symbol = str(candidate.get("symbol") or "")
+        return bool(_STOCK_MIRROR.search(name)) or bool(re.fullmatch(r"[A-Z]{1,5}[XB]", symbol) and symbol[:-1].lower() in _EQUITY_SYMBOLS)
+    return False
 # A non-Solana chain with at least this much DEX Screener liquidity carries a
 # real same-ticker token (a genuine cross-chain rival to a verified Solana one),
 # not dust -- the Bitquery-independent signal for ambiguity detection.
@@ -973,7 +1023,10 @@ async def _canonical_on_chain(ticker: str, chain: str, strict: bool = False) -> 
             ds = await asyncio.to_thread(token_candidates, ticker)
         except Exception:
             ds = []
-        candidates = [c for c in ds if _chain_key(c["chain"]) == key]
+        # A pool with a fortune in "liquidity" and no trading is a decoy, not
+        # the token: on Robinhood Chain the ROBINHOOD listing with $1.3M
+        # listed and $0.01 traded outranked the real one (live, 2026-09-18).
+        candidates = [c for c in ds if _chain_key(c["chain"]) == key and not _decoy_pool(c)]
     return clear_winner(candidates) or (candidates[0] if candidates else None)
 
 
@@ -1046,7 +1099,7 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
         ds_candidates = await asyncio.to_thread(token_candidates, ticker)
     except Exception:
         ds_candidates = []
-    ds_candidates = [c for c in ds_candidates if _chain_key(c["chain"]) not in _MIRROR_CHAINS]
+    ds_candidates = [c for c in ds_candidates if not _is_mirror(c)]
     # DEX Screener liquidity per chain enumerates the RIVAL chains (a same-ticker
     # token with real liquidity, not dust). This signal is Bitquery-independent so
     # ambiguity detection survives a Bitquery outage/402; the per-chain canonical
@@ -1623,7 +1676,10 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     # Never for an equity ask: "is MSTR a good buy" is classed equity by the
     # router, but this intercept ran first and resolved MSTR to a tokenized-
     # stock namesake on Jupiter, so a stock question got a token deep dive.
-    if _DEEPDIVE.search(request) and not TRENDING_TOKENS.search(request) and "equity_research" not in set(state.get("capabilities", [])):
+    if _DEEPDIVE.search(request) and not TRENDING_TOKENS.search(request) and ("equity_research" not in set(state.get("capabilities", [])) or _TOKEN_ADDRESS.search(request)):
+        # An equity-classed ask still gets the token lens when it carries a
+        # contract address: "deep dive on 0x… on robinhood" is a Robinhood
+        # Chain token, and an address is never a stock (live, 2026-09-18).
         deep_dive = await _run_token_deep_dive(state, request)
         if deep_dive is not None:
             return deep_dive
@@ -1766,7 +1822,9 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
             ),
             "trajectory": None,
         }
-    if "equity_research" in capabilities:
+    if "equity_research" in capabilities and not address_match:
+        # A contract address is never a stock: "deep dive on 0x… on robinhood"
+        # is a Robinhood Chain token, not the HOOD equity (live, 2026-09-18).
         return await _equity_research(state)
     eligible_capabilities = _router_eligible_capabilities(request, capabilities, chains)
     # Reachability backstop (the permanent fix for classifier/tool vocabulary

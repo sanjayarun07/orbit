@@ -212,6 +212,9 @@ class Settings(BaseSettings):
     mobula_api_key: str | None = None
     mobula_base_url: str = "https://api.mobula.io/api/2"
     mobula_requests_per_minute: int = 60
+    # How long the wallet-portfolio intercept waits for Mobula before the
+    # per-chain balances answer instead.
+    mobula_portfolio_timeout_seconds: float = 20.0
     # Left at 0.0: Mobula bills in credits (1 per chain for most reads, 10
     # for DeFi positions) with no published credit-to-dollar rate for paid
     # tiers (only the 10k-credit/month free tier is public) -- same

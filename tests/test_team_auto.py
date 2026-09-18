@@ -75,9 +75,11 @@ def test_the_browser_has_no_desk_switch_and_sends_no_team_mode():
         assert ".team-toggle" not in (STATIC / sheet).read_text(), sheet
 
 
-def test_the_desk_never_researches_a_mirror_chain_listing(monkeypatch):
+def test_the_desk_never_researches_a_decoy_listing(monkeypatch):
     """Live: "thoughts on $WIF" got a thesis on a Robinhood-chain WIF with
-    $779M of listed liquidity and no volume; dogwifhat lives on Solana."""
+    $779M of listed liquidity and $10K of volume; dogwifhat lives on Solana.
+    Robinhood Chain itself is no longer a mirror chain (its memecoins are
+    real), so the decoy is caught by its volume, as the research resolver does."""
     from app.nodes import team
 
     monkeypatch.setattr(team, "search_verified_tokens", lambda q: [])

@@ -154,6 +154,9 @@ OPEN_QUESTION = re.compile(
 EXECUTION_EXPLANATION = re.compile(r"^\s*(?:how\s+(?:does\s+)?(?:the\s+)?(?:relay(?:\.link)?\s+)?(?:cross[- ]chain\s+)?(?:bridge|bridging|swap)\s+(?:work|works|operate)|what\s+is\s+(?:a\s+|the\s+)?(?:relay(?:\.link)?\s+)?(?:bridge|bridging|cross[- ]chain\s+swap)|explain\s+(?:how\s+)?(?:relay(?:\.link)?\s+)?(?:bridge|bridging|cross[- ]chain\s+swap))\b", re.I)
 
 CHAIN_ALIASES = {
+    # Robinhood Chain (Arbitrum-based) carries native memecoins as well as
+    # tokenized stocks; "on robinhood" after an address is the chain (2026-09-18).
+    "robinhood": "robinhood", "robinhood chain": "robinhood",
     "solana": "solana", "ethereum": "ethereum", "base": "base",
     "robinhood chain": "robinhood", "robinhood": "robinhood",
     "arbitrum": "arbitrum", "optimism": "optimism", "polygon": "polygon",

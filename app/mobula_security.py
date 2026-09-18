@@ -34,6 +34,7 @@ _CHAIN_NAMES = {
     "solana": "solana", "ethereum": "ethereum", "eth": "ethereum", "base": "base", "arbitrum": "arbitrum",
     "bsc": "bnb smart chain (bep20)", "bnb": "bnb smart chain (bep20)", "bnb chain": "bnb smart chain (bep20)",
     "polygon": "polygon", "avalanche": "avalanche c-chain", "optimism": "optimism", "hyperevm": "hyperevm",
+    "robinhood": "Robinhood Chain", "robinhood chain": "Robinhood Chain",
 }
 # Percent of LP in plain wallets above which the pool can be pulled at will.
 _RUG_RISK_PCT = 50.0
@@ -124,8 +125,8 @@ def token_security(request: str) -> str:
         raise RuntimeError("Mobula returned no security analysis for this token")
 
     lines = [
-        "# Token security & liquidity — Mobula",
-        f"**Contract**: `{address}` · **Chain**: {chain} · **Checked**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+        "# Token security & liquidity",
+        f"**Provider**: Mobula · **Contract**: `{address}` · **Chain**: {chain} · **Checked**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         "",
     ]
 
@@ -180,7 +181,7 @@ def token_security(request: str) -> str:
 
 
 _PULSE_CHAIN = {"solana": "solana:solana", "ethereum": "evm:1", "base": "evm:8453", "bnb smart chain (bep20)": "evm:56", "arbitrum": "evm:42161",
-                "polygon": "evm:137", "avalanche c-chain": "evm:43114", "optimism": "evm:10", "hyperevm": "evm:999"}
+                "polygon": "evm:137", "avalanche c-chain": "evm:43114", "optimism": "evm:10", "hyperevm": "evm:999", "Robinhood Chain": "evm:4663"}
 
 
 def _logo_reuses(address: str, chain: str) -> tuple[int, list[str]] | None:
@@ -222,7 +223,7 @@ class MobulaSecurityProvider:
             # Naming the chains it really covers earns the same chain-fit score
             # the per-chain tools get, so an explicit LP-lock question reaches
             # this card rather than a generic pair lookup.
-            chains=("solana", "ethereum", "base", "arbitrum", "bsc", "bnb", "polygon", "avalanche", "optimism", "hyperevm"),
+            chains=("solana", "ethereum", "base", "arbitrum", "bsc", "bnb", "polygon", "avalanche", "optimism", "hyperevm", "robinhood"),
             cost_usd=settings.mobula_request_cost_usd, quota_per_minute=settings.mobula_requests_per_minute,
             # Below the chain-native security tools (Jupiter Shield on Solana,
             # GoPlus and Honeypot.is on EVM): they answer "is this token safe"

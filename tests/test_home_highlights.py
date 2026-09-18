@@ -65,7 +65,7 @@ def test_market_fallback_when_news_is_unavailable(monkeypatch):
 def test_placeholder_news_is_not_a_tile():
     text = '{"crypto":[{"headline":"Live crypto news unavailable","summary":"No current results.","source":"unknown"}],"stocks":[{"headline":"Fed holds","summary":"Rates unchanged at 4.25%.","source":"wsj.com"}]}'
     parsed = home_highlights._parse_news(text)
-    assert parsed == {"crypto": [], "stocks": [{"headline": "Fed holds", "summary": "Rates unchanged at 4.25%.", "source": "wsj.com"}]}
+    assert parsed == {"crypto": [], "stocks": [{"headline": "Fed holds", "summary": "Rates unchanged at 4.25%.", "source": "wsj.com"}], "memes": []}
     assert home_highlights._parse_news('{"crypto":[],"stocks":[]}') is None
 
 
