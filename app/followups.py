@@ -18,6 +18,7 @@ import re
 
 import dspy
 
+from app.clarify import is_clarification
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -25,11 +26,16 @@ logger = logging.getLogger(__name__)
 MAX_FOLLOWUPS = 5
 MIN_FOLLOWUPS = 2
 MIN_ANSWER_CHARS = 240
-TIMEOUT_SECONDS = 8.0
+TIMEOUT_SECONDS = 6.0
 
 _PRONOUN_START = re.compile(r"^\s*(?:what|how|why|when|where|which|who|is|are|does|do|can|should|will)\b.*\b(?:it|its|this|that|they|them|these|those)\b", re.I)
 _WORD = re.compile(r"[A-Za-z][A-Za-z0-9.\-']{1,}")
 _NUMBER = re.compile(r"\d[\d,.]*[kmb%]?", re.I)
+# Questions Orbit cannot answer with data (predictions, effects, advice) and
+# questions aimed at the user rather than at Orbit ("Do you want ...?").
+_SPECULATIVE = re.compile(r"\b(?:impact|affect|effect|influence|sustainable|might|could|would|likely|predict|forecast|outlook|mitigate|sell pressure|"
+                          r"should (?:i|you|one)|is it (?:a good|worth)|price (?:reaction|target)|how (?:will|would|might))\b", re.I)
+_TO_THE_USER = re.compile(r"^\s*(?:do|would|are|did|can|could|will|have|should) you\b", re.I)
 _GENERIC = {"crypto", "token", "tokens", "market", "markets", "price", "prices", "wallet", "portfolio", "trending", "trade",
             "buy", "sell", "risk", "risks", "chain", "chains", "the", "and", "for", "with", "about", "what", "how", "does",
             "next", "current", "latest", "now", "today", "coin", "coins", "project", "protocol", "supply", "unlock", "unlocks",
@@ -41,11 +47,12 @@ class RelatedQuestions(dspy.Signature):
     one per line, no numbering. Each must be specific to the answer: name the
     token, project, wallet, person or figure the answer discussed (never "it"
     or "this token"), and ask about something the answer mentioned or left
-    open -- a date it gave, an allocation it listed, a risk it raised, the
-    next event it implied. Questions must be answerable with crypto-market
-    data or research (prices, holders, unlocks, security, protocols, wallets,
-    news), not with advice. Do not repeat the user's question. Output nothing
-    else."""
+    open -- a date it gave, an allocation it listed, a figure it cited, the
+    next event it implied. Only FACTUAL questions answerable with data or
+    research (a price, a holder count, an unlock date, a supply figure, an
+    audit, a news event): never predictions ("what impact could"), never
+    advice ("should I"), never questions to the user ("do you want"). Do not
+    repeat the user's question. Output nothing else."""
 
     question: str = dspy.InputField(desc="What the user asked")
     answer: str = dspy.InputField(desc="The answer they just read (may be truncated)")
@@ -78,6 +85,8 @@ def grounded(followup: str, question: str, answer: str) -> bool:
     answer or the question, and it does not lean on a pronoun for its subject."""
     text = followup.strip()
     if not text or len(text) < 12 or len(text) > 160:
+        return False
+    if _SPECULATIVE.search(text) or _TO_THE_USER.match(text):
         return False
     if _PRONOUN_START.search(text) and not any(a in _terms(answer) | _terms(question) for a in _anchors(text)):
         return False
@@ -121,7 +130,7 @@ def eligible(intent: str | None, answer: str | None, trade_plan) -> bool:
     if intent not in ("research", "general"):
         return False
     text = (answer or "").strip()
-    if len(text) < MIN_ANSWER_CHARS or text.rstrip().endswith("?"):
+    if len(text) < MIN_ANSWER_CHARS or is_clarification(text):
         return False
     lowered = text.lower()
     return not any(marker in lowered for marker in ("could not", "couldn't reach", "try again", "is not configured", "i don't want to guess"))

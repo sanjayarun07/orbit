@@ -41,6 +41,7 @@ def _reset_account_stores(monkeypatch):
     from app.settings import settings as _settings
 
     monkeypatch.setattr(_settings, "followups_enabled", False)
+    monkeypatch.setattr(_settings, "warm_caches_on_start", False)
     monkeypatch.setattr(_tradingview, "get_redis", no_redis)
     # The subject probe looks a name up on the web when the router is unsure;
     # the suite never reaches Perplexity for that. Tests of the probe itself

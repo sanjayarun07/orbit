@@ -93,8 +93,27 @@ async def synthesize(request: str, cards: str, trajectory: dict, advice: bool = 
         summary = ""
     if not summary:
         return cards
+    summary = audit_guard(summary, cards)
     note = "\n\n_Taken together from the cards below. Not financial advice._" if advice else ""
     return f"**Taken together**\n\n{summary}{note}\n\n---\n\n{cards}"
+
+
+_AUDIT_CLAIM = re.compile(r"\b(?:audited|audit(?:ed)?\s+by|has\s+(?:an|a)\s+audit|passed\s+(?:an|a|its)\s+audit|security\s+audit(?:s)?\s+(?:by|from|confirm))\b", re.I)
+_AUDIT_EVIDENCE = re.compile(r"\b(?:audit report|audited by|audit(?:ed)?\s+(?:by|from)\s+(?:certik|ottersec|zellic|halborn|trail of bits|hacken|peckshield|slowmist|quantstamp|sec3|neodyme|kudelski|cyberscope|hashex|solidproof)"
+                             r"|(?:certik|ottersec|zellic|halborn|trail of bits|hacken|peckshield|slowmist|quantstamp|sec3|neodyme)\b[^\n]{0,80}\baudit)\b", re.I)
+
+
+def audit_guard(summary: str, cards: str) -> str:
+    """Never let a summary call a token audited on the strength of a
+    verification or Shield check. Live (2026-09-18): "Audit report on ANSEM"
+    and "Is RENDER audited?" were summarised as audited by Jupiter while the
+    card itself said those checks are not an audit. When the summary claims
+    an audit and no card names an audit report or auditing firm, the claim
+    is corrected in front of it rather than left to stand."""
+    if not _AUDIT_CLAIM.search(summary or "") or _AUDIT_EVIDENCE.search(cards or ""):
+        return summary
+    return ("**No audit report was found in the evidence.** Jupiter verification, Shield warnings and organic-score checks "
+            "are listing and safety signals, not a security audit; treat any mention of an audit below as unsupported.\n\n" + summary)
 
 
 _ADVICE_PROBES = (

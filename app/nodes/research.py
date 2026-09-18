@@ -17,7 +17,8 @@ from app.market_overview import crypto_market_overview
 from app import composition, streaming
 from app.integrations import tradingview
 from app.routing import lexicon, subject_probe
-from app import event_calendar, why_moving
+from app import event_calendar, token_unlocks, why_moving
+from app.clarify import is_clarification
 from app.market_providers import TRENDING_TOKENS
 from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available
 from app.provider_registry import get_provider_router
@@ -1347,6 +1348,25 @@ def _web_context_part(state: AgentState) -> tuple[str, dict] | None:
                   "tool_name_0": WEB_CONTEXT_TOOL, "tool_args_0": {"query": state["request"]}, "observation_0": card}
 
 
+def _calendar_ask(request: str) -> bool:
+    """A market-calendar question: the calendar words, and no token, address
+    or ticker-like name that makes it a question about one asset."""
+    return bool(event_calendar.TRIGGER.search(request)) and not _TOKEN_ADDRESS.search(request) and not _named_tickers(request) \
+        and not subject_probe.subject_of(request)
+
+
+def _market_scoped(request: str) -> str:
+    """The web question for a research turn whose subject is a ticker-like
+    name the tools did not resolve ("What is OPEN?", "Research ARC", "Is M
+    safe?"): scoped to markets so the search does not answer with the
+    dictionary, a research institute or a medicine."""
+    subject = subject_probe.subject_of(request) or next(iter(re.findall(r"(?<![A-Za-z])\$?([A-Z])(?![A-Za-z])", request)), None)
+    if not subject:
+        return request
+    return (f"{request}\n\n(Context: this is a crypto and financial-markets question. Read \"{subject}\" as a token, protocol, "
+            f"company or ticker; if several exist, name each with its chain or exchange; if none exists, say so.)")
+
+
 async def research_node(state: AgentState) -> dict:
     sink: dict = {}
     request = _effective_request(state)
@@ -1373,9 +1393,10 @@ async def research_node(state: AgentState) -> dict:
         result = {"answer": answer, "trajectory": trajectory or None, **extras}
     else:
         result = await _research_node(state, sink)
-    if web_part and result.get("answer") and not result.get("pending_token"):
+    if web_part and result.get("answer") and not result.get("pending_token") and not is_clarification(result.get("answer")):
         # Search first, then the tools, read together: the web's answer is the
-        # first card unless the tools' turn was that same answer already.
+        # first card unless the tools' turn was that same answer already. A
+        # clarifying question from the tools' path stays a question.
         trajectory = result.get("trajectory") or {}
         if trajectory.get("tool_name_0") != WEB_CONTEXT_TOOL:
             cards, combined = composition.combine([web_part, (result["answer"], trajectory)])
@@ -1453,8 +1474,20 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
                 "observation_0": observation,
             },
         }
-    # "what events are coming this week?" -> the dated calendar card.
-    if event_calendar.TRIGGER.search(request) and not _TOKEN_ADDRESS.search(request):
+    # "what about the unlock next month?" with no token named: the token in
+    # the conversation's focus, or a question -- never the market calendar's
+    # first unlock (live 2026-09-18: it answered with SUI nobody asked about).
+    if token_unlocks.UNLOCK_ASK.search(request) and not _TOKEN_ADDRESS.search(request) and not _named_tickers(request):
+        focus = _focus_token(state)
+        if focus and focus.get("symbol"):
+            request = f"{focus['symbol']} {request} {focus['address']}" + (f" on {focus['chain']}" if focus.get("chain") else "")
+        else:
+            return {"answer": ("Which token's unlock? Name it (a $ticker, the project name or its contract address) and I'll pull "
+                               "its vesting schedule: the next unlock dates, amounts and who they go to."), "trajectory": None}
+    # "what events are coming this week?" -> the dated calendar card. Never
+    # for a question that names a token ("what's happening with FARTCOIN?"
+    # is about FARTCOIN, not the macro calendar).
+    if _calendar_ask(request):
         days = 14 if re.search(r"\b(?:next|two)\s+weeks?|fortnight|month\b", request, re.I) else 7
         streaming.emit("status", text="Fetching the events calendar")
         data = await asyncio.to_thread(event_calendar.get_calendar, days)
@@ -1709,14 +1742,15 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         # answer, grounded and cited, rather than a second search for the same.
         return {"answer": web_part[0], "trajectory": web_part[1]}
     streaming.emit("status", text="Researching with the live tools")
+    web_request = request if resolution.chain else _market_scoped(request)
     result = await runtime.answer(
         _research_agent(
-            request,
+            web_request,
             tuple(state.get("capabilities", [])),
             tuple(state.get("chains", [])),
             exclude=(failed_direct_tool,) if failed_direct_tool else (),
         ),
-        request=request,
+        request=web_request,
         conversation_history="",
     )
     trajectory = getattr(result, "trajectory", None)

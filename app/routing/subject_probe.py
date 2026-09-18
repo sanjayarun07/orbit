@@ -148,9 +148,39 @@ def route_from(found: dict, request: str) -> dict | None:
     if kind == "protocol":
         return {"intent": "research", "capabilities": ["knowledge", "defi_data", "web_research"], "chains": chains, "route_source": "subject_probe",
                 "contextual_request": f"{request} ({found.get('name') or symbol} protocol)"}
-    if kind in {"person", "company", "concept"}:
+    if kind in {"person", "company"}:
         return {"intent": "research", "capabilities": ["web_research"], "chains": [], "route_source": "subject_probe"}
+    # "concept" (Mercury retrograde, an acronym) and "other" do not settle a
+    # market question; the resolver asks with the probe's reading as a hint.
     return None
+
+
+def agrees(found: dict | None, context: str | None) -> bool:
+    """Whether the web's answer to the question is about the same thing the
+    probe identified. A token, equity or protocol needs market text; the
+    TRUMP case (probe: the Solana memecoin; web: the politician) is the
+    disagreement this catches. A person or company accepts any context."""
+    from app.clarify import is_market_text
+
+    if not found or not context:
+        return False
+    kind = str(found.get("kind") or "").lower()
+    if kind in {"token", "equity", "protocol"}:
+        return is_market_text(context)
+    return True
+
+
+def clarify_text(found: dict | None, request: str) -> str:
+    """The question to ask when neither the probe nor the web settled the
+    subject, naming what the web read it as so the user can redirect."""
+    subject = (found or {}).get("subject") or subject_of(request)
+    reading = str((found or {}).get("summary") or "").strip()
+    reading = reading.split(" Sources:")[0].split(" sources:")[0].strip()
+    lead = f"I'm not sure what **{subject}** refers to here." if subject else "I'm not sure what this refers to."
+    hint = f" The web reads it as: {reading}" if reading else ""
+    return (f"{lead}{hint}\n\nOrbit covers crypto and markets: if you mean a token, protocol or company, name it "
+            "(a $ticker, the full project name, or a contract address) and say what you want to know -- price, security, "
+            "unlocks, holders, news -- and I'll pull the data.")
 
 
 def reset() -> None:

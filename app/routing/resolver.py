@@ -37,6 +37,8 @@ from .model import speech_classifier
 from .semantic import SpeechUnderstanding, embedding_router
 from .speech import has_competing_speech, is_parameter_fragment
 from .trade_parser import extract_cross_chain_draft
+from app.clarify import is_clarification, is_market_text
+
 from . import subject_probe
 
 # Rule reasons anchored by a hard signal rather than topic keywords. Execution
@@ -188,16 +190,30 @@ async def _model_first(request: str, candidate: CapabilityRoute | None, call_lm,
         # answer still stands on its own before we ask the user anything.
         found, context = await asyncio.gather(asyncio.to_thread(subject_probe.probe, request),
                                               asyncio.to_thread(subject_probe.context_search, request))
+        # The web asking "which unlock do you mean?" is not context; it is the
+        # same missing subject, and it ends the turn as a question to the user.
+        web_asks = bool(context) and is_clarification(context)
+        if web_asks:
+            context = None
         probed = subject_probe.route_from(found, request) if found else None
         if probed:
-            if context:
+            # One subject per turn: the web's answer rides along only when it
+            # is about the thing the probe identified (TRUMP: the probe said
+            # the Solana memecoin, the web described the politician -- the
+            # token route stands, the web card is dropped).
+            agreed = subject_probe.agrees(found, context)
+            if context and agreed:
                 probed["web_context"] = context
             return probed, {**meta, "method": "subject_probe", "reason": f"probe:{found.get('kind')}", "subject": found.get("subject"),
-                            "probe_confidence": found.get("confidence"), "web_context": bool(context)}
-        if context:
+                            "probe_confidence": found.get("confidence"),
+                            "web_context": True if (context and agreed) else ("dropped:off_subject" if context else False)}
+        if context and is_market_text(context):
             return ({"intent": "research", "capabilities": ["web_research"], "chains": [], "route_source": "subject_probe", "web_context": context},
                     {**meta, "method": "web_context", "reason": "model_uncertain:web_context" + (f":probe_{found.get('kind')}" if found else "")})
-        return _clarify_route("speech_model"), {**meta, "reason": "model_uncertain" + (f":probe_{found.get('kind')}" if found else "")}
+        # Nothing settled it (or the web read it as something outside markets:
+        # Mercury the planet). Ask, and say what the web made of it.
+        reason = "model_uncertain" + (f":probe_{found.get('kind')}" if found else "") + (":web_asks" if web_asks else ":off_market" if context else "")
+        return {**_clarify_route("speech_model"), "clarification": subject_probe.clarify_text(found, request)}, {**meta, "reason": reason}
     if understanding.speech_act == "quote":
         return _quote_route(understanding, request, "speech_model"), meta
     chains = list(candidate.chains) if candidate is not None else list(extract_chains(request))

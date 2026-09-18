@@ -153,7 +153,8 @@ def _web_lookup(symbol: str, request: str) -> str | None:
         f"{symbol} token unlock and vesting schedule. Give the allocation table (category, amount, vesting terms), "
         f"total supply, what was liquid at TGE, the next unlock dates and amounts, and cite the project's official "
         f"tokenomics documentation and an unlock calendar. If several tokens use the ticker {symbol}, say which one "
-        f"you mean and why. Original question: {request}"
+        f"you mean and why. Report figures exactly as each source states them; where sources disagree, show both figures "
+        f"with their sources and do not reconcile, average or derive a monthly amount from them. Original question: {request}"
     )
 
 
@@ -222,6 +223,15 @@ def unlock_schedule(request: str) -> str:
                     "Most memecoins and fully circulating tokens have none; a token with a vesting schedule that is not listed there has to be checked in its own docs.")
     _cache[key] = (time.monotonic(), card)
     return card
+
+
+def warm() -> None:
+    """Fetch the emissions index ahead of the first unlock question: live it
+    took ~31s cold, which is the whole latency budget of a turn."""
+    try:
+        _unlock_index()
+    except Exception:
+        logger.debug("unlocks: warm-up failed", exc_info=True)
 
 
 def reset() -> None:

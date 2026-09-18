@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     # Related questions under an answer (app/followups.py): model-written,
     # kept only when grounded in the answer; off means the section never shows.
     followups_enabled: bool = True
+    # Fetch slow reference data (DefiLlama's emissions index) at startup.
+    warm_caches_on_start: bool = True
     tradingview_mcp_url: str = "https://mcp.tradingview.com/mcp"
     # x402 pay-per-message on POST /chat (app/x402_gate.py). Off by default;
     # when on, an unpaid request gets HTTP 402 with the payment requirements

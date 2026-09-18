@@ -1048,3 +1048,42 @@ seconds, and reach the browser as `suggestions` on the response and in
 history; the browser renders a "Related" list under the answer and a tap
 sends the question. `FOLLOWUPS_ENABLED=false` turns the whole thing off. The
 suite runs with it off and opts in per test.
+
+### Twenty uncertain prompts, live (2026-09-18): what the run found and what changed
+
+`reports/uncertain-live-20/` scored 7 pass, 6 partial, 7 fail on a
+deliberately hard set. Fixes, each with the run's evidence as a test in
+`tests/test_uncertain_live_20.py`:
+
+- **One subject per turn.** The probe and the context search must agree
+  before the web answer rides along: a token, equity or protocol needs
+  market text (`app/clarify.py`), so TRUMP keeps the memecoin route and
+  drops the politician (`routing_decision.web_context =
+  "dropped:off_subject"`). A probe that says "concept" (Mercury retrograde)
+  no longer routes; with an off-market web answer the turn asks, naming
+  what the web read the word as.
+- **A clarification is terminal.** The web's own "which unlock do you
+  mean?" is recognised (`clarify.is_clarification`) and ends the turn as a
+  question; the research node never merges a web card onto a clarifying
+  answer; related questions are never generated for one.
+- **An unlock ask with no token** takes the conversation's focus token or
+  asks; it never falls to the market calendar. The calendar intercept also
+  ignores any question that names a ticker ("what's happening with
+  FARTCOIN?").
+- **No audit claim without an audit report.** `composition.audit_guard`
+  puts a correction in front of a summary that calls a token audited when
+  no card names an audit report or auditing firm; the synthesis signature
+  says the same.
+- **Web questions about ticker-like names are scoped to markets** ("What is
+  OPEN?", "Is M safe?", "Research ARC") so the search reads the word as a
+  token, protocol or company.
+- **Related questions** drop predictions, effects, advice and questions
+  aimed at the user; the model bound is six seconds.
+- **Unlock web fallback** asks the search to report conflicting figures
+  side by side, never to reconcile or derive a monthly amount. The
+  emissions index (31s cold) is fetched at startup
+  (`WARM_CACHES_ON_START`).
+
+Still open from the run: confident-route identity misses (VIRTUAL, KITE,
+Apple token) are classifier and knowledge-base gaps, not the uncertain
+branch; latency (median 16s) is dominated by tool fan-out and Perplexity.

@@ -85,6 +85,7 @@ from app.plans import get_plan
 from app.provider_registry import get_provider_router, save_provider_overrides
 from app.db import get_pg_pool, get_redis
 from app.settings import settings
+from app import token_unlocks
 from app.portfolio import build_portfolio_snapshot
 from app.wallet_insights import portfolio_scenario, wallet_health
 from app.wallet_auth import (
@@ -136,6 +137,8 @@ async def lifespan(_app: FastAPI):
     task_worker = asyncio.create_task(tasks.worker())
     kb_tool.set_loop(asyncio.get_running_loop())
     kb_warm = asyncio.create_task(_warm_knowledge())
+    if settings.warm_caches_on_start:
+        asyncio.create_task(asyncio.to_thread(token_unlocks.warm))
     kb_worker = asyncio.create_task(kb_ingest.worker())
     _workers.update({
         "reconciliation": reconciliation, "relay_reconciliation": relay_reconciliation,

@@ -102,7 +102,12 @@ class CompositeSynthesis(dspy.Signature):
     each fact comes from ("per the gainers list", "the sentiment snapshot").
     Never add a number, token or claim that is not in the evidence. When the
     stance is a market read, do not tell the user what to buy; describe the
-    conditions the evidence shows and the risks it shows."""
+    conditions the evidence shows and the risks it shows. Verification,
+    Shield or organic-score checks are NOT an audit: never write that a
+    token is audited unless a card names an audit report or auditing firm;
+    say "no audit report in the evidence" instead. If a card asks the user
+    a question instead of answering, repeat the question; never pick a
+    subject the question did not name."""
 
     request: str = dspy.InputField()
     evidence: str = dspy.InputField(desc="The cards, separated by ---; each is verbatim tool output")
