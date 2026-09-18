@@ -990,8 +990,9 @@ mechanisms:
   layer, the Solana security tool's own matcher and the multi-tool plan.
   A misroute is now a failing test, not a transcript.
 - **A look-up before a guess.** When the classifier is unsure and no rule
-  anchors the turn, `app/routing/subject_probe.py` asks the finance web
-  search what the message's subject is (one strict-JSON call, cached an hour)
+  anchors the turn, `app/routing/subject_probe.py` asks the web search
+  what the message's subject is (plain web search beat the finance-tuned
+  one on memecoins at the same price) (one strict-JSON call, cached an hour)
   and routes on the answer: a token becomes token research on its chain
   (the request is rewritten "…(GIGA token on solana)"), a stock equity
   research, a protocol a knowledge question, a person or company web

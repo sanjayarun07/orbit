@@ -7,7 +7,7 @@ public-sector audit reports. The user's rule (2026-09-18): if we are not
 sure what the query is, start with a web search to get the context, then
 route with it.
 
-`probe(request)` asks the finance-tuned web search one strict-JSON question
+`probe(request)` asks the web search one strict-JSON question
 -- what the proper noun in this message most likely refers to -- and the
 resolver turns the answer into a route: a token becomes token research on
 its chain, a stock becomes equity research, a protocol a knowledge or web
@@ -70,7 +70,11 @@ def probe(request: str) -> dict | None:
             return hit[1]
     result = None
     try:
-        text = perplexity_invoke("finance_search", f'In crypto and markets, what does "{subject}" refer to? Context: "{request}"', _INSTRUCTIONS)
+        # Plain web search, not the finance-tuned one: measured on the same
+        # seven subjects (2026-09-18) at the same price, web search named the
+        # memecoins finance search called "other" (ANSEM) or left without a
+        # symbol (PUMP) and typed Reliance as the equity it is.
+        text = perplexity_invoke("web_search", f'In crypto and markets, what does "{subject}" refer to? Context: "{request}"', _INSTRUCTIONS)
         match = re.search(r"\{.*\}", text or "", re.S)
         data = json.loads(match.group(0)) if match else None
         if isinstance(data, dict) and data.get("kind"):

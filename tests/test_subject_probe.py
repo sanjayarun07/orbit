@@ -40,7 +40,7 @@ def test_the_probe_asks_once_per_subject_and_caches_the_answer(monkeypatch):
     first = subject_probe.probe("Audit report on ANSEM")
     second = subject_probe.probe("what about ANSEM?")
     assert first["kind"] == "token" and first["chain"] == "solana" and first["subject"] == "ANSEM"
-    assert second == first and len(calls) == 1 and calls[0][0] == "finance_search" and "ANSEM" in calls[0][1]
+    assert second == first and len(calls) == 1 and calls[0][0] == "web_search" and "ANSEM" in calls[0][1]
 
 
 @pytest.mark.parametrize("found,intent,caps,chains", [
