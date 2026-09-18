@@ -36,6 +36,13 @@ _NUMBER = re.compile(r"\d[\d,.]*[kmb%]?", re.I)
 _SPECULATIVE = re.compile(r"\b(?:impact|affect|effect|influence|sustainable|might|could|would|likely|predict|forecast|outlook|mitigate|sell pressure|"
                           r"should (?:i|you|one)|is it (?:a good|worth)|price (?:reaction|target)|how (?:will|would|might))\b", re.I)
 _TO_THE_USER = re.compile(r"^\s*(?:do|would|are|did|can|could|will|have|should) you\b", re.I)
+# Questions no tool can answer: a position's or holding's history. Hyperliquid's
+# clearinghouseState and every balances endpoint report current state only, so
+# "when did the wallet open the ONDO long at 10x?" (2026-09-18) was offered and
+# then could not be answered.
+_NO_HISTORY = re.compile(r"\b(?:when|what date|how long ago)\b[^?]{0,80}\b(?:open(?:ed)?|enter(?:ed)?|acquir\w+|bought|buy|sold|sell|clos(?:e|ed))\b"
+                         r"|\bhow long\b[^?]{0,60}\b(?:held|holding|open)\b", re.I)
+_POSITION_WORDS = re.compile(r"\b(?:position|long|short|leverage|leveraged|perp|perps|wallet|holding|balance|stake)\b", re.I)
 _GENERIC = {"crypto", "token", "tokens", "market", "markets", "price", "prices", "wallet", "portfolio", "trending", "trade",
             "buy", "sell", "risk", "risks", "chain", "chains", "the", "and", "for", "with", "about", "what", "how", "does",
             "next", "current", "latest", "now", "today", "coin", "coins", "project", "protocol", "supply", "unlock", "unlocks",
@@ -87,6 +94,8 @@ def grounded(followup: str, question: str, answer: str) -> bool:
     if not text or len(text) < 12 or len(text) > 160:
         return False
     if _SPECULATIVE.search(text) or _TO_THE_USER.match(text):
+        return False
+    if _NO_HISTORY.search(text) and _POSITION_WORDS.search(text):
         return False
     if _PRONOUN_START.search(text) and not any(a in _terms(answer) | _terms(question) for a in _anchors(text)):
         return False

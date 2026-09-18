@@ -1239,3 +1239,23 @@ Two changes did come out of the comparison:
   returns the Market Research thesis directly, saving a model call. With a
   charter set there is a rule to relate the thesis to, so the Coordinator
   still folds.
+
+### A wallet turn must not offer a question its own data cannot answer (2026-09-18)
+
+A Hyperliquid portfolio answer offered "When did the wallet open the ONDO
+long position at 10x leverage?" as a related question. No tool can answer
+it: `clearinghouseState` and every balances endpoint report current state,
+never history. The gate correctly refused, but the refusal read "I couldn't
+find The answer lacks the date or time ... for what you asked" and then
+told a user who had pasted an address to name a token. Three fixes:
+
+- Related questions drop position and holding history ("when did ... open",
+  "how long has ... held"), while keeping current-state questions such as a
+  liquidation or entry price.
+- The judge's `missing` field is specified as a short noun phrase, and
+  `answer_gate._missing_phrase` normalises a sentence into one anyway,
+  keeping a name's capital ("Mercury the token").
+- A refusal for a question that already names an address says what those
+  sources do and do not cover and offers the next step that fits, instead
+  of asking for a ticker. The "what I could pull is about ..." clause is
+  dropped when it only restates the question.

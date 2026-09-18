@@ -56,7 +56,7 @@ class AnswerCheck(dspy.Signature):
     answer: str = dspy.InputField(desc="The answer as the user would read it (may be truncated)")
     verdict: str = dspy.OutputField(desc="answers | wrong_subject | missing | asks")
     subject: str = dspy.OutputField(desc="What the answer is actually about, in a few words")
-    missing: str = dspy.OutputField(desc="What the question asked for that the answer lacks; empty when nothing")
+    missing: str = dspy.OutputField(desc="What the question asked for that the answer lacks, as a SHORT NOUN PHRASE naming the thing ('the position's open time', 'the token's USD value'); never a sentence; empty when nothing")
 
 
 answer_checker = dspy.Predict(AnswerCheck)
@@ -112,11 +112,44 @@ async def _web_answer(question: str) -> str | None:
     return found if found and is_market_text(found) and not is_clarification(found) else None
 
 
+_LACKS = re.compile(r"^\s*(?:the\s+)?(?:answer|data|response|passages?|card)\s+(?:lacks?|does not (?:include|state|mention|contain|provide|specify)|doesn't (?:include|state|mention|contain|provide|specify))\s+", re.I)
+_ADDRESS = re.compile(r"\b(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})\b")
+
+
+def _missing_phrase(missing: str) -> str:
+    """The judge's `missing` as a noun phrase that reads inside a sentence.
+    It sometimes answers with a whole sentence ("The answer lacks the date
+    or time when the wallet opened the ONDO long position."), which used to
+    be dropped into the middle of one (2026-09-18)."""
+    text = " ".join((missing or "").split()).rstrip(".")
+    text = _LACKS.sub("", text)
+    if text.startswith("The "):          # never lowercase a name: "Mercury the token" stays capitalised
+        text = "the " + text[4:]
+    return text or "what you asked for"
+
+
 def _could_not_find(question: str, verdict: dict) -> str:
-    subject = verdict.get("subject") or "the subject"
-    missing = verdict.get("missing") or "what you asked for"
-    return (f"I couldn't find {missing} for what you asked, and the data I have is about {subject}, which may not be what you mean. "
-            "Name the token, protocol or company precisely (a $ticker, the full name, or a contract address) and say what you want to know, and I'll look again.")
+    """The honest close when neither the tools nor the web answered: what is
+    missing, what we did find, and the one next step that fits the question.
+    A question that already names an address is not answered by asking the
+    user to name a token."""
+    missing = _missing_phrase(verdict.get("missing") or "")
+    subject = (verdict.get("subject") or "").strip()
+    # Echo what we did find only when it says something the question didn't:
+    # "about <the question, restated>" is noise.
+    q_words = {w for w in re.findall(r"[a-z0-9]+", (question or "").lower()) if len(w) > 2}
+    s_words = {w for w in re.findall(r"[a-z0-9]+", subject.lower()) if len(w) > 2}
+    restates = bool(s_words) and len(s_words - q_words) / len(s_words) < 0.34
+    found = f" What I could pull is about {subject}." if subject and not restates else ""
+    address = _ADDRESS.search(question or "")
+    if address:
+        short = f"{address.group(1)[:6]}…{address.group(1)[-4:]}"
+        step = (f" My sources for `{short}` return its current state -- balances, open positions, recent transfers -- not its history, "
+                "so ask about what it holds now, or paste a transaction hash and I'll read that.")
+    else:
+        step = (" Name the token, protocol or company precisely (a $ticker, the full name, or a contract address) and say what you "
+                "want to know, and I'll look again.")
+    return f"I couldn't find {missing}.{found}{step}"
 
 
 async def gate(question: str, result: dict) -> dict:
