@@ -14,7 +14,7 @@ def _utc() -> str:
 
 from app.additional_providers import ADDITIONAL_PROVIDERS
 from app.routing import lexicon
-from app import token_unlocks
+from app import token_unlocks, url_reader
 from app.integrations import tradingview
 from app.tool_catalog import TOOL_SPECS
 from app.market_providers import MARKET_PROVIDERS
@@ -313,6 +313,13 @@ def get_provider_router() -> ProviderRouter:
         "perplexity_web_search", "perplexity", ("web_research", "equity_research", "finance_data", "project_intelligence", "vc_intelligence"), perplexity_web_search,
         enabled=perplexity_available, cost_usd=settings.perplexity_web_search_cost_usd,
         quota_per_minute=settings.perplexity_requests_per_minute, priority=4,
+    ))
+    router.register(ProviderTool(
+        "url_reader", "orbit", ("url_fetch",), url_reader.read,
+        matches=lambda request: bool(url_reader.URL.search(request or "")),
+        keywords=("summarize", "summarise", "read", "link", "url", "article", "page", "post"),
+        chains=(), cache_ttl_seconds=600, priority=6, spec=TOOL_SPECS.get("url_reader"),
+        description="Read and summarize a linked web page or post against what the user asked: fetched directly, else through Perplexity's reader, else from search results about the link",
     ))
     router.register(ProviderTool(
         "perplexity_fetch_url", "perplexity", ("url_fetch",), _fetch_url,

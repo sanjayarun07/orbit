@@ -1171,3 +1171,18 @@ records the verdict and how it was resolved.
 Rule for future transcripts: do not add a phrasing regex. Add the
 transcript as a test; if the gate let a wrong answer through, sharpen the
 AnswerCheck signature.
+
+### Linked pages are read three ways and summarized by our model (2026-09-18)
+
+A pasted link used to go straight to Perplexity's fetch tool, and a page it
+could not read came back as "I couldn't access the page". `app/url_reader.py`
+(router tool `url_reader`, ahead of `perplexity_fetch_url` for `url_fetch`)
+fetches the page directly with a browser-like request and extracts the
+article text with the standard-library parser, then falls back to
+Perplexity's reader, then to a Perplexity web search about the link (a
+post the index has seen even when the site blocks readers). The text is
+summarized by the primary model against what the user asked, with the
+source named. Only when all three fail does the answer say what was tried
+and ask for the text or the token. Token pages never reach it: the
+research node turns CoinMarketCap, CoinGecko, DEX Screener and explorer
+links into token questions first.
