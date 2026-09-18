@@ -178,7 +178,11 @@ class ResearchAnswer(dspy.Signature):
 class KnowledgeAnswer(dspy.Signature):
     """Answer a protocol / concept question strictly from numbered knowledge-base
     passages. Cite every factual claim as [n]. If the passages don't cover part
-    of the question, say exactly what is missing instead of filling it in.
+    of the question, say exactly what is missing instead of filling it in. If
+    they do not answer the question at all (the question asks about investors,
+    a hack, a vote or a figure and no passage mentions it), reply with exactly
+    one line: `NOT COVERED: <what the passages lack>` -- nothing else, no
+    Sources -- so the answer can come from a source that has it.
     Prefer the passage that matches the protocol version the user named; when
     passages describe different versions (e.g. v3 vs v4), say which is which.
     Write for a trader: concrete parameters, mechanics, and what they imply.

@@ -1087,3 +1087,16 @@ deliberately hard set. Fixes, each with the run's evidence as a test in
 Still open from the run: confident-route identity misses (VIRTUAL, KITE,
 Apple token) are classifier and knowledge-base gaps, not the uncertain
 branch; latency (median 16s) is dominated by tool fan-out and Perplexity.
+
+### A knowledge miss is never the answer (2026-09-18)
+
+"Who are the investors backing EigenLayer?" was answered with "the provided
+passages do not include information about the specific investors" and four
+forum links: the knowledge base had passages about the project, not about
+the question. The knowledge synthesis is now asked to reply `NOT COVERED:
+...` when the passages do not answer, `research.knowledge_missed` recognises
+that marker and the prose variants, and `_synthesize_knowledge` then answers
+from a crypto-scoped Perplexity web search with the gap stated in one line.
+In a multi-tool plan a missed knowledge card is dropped rather than
+synthesized with the others. Live, the question now returns the seed,
+Series A, Series B and token-purchase rounds with the investors named.

@@ -20,7 +20,7 @@ from app.routing import lexicon, subject_probe
 from app import event_calendar, token_unlocks, why_moving
 from app.clarify import is_clarification
 from app.market_providers import TRENDING_TOKENS
-from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available
+from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available, perplexity_web_search
 from app.provider_registry import get_provider_router
 from app.repeat_guard import guard_tools
 from app.token_resolve import bitquery_evm_lookup, clear_winner, token_candidates
@@ -1274,11 +1274,59 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
     }
 
 
+# The knowledge synthesis saying the passages do not answer the question --
+# the marker it is asked to use, or the prose it wrote before it had one
+# ("The provided passages do not include information about the specific
+# investors backing EigenLayer", 2026-09-18).
+_KB_MISS = re.compile(r"^\s*NOT COVERED\b|\b(?:passages|knowledge base|provided (?:passages|context|documents?))\b[^.\n]{0,80}\b(?:do(?:es)? not|don't|doesn't|lack|omit)\b[^.\n]{0,40}\b(?:include|mention|cover|contain|provide|specify)"
+                      r"|\bmissing from the (?:given |provided )?knowledge base\b|\bno (?:information|details?|mention) (?:about|on|of)\b[^.\n]{0,80}\bin the (?:provided |given )?passages", re.I)
+
+
+def knowledge_missed(answer: str) -> bool:
+    """True when the knowledge answer is really "the passages don't say"."""
+    head = "\n".join((answer or "").strip().splitlines()[:3])
+    return bool(_KB_MISS.search(head))
+
+
+async def _knowledge_from_the_web(request: str) -> str | None:
+    """The answer from the web when the knowledge base's passages are about
+    the project but not the question (its docs cover restaking, not who
+    funded it). Scoped to crypto so the search reads the name the way the
+    knowledge base did; None when web search is off or fails."""
+    if not perplexity_available():
+        return None
+    streaming.emit("status", text="Running perplexity web search")
+    try:
+        found = await asyncio.to_thread(
+            perplexity_web_search,
+            f"{request}\n\n(Crypto / Web3 context. Answer from primary sources -- the project's announcements, funding databases, "
+            f"official posts -- with dates and figures as stated; if sources disagree, show each.)",
+        )
+    except Exception:
+        logger.info("web fallback for a knowledge miss failed", exc_info=True)
+        return None
+    return found.strip() or None
+
+
 @trace(name="research", as_type="agent")
 async def _synthesize_knowledge(request: str, passages: str, history: str, *, stream: bool = True) -> str:
     """The cited answer over knowledge-base passages. Streamed to the client
     when it IS the answer; whole when it is one card of a composition (the
-    composite summary is what streams then)."""
+    composite summary is what streams then). When the passages turn out not
+    to answer the question, the web does (a knowledge miss is never the
+    answer the user reads)."""
+    answer = await _knowledge_answer(request, passages, history, stream=stream)
+    if not knowledge_missed(answer):
+        return answer
+    from_web = await _knowledge_from_the_web(request)
+    if not from_web:
+        return answer
+    if stream:
+        streaming.emit("card", markdown=from_web, tool="perplexity_web_search")
+    return f"{from_web}\n\n_The knowledge base's passages on this project do not cover this question; answered from the web._"
+
+
+async def _knowledge_answer(request: str, passages: str, history: str, *, stream: bool = True) -> str:
     try:
         if stream:
             streaming.emit("status", text="Reading the knowledge base")
@@ -1327,9 +1375,13 @@ async def _gather_planned(request: str, capabilities: tuple[str, ...], chains: t
     for result in results:
         card = result.output
         if result.tool == "knowledge_base_search":
-            card = await _synthesize_knowledge(request, result.output, state.get("history", ""), stream=False)
+            card = await _knowledge_answer(request, result.output, state.get("history", ""), stream=False)
+            if knowledge_missed(card):
+                continue          # passages about the project, not the question: not a card
             streaming.emit("card", markdown=card, tool=result.tool)
         parts.append((card, _provider_trajectory(result, request, "/".join(capabilities))))
+    if len(parts) < 2:
+        return None
     cards, trajectory = composition.combine(parts)
     answer = await composition.synthesize(request, cards, trajectory)
     return {"answer": answer, "trajectory": {"thought_0": f"The request spans {len(results)} tools; run together and read together.", **trajectory}}
