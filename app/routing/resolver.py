@@ -22,6 +22,7 @@ Legacy conversation text is never replayed to recover execution intent.
 import asyncio
 import json
 import logging
+import re
 import threading
 from collections import OrderedDict
 
@@ -86,6 +87,38 @@ def _speech_route(understanding: SpeechUnderstanding, method: str, chains: list[
                 else ["finance_data", "web_research"] if understanding.domain == "equity" else ["web_research"])
         return {"intent": "research", "capabilities": caps, "chains": chains, "route_source": method}
     return {"intent": "research", "capabilities": ["web_research"], "chains": chains, "route_source": method}
+
+
+# An asset named in an advice-shaped message: $TICKER, an all-caps ticker,
+# an address, or the word after buy/sell/long/short/into/on/about.
+_ADVICE_ASSET = re.compile(
+    r"\$[A-Za-z][A-Za-z0-9]{1,9}\b|(?-i:\b[A-Z][A-Z0-9]{1,9}\b)"
+    r"|\b(?:buy|sell|long|short|ape\s+into|into|hold|on|about|in)\s+(?:some\s+|more\s+|the\s+)?([a-z][a-z0-9]{1,9})\b",
+    re.I,
+)
+_ADVICE_STOP = {"the", "it", "this", "that", "crypto", "market", "markets", "now", "today", "here", "general", "stocks", "btc", "eth", "sol"}
+
+
+def _desk_wanted(update: dict, metadata: dict, request: str) -> bool:
+    """Whether the desk should take this turn on its own: an advice-shaped
+    crypto ask (the classifier's "advice") about a named asset, routed as
+    research or a trade simulation. Never a security check (the dossier is
+    the right answer), never a trade or a quick action, never when off."""
+    if not settings.team_desk_auto or update.get("route_source") == "quick_action":
+        return False
+    intent = update.get("intent")
+    caps = update.get("capabilities") or []
+    if not (intent == "research" or (intent == "portfolio" and "trade_simulation" in caps)):
+        return False
+    if metadata.get("speech_act") != "advice" or metadata.get("domain") not in (None, "crypto", "general"):
+        return False
+    if "token_security" in caps or lx.SECURITY.search(request or "") or "equity_research" in caps:
+        return False
+    for match in _ADVICE_ASSET.finditer(request or ""):
+        word = (match.group(1) or match.group(0)).lstrip("$").lower()
+        if word not in _ADVICE_STOP:
+            return True
+    return bool(lx.ADDRESS.search(request or ""))
 
 
 def _clarify_route(method: str) -> dict:
@@ -283,6 +316,14 @@ async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> d
     if team_mode and is_content and update.get("route_source") != "quick_action":
         update["team_subintent"] = "trade" if intent0 == "trade" else "analysis"
         update["intent"] = "team"
+    elif _desk_wanted(update, metadata, contextual):
+        # The desk on its own (user, 2026-09-18: "make it auto in the backend
+        # whenever required"): an opinion about an asset gets Market Research,
+        # a conviction and a risk read; a fact, a security check or a swap
+        # does not.
+        update["team_subintent"] = "analysis"
+        update["intent"] = "team"
+        metadata["team_auto"] = True
 
     # A portfolio ask that names an address is a read-only look at THAT
     # wallet: the address becomes the turn's wallet when none is connected,

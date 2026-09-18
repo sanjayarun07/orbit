@@ -49,7 +49,6 @@ body.home .jump-latest { display: none; }
 .composer-tools { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
 .composer-context { display: none; }
 .composer-plus { width: 30px; height: 30px; border-radius: 7px; border: 1px solid var(--border); }
-.team-toggle { margin-left: 0; font-size: 11px; }
 .policy-chip, .policy-chip.unset { border: 0; background: transparent; color: var(--muted); padding: 4px 6px; max-width: 200px; font-size: 11px; margin: 0; }
 .policy-chip:hover, .policy-chip.unset:hover { background: var(--surface-2); color: var(--text); }
 .policy-chip b { font-weight: 500; }

@@ -1100,3 +1100,52 @@ from a crypto-scoped Perplexity web search with the gap stated in one line.
 In a multi-tool plan a missed knowledge card is dropped rather than
 synthesized with the others. Live, the question now returns the seed,
 Series A, Series B and token-purchase rounds with the investors named.
+
+### The trading desk on its own; no switch in the page (2026-09-18)
+
+User decision: keep the desk, do not make it the default for everything,
+"make it auto in the backend whenever required", and "remove it from UI".
+`resolver._desk_wanted` sends a turn to the desk when the classifier calls
+it advice about a named asset ("should I buy BONK here?", "thoughts on
+$WIF") and it routed as research or a trade simulation. A factual lookup,
+a security check (the dossier answers), an equity question, a plain swap
+and a quick action never go on their own. `routing_decision.team_auto`
+marks such turns; the desk turn is still billed at `credit_cost_team_turn`.
+`TEAM_DESK_AUTO=false` turns it off. The session's `team_mode` (the chat
+phrase "enable team mode", the MCP tool) still forces the desk for every
+content turn. The composer's "In-depth" switch is gone; the page keeps a
+no-op `syncTeamMode` because answers and history still carry the field.
+
+### TradingView connect: discovery timeouts (2026-09-18)
+
+"TradingView could not be reached to start the connection" was a 10-second
+read timeout fetching the protected-resource document, which answered
+normally a minute later. Discovery now tries twice with a 20-second read
+timeout and names the document in its error, and the metadata is fetched
+at startup (`WARM_CACHES_ON_START`) so a click does not pay for it.
+
+### A ticker shared by several tokens is a question, not a pair dump (2026-09-18)
+
+"open token details and current price details" returned a DEX pair table
+mixing OpenLedger, an index token and "Open tokens" across four chains as
+if they were one token. Two causes: the named-token pattern did not read a
+lower-case name before "token details", so the resolver never engaged; and
+when the resolver finds namesakes but no verified or clearly dominant one,
+it left the raw ticker to the pair-search tool. Now a lower-case name
+before "token" plus a data noun is a ticker, and unsettled namesakes become
+a question listing each candidate with its chain, name and liquidity
+(mirror-chain listings excluded), remembered for the one-word follow-up.
+Also found: the equity rule anchored on any cashtag, so "thoughts on $WIF"
+was a stock question; a cashtag now anchors equity only for a known
+instrument or an exchange-prefixed symbol.
+
+### A pasted token-page link is the token (2026-09-18)
+
+A CoinMarketCap link to OpenLedger was answered with "I couldn't access the
+CoinMarketCap page" (the site blocks fetches). `app/token_pages.py` reads
+CoinMarketCap and CoinGecko slugs (CoinGecko's coin API, then its search
+when the slugs differ), DEX Screener, Birdeye and explorer links into a
+symbol, name, chain and contract; picks the chain where that contract has
+the most DEX liquidity; and the research node rewrites the turn into a
+token question about that contract, answered from our own tools, with one
+line saying how the link was read. News and docs links are still fetched.

@@ -11,6 +11,7 @@ import re
 from .contracts import CapabilityRoute, WorkflowIntent
 from .controls import is_charter_command, is_execution_explanation, is_team_command, is_trade_cancellation, is_trade_confirmation
 from .entities import extract_chains, has_evm_address, has_solana_address
+from .instruments import equity_instruments
 from . import lexicon as lx
 from .speech import has_competing_speech
 
@@ -103,8 +104,12 @@ def route_capabilities(request: str) -> CapabilityRoute | None:
 
     # Equity language is checked before execution verbs: "buy-rated NVDA" and
     # "recent stock move" are research, not orders.
+    # A cashtag alone is not a stock in a crypto copilot ("thoughts on $WIF"):
+    # it anchors equity only for a known instrument or an exchange-prefixed
+    # symbol (NSE:RELIANCE). Equity words anchor on their own.
     if lx.EQUITY.search(request) or (
         lx.EQUITY_TICKER.search(request)
+        and (equity_instruments(request) or lx.EXCHANGE_TICKER.search(request))
         and not re.search(r"\b(?:swap|buy|sell|exchange|bridge|trade|convert)\b", request, re.I)
     ):
         return _route("research", ("equity_research",), chains, reason="equity")

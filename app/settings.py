@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     # Related questions under an answer (app/followups.py): model-written,
     # kept only when grounded in the answer; off means the section never shows.
     followups_enabled: bool = True
+    # The trading desk (team mode) on its own for advice-shaped asks about an
+    # asset ("should I buy X", "thoughts on Y"); factual lookups, security
+    # checks and plain swaps stay on the single path. The session's team_mode
+    # (chat command / MCP) still forces the desk for everything.
+    team_desk_auto: bool = True
     # Fetch slow reference data (DefiLlama's emissions index) at startup.
     warm_caches_on_start: bool = True
     tradingview_mcp_url: str = "https://mcp.tradingview.com/mcp"

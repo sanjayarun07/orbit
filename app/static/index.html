@@ -21,9 +21,9 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <script>(function(){try{var p=JSON.parse(localStorage.getItem("orbit_theme_v1")||'"system"');var t=p==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):p;document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t;}catch(e){}})();</script>
 <link rel="stylesheet" href="/ui/theme.css?v=1">
-<link rel="stylesheet" href="/ui/chat.css?v=7">
-<link rel="stylesheet" href="/ui/product.css?v=6">
-<link rel="stylesheet" href="/ui/mobile.css?v=6">
+<link rel="stylesheet" href="/ui/chat.css?v=8">
+<link rel="stylesheet" href="/ui/product.css?v=7">
+<link rel="stylesheet" href="/ui/mobile.css?v=7">
 </head>
 <body>
 <div class="app">
@@ -89,7 +89,6 @@
         <div class="composer-tools">
           <button class="composer-plus" id="composerPlus" type="button" aria-label="Connect a wallet" title="Connect a wallet"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
           <span class="composer-context"><svg class="icon" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg><span>Live tools</span></span>
-          <label class="team-toggle" id="teamToggle" title="Adds research and risk perspectives. Takes longer and uses more credits."><input id="teamMode" type="checkbox" role="switch" aria-label="In-depth analysis" /><span class="team-track" aria-hidden="true"></span><span class="team-label">In-depth</span></label>
           <span class="pay-chip" id="payChip" hidden title=""><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 14h3"/></svg><span id="payChipText"></span></span>
           <button class="pay-chip credits-chip" id="creditsChip" type="button" hidden title="View your plan and credit balance."><b id="creditsCount">0</b>&nbsp;credits · <span id="creditsPlan">Trial</span></button>
           <button class="policy-chip" id="policyChip" type="button" hidden title=""><svg class="icon" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5l-8-3Z"/></svg><b>Trade preferences</b><span id="policyText"></span></button>
@@ -353,12 +352,10 @@ const sendBtn = $("#sendBtn");
 const jumpLatestBtn = $("#jumpLatest");
 const walletInput = $("#walletAddress");
 const chatListEl = $("#chatList");
-const teamToggle = $("#teamMode");
-// The switch is sent only when the user flipped it since the last turn; the
-// server's answer is authoritative (a chat phrase can also change the mode).
-let teamModePending = null;
-function syncTeamMode(on){teamToggle.checked=Boolean(on);teamModePending=null;$("#teamToggle").classList.toggle("on",teamToggle.checked);$("#teamToggle").classList.remove("pending");}
-teamToggle.addEventListener("change",()=>{teamModePending=teamToggle.checked;$("#teamToggle").classList.toggle("on",teamToggle.checked);$("#teamToggle").classList.add("pending");});
+// The trading desk has no switch here any more (2026-09-18): the backend
+// takes advice-shaped asks to the desk on its own; the chat phrase "enable
+// team mode" still forces it for a session. The answer carries team_mode.
+function syncTeamMode(on){}
 // The user's risk charter, as persisted by the server for this chat. Shown
 // whenever one is set so the rules the Risk agent enforces are always visible.
 // The risk charter as persisted by the server for this chat: the canonical
@@ -1284,7 +1281,7 @@ async function sendMessage(text,quickAction=null,extra={},retryTyping=null) {
   if (busy || !text.trim()) return;retireQuickActions();chatTurnEpoch++;retirePendingTradeCards();busy=true; sendBtn.disabled=true;
   const typing=retryTyping||(addUserMessage(text),addTyping());
   const requestSession=sessionId || undefined;
-  try { const payload={message:text,tz_offset_min:-new Date().getTimezoneOffset(),wallet_address:walletInput.value.trim() || null,session_id:requestSession,context_revision:(requestSession&&sessionRevision!=null)?sessionRevision:null,quick_action:quickAction,team_mode:teamModePending,...extra};let streamed=await streamChat(payload,typing);
+  try { const payload={message:text,tz_offset_min:-new Date().getTimezoneOffset(),wallet_address:walletInput.value.trim() || null,session_id:requestSession,context_revision:(requestSession&&sessionRevision!=null)?sessionRevision:null,quick_action:quickAction,...extra};let streamed=await streamChat(payload,typing);
     if(streamed?.interrupted){const recovered=requestSession?await recoverTurn(requestSession,text,streamed.view):null;
       if(recovered)streamed={ok:true,status:200,json:async()=>recovered};
       else throw new Error(requestSession?"the connection dropped and the answer did not arrive in time. Open this chat again to see it.":"the connection dropped. Open History to find the answer, then try again.");}

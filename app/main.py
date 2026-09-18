@@ -139,6 +139,7 @@ async def lifespan(_app: FastAPI):
     kb_warm = asyncio.create_task(_warm_knowledge())
     if settings.warm_caches_on_start:
         asyncio.create_task(asyncio.to_thread(token_unlocks.warm))
+        asyncio.create_task(tradingview.warm())
     kb_worker = asyncio.create_task(kb_ingest.worker())
     _workers.update({
         "reconciliation": reconciliation, "relay_reconciliation": relay_reconciliation,

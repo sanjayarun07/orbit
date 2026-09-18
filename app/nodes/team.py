@@ -16,7 +16,7 @@ from app.jupiter import WRAPPED_SOL_MINT
 from app import streaming
 from app.nodes.state import AgentState, effective_request as _effective_request
 from app.nodes import runtime
-from app.nodes.research import research_node, _TOKEN_ADDRESS
+from app.nodes.research import research_node, _TOKEN_ADDRESS, _MIRROR_CHAINS, _chain_key
 from app.token_resolve import clear_winner, token_candidates
 from app.nodes.trading import (
     trade_planner_node,
@@ -81,6 +81,10 @@ async def _resolve_research_asset(request: str, chains: tuple[str, ...] = ()) ->
         candidates = await asyncio.to_thread(token_candidates, ticker, chains)
     except Exception:
         candidates = []
+    # Mirror-chain listings (Robinhood's tokenized-stock chain, Hyperliquid)
+    # are not the token: live (2026-09-18) the desk wrote a WIF thesis on a
+    # Robinhood/Uniswap listing with $779M "liquidity" and $0.01M volume.
+    candidates = [c for c in candidates if _chain_key(c["chain"]) not in _MIRROR_CHAINS]
     winner = clear_winner(candidates)
     if winner is not None:
         return winner["address"], winner["chain"]

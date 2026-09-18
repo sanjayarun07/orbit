@@ -75,10 +75,20 @@ def redirect_uri() -> str:
 # ----------------------------------------------------------------------------
 
 async def _get_json(url: str) -> dict:
-    async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.get(url, headers={"Accept": "application/json"})
-        response.raise_for_status()
-        return response.json()
+    """One discovery document. TradingView's metadata endpoint answered a
+    click with a read timeout once (2026-09-18) and fine a minute later, so
+    a slow first answer gets a second try before the user sees an error."""
+    last: Exception | None = None
+    for attempt in (1, 2):
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0)) as client:
+                response = await client.get(url, headers={"Accept": "application/json"})
+                response.raise_for_status()
+                return response.json()
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            last = exc
+            logger.info("TradingView discovery %s attempt %d failed: %s", url, attempt, type(exc).__name__)
+    raise TradingViewError(f"TradingView's discovery document at {url} did not answer in time ({type(last).__name__}).") from last
 
 
 async def _post_json(url: str, payload: dict) -> dict:
@@ -120,6 +130,16 @@ async def metadata() -> dict:
             raise TradingViewError(f"TradingView's authorization server does not advertise {key}")
     _metadata = meta
     return meta
+
+
+async def warm() -> None:
+    """Fetch the authorization-server metadata ahead of the first click."""
+    if not enabled():
+        return
+    try:
+        await metadata()
+    except Exception:
+        logger.info("TradingView metadata warm-up skipped", exc_info=True)
 
 
 async def _load_client() -> dict | None:

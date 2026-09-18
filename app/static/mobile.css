@@ -7,7 +7,7 @@
 @media (pointer: coarse) {
   input, select, textarea, #messageInput, .composer textarea, .field input, .field select, .field textarea, .key-create input, .charter-grid textarea, .route-form input, .route-form select, .auth input, .ops-actions input, .ops-actions select, .lab-body textarea { font-size: 16px; }
   button, a, .chip, .nav-item, .tab, .chat-item, .prompt-card, [role="button"] { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
-  .chip, .pay-chip, .policy-chip, .credits-chip, .team-toggle, .explore-toggle, .history-view, .tab, .nav-item, .new-chat, .wallet-button, .account-button { min-height: 42px; }
+  .chip, .pay-chip, .policy-chip, .credits-chip, .explore-toggle, .history-view, .tab, .nav-item, .new-chat, .wallet-button, .account-button { min-height: 42px; }
   .composer-plus, .send, .msg-actions button, .chat-act, .icon-button, .mobile-menu, .close, .dialog-close, .chip-close { min-width: 42px; min-height: 42px; }
   .dialog-head .close { width: 42px; height: 42px; }
   .field input[type="checkbox"], input[type="checkbox"], input[type="radio"] { width: 22px; height: 22px; min-height: 0; }
@@ -65,7 +65,6 @@
   .policy-chip { margin-left: 0; max-width: none; flex: 0 1 auto; min-width: 0; padding: 0 8px; }
   .policy-chip b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .policy-chip #policyText { display: none; }
-  .team-toggle { padding: 0 10px; }
   .send { margin-left: auto; }
   .send, .composer-plus { width: 42px; height: 42px; }
   /* Dialogs become bottom sheets: full width, rounded top, footer buttons

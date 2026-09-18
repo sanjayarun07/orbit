@@ -138,6 +138,7 @@ WEB3_PEOPLE = re.compile(r"\b(?:search|find|lookup|research|who is)\b.{0,50}\b(?
 FINANCE = re.compile(r"\b(?:stock|stocks|share price|ticker|equity|earnings|revenue|market cap|p/?e|financials?|analyst rating|dividend|forex|commodit(?:y|ies)|bitcoin price|btc price|ethereum price|eth price)\b", re.I)
 EQUITY = re.compile(r"\b(?:equity research|stock market|stocks?|shares?|equities|earnings|dividend|analyst ratings?|price target|fundamental analysis|nse|bse|nifty|sensex|nasdaq|nyse|s&p\s*500|dow jones|us market|indian? market)\b", re.I)
 EQUITY_TICKER = re.compile(r"(?:\$[A-Z]{1,6}|\b(?:NSE|BSE|NASDAQ|NYSE):[A-Z0-9.-]{1,16})\b", re.I)
+EXCHANGE_TICKER = re.compile(r"\b(?:NSE|BSE|NASDAQ|NYSE):[A-Z0-9.-]{1,16}\b", re.I)
 DEFI = re.compile(r"\b(?:defi|tvl|total value locked|protocol tvl|chain tvl)\b", re.I)
 LISTING = re.compile(r"\b(?:listings?|listed|delistings?|delisted|exchange announcements?)\b", re.I)
 CONCEPTUAL = re.compile(r"^(?:hi|hello|hey|thanks|thank you|what can you do)[!?. ]*$", re.I)

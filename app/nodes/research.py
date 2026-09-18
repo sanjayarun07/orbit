@@ -17,7 +17,7 @@ from app.market_overview import crypto_market_overview
 from app import composition, streaming
 from app.integrations import tradingview
 from app.routing import lexicon, subject_probe
-from app import event_calendar, token_unlocks, why_moving
+from app import event_calendar, token_pages, token_unlocks, why_moving
 from app.clarify import is_clarification
 from app.market_providers import TRENDING_TOKENS
 from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available, perplexity_web_search
@@ -816,10 +816,15 @@ _NAMED_TOKEN = re.compile(
     r"|\b(?:is|was|been)\s+\$?([A-Za-z][A-Za-z0-9]{1,9})\s+audited\b"
     # "ANSEM token", "Solana ANSEM token": an upper-case symbol named as a token.
     r"|\b\$?((?-i:[A-Z][A-Z0-9]{1,9}))\s+(?:token|coin)\b"
+    # "open token details", "bonk token price": a lower-case name before
+    # "token" + a data noun (never "meme token" or "new token" alone).
+    r"|\b([a-z][a-z0-9]{1,9})\s+token\s+(?:details?|price|prices|info|information|overview|stats|data|address|contract|holders|chart|mcap|market\s*cap|supply|liquidity|volume)\b"
     r"|\$([A-Za-z][A-Za-z0-9]{1,9})\b",
     re.IGNORECASE,
 )
-_NAMED_STOP = {"THE", "A", "AN", "MY", "THIS", "THAT", "IT", "SOME", "TOP", "NEW", "MINT", "SPL", "USD", "TOKEN", "COIN", "AUDIT", "REPORT", "SOLANA", "SPL20", "ERC20"}
+_NAMED_STOP = {"THE", "A", "AN", "MY", "THIS", "THAT", "IT", "SOME", "TOP", "NEW", "MINT", "SPL", "USD", "TOKEN", "COIN", "AUDIT", "REPORT", "SOLANA", "SPL20", "ERC20",
+               "ANY", "YOUR", "MEME", "NATIVE", "UTILITY", "GOVERNANCE", "WRAPPED", "BASE", "ETHEREUM", "BSC", "BEST", "WHICH", "WHAT", "EACH", "EVERY", "OTHER", "SAME",
+               "OWN", "REAL", "FAKE", "ONE", "FIRST", "LATEST", "CURRENT", "GIVE", "SHOW", "GET", "FULL", "MORE", "ABOUT", "FOR", "WITH", "AND", "OF", "TO", "IN", "ON"}
 _SYMBOL_LIKE = re.compile(r"(?<![A-Za-z0-9$])\$?[A-Z][A-Z0-9]{1,9}(?![A-Za-z0-9])")
 _SYMBOL_STOP = {"I", "A", "OK", "ETF", "ETFS", "USD", "USDT", "USDC", "AI", "DEFI", "NFT", "NFTS", "DEX", "CEX", "TVL", "APY", "APR", "ATH", "ATL", "OI", "RSI", "MACD", "EMA", "SMA", "US", "UK", "EU", "SEC", "FED", "CPI", "L1", "L2"}
 
@@ -905,7 +910,9 @@ def _candidate_line(candidate: dict) -> str:
     mag = f", ~${liq/1_000_000:.1f}M {unit}" if liq >= 1_000_000 else (f", ~${liq/1_000:.0f}k {unit}" if liq >= 1_000 else "")
     traders = f" · {candidate['traders']} traders" if candidate.get("traders") else ""
     verified = " · Jupiter-verified" if candidate.get("verified") else ""
-    return f"{candidate['chain']} `{candidate['address']}`{mag}{traders}{verified}"
+    name = candidate.get("name")
+    named = f" ({name})" if name and name.upper() != str(candidate.get("symbol") or "").upper() else ""
+    return f"{candidate['chain']}{named} `{candidate['address']}`{mag}{traders}{verified}"
 
 
 # Derivative / mirror venues (perp DEXes, Robinhood's Solana mirror) are not the
@@ -1079,6 +1086,13 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
             candidate = await _canonical_on_chain(ticker, probed_chain)
             if candidate:
                 return _resolved(candidate)
+        # Several namesakes and nothing to pick one by (OPEN: OpenLedger,
+        # an index token, "Open tokens" on four chains, 2026-09-18): ask
+        # with the candidates, rather than let a pair search list them all
+        # as if they were one token.
+        namesakes = sorted(ds_candidates, key=lambda c: c.get("liquidity_usd") or 0, reverse=True)
+        if len({(c["chain"], c["address"]) for c in namesakes}) >= 2:
+            return _build_ask(request, ticker, namesakes, namesakes=True)
         return _TokenResolution(request)
     if len(entries) == 1:
         return _resolved(entries[0])
@@ -1113,12 +1127,13 @@ async def _probe_chain(request: str) -> str | None:
     return chain if chain and chain != "other" else None
 
 
-def _build_ask(request: str, ticker: str, candidates: list[dict]) -> _TokenResolution:
+def _build_ask(request: str, ticker: str, candidates: list[dict], namesakes: bool = False) -> _TokenResolution:
     top = candidates[:5]
     listing = "\n".join(f"- {ticker} on {_candidate_line(c)}" for c in top)
+    lead = (f"**{ticker}** is the ticker of several different tokens and none stands out, so I don't want to guess which one you mean:"
+            if namesakes else f"**{ticker}** exists on several chains with comparable liquidity, so I don't want to guess which one you mean:")
     clarification = (
-        f"**{ticker}** exists on several chains with comparable liquidity, so I don't want to "
-        f"guess which one you mean:\n\n{listing}\n\n"
+        f"{lead}\n\n{listing}\n\n"
         "Reply with the chain (e.g. `Base`), the position (`the second one`), or paste the exact "
         "contract address, and I'll pull the data for that token."
     )
@@ -1422,6 +1437,15 @@ def _market_scoped(request: str) -> str:
 async def research_node(state: AgentState) -> dict:
     sink: dict = {}
     request = _effective_request(state)
+    # A pasted token-page link (CoinMarketCap, CoinGecko, DEX Screener, an
+    # explorer) is the token, not a page to fetch: the turn becomes a token
+    # question about that contract and answers from our own data.
+    page = await asyncio.to_thread(token_pages.parse, request)
+    if page:
+        request = page.rewrite(request)
+        streaming.emit("status", text=f"Reading the link as {page.name or page.symbol or page.slug or 'a token'}")
+        state = {**state, "request": request, "contextual_request": None, "capabilities": ["market_data", "token_discovery"],
+                 "chains": [page.chain] if page.chain else list(state.get("chains") or [])}
     web_part = _web_context_part(state)
     if web_part:
         streaming.emit("card", markdown=web_part[0], tool=WEB_CONTEXT_TOOL)
@@ -1445,6 +1469,8 @@ async def research_node(state: AgentState) -> dict:
         result = {"answer": answer, "trajectory": trajectory or None, **extras}
     else:
         result = await _research_node(state, sink)
+    if page and result.get("answer"):
+        result = {**result, "answer": f"{page.note()}\n\n{result['answer']}"}
     if web_part and result.get("answer") and not result.get("pending_token") and not is_clarification(result.get("answer")):
         # Search first, then the tools, read together: the web's answer is the
         # first card unless the tools' turn was that same answer already. A
