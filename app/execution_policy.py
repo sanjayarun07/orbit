@@ -17,7 +17,7 @@ from app.experience import (advance_session_context, build_context_capsules, bui
     with_resolved_token, build_gas_advisory, build_intent_lock, build_trade_readiness)
 from app.graph import run_agent
 from app.identity import Identity, current_identity, service_identity
-from app import charts, followups
+from app import charts, followups, user_memory
 from app.integrations import tradingview
 from app.limits import acquire_chat_slot, allow_chat_request, allow_chat_request_from_ip, release_chat_slot
 from app.metrics import increment
@@ -179,6 +179,17 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         await _require_still_admitted(session_id, identity)
         messages, session_context = await get_session_snapshot(session_id)
         history = history_text_from_messages(messages)
+        # What Orbit remembers about a signed-in user from earlier chats, as
+        # context the general and research paths read (app/user_memory.py).
+        memory_user = identity.user["id"] if getattr(identity, "signed_in", False) and identity.user else None
+        if memory_user and user_memory.enabled():
+            try:
+                recalled = await asyncio.wait_for(user_memory.recall(memory_user, body.message), timeout=6)
+                history = user_memory.with_block(history, recalled)
+                if recalled:
+                    session_context = {**session_context, "user_memory": [f["fact"] for f in recalled]}
+            except Exception:
+                logger.warning("user memory recall skipped for %s", memory_user[:8], exc_info=True)
         current_revision = int(session_context.get("revision", 0))
         if body.context_revision is not None and body.context_revision != current_revision:
             raise ServiceError(
@@ -357,6 +368,9 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
                 return None
 
         chart, suggestions = await asyncio.gather(_chart(), followups.generate(body.message, answer, run.intent, plan))
+        if memory_user and user_memory.enabled() and plan is None:
+            # Off the turn's critical path: the answer is already written.
+            asyncio.create_task(user_memory.extract(memory_user, session_id, body.message, answer, run.intent))
         assistant_metadata = {
             "chart": chart,
             "routing_decision": getattr(run, "routing_decision", None),

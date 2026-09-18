@@ -904,9 +904,10 @@ class _TokenResolution:
     - no change: `request` unchanged, everything else falsy.
     """
 
-    __slots__ = ("request", "chain", "clarification", "pending")
+    __slots__ = ("request", "chain", "clarification", "pending", "note")
 
-    def __init__(self, request: str, chain: str | None = None, clarification: str | None = None, pending: dict | None = None):
+    def __init__(self, request: str, chain: str | None = None, clarification: str | None = None, pending: dict | None = None, note: str | None = None):
+        self.note = note              # one line the answer opens with when a pick among namesakes was made
         self.request = request
         self.chain = chain
         self.clarification = clarification
@@ -968,6 +969,18 @@ try:
     _EQUITY_SYMBOLS = {str(row.get("symbol") or "").lower() for row in _EQUITY_REGISTRY} | {a.lower() for row in _EQUITY_REGISTRY for a in (row.get("aliases") or [])}
 except Exception:            # the registry is a convenience, never a dependency
     _EQUITY_SYMBOLS = set()
+
+
+def _ds_namesakes(ticker: str, chain: str) -> list[dict]:
+    """Every real DEX Screener listing of a ticker on one chain, best liquidity
+    first: no stock mirrors, no decoy pools."""
+    key = _chain_key(chain)
+    try:
+        rows = token_candidates(ticker)
+    except Exception:
+        return []
+    rows = [c for c in rows if _chain_key(c["chain"]) == key and not _is_mirror(c) and not _decoy_pool(c)]
+    return sorted(rows, key=lambda c: -(c.get("liquidity_usd") or 0))
 
 
 def _decoy_pool(candidate: dict) -> bool:
@@ -1098,6 +1111,22 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
                     seen.add(dedupe_key)
                     resolved.append(candidate)
         if len(resolved) == 1:
+            # One chain named, but several tokens carry the ticker there and
+            # none stands out (ROBINHOOD on Robinhood Chain, 2026-09-18): ask
+            # with the namesakes, as OPEN does. A Bitquery pick (real traders)
+            # is trusted; only a DEX Screener pick is second-guessed.
+            if len(named_chains) == 1 and resolved[0].get("traders") is None:
+                namesakes = await asyncio.to_thread(_ds_namesakes, ticker, named_chains[0])
+                if len(namesakes) >= 2:
+                    winner = clear_winner(namesakes)
+                    if winner is None:
+                        return _build_ask(request, ticker, namesakes, namesakes=True)
+                    # A clear winner is still one of several: say which was read.
+                    picked = _resolved(winner)
+                    name = winner.get("name")
+                    picked.note = (f"_Read **{ticker}** as {name + ' ' if name and name.upper() != ticker else ''}`{winner['address']}` on {named_chains[0]}, "
+                                   f"the most liquid of {len(namesakes)} tokens with that ticker there; name another if you meant it._")
+                    return picked
             return _resolved(resolved[0])
         if resolved:
             # The user named several chains and the token lives on more than one
@@ -1543,9 +1572,40 @@ def _market_scoped(request: str) -> str:
     return subject_probe.market_scoped(request)
 
 
+# "what should I look at today?", "anything for my bags?": a question about
+# the user with no asset named. With remembered holdings it becomes a
+# question about those (2026-09-18); without, it falls through unchanged.
+_PERSONAL_ASK = re.compile(r"\b(?:what you know about me|based on (?:what you know|my)|my (?:bags?|holdings?|portfolio|tokens?|coins?|positions?)|for me\b|should i (?:look at|watch|check)|my watchlist)\b", re.I)
+
+
+def _remembered_holdings(state: AgentState) -> list[str]:
+    """Tickers named in the recalled 'Holds …' facts, in order, no duplicates."""
+    facts = (state.get("session_context") or {}).get("user_memory") or []
+    out: list[str] = []
+    for fact in facts:
+        if not re.match(r"\s*(?:holds?|holding|owns?|bought|trades?|long)\b", str(fact), re.I):
+            continue
+        for match in _SYMBOL_LIKE.finditer(str(fact)):
+            symbol = match.group(0).lstrip("$")
+            if symbol not in _SYMBOL_STOP and symbol not in out:
+                out.append(symbol)
+    return out[:4]
+
+
 async def research_node(state: AgentState) -> dict:
     sink: dict = {}
     request = _effective_request(state)
+    if _PERSONAL_ASK.search(request) and not _mentions_asset(request):
+        holdings = _remembered_holdings(state)
+        if holdings:
+            # One sentence per holding: the compound-ask path then makes one
+            # market card each and reads them together. "price of $X" is a
+            # phrasing the resolver knows; "market update" would have been the
+            # broad overview instead (live, 2026-09-18).
+            request = ". ".join(f"price and 24h change of ${symbol}" for symbol in holdings)
+            state = {**state, "request": request, "contextual_request": None,
+                     "capabilities": sorted(set(state.get("capabilities") or []) | {"market_data", "token_discovery"})}
+            streaming.emit("status", text=f"Reading your remembered holdings: {', '.join(holdings)}")
     # A pasted token-page link (CoinMarketCap, CoinGecko, DEX Screener, an
     # explorer) is the token, not a page to fetch: the turn becomes a token
     # question about that contract and answers from our own data.
@@ -1594,6 +1654,8 @@ async def research_node(state: AgentState) -> dict:
     result = await answer_gate.gate(state["request"], result)
     if page and result.get("answer"):
         result = {**result, "answer": f"{page.note()}\n\n{result['answer']}"}
+    if sink.get("resolution_note") and result.get("answer") and not is_clarification(result.get("answer")):
+        result = {**result, "answer": f"{sink['resolution_note']}\n\n{result['answer']}"}
     if sink.get("resolved_token") and not result.get("resolved_token"):
         result = {**result, "resolved_token": sink["resolved_token"]}
     return result
@@ -1727,6 +1789,8 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         # ("Base") resolves it next turn (see resolve_pending_token).
         return {"answer": resolution.clarification, "pending_token": resolution.pending}
     sink["resolved_token"] = _resolved_token_record(request, resolution)
+    if getattr(resolution, "note", None):
+        sink["resolution_note"] = resolution.note
     request = resolution.request
     if resolution.chain:
         # Thread the resolved chain to every downstream provider call so the

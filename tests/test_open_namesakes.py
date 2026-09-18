@@ -74,3 +74,36 @@ def test_only_tokenized_stocks_on_robinhood_chain_are_mirrors(candidate, mirror)
     """Robinhood Chain carries native memecoins as well as stock mirrors
     (user focus, 2026-09-18); the whole chain was being filtered."""
     assert research._is_mirror(candidate) is mirror
+
+
+def test_several_namesakes_on_the_named_chain_are_asked_about(monkeypatch):
+    """"ROBINHOOD token price on robinhood chain" silently picked one of several
+    ROBINHOOD tokens (live set case 21, 2026-09-18)."""
+    rows = [
+        {"chain": "robinhood", "symbol": "ROBINHOOD", "name": "Robinhood", "address": "0x500CeE0c4184faF3B3d0Cf8c0380B57B2dE44607", "liquidity_usd": 130_216.0, "volume_24h_usd": 41_000.0},
+        {"chain": "robinhood", "symbol": "ROBINHOOD", "name": "Robinhood", "address": "0x99A90B1218419c62A2Fa7E427284C6c7D058d47a", "liquidity_usd": 21_094.0, "volume_24h_usd": 3_000.0},
+        {"chain": "robinhood", "symbol": "ROBIN", "name": "Robinhood", "address": "0xCB4F9A33E1B7531f7f9B2c767c39Ed2550382E03", "liquidity_usd": 20_277.0, "volume_24h_usd": 2_500.0},
+    ]
+    monkeypatch.setattr(research, "token_candidates", lambda ticker: rows)
+    monkeypatch.setattr(research, "bitquery_evm_lookup", lambda ticker, chain: ([], True))
+
+    async def canonical(ticker, chain, strict=False):
+        return dict(rows[0])          # a DEX Screener pick: no traders count
+
+    monkeypatch.setattr(research, "_canonical_on_chain", canonical)
+    out = asyncio.run(research._resolve_named_token("ROBINHOOD token price on robinhood chain", {"market_data", "token_discovery"}))
+    # 130K vs 21K is a clear winner by the liquidity rule: it resolves, and SAYS which one it read.
+    assert not out.clarification and out.chain == "robinhood" and "0x500CeE0c4184faF3B3d0Cf8c0380B57B2dE44607" in out.request
+    assert out.note and "most liquid of 3 tokens with that ticker" in out.note and "0x500CeE0c4184faF3B3d0Cf8c0380B57B2dE44607" in out.note
+
+    # comparable liquidity: no winner, so the namesakes become the question
+    close = [dict(rows[0], liquidity_usd=130_216.0), dict(rows[1], liquidity_usd=120_000.0), rows[2]]
+    monkeypatch.setattr(research, "token_candidates", lambda ticker: close)
+    out = asyncio.run(research._resolve_named_token("ROBINHOOD token price on robinhood chain", {"market_data", "token_discovery"}))
+    assert out.clarification and "several different tokens" in out.clarification and "0x99A90B12" in out.clarification
+
+    async def bitquery_pick(ticker, chain, strict=False):
+        return dict(rows[0], traders=812)
+    monkeypatch.setattr(research, "_canonical_on_chain", bitquery_pick)
+    out = asyncio.run(research._resolve_named_token("ROBINHOOD token price on robinhood chain", {"market_data"}))
+    assert not out.clarification and out.chain == "robinhood", "a Bitquery pick with real traders is trusted"

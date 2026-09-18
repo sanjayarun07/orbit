@@ -1407,3 +1407,29 @@ whale intercept asks only when nothing names an asset. The answer judge is
 told that "top holders" means a ranked list of wallets and an aggregate is
 missing. And "wallets holding <mint>" is a token question, never a
 portfolio lookup on the mint, whatever wallet words it contains.
+
+### Cross-conversation memory (2026-09-18)
+
+Built in-house rather than adopting mem0 (`app/user_memory.py`). After a
+signed-in research, general or portfolio turn, the primary model is asked
+for the few durable facts the turn revealed about the user: holdings,
+chains and venues used, preferences, aversions, goals, experience. Each
+fact is one third-person sentence; secrets and full addresses are refused
+by the parser whatever the model returns; a fact within cosine 0.88 of an
+existing one refreshes it instead of duplicating; a user holds at most 200.
+Before a turn, the five facts nearest the message are recalled (embedding
+similarity, recent facts filling in) into the conversation history as a
+"what Orbit knows about this user" block, which explicitly says it is
+context and never a trade permission. Trade turns are neither mined nor
+gated by it; the risk charter remains the only enforced source of truth.
+Extraction runs after the answer is written, off the critical path,
+bounded to ten seconds. Storage is the `user_memories` table (JSON
+embeddings compared in Python, so pgvector stays optional), cascading on
+account deletion, with the in-memory store for tests and no-Postgres runs.
+Settings > Data & privacy lists every fact with its kind and date, deletes
+one or clears all; `/me/export` includes them; `USER_MEMORY_ENABLED=false`
+turns the feature off.
+
+Also today: a ticker on a named chain with several real namesakes resolves
+to the clear liquidity winner and the answer opens by saying which one was
+read; with no clear winner it asks, listing them.

@@ -101,3 +101,12 @@ def test_the_desk_asks_exactly_when_the_resolver_would(monkeypatch):
     monkeypatch.setattr(team, "_resolve_named_token", ambiguous)
     out = asyncio.run(team.team_node({"request": "Thoughts on MON?", "team_subintent": "analysis", "chains": [], "session_context": {}}))
     assert out["answer"].startswith("**MON** exists on several chains") and out["pending_token"]["symbol"] == "MON" and out["intent"] == "research"
+
+
+def test_a_question_about_me_names_no_asset_for_the_desk():
+    """"given what you know about me, what should I look at today?" went to
+    the desk because "about me" parsed as an asset called "me"."""
+    from app.routing import resolver as _resolver
+    update = {"intent": "research", "capabilities": ["web_research"], "route_source": "speech_model"}
+    assert not _resolver._desk_wanted(update, {"speech_act": "advice", "domain": "crypto"}, "given what you know about me, what should I look at today?")
+    assert not _resolver._desk_wanted(update, {"speech_act": "advice", "domain": "crypto"}, "what should I buy today?")

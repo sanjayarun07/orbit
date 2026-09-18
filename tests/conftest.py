@@ -14,8 +14,11 @@ def _reset_account_stores(monkeypatch):
     async def no_pool():
         return None
 
-    for module in (accounts, credits, api_keys, billing, tasks):
+    from app import user_memory as _user_memory
+
+    for module in (accounts, credits, api_keys, billing, tasks, _user_memory):
         monkeypatch.setattr(module, "get_pg_pool", no_pool)
+    _user_memory.reset_for_test()
     from app.integrations import tradingview as _tradingview
 
     monkeypatch.setattr(_tradingview, "get_pg_pool", no_pool)
@@ -42,6 +45,8 @@ def _reset_account_stores(monkeypatch):
 
     monkeypatch.setattr(_settings, "followups_enabled", False)
     monkeypatch.setattr(_settings, "answer_gate_enabled", False)
+    # Cross-chat memory extracts with the model and embeds; tests opt in.
+    monkeypatch.setattr(_settings, "user_memory_enabled", False)
     # The listing registry asks CoinGecko which coin a ticker is; the suite
     # answers "none listed" unless a test says otherwise.
     from app import symbol_registry as _symbols

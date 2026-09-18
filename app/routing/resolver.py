@@ -96,7 +96,8 @@ _ADVICE_ASSET = re.compile(
     r"|\b(?:buy|sell|long|short|ape\s+into|into|hold|on|about|in)\s+(?:some\s+|more\s+|the\s+)?([a-z][a-z0-9]{1,9})\b",
     re.I,
 )
-_ADVICE_STOP = {"the", "it", "this", "that", "crypto", "market", "markets", "now", "today", "here", "general", "stocks", "btc", "eth", "sol"}
+_ADVICE_STOP = {"the", "it", "this", "that", "crypto", "market", "markets", "now", "today", "here", "general", "stocks", "btc", "eth", "sol",
+                "me", "you", "my", "your", "what", "which", "them", "these", "those", "something", "anything", "everything", "all", "tokens", "coins"}
 
 
 def _desk_wanted(update: dict, metadata: dict, request: str) -> bool:

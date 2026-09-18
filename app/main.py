@@ -85,7 +85,7 @@ from app.plans import get_plan
 from app.provider_registry import get_provider_router, save_provider_overrides
 from app.db import get_pg_pool, get_redis
 from app.settings import settings
-from app import token_unlocks
+from app import token_unlocks, user_memory
 from app.portfolio import build_portfolio_snapshot
 from app.wallet_insights import portfolio_scenario, wallet_health
 from app.wallet_auth import (
@@ -1356,7 +1356,26 @@ async def export_my_data(identity: Identity = Depends(require_browser_session)):
         "api_keys": await api_keys.list_for_user(user["id"]),
         "credits": {"balance": await credits.balance(identity.account_id), "ledger": await credits.history(identity.account_id, limit=1000)},
         "conversations": conversations,
+        "memory": await user_memory.list_facts(user["id"]),
     }
+
+
+@app.get("/me/memory")
+async def my_memory(identity: Identity = Depends(require_browser_session)):
+    """Every fact Orbit remembers about the signed-in user, with its source."""
+    return {"facts": await user_memory.list_facts(identity.user["id"]), "enabled": user_memory.enabled()}
+
+
+@app.delete("/me/memory/{fact_id}")
+async def forget_memory(fact_id: str, identity: Identity = Depends(require_browser_session)):
+    if not await user_memory.forget(identity.user["id"], fact_id):
+        raise HTTPException(status_code=404, detail="No such memory")
+    return {"status": "forgotten", "id": fact_id}
+
+
+@app.delete("/me/memory")
+async def clear_memory(identity: Identity = Depends(require_browser_session)):
+    return {"status": "cleared", "count": await user_memory.clear(identity.user["id"])}
 
 
 @app.get("/me/conversations")

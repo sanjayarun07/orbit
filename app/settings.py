@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     # Related questions under an answer (app/followups.py): model-written,
     # kept only when grounded in the answer; off means the section never shows.
     followups_enabled: bool = True
+    # Cross-conversation memory (app/user_memory.py): durable facts about a
+    # signed-in user, extracted after a turn and recalled before the next.
+    user_memory_enabled: bool = True
     # Every research answer is checked against the question before it is
     # returned (app/answer_gate.py); a wrong-subject or empty answer is
     # replaced by the web's answer or a question. Costs a model call per turn.

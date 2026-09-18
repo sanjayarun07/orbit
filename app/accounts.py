@@ -712,6 +712,12 @@ async def delete_user(user_id: str) -> None:
         await pool.execute("DELETE FROM team_members WHERE owner_id = $1 OR user_id = $1", user_id)
         await pool.execute("DELETE FROM users WHERE id = $1", user_id)
         return
+    try:
+        from app import user_memory as _user_memory
+
+        await _user_memory.clear(user_id)
+    except Exception:
+        logger.warning("user memory not cleared for %s", user_id, exc_info=True)
     user = _users.pop(user_id, None)
     if user:
         _users_by_email.pop(user["email"], None)
