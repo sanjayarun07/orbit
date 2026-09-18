@@ -42,6 +42,21 @@ def _reset_account_stores(monkeypatch):
 
     monkeypatch.setattr(_settings, "followups_enabled", False)
     monkeypatch.setattr(_settings, "answer_gate_enabled", False)
+    # The listing registry asks CoinGecko which coin a ticker is; the suite
+    # answers "none listed" unless a test says otherwise.
+    from app import symbol_registry as _symbols
+
+    _symbols.reset()
+    monkeypatch.setattr(_symbols, "listed", lambda symbol: [])
+
+    # Outcome-scored tools (app/tool_outcomes.py) learn per-tool success rates
+    # that shift the router's ranking. They are module state, so one test's
+    # failed provider call silently reordered a later test's expected ranking
+    # (tests/test_session_focus_resolution.py passed alone, failed in a run).
+    from app import tool_outcomes as _outcomes
+
+    with _outcomes._lock:
+        _outcomes._counts.clear()
     monkeypatch.setattr(_settings, "warm_caches_on_start", False)
     monkeypatch.setattr(_tradingview, "get_redis", no_redis)
     # The subject probe looks a name up on the web when the router is unsure;

@@ -163,9 +163,9 @@ def test_a_web_card_is_never_merged_onto_a_clarifying_answer(monkeypatch):
 
 def test_a_web_question_about_a_ticker_like_name_is_scoped_to_markets():
     scoped = research._market_scoped("What is OPEN?")
-    assert scoped.startswith("What is OPEN?") and 'Read "OPEN" as a token, protocol, company or ticker' in scoped
-    assert 'Read "M" as a token' in research._market_scoped("Is M safe?")
-    assert 'Read "ARC" as' in research._market_scoped("Research ARC")
+    assert scoped.startswith("What is OPEN?") and 'Read "OPEN" and any other ticker-like name in the question first as a crypto token' in scoped
+    assert research._market_scoped("Is M safe?") == "Is M safe?", "a one-letter name has no subject to scope; it is asked about instead"
+    assert 'Read "ARC" and any other ticker-like name' in research._market_scoped("Research ARC")
     assert research._market_scoped("what is the best way to bridge to base") == "what is the best way to bridge to base"
 
 
@@ -224,3 +224,76 @@ def test_a_clarifying_answer_grows_no_related_questions(monkeypatch):
                "- business model and sector\n- revenue, profitability, and growth\n\n_This is general information, not financial advice._")
     assert not followups.eligible("research", compare, None)
     assert not followups.eligible("research", "What does “M” refer to—an app, medication, person, product, place, or drug?\n\n" + "If you mean M Safe, it is not universally safe. " * 8, None)
+
+
+# --- the gated re-run (reports/uncertain-live-20-gated): regressions it found ------
+
+@pytest.mark.parametrize("text,tickers", [("SUI next cliff", ["SUI"]), ("Tell me about ONDO's next unlock", ["ONDO"]), ("JUP upcoming unlock", ["JUP"])])
+def test_next_cliff_and_possessive_unlock_phrasings_name_the_token(text, tickers):
+    assert research._named_tickers(text) == tickers
+
+
+def test_an_unlock_ask_that_names_a_bare_symbol_is_not_asked_back(monkeypatch):
+    seen = {}
+
+    async def resolve(request, capabilities, user_chains=()):
+        seen["request"] = request
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(research, "_resolve_named_token", resolve)
+    with pytest.raises(RuntimeError):
+        asyncio.run(research._research_node({"request": "SUI next cliff", "capabilities": ["market_data"], "chains": [], "session_context": {}}, {}))
+    assert seen["request"] == "SUI next cliff"
+
+
+def test_a_comparison_never_goes_to_the_desk_on_its_own():
+    from app.routing import resolver as _resolver
+    update = {"intent": "research", "capabilities": ["web_research"], "route_source": "speech_model"}
+    assert not _resolver._desk_wanted(update, {"speech_act": "advice", "domain": "crypto"}, "Compare OPEN and MOVE")
+    assert not _resolver._desk_wanted(update, {"speech_act": "advice", "domain": "crypto"}, "BONK vs WIF which is better")
+    assert _resolver._desk_wanted(update, {"speech_act": "advice", "domain": "crypto"}, "thoughts on WIF")
+
+
+def test_the_market_scoping_is_crypto_first_and_a_one_letter_name_asks():
+    scoped = research._market_scoped("Tell me about MOVE")
+    assert "crypto-first" in scoped and "never as a dictionary word, a medicine" in scoped
+    assert research._market_scoped("Is M safe?") == "Is M safe?" or 'Read "M"' in research._market_scoped("Is M safe?")
+
+
+def test_only_the_web_tools_get_the_market_scoped_question(monkeypatch):
+    """Live: "Compare OPEN and MOVE" ran two Perplexity searches with the bare
+    text and answered about two Nasdaq stocks. A web search now receives the
+    scoped question; a data tool keyed on a symbol never does."""
+    assert research._tool_request("perplexity_web_search", "Compare OPEN and MOVE", True).startswith("Compare OPEN and MOVE\n\n(Context:")
+    assert research._tool_request("perplexity_finance_search", "Compare OPEN and MOVE", True).startswith("Compare OPEN and MOVE\n\n(Context:")
+    assert research._tool_request("dexscreener_pair_search", "Compare OPEN and MOVE", True) == "Compare OPEN and MOVE"
+    assert research._tool_request("perplexity_web_search", "Compare OPEN and MOVE", False) == "Compare OPEN and MOVE"
+
+    seen = {}
+
+    async def no_token(request, capabilities, user_chains=()):
+        return research._TokenResolution(request)
+
+    class Router:
+        def matched_capabilities(self, request, chains):
+            return set()
+
+        def plan_across(self, request, capabilities, chains):
+            return []
+
+        def _ranked_union(self, request, capabilities, chains, _):
+            return [SimpleNamespace(name="perplexity_web_search")]
+
+        def try_route_across(self, request, capabilities, chains):
+            seen["request"] = request
+            return SimpleNamespace(tool="perplexity_web_search", output="scoped answer", failures=[], attempted=["perplexity_web_search"])
+
+    monkeypatch.setattr(research, "_resolve_named_token", no_token)
+    monkeypatch.setattr(research, "get_provider_router", lambda: Router())
+    monkeypatch.setattr(research, "_router_eligible_capabilities", lambda request, caps, chains: ("web_research", "market_data"))
+    out = asyncio.run(research._research_node({"request": "Compare OPEN and MOVE", "capabilities": ["web_research"], "chains": [], "session_context": {}}, {}))
+    assert out["answer"] == "scoped answer" and seen["request"].startswith("Compare OPEN and MOVE\n\n(Context: this is a question to a crypto-first markets assistant.")
+    assert research._market_scoped(seen["request"]) == seen["request"], "scoping is applied once"
+
+    out = asyncio.run(research._research_node({"request": "Is M safe?", "capabilities": ["web_research"], "chains": [], "session_context": {}}, {}))
+    assert out["answer"].startswith("Which token is **M**?")

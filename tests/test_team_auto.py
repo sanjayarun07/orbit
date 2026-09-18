@@ -86,3 +86,16 @@ def test_the_desk_never_researches_a_mirror_chain_listing(monkeypatch):
         {"chain": "solana", "symbol": "WIF", "address": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm", "liquidity_usd": 20_000_000.0, "volume_24h_usd": 90_000_000.0},
     ])
     assert asyncio.run(team._resolve_research_asset("thoughts on $WIF")) == ("EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm", "solana")
+
+
+def test_the_desk_asks_exactly_when_the_resolver_would(monkeypatch):
+    """"Thoughts on MON?" used to be a 5/10 thesis on whichever MON the desk
+    found; the research resolver's ambiguity question now comes first."""
+    from app.nodes import research, team
+
+    async def ambiguous(request, capabilities, user_chains=()):
+        return research._TokenResolution(request, clarification="**MON** exists on several chains; which one do you mean?", pending={"symbol": "MON", "candidates": []})
+
+    monkeypatch.setattr(team, "_resolve_named_token", ambiguous)
+    out = asyncio.run(team.team_node({"request": "Thoughts on MON?", "team_subintent": "analysis", "chains": [], "session_context": {}}))
+    assert out["answer"].startswith("**MON** exists on several chains") and out["pending_token"]["symbol"] == "MON" and out["intent"] == "research"

@@ -118,3 +118,29 @@ def test_the_research_node_runs_the_gate_last(monkeypatch):
     monkeypatch.setattr(answer_gate, "gate", gate)
     out = asyncio.run(research.research_node({"request": "What's happening with FARTCOIN?", "capabilities": ["web_research"], "chains": [], "session_context": {}}))
     assert out["answer"] == "gated for What's happening with FARTCOIN?"
+
+
+def test_asks_is_trusted_only_for_a_real_question(monkeypatch):
+    """Live: "What is OPEN?" came back as the English word and the judge
+    labelled it "asks"; a non-question judged "asks" is a wrong subject."""
+    _judge(monkeypatch, ("asks", "meaning of OPEN", ""), ("answers", "OpenLedger (OPEN)", ""))
+
+    async def web(question):
+        return "OpenLedger (OPEN) is a BNB Chain token for AI data attribution; market cap about $30M; 1B supply."
+
+    monkeypatch.setattr(answer_gate, "_web_answer", web)
+    out = asyncio.run(answer_gate.gate("What is OPEN?", {"answer": "OPEN most commonly means open in English: not closed, unlocked, available. " * 3, "trajectory": {}}))
+    assert out["answer"].startswith("OpenLedger (OPEN)") and out["answer_gate"]["resolved_by"] == "web"
+
+
+def test_the_gates_own_web_search_is_market_scoped(monkeypatch):
+    """Live: "Compare OPEN and MOVE" passed the gate's fallback unscoped and
+    came back as two Nasdaq stocks."""
+    from app.routing import subject_probe
+
+    _judge(monkeypatch, ("wrong_subject", "two Nasdaq stocks", "the OPEN and MOVE tokens"), ("answers", "OPEN and MOVE tokens", ""))
+    asked = []
+    monkeypatch.setattr(subject_probe, "context_search", lambda q: asked.append(q) or "OPEN is OpenLedger's BNB Chain token; MOVE is Movement Network's token.")
+    out = asyncio.run(answer_gate.gate("Compare OPEN and MOVE", {"answer": "Opendoor Technologies trades at $2.59 " * 8, "trajectory": {}}))
+    assert asked and asked[0].startswith("Compare OPEN and MOVE\n\n(Context: this is a question to a crypto-first markets assistant.")
+    assert out["answer"].startswith("OPEN is OpenLedger's BNB Chain token")

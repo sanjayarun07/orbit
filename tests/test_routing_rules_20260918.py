@@ -102,7 +102,7 @@ def _stub_downstream(monkeypatch, seen):
     monkeypatch.setattr(research_mod, "direct_mcp_request", lambda request, token_subject=False: None)
     monkeypatch.setattr(research_mod, "is_crypto_trends_query", lambda request: False)
 
-    async def gathered(request, capabilities, chains, state):
+    async def gathered(request, capabilities, chains, state, scope_web=False):
         seen["gathered"] = (request, tuple(capabilities), tuple(chains))
         return {"answer": "# Token security dossier", "trajectory": {"tool_name_0": "solana_token_security"}}
 

@@ -42,6 +42,11 @@ class AnswerCheck(dspy.Signature):
     for (price, holders, unlock dates, investors, safety, news ...)? An
     answer that says the data or passages do not include it, or that gives
     other facts about the right subject, fails.
+    Orbit is a crypto-and-markets assistant: when the user's word has a
+    token, protocol, company or market reading, an answer whose main subject
+    is something else (a medicine, a civic organisation, a planet, a
+    dictionary sense) fails (1) even if it mentions the market reading
+    in passing.
     verdict: "answers" when both pass; "wrong_subject" when (1) fails;
     "missing" when only (2) fails; "asks" when the answer is itself a
     question to the user. Be strict about the subject and lenient about
@@ -98,7 +103,9 @@ async def _web_answer(question: str) -> str | None:
     from app.routing import subject_probe
 
     try:
-        found = await asyncio.to_thread(subject_probe.context_search, question)
+        # Scoped the way the research node scopes a web tool: the gate's
+        # fallback answered "Compare OPEN and MOVE" with two Nasdaq stocks.
+        found = await asyncio.to_thread(subject_probe.context_search, subject_probe.market_scoped(question))
     except Exception:
         logger.info("web answer for the gate failed", exc_info=True)
         return None
@@ -120,6 +127,10 @@ async def gate(question: str, result: dict) -> dict:
     if not eligible(answer, result):
         return result
     verdict = await check(question, answer)
+    if verdict["verdict"] == "asks" and not is_clarification(answer):
+        # The judge called a dictionary entry a question (live: "What is
+        # OPEN?"); an answer that does not ask the user is judged on subject.
+        verdict = {**verdict, "verdict": "wrong_subject"}
     if verdict["verdict"] in ("answers", "asks"):
         return result
     logger.info("answer gate: %s (subject=%r missing=%r) for %r", verdict["verdict"], verdict["subject"], verdict["missing"], question[:80])

@@ -114,6 +114,8 @@ def _desk_wanted(update: dict, metadata: dict, request: str) -> bool:
         return False
     if "token_security" in caps or lx.SECURITY.search(request or "") or "equity_research" in caps:
         return False
+    if re.search(r"\b(?:compare|comparison|vs\.?|versus)\b", request or "", re.I):
+        return False          # two subjects: the single path asks or compares; the desk has one asset
     for match in _ADVICE_ASSET.finditer(request or ""):
         word = (match.group(1) or match.group(0)).lstrip("$").lower()
         if word not in _ADVICE_STOP:

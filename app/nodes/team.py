@@ -16,7 +16,8 @@ from app.jupiter import WRAPPED_SOL_MINT
 from app import streaming
 from app.nodes.state import AgentState, effective_request as _effective_request
 from app.nodes import runtime
-from app.nodes.research import research_node, _TOKEN_ADDRESS, _MIRROR_CHAINS, _chain_key
+from app.nodes.research import research_node, _TOKEN_ADDRESS, _MIRROR_CHAINS, _chain_key, _resolve_named_token, _mentions_asset, _named_tickers, _SYMBOL_LIKE, _SYMBOL_STOP
+from app import answer_gate
 from app.token_resolve import clear_winner, token_candidates
 from app.nodes.trading import (
     trade_planner_node,
@@ -250,6 +251,16 @@ async def team_node(state: AgentState) -> dict:
     request = _effective_request(state)
     subintent = state.get("team_subintent") or "analysis"
 
+    # The desk asks exactly when the research resolver would ("Thoughts on
+    # MON?": MON on Solana and Monad): one resolver, one ambiguity rule.
+    if subintent != "trade" and _mentions_asset(request) and not _TOKEN_ADDRESS.search(request):
+        symbols = _named_tickers(request) or [m.group(0).lstrip("$") for m in _SYMBOL_LIKE.finditer(request) if m.group(0).lstrip("$") not in _SYMBOL_STOP]
+        try:
+            resolution = await _resolve_named_token(f"price of {symbols[-1]}" if symbols else request, {"market_data", "token_discovery"}, tuple(state.get("chains", [])))
+        except Exception:
+            resolution = None
+        if resolution is not None and resolution.clarification:
+            return {"intent": "research", "answer": resolution.clarification, "pending_token": resolution.pending}
     thesis, conviction, research_trajectory, pending_token = await _market_research(state, request)
     if pending_token is not None:
         # The desk can't research an ambiguous cross-chain symbol without knowing
@@ -283,6 +294,14 @@ async def team_node(state: AgentState) -> dict:
         logger.warning("team: coordinator synthesis failed; returning thesis", exc_info=True)
         answer = thesis
 
+    if subintent != "trade":
+        # A desk analysis ships only when it answers the question (the same
+        # gate as the single path): a 1/10 "insufficient data" thesis is not
+        # an answer.
+        gated = await answer_gate.gate(request, {"answer": answer, "trajectory": {"market_research": research_trajectory} if research_trajectory else None})
+        answer = gated.get("answer") or answer
+        if gated.get("answer_gate"):
+            research_trajectory = gated.get("trajectory")
     team_report = {
         "market_research": thesis,
         "conviction": conviction,

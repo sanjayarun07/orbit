@@ -17,7 +17,7 @@ from app.market_overview import crypto_market_overview
 from app import composition, streaming
 from app.integrations import tradingview
 from app.routing import lexicon, subject_probe
-from app import answer_gate, event_calendar, token_pages, token_unlocks, why_moving
+from app import answer_gate, event_calendar, symbol_registry, token_pages, token_unlocks, why_moving
 from app.clarify import is_clarification
 from app.market_providers import TRENDING_TOKENS
 from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available, perplexity_web_search
@@ -810,7 +810,7 @@ _NAMED_TOKEN = re.compile(
     # "audit report on ANSEM", "security check for BONK", "due diligence on WIF".
     r"|\b(?:audit(?:s|ed|ing)?(?:\s+reports?)?|security\s+(?:report|check|audit|review)|due[\s-]*diligence)\s+(?:on|of|for)\s+(?:the\s+)?(?:\$([A-Za-z][A-Za-z0-9]{1,9})|((?-i:[A-Z][A-Z0-9]{1,9})))\b"
     # "next ARB unlock", "JUP vesting", "unlock schedule for OPEN", "OPEN emissions".
-    r"|\b\$?((?-i:[A-Z][A-Z0-9]{1,9}))\s+(?:token\s+)?(?:unlocks?|unlocking|vesting|emissions?|cliff)\b"
+    r"|\b\$?((?-i:[A-Z][A-Z0-9]{1,9}))(?:'s)?\s+(?:token\s+)?(?:next\s+|upcoming\s+)?(?:unlocks?|unlocking|vesting|emissions?|cliff)\b"
     r"|\b(?:unlocks?|vesting|emissions?|cliff)\s+(?:schedule\s+)?(?:for|of)\s+(?:the\s+)?\$?([A-Za-z][A-Za-z0-9]{1,9})\b"
     # "is BONK audited", "was WIF audited".
     r"|\b(?:is|was|been)\s+\$?([A-Za-z][A-Za-z0-9]{1,9})\s+audited\b"
@@ -912,6 +912,8 @@ def _candidate_line(candidate: dict) -> str:
     verified = " · Jupiter-verified" if candidate.get("verified") else ""
     name = candidate.get("name")
     named = f" ({name})" if name and name.upper() != str(candidate.get("symbol") or "").upper() else ""
+    if not candidate.get("address"):
+        return f"{candidate['chain']}{named}"
     return f"{candidate['chain']}{named} `{candidate['address']}`{mag}{traders}{verified}"
 
 
@@ -1072,11 +1074,18 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
             entries.append(candidate)
 
     if not entries:
-        # No verified Solana token and no real EVM activity -- best effort for a
-        # non-verified Solana-only token (e.g. a brand-new memecoin) via the DEX
-        # Screener Solana pick; then a web look-up of the name (user rule,
-        # 2026-09-18: look it up before guessing or asking) for the chain to
-        # resolve on; otherwise leave it for the router.
+        # No verified Solana token and no real EVM activity. First the listing
+        # the market uses (user, 2026-09-18: "OPEN token should take only
+        # crypto assets"): CoinGecko's ranked coins with this symbol. One clear
+        # leader (OpenLedger, 673 vs 1,963) is the token; two close ones
+        # (Monad 144, MON Protocol 1,360 -> ask) become the question, never
+        # the pool dust DEX Screener lists under the same letters.
+        listing = await _listed_resolution(request, ticker)
+        if listing is not None:
+            return listing
+        # Then best effort for a non-verified Solana-only token (a brand-new
+        # memecoin) via the DEX Screener Solana pick; then a web look-up of the
+        # name for the chain to resolve on; otherwise leave it for the router.
         sol = [c for c in ds_candidates if _chain_key(c["chain"]) == "solana"]
         winner = clear_winner(sol)
         if winner:
@@ -1112,6 +1121,31 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
             if _chain_key(entry["chain"]) == _chain_key(probed_chain):
                 return _resolved(entry)
     return _build_ask(request, ticker, entries)
+
+
+async def _listed_resolution(request: str, ticker: str) -> "_TokenResolution | None":
+    """The resolution CoinGecko's listing gives for a ticker: the clear leader
+    resolved to its contract, or a question naming the ranked coins; None
+    when nothing with a market-cap rank carries the symbol (then DEX Screener
+    and the web decide as before)."""
+    try:
+        listed = await asyncio.to_thread(symbol_registry.listed, ticker)
+    except Exception:
+        return None
+    ranked = [r for r in listed if r.get("rank")]
+    if not ranked:
+        return None
+    lead = symbol_registry.leader(listed)
+    if lead:
+        where = await asyncio.to_thread(symbol_registry.contract, lead["id"])
+        if where:
+            return _TokenResolution(f"{request} {where[1]} on {where[0]}", chain=where[0])
+    candidates = []
+    for row in ranked[:3]:
+        where = await asyncio.to_thread(symbol_registry.contract, row["id"])
+        candidates.append({"chain": where[0] if where else "a chain the tools do not cover", "address": where[1] if where else "",
+                           "symbol": ticker, "name": f"{row['name']}, CoinGecko rank {row['rank']}", "liquidity_usd": 0.0})
+    return _build_ask(request, ticker, candidates, namesakes=True)
 
 
 async def _probe_chain(request: str) -> str | None:
@@ -1360,7 +1394,7 @@ async def _knowledge_answer(request: str, passages: str, history: str, *, stream
     return answer
 
 
-async def _gather_planned(request: str, capabilities: tuple[str, ...], chains: tuple[str, ...], state: AgentState) -> dict | None:
+async def _gather_planned(request: str, capabilities: tuple[str, ...], chains: tuple[str, ...], state: AgentState, scope_web: bool = False) -> dict | None:
     """Run the router's multi-tool plan when it has more than one tool;
     None when a single tool is the plan (the ordinary route decides) or
     fewer than two tools produced usable output."""
@@ -1375,7 +1409,7 @@ async def _gather_planned(request: str, capabilities: tuple[str, ...], chains: t
 
     async def one(tool):
         try:
-            result = await asyncio.to_thread(router.invoke, tool.name, request, chains)
+            result = await asyncio.to_thread(router.invoke, tool.name, _tool_request(tool.name, request, scope_web), chains)
         except Exception:
             logger.warning("planned tool %s failed", tool.name, exc_info=True)
             return None
@@ -1422,16 +1456,21 @@ def _calendar_ask(request: str) -> bool:
         and not subject_probe.subject_of(request)
 
 
+# Tools that answer from the open web: these read the question as prose, so a
+# ticker-like name reaches them scoped to markets. Every other tool keys off
+# an address or a symbol and must get the request verbatim.
+_WEB_TOOLS = {"perplexity_web_search", "perplexity_finance_search", "openai_web_search", "crypto_market_brief", "exchange_listing_announcements"}
+
+
+def _tool_request(tool_name: str, request: str, scope_web: bool) -> str:
+    """What this tool is asked: the market-scoped question for a web search,
+    the request itself for everything else."""
+    return _market_scoped(request) if scope_web and tool_name in _WEB_TOOLS else request
+
+
 def _market_scoped(request: str) -> str:
-    """The web question for a research turn whose subject is a ticker-like
-    name the tools did not resolve ("What is OPEN?", "Research ARC", "Is M
-    safe?"): scoped to markets so the search does not answer with the
-    dictionary, a research institute or a medicine."""
-    subject = subject_probe.subject_of(request) or next(iter(re.findall(r"(?<![A-Za-z])\$?([A-Z])(?![A-Za-z])", request)), None)
-    if not subject:
-        return request
-    return (f"{request}\n\n(Context: this is a crypto and financial-markets question. Read \"{subject}\" as a token, protocol, "
-            f"company or ticker; if several exist, name each with its chain or exchange; if none exists, say so.)")
+    """The question as a web search should read it (app/routing/subject_probe)."""
+    return subject_probe.market_scoped(request)
 
 
 async def research_node(state: AgentState) -> dict:
@@ -1560,7 +1599,7 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     # "what about the unlock next month?" with no token named: the token in
     # the conversation's focus, or a question -- never the market calendar's
     # first unlock (live 2026-09-18: it answered with SUI nobody asked about).
-    if token_unlocks.UNLOCK_ASK.search(request) and not _TOKEN_ADDRESS.search(request) and not _named_tickers(request):
+    if token_unlocks.UNLOCK_ASK.search(request) and not _mentions_asset(request):
         focus = _focus_token(state)
         if focus and focus.get("symbol"):
             request = f"{focus['symbol']} {request} {focus['address']}" + (f" on {focus['chain']}" if focus.get("chain") else "")
@@ -1745,6 +1784,17 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         if cap in _BACKSTOP_CAPABILITIES and cap in tool_matched and cap not in eligible_capabilities
     )
     eligible_capabilities = eligible_capabilities + backstop
+    # A one-letter name ("is M safe?") matches many tokens: ask, never search.
+    if not resolution.chain and not address_match and not subject_probe.subject_of(request):
+        single = re.search(r"(?<![A-Za-z0-9$])\$?([A-Z])(?![A-Za-z0-9])", request)
+        if single:
+            return {"answer": (f"Which token is **{single.group(1)}**? A one-letter ticker matches many tokens. Name it with its full name, "
+                               "a $ticker or its contract address and the chain, and I'll pull the data."), "trajectory": None}
+    # A ticker-like name no data tool resolved: the WEB tools get the question
+    # scoped to markets, the data tools get it verbatim (live 2026-09-18:
+    # "What is OPEN?" reached Perplexity as written and came back as the
+    # English word; "Compare OPEN and MOVE" as two Nasdaq stocks).
+    scope_web = bool(not resolution.chain and not address_match and subject_probe.subject_of(request))
     has_gainers_request = (
         bool(chains) and chains[0] in _GAINERS_SUPPORTED_CHAINS
         and bool(_GAINERS_LOSERS_REQUEST.search(state["request"]))
@@ -1793,12 +1843,19 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         # (a security dossier AND the market overview for "is BONK safe");
         # they run together and are read together. One tool when one is
         # enough. Every invocation charges the per-turn budget as before.
-        gathered = await _gather_planned(request, eligible_capabilities, chains, state)
+        gathered = await _gather_planned(request, eligible_capabilities, chains, state, scope_web)
         if gathered is not None:
             return gathered
+        single_request = request
+        if scope_web:
+            try:
+                ranked = get_provider_router()._ranked_union(request, eligible_capabilities, chains, None)
+                single_request = _tool_request(ranked[0].name, request, True) if ranked else request
+            except Exception:
+                logger.debug("could not peek the ranked tool for scoping", exc_info=True)
         result = await asyncio.to_thread(
             get_provider_router().try_route_across,
-            request,
+            single_request,
             eligible_capabilities,
             chains,
         )
@@ -1824,6 +1881,17 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         # No tool claims the question and the web already answered it: that
         # answer, grounded and cited, rather than a second search for the same.
         return {"answer": web_part[0], "trajectory": web_part[1]}
+    if not resolution.chain and not eligible_capabilities and subject_probe.subject_of(request) and perplexity_available():
+        # A ticker-like name with no tool to answer it: one web search, scoped
+        # to markets, sent as written -- not an agent loop that may drop the
+        # scope (live: "Tell me about MOVE" came back as a Philadelphia group).
+        streaming.emit("status", text="Running perplexity web search")
+        try:
+            observation = await asyncio.to_thread(perplexity_web_search, _market_scoped(request))
+            return {"answer": observation, "trajectory": {"thought_0": "A ticker-like name with no data tool: the web, scoped to markets.",
+                                                          "tool_name_0": "perplexity_web_search", "tool_args_0": {"query": _market_scoped(request)}, "observation_0": observation}}
+        except Exception:
+            logger.info("scoped web search failed; agent fallback", exc_info=True)
     streaming.emit("status", text="Researching with the live tools")
     web_request = request if resolution.chain else _market_scoped(request)
     result = await runtime.answer(

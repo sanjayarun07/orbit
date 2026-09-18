@@ -119,6 +119,22 @@ def context_search(request: str) -> str | None:
     return result
 
 
+def market_scoped(request: str) -> str:
+    """A question naming a ticker-like word, rewritten for a web search so it
+    is read as a markets question. Live 2026-09-18: "What is OPEN?" came back
+    as the English word, "Compare OPEN and MOVE" as two Nasdaq stocks. Idempotent."""
+    marker = "(Context: this is a question to a crypto-first markets assistant."
+    if marker in request:
+        return request
+    subject = subject_of(request)
+    if not subject:
+        return request
+    return (f"{request}\n\n{marker} Read \"{subject}\" and any other ticker-like name in the question first as a crypto "
+            f"token or protocol -- name each such token with its chain -- and then as a stock or company if one shares the "
+            f"name; never as a dictionary word, a medicine, a civic organisation or a planet. If no token or company "
+            f"exists, say so.)")
+
+
 def context_card(request: str, context: str) -> str:
     """The context search as an evidence card the research node can read with
     the tools' cards."""
