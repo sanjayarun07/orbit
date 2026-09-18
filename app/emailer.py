@@ -38,6 +38,13 @@ async def send_email(to: str, subject: str, html: str, text: str | None = None) 
         if response.status_code >= 400:
             logger.warning("email send failed: %s %s", response.status_code, response.text[:200])
             return False
+        # The provider's id is what its dashboard shows delivery events under;
+        # without it an "accepted but never arrived" report cannot be traced.
+        try:
+            message_id = response.json().get("id")
+        except Exception:
+            message_id = None
+        logger.info("email accepted by provider: id=%s subject=%r to=%s", message_id, subject, to)
         return True
     except httpx.HTTPError:
         logger.warning("email send failed", exc_info=True)

@@ -223,3 +223,26 @@ def test_member_leaving_and_owner_downgrade_dissolve_the_link(fake_agent):
     asyncio.run(accounts.update_user(owner_me["user"]["id"], plan_id="pro"))
     assert member.get("/me").json()["plan"]["id"] == "free"
     assert MAX.seats == 5
+
+
+def test_an_accepted_email_is_logged_with_the_providers_id(monkeypatch, caplog):
+    """A sign-in email that Resend accepted but that never arrived (2026-09-18)
+    could not be traced: nothing recorded the provider's message id."""
+    import asyncio
+    import logging
+    from types import SimpleNamespace
+    from app import emailer
+    from app.settings import settings
+
+    monkeypatch.setattr(settings, "resend_api_key", "re_test")
+
+    class Client:
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, json=None, headers=None): return SimpleNamespace(status_code=200, text="", json=lambda: {"id": "em_123"})
+
+    monkeypatch.setattr(emailer.httpx, "AsyncClient", Client)
+    with caplog.at_level(logging.INFO, logger="app.emailer"):
+        assert asyncio.run(emailer.send_email("a@b.co", "Sign in", "<p>x</p>")) is True
+    assert any("id=em_123" in r.getMessage() and "to=a@b.co" in r.getMessage() for r in caplog.records)
