@@ -16,6 +16,7 @@ from app.market_brief import crypto_market_brief
 from app.market_overview import crypto_market_overview
 from app import composition, streaming
 from app.integrations import tradingview
+from app.routing import lexicon
 from app import event_calendar, why_moving
 from app.market_providers import TRENDING_TOKENS
 from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available
@@ -805,10 +806,16 @@ _NAMED_TOKEN = re.compile(
     # "if BONK is safe to ape into", "BONK is a scam?" -- the ticker precedes the
     # copula; upper-case only so "it is safe" / "this is legit" never bind.
     r"|\b\$?((?-i:[A-Z][A-Z0-9]{1,9}))\s+is\s+(?:a\s+)?(?:safe|rug|honeypot|scam|legit)\b"
+    # "audit report on ANSEM", "security check for BONK", "due diligence on WIF".
+    r"|\b(?:audit(?:s|ed|ing)?(?:\s+reports?)?|security\s+(?:report|check|audit|review)|due[\s-]*diligence)\s+(?:on|of|for)\s+(?:the\s+)?(?:\$([A-Za-z][A-Za-z0-9]{1,9})|((?-i:[A-Z][A-Z0-9]{1,9})))\b"
+    # "is BONK audited", "was WIF audited".
+    r"|\b(?:is|was|been)\s+\$?([A-Za-z][A-Za-z0-9]{1,9})\s+audited\b"
+    # "ANSEM token", "Solana ANSEM token": an upper-case symbol named as a token.
+    r"|\b\$?((?-i:[A-Z][A-Z0-9]{1,9}))\s+(?:token|coin)\b"
     r"|\$([A-Za-z][A-Za-z0-9]{1,9})\b",
     re.IGNORECASE,
 )
-_NAMED_STOP = {"THE", "A", "AN", "MY", "THIS", "THAT", "IT", "SOME", "TOP", "NEW", "MINT", "SPL", "USD"}
+_NAMED_STOP = {"THE", "A", "AN", "MY", "THIS", "THAT", "IT", "SOME", "TOP", "NEW", "MINT", "SPL", "USD", "TOKEN", "COIN", "AUDIT", "REPORT", "SOLANA", "SPL20", "ERC20"}
 _SYMBOL_LIKE = re.compile(r"(?<![A-Za-z0-9$])\$?[A-Z][A-Z0-9]{1,9}(?![A-Za-z0-9])")
 _SYMBOL_STOP = {"I", "A", "OK", "ETF", "ETFS", "USD", "USDT", "USDC", "AI", "DEFI", "NFT", "NFTS", "DEX", "CEX", "TVL", "APY", "APR", "ATH", "ATL", "OI", "RSI", "MACD", "EMA", "SMA", "US", "UK", "EU", "SEC", "FED", "CPI", "L1", "L2"}
 
@@ -823,7 +830,7 @@ def _mentions_asset(request: str) -> bool:
 
 
 _WHALE_ASK = re.compile(r"\b(?:whales?|whale\s+activity|smart\s+money|large\s+(?:buys|transfers|holders))\b", re.IGNORECASE)
-_SECURITY_ASK = re.compile(r"\b(?:safe|safety|security|rug|honeypot|scam|legit|audit)\b", re.IGNORECASE)
+_SECURITY_ASK = lexicon.SECURITY          # the one security vocabulary (app/routing/lexicon.py)
 
 
 def _resolved_token_record(original_request: str, resolution: "_TokenResolution") -> dict | None:
@@ -866,6 +873,15 @@ def _chain_key(chain: str) -> str:
     wording compare equal (bsc<->bnb, and case)."""
     key = chain.strip().lower()
     return {"bsc": "bnb"}.get(key, key)
+
+
+def _focus_token(state: AgentState) -> dict | None:
+    """The token the conversation is about (the last token capsule), as
+    {symbol, address, chain}, or None."""
+    focus = (state.get("session_context") or {}).get("focus")
+    if not isinstance(focus, dict) or focus.get("kind") != "token" or not focus.get("address"):
+        return None
+    return {"symbol": focus.get("label"), "address": focus["address"], "chain": focus.get("chain")}
 
 
 def _named_tickers(request: str) -> list[str]:
@@ -1403,11 +1419,20 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     # rug") cannot be answered by guessing a token; the tools need a contract
     # and a chain. Asked, not guessed.
     if "token_security" in set(state.get("capabilities", [])) and not _TOKEN_ADDRESS.search(request) and not _named_tickers(request):
-        return {
-            "answer": ("Which token should I check? Paste its contract address (or mint) and the chain it is on, "
-                       "or name the token with a $ticker, and I'll run the security checks."),
-            "trajectory": None,
-        }
+        # "is it audited?" / "audit report?" right after a token turn: the
+        # token in the conversation's focus is the subject (2026-09-18: the
+        # question was asked back although ANSEM had just been resolved).
+        focus = _focus_token(state)
+        if focus and focus.get("address"):
+            request = f"{request} {focus['address']}" + (f" on {focus['chain']}" if focus.get("chain") else "")
+            if focus.get("chain"):
+                state = {**state, "chains": [focus["chain"]]}
+        else:
+            return {
+                "answer": ("Which token should I check? Paste its contract address (or mint) and the chain it is on, "
+                           "or name the token with a $ticker, and I'll run the security checks."),
+                "trajectory": None,
+            }
     resolution = await _resolve_named_token(
         request, set(state.get("capabilities", [])), tuple(state.get("chains", []))
     )

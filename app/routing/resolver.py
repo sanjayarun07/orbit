@@ -37,6 +37,7 @@ from .model import speech_classifier
 from .semantic import SpeechUnderstanding, embedding_router
 from .speech import has_competing_speech, is_parameter_fragment
 from .trade_parser import extract_cross_chain_draft
+from . import subject_probe
 
 # Rule reasons anchored by a hard signal rather than topic keywords. Execution
 # intents (trade / cross_chain_swap, any reason except semantic_required) are
@@ -173,10 +174,18 @@ async def _model_first(request: str, candidate: CapabilityRoute | None, call_lm,
     uncertain = understanding.speech_act == "abstain" or understanding.confidence < settings.intent_model_confidence_threshold
     if uncertain:
         # An uncertain model never decides. A strong rule may; the embedding
-        # tier is not consulted as a second fuzzy opinion.
+        # tier is not consulted as a second fuzzy opinion. Failing both, the
+        # subject of the message is looked up on the web first (user rule,
+        # 2026-09-18: "if we are not sure what the query is, start with a web
+        # search to get the context, then follow") and the answer routes it.
         if _strong_rule(candidate):
             return route_fields(candidate, source), {**meta, "method": "rules", "reason": f"model_uncertain:{hint}"}
-        return _clarify_route("speech_model"), {**meta, "reason": "model_uncertain"}
+        found = await asyncio.to_thread(subject_probe.probe, request)
+        probed = subject_probe.route_from(found, request) if found else None
+        if probed:
+            return probed, {**meta, "method": "subject_probe", "reason": f"probe:{found.get('kind')}", "subject": found.get("subject"),
+                            "probe_confidence": found.get("confidence")}
+        return _clarify_route("speech_model"), {**meta, "reason": "model_uncertain" + (f":probe_{found.get('kind')}" if found else "")}
     if understanding.speech_act == "quote":
         return _quote_route(understanding, request, "speech_model"), meta
     chains = list(candidate.chains) if candidate is not None else list(extract_chains(request))

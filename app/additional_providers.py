@@ -10,6 +10,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import re
 
+from app.routing import lexicon
+
 from app.routing.entities import extract_chains
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -44,7 +46,7 @@ _GOLDRUSH_CHAINS = {
 # GoldRush chains that support the balances_v2 endpoint on a non-EVM
 # (base58) address -- today just Solana. Transactions stays EVM-only.
 _GOLDRUSH_NON_EVM_CHAINS = {"solana"}
-_SECURITY = re.compile(r"\b(?:safe(?:ty)?|secur(?:e|ity)|risky?|rugs?(?:\s?pulls?)?|scams?|honey\s?pots?|sellab\w*|un?sellable|audits?)\b|\bcan\s+(?:i|you|we|one|anyone)\s+(?:even\s+|still\s+|actually\s+)?sell\b", re.I)
+_SECURITY = lexicon.SECURITY          # the one security vocabulary (app/routing/lexicon.py)
 _WALLET_ACTIVITY = re.compile(r"\b(?:wallet|transactions?|activity|history|transfers?)\b", re.I)
 # CoinGecko's curated "ecosystem" category per chain -- the closest free,
 # keyless proxy for "tokens native to/associated with this chain" their

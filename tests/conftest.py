@@ -37,6 +37,13 @@ def _reset_account_stores(monkeypatch):
 
     monkeypatch.setattr(limits, "get_redis", no_redis)
     monkeypatch.setattr(_tradingview, "get_redis", no_redis)
+    # The subject probe looks a name up on the web when the router is unsure;
+    # the suite never reaches Perplexity for that. Tests of the probe itself
+    # switch it on and stub the search.
+    from app.routing import subject_probe as _subject_probe
+
+    monkeypatch.setattr(_subject_probe, "perplexity_available", lambda: False)
+    _subject_probe.reset()
     # The /auth/ rate limit is per IP and lives in Redis when configured; every
     # test signs in from the same client IP, so it must not carry across tests.
     from app import main

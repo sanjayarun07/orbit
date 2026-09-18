@@ -969,3 +969,35 @@ memecoins rather than the majors that always lead a mention count. The
 narratives tool is `not_for` social, so it no longer claims these asks;
 `x_kol_sentiment` still takes the one-token form ("what is CT saying about
 BONK"). Eval cases social-trending-memes and social-trending-ct.
+
+## Routing: one vocabulary, a gate, and a look-up before a guess (2026-09-18)
+
+Why (user: "I don't want this to happen again and again"): the same class of
+miss kept recurring. "Audit report on ANSEM" went to web search and came back
+with French public-sector audit reports; "Audit report on ANSEM TOKEN" asked
+"Which token should I check?" although ANSEM had just been resolved; "is it
+audited?" reached the router and lost the security tool. Three causes, three
+mechanisms:
+
+- **One vocabulary.** Six hand-kept copies of the security words (the
+  Layer-1 rule, the research intercept, two tool matchers, the catalog's
+  dimension pattern) had drifted; "audited" was known to some and not to
+  others. Every layer now reads `lexicon.SECURITY_WORDS`. Never add a word to
+  one layer: add it there and add a phrasing to the gate.
+- **A gate in the suite.** `tests/test_routing_gate.py` runs the whole
+  router-mode eval (`scripts/routing_eval/cases.json`) on every commit with
+  zero misses allowed, and checks sixteen security phrasings against every
+  layer, the Solana security tool's own matcher and the multi-tool plan.
+  A misroute is now a failing test, not a transcript.
+- **A look-up before a guess.** When the classifier is unsure and no rule
+  anchors the turn, `app/routing/subject_probe.py` asks the finance web
+  search what the message's subject is (one strict-JSON call, cached an hour)
+  and routes on the answer: a token becomes token research on its chain
+  (the request is rewritten "…(GIGA token on solana)"), a stock equity
+  research, a protocol a knowledge question, a person or company web
+  research. Only when nothing settles it does the turn ask the user back.
+  Live: "what about GIGA" and "PUMP" route as Solana tokens, "Reliance
+  results" as an NSE equity.
+
+Also: a security follow-up with no token named ("is it audited?") takes the
+token in the conversation's focus instead of asking.

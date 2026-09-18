@@ -62,3 +62,73 @@ def test_off_topic_passages_are_not_an_answer(monkeypatch):
     lombard = SimpleNamespace(entity=SimpleNamespace(canonical_name="Lombard LBTC", symbol="LBTC", entity_type="protocol"), confidence=0.9)
     monkeypatch.setattr(kb, "_run", lambda coro: (coro.close() or (hits, SimpleNamespace(entities=[lombard], graph_expanded=[]))))
     assert "Bitcoin Earn carries smart-contract risk" in kb.knowledge_base_search("what are the risks of Lombard Bitcoin Earn")
+
+
+# --- transcript of 2026-09-18: "Audit report on ANSEM" ------------------------------
+# Four turns about one token: the audit ask went to web search (French public-
+# sector audit reports); "Audit report on ANSEM TOKEN" answered "Which token
+# should I check?" although ANSEM had just been resolved and was in focus.
+
+@pytest.mark.parametrize("text,ticker", [
+    ("Audit report on ANSEM", "ANSEM"), ("Audit report on ANSEM TOKEN", "ANSEM"), ("Solana ANSEM token", "ANSEM"),
+    ("ANSEM token on solana", "ANSEM"), ("is BONK audited", "BONK"), ("security check for WIF", "WIF"), ("due diligence on JUP", "JUP"),
+])
+def test_audit_and_token_phrasings_name_their_ticker(text, ticker):
+    assert research_mod._named_tickers(text) == [ticker]
+
+
+def test_generic_token_words_are_not_tickers():
+    assert research_mod._named_tickers("what is the ERC20 token standard") == []
+    assert research_mod._named_tickers("audit report on the company") == []
+
+
+@pytest.mark.parametrize("text", ["Audit report on ANSEM", "is BONK audited", "security check for WIF", "is it audited?"])
+def test_an_audit_ask_is_a_token_security_rule(text):
+    from app.routing import intent_router
+    route = intent_router.route_capabilities(text)
+    assert route is not None and "token_security" in route.capabilities, text
+
+
+def _security_state(request, **extra):
+    return {"request": request, "capabilities": ["token_security", "token_discovery"], "chains": [], "history": "", "session_context": {}, **extra}
+
+
+def _stub_downstream(monkeypatch, seen):
+    async def resolve(request, capabilities, user_chains=()):
+        seen["resolve"] = request
+        return SimpleNamespace(clarification=None, pending=None, request=request + " 9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump on solana" if "9cRCn9" not in request else request, chain="solana")
+
+    monkeypatch.setattr(research_mod, "_resolve_named_token", resolve)
+    monkeypatch.setattr(research_mod, "direct_mcp_request", lambda request, token_subject=False: None)
+    monkeypatch.setattr(research_mod, "is_crypto_trends_query", lambda request: False)
+
+    async def gathered(request, capabilities, chains, state):
+        seen["gathered"] = (request, tuple(capabilities), tuple(chains))
+        return {"answer": "# Token security dossier", "trajectory": {"tool_name_0": "solana_token_security"}}
+
+    monkeypatch.setattr(research_mod, "_gather_planned", gathered)
+    monkeypatch.setattr(research_mod, "get_provider_router", lambda: SimpleNamespace(matched_capabilities=lambda *a: (), try_route_across=lambda *a, **k: None, plan_across=lambda *a, **k: []))
+
+
+def test_an_audit_ask_that_names_the_token_runs_the_security_check_instead_of_asking(monkeypatch):
+    seen = {}
+    _stub_downstream(monkeypatch, seen)
+    out = asyncio.run(research_mod.research_node(_security_state("Audit report on ANSEM TOKEN")))
+    assert out["answer"].startswith("# Token security dossier"), out["answer"]
+    assert seen["resolve"] == "Audit report on ANSEM TOKEN" and "token_security" in seen["gathered"][1]
+
+
+def test_a_security_follow_up_uses_the_token_in_focus(monkeypatch):
+    seen = {}
+    _stub_downstream(monkeypatch, seen)
+    focus = {"kind": "token", "label": "ANSEM", "address": "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump", "chain": "solana"}
+    out = asyncio.run(research_mod.research_node(_security_state("is it audited?", session_context={"focus": focus})))
+    assert out["answer"].startswith("# Token security dossier")
+    assert "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump" in seen["gathered"][0] and seen["gathered"][2] == ("solana",)
+
+
+def test_with_no_token_named_and_nothing_in_focus_the_question_is_still_asked(monkeypatch):
+    seen = {}
+    _stub_downstream(monkeypatch, seen)
+    out = asyncio.run(research_mod.research_node(_security_state("is it audited?")))
+    assert "Which token should I check" in out["answer"] and "gathered" not in seen

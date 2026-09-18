@@ -354,6 +354,35 @@
     "notes": "structured 10-dimension token deep-dive lens (research_node intercept)"
   },
   {
+    "id": "audit-report-symbol",
+    "query": "Audit report on ANSEM",
+    "expected_tools": [
+      "solana_token_security"
+    ],
+    "forbidden_tools": [
+      "perplexity_web_search",
+      "openai_web_search",
+      "jupiter"
+    ],
+    "expected_intent": "research",
+    "router": false,
+    "notes": "an audit ask names a token: contract security, not a web search (2026-09-18 transcript: French public-sector audit reports)"
+  },
+  {
+    "id": "audit-report-symbol-token",
+    "query": "Audit report on ANSEM TOKEN",
+    "expected_tools": [
+      "solana_token_security"
+    ],
+    "forbidden_tools": [
+      "perplexity_web_search",
+      "jupiter"
+    ],
+    "expected_intent": "research",
+    "router": false,
+    "notes": "same ask; used to answer 'Which token should I check?'"
+  },
+  {
     "id": "risks-of-buying-bonk",
     "query": "What are the risks of buying BONK?",
     "expected_tools": [
@@ -1324,4 +1353,4 @@
     "router": false,
     "notes": "market-wide advice with no asset: composed from movers, volume, sentiment and news, read together; never a quote (2026-09-17)"
   }
-]\n
+]

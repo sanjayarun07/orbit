@@ -68,7 +68,18 @@ PERP_POSITIONS = re.compile(
 WALLET_OWNER = re.compile(r"\b(?:wallet|portfolio|balances?|pnl|transactions?|counterparties)\b", re.I)
 ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}|(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])")
 TOKEN = re.compile(r"\b(?:tokens?|coins?|mints?|contracts?|memecoins?|meme\s+coins?|holders?|liquidity)\b", re.I)
-SECURITY = re.compile(r"\b(?:safe(?:ty)?|secur(?:e|ity)|risky?|rugs?(?:\s?pulls?)?|scams?|honey\s?pots?|sellab\w*|audits?)\b", re.I)
+# THE security vocabulary. Every layer that recognises a token-security ask --
+# the Layer-1 rule, the research node's intercept, the tool matchers and the
+# catalog's "security" dimension -- reads this one pattern. Six hand-kept
+# copies drifted apart (2026-09-18: "audited" was known to some and not to
+# others, so a follow-up reached the router and lost the security tool).
+SECURITY_WORDS = (
+    r"\b(?:safe(?:ty)?|secur(?:e|ity)|risky?|risks?|rugs?(?:\s?pulls?)?|rug(?:ged|ging)|scams?|scammy|honey\s?pots?|"
+    r"legit|sellab\w*|(?:un)?sellable|audit(?:s|ed|ing)?|freez(?:e|able|es)|blacklist(?:ed)?|mint(?:able)?\s+authority|mintable|"
+    r"(?:buy|sell)\s+tax|warnings?|exploit(?:s|ed)?|hack(?:s|ed)?|backdoors?)\b"
+    r"|\bcan\s+(?:i|you|we|one|anyone)\s+(?:even\s+|still\s+|actually\s+)?sell\b"
+)
+SECURITY = re.compile(SECURITY_WORDS, re.I)
 # Crypto-specific security jargon (or a $TICKER paired with a security word) is
 # unambiguous even without a "token/coin/contract" word nearby. Plain "safe" or
 # "risk" alone stay excluded here since they are common in non-crypto questions.
@@ -79,7 +90,14 @@ SECURITY_STRONG = re.compile(
     # "can I sell X" / "is it sellable": a honeypot question, not a sell order.
     r"|\bcan\s+(?:i|you|we|one|anyone)\s+(?:even\s+|still\s+|actually\s+)?sell\b|\b(?:un)?sellable\b"
     r"|\$[A-Za-z][A-Za-z0-9]{1,9}\b[^.\n?!]{0,24}\b(?:scam|safe|safety|legit|rug|honeypot)\b"
-    r"|\b(?:scam|safe|safety|legit)\b[^.\n?!]{0,24}\$[A-Za-z][A-Za-z0-9]{1,9}\b",
+    r"|\b(?:scam|safe|safety|legit)\b[^.\n?!]{0,24}\$[A-Za-z][A-Za-z0-9]{1,9}\b"
+    # "audit report on ANSEM", "is ANSEM audited", "$X audit": in a token app an
+    # audit ask is a contract-security ask (2026-09-18: it went to web search
+    # and came back with French public-sector audit reports).
+    r"|\baudit(?:s|ed|ing)?(?:\s+reports?)?\s+(?:on|of|for)\b"
+    r"|\bsecurity\s+(?:check|report|audit|review)\b"
+    r"|\b(?:is|was|been)\s+\S+\s+audited\b"
+    r"|\$[A-Za-z][A-Za-z0-9]{1,9}\b[^.\n?!]{0,24}\baudit",
     re.I,
 )
 MARKET = re.compile(

@@ -13,6 +13,7 @@ def _utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 from app.additional_providers import ADDITIONAL_PROVIDERS
+from app.routing import lexicon
 from app.integrations import tradingview
 from app.tool_catalog import TOOL_SPECS
 from app.market_providers import MARKET_PROVIDERS
@@ -41,11 +42,7 @@ def _fetch_url(request: str) -> str:
 
 
 _SOLANA_MINT = re.compile(r"(?<![A-Za-z0-9])([1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])")
-_SAFETY_WORDS = re.compile(
-    r"\b(?:safe|safety|secure|security|rugs?|rug\s*pulls?|honey\s?pots?|scams?|legit|audits?|"
-    r"risky?|freeze|freezable|mint\s+authority|sellable|sellability|warnings?)\b",
-    re.IGNORECASE,
-)
+_SAFETY_WORDS = lexicon.SECURITY          # the one security vocabulary (app/routing/lexicon.py)
 
 
 # "trending/new/hot/top TOKENS|PAIRS|POOLS" on a chain/launchpad -- the

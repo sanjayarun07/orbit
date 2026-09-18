@@ -34,6 +34,8 @@ traces back to one of them.
 from __future__ import annotations
 
 import re
+
+from app.routing.lexicon import SECURITY_WORDS
 from dataclasses import dataclass, field
 
 DIMENSION_PATTERNS: dict[str, re.Pattern] = {
@@ -48,7 +50,7 @@ DIMENSION_PATTERNS: dict[str, re.Pattern] = {
     "fundamentals": re.compile(r"\bfundamentals?\b|\bp/e\b|\bvaluation\b|\bmargins?\b|\brevenue\b|\beps\b|\banalyst\s+(?:targets?|consensus|ratings?)\b|\bprice\s+targets?\b", re.I),
     "earnings": re.compile(r"\bearnings\s+(?:date|call|report|calendar)\b|\breport(?:s|ing)?\s+earnings\b|\bnext\s+earnings\b", re.I),
     "holders": re.compile(r"\bholders?\b|\bwhales?\b|\bconcentration\b|\btop\s+wallets\b|\bdistribution\b", re.I),
-    "security": re.compile(r"\bsafe(?:ty)?\b|\brug(?:pull)?\b|\bscam\b|\bhoneypot\b|\baudit(?:ed)?\b|\bmintable\b|\bfreeze\b|\bblacklist\b|\b(?:buy|sell)\s+tax\b|\bsellab\w+\b|\brisk(?:y)?\b", re.I),
+    "security": re.compile(SECURITY_WORDS, re.I),          # the one security vocabulary (app/routing/lexicon.py)
     "trades": re.compile(r"\b(?:recent|latest|last)\s+(?:trades?|swaps?|buys?|sells?)\b|\bdex\s+trades?\b|\btrade\s+history\b", re.I),
     "balances": re.compile(r"\bbalances?\b|\bholdings?\b|\bportfolio\b|\bwhat\s+do\s+i\s+(?:hold|own)\b", re.I),
     "transactions": re.compile(r"\btransactions?\b|\btxs?\b|\bactivity\b|\btransfers?\b|\bwallet\s+history\b", re.I),
