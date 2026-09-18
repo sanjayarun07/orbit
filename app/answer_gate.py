@@ -42,6 +42,10 @@ class AnswerCheck(dspy.Signature):
     for (price, holders, unlock dates, investors, safety, news ...)? An
     answer that says the data or passages do not include it, or that gives
     other facts about the right subject, fails.
+    "Top holders" or "largest wallets" asks for a ranked list of wallets with
+    their shares; an aggregate ("smart money holds 7-17M") without any wallet
+    is "missing". "Whale activity" asks for specific large transfers or
+    positions, not a market summary.
     Orbit is a crypto-and-markets assistant: when the user's word has a
     token, protocol, company or market reading, an answer whose main subject
     is something else (a medicine, a civic organisation, a planet, a

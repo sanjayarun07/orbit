@@ -848,6 +848,23 @@ _SYMBOL_LIKE = re.compile(r"(?<![A-Za-z0-9$])\$?[A-Z][A-Z0-9]{1,9}(?![A-Za-z0-9]
 _SYMBOL_STOP = {"I", "A", "OK", "ETF", "ETFS", "USD", "USDT", "USDC", "AI", "DEFI", "NFT", "NFTS", "DEX", "CEX", "TVL", "APY", "APR", "ATH", "ATL", "OI", "RSI", "MACD", "EMA", "SMA", "US", "UK", "EU", "SEC", "FED", "CPI", "L1", "L2"}
 
 
+# A question that wants a token's data: with one of these words, a bare
+# all-caps symbol is the token ("ANSEM top holders on solana" went to the
+# web and came back as a smart-money aggregate, 2026-09-18).
+_DATA_ASK = re.compile(r"\b(?:holders?|holding|whales?|price|prices|liquidity|volume|market\s*cap|mcap|fdv|supply|security|safe|rug\w*|honeypot|"
+                       r"unlocks?|vesting|trades?|swaps?|buyers?|bundl\w+|snip\w+|insiders?|chart|deployer|dev\b|concentration|distribution)\b", re.I)
+
+
+def _bare_symbols(request: str) -> list[str]:
+    """All-caps symbols in the request that are not market jargon, in order."""
+    out: list[str] = []
+    for match in _SYMBOL_LIKE.finditer(request or ""):
+        symbol = match.group(0).lstrip("$")
+        if symbol not in _SYMBOL_STOP and symbol not in _NAMED_STOP and symbol not in out:
+            out.append(symbol)
+    return out
+
+
 def _mentions_asset(request: str) -> bool:
     """Whether the ask names a specific asset: a contract/mint, a $ticker or a
     phrasing the named-token pattern knows, or a bare all-caps symbol that is
@@ -1056,7 +1073,7 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
     security_ask = bool(_SECURITY_ASK.search(request))
     if not (capabilities & {"token_discovery", "token_security", "market_data"}) and not security_ask:
         return _TokenResolution(request)
-    tickers = _named_tickers(request)
+    tickers = _named_tickers(request) or (_bare_symbols(request) if _DATA_ASK.search(request) else [])
     if not tickers:
         return _TokenResolution(request)
     ticker = tickers[-1]
@@ -1615,7 +1632,7 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
             return {"answer": answer, "trajectory": {"thought_0": "A market-wide 'what to trade' ask is movers, volume, sentiment and news read together.", **trajectory}}
     # "check whale activity" with no token, address or ticker: whales of what?
     # Asked, not guessed (and never silently dropped from a compound message).
-    if _WHALE_ASK.search(request) and not _TOKEN_ADDRESS.search(request) and not _named_tickers(request):
+    if _WHALE_ASK.search(request) and not _mentions_asset(request):
         return {"answer": ("Whale activity for which token or wallet? Name the token (a $ticker or its contract/mint) and I'll pull its top holders "
                            "and concentration, or paste a wallet address and I'll show its recent large transfers."), "trajectory": None}
     # "why is SOL down?" -> the composed market + news card (crypto first, stock

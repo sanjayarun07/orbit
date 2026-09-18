@@ -133,3 +133,40 @@ def test_a_slow_mobula_portfolio_yields_to_the_per_chain_path(monkeypatch):
     monkeypatch.setattr(research, "_nansen_defi_positions", nothing)
     answer, trajectory = asyncio.run(research._compose_wallet_portfolio("HDixbrzwwLXczhDBk1JVrurPQsuLE8FUKnW2pucSXN3o", None))
     assert "| SOL | 12.5 |" in answer and trajectory["tool_name_0"] == "goldrush_wallet_balances"
+
+
+# --- transcript 2026-09-18 22:22: "ANSEM top holders on solana" ------------------
+
+def test_a_bare_symbol_before_a_data_word_is_the_token():
+    assert research._bare_symbols("ANSEM top holders on solana") == ["ANSEM"]
+    assert research._bare_symbols("what are the largest smart money wallets holding ANSEM") == ["ANSEM"]
+    assert research._bare_symbols("USDC price") == [], "market jargon is not a subject"
+    assert research._DATA_ASK.search("ANSEM top holders on solana") and not research._DATA_ASK.search("thoughts on ANSEM")
+
+
+def test_the_resolver_engages_on_a_bare_symbol_holders_ask(monkeypatch):
+    seen = {}
+
+    async def canonical(ticker, chain, strict=False):
+        seen["ticker"] = ticker
+        return {"chain": "solana", "address": "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump", "symbol": ticker, "liquidity_usd": 1.0, "verified": True}
+
+    monkeypatch.setattr(research, "_canonical_on_chain", canonical)
+    out = asyncio.run(research._resolve_named_token("ANSEM top holders on solana", {"token_discovery", "market_data"}))
+    assert seen["ticker"] == "ANSEM" and out.chain == "solana" and "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump" in out.request
+
+
+def test_a_whale_ask_that_names_a_bare_symbol_is_not_asked_back(monkeypatch):
+    seen = {}
+
+    async def resolve(request, capabilities, user_chains=()):
+        seen["request"] = request
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(research, "_resolve_named_token", resolve)
+    state = {"request": "What are the largest known smart money wallets holding ANSEM tokens on Solana?", "capabilities": ["token_holdings"], "chains": ["solana"], "session_context": {}}
+    try:
+        asyncio.run(research._research_node(state, {}))
+    except RuntimeError:
+        pass
+    assert "ANSEM" in seen.get("request", ""), "the whale intercept must not ask which token when one is named"

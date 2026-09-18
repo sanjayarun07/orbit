@@ -438,3 +438,10 @@ def test_bundle_questions_reach_the_check():
     ranked = [t.name for t in get_provider_router()._ranked_union(f"is {FARTCOIN} bundled on solana", caps, ("solana",), None)]
     assert ranked and ranked[0] == "mobula_token_bundle", ranked
     assert not mobula_meme.BUNDLE_ASK.search("top holders of BONK")
+
+
+def test_wallets_holding_a_token_is_a_token_question():
+    mint = "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump"
+    assert not mobula_wallet.matches(f"What are the largest known smart money wallets holding ANSEM tokens on Solana? {mint} on solana")
+    assert not mobula_wallet.matches(f"top holders of {mint} on solana")
+    assert mobula_wallet.matches(f"{WALLET} wallet portfolio") and mobula_wallet.matches(f"what does {WALLET} hold")

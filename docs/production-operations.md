@@ -1392,3 +1392,18 @@ a `memes` array; the four market tiles are unchanged and meme cards ride
 separately as `meme_cards`) followed by prompts every one of which a live
 tool answers: what's bonding on pump.fun, new launches on Solana and on
 Robinhood chain, a FARTCOIN deep dive, BONK's LP locks, WIF's holders.
+
+### A bare ticker before a data word is the token (2026-09-18, 22:22 transcript)
+
+"ANSEM top holders on solana" went to the web and came back as a smart-
+money aggregate with no wallet in it; the follow-up "largest smart money
+wallets holding ANSEM" was asked which token. Both because the resolver and
+the whale intercept only read tickers in known phrasings ("holders of X",
+"X token") and "ANSEM" stood bare. Now a bare all-caps symbol that is not
+market jargon counts as the token whenever the question carries a data
+word (holders, price, liquidity, security, unlocks, trades, buyers, bundle,
+snipers, deployer ...): `research._bare_symbols` behind `_DATA_ASK`. The
+whale intercept asks only when nothing names an asset. The answer judge is
+told that "top holders" means a ranked list of wallets and an aggregate is
+missing. And "wallets holding <mint>" is a token question, never a
+portfolio lookup on the mint, whatever wallet words it contains.

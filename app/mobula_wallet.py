@@ -66,12 +66,21 @@ _TOKEN_SHAPED = re.compile(r"\b(?:trades?|holders?|volume|price|liquidity|pairs?
                            r"|\b(?:holders?|insiders?|snip\w+|bundl\w+|whales?|concentration|distribution|top\s*\d+|liquidity|lp|rug\w*|honeypot|deployer|dev)\b", re.I)
 
 
+# "the largest wallets holding ANSEM <mint>" names wallets, but the address
+# is the token's: the question is about its holders (live, 2026-09-18, the
+# portfolio tool ran on the mint). These phrasings veto even a wallet word.
+_HOLDERS_OF_TOKEN = re.compile(r"\bwallets?\s+(?:holding|that\s+hold|which\s+hold|hold)\b|\bholders?\s+of\b|\btop\s*\d*\s*holders?\b|\bholding\s+\$?[A-Z]{2,10}\b", re.I)
+
+
 def matches(request: str) -> bool:
     """A wallet question about a concrete address. "insiders holding <mint>"
     is about the token's holders, not a wallet: token words veto unless an
-    explicit wallet word is present."""
+    explicit wallet word is present, and a holders-of-a-token phrasing vetoes
+    regardless."""
     text = request or ""
     if not address_in(text) or not WALLET_ASK.search(text):
+        return False
+    if _HOLDERS_OF_TOKEN.search(text):
         return False
     return bool(_WALLET_WORD.search(text)) or not _TOKEN_SHAPED.search(text)
 
