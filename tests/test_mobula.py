@@ -12,7 +12,10 @@ from app.provider_registry import get_provider_router
 from app.settings import settings
 
 # conftest points these at a network guard; the card tests drive the real ones.
+from app import mobula_meme
+
 _REAL_SECURITY = mobula_security.token_security
+_REAL_TRADES = mobula_meme.token_trades
 
 WALLET = "0x6DbA597fe4bA47F97F1f0C32feEC4bf6Aea11460"
 FARTCOIN = "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump"
@@ -197,3 +200,86 @@ def test_the_security_card_names_the_pullable_pool(monkeypatch):
 ])
 def test_how_a_pool_is_read(pool, verdict):
     assert mobula_security._pool_verdict(pool) == verdict
+
+
+# --- memecoin forensics: holders, trades, deployer -----------------------------
+
+HOLDERS = [
+    {"walletAddress": "9SLPTL41SPsYkgdsMzdfJsxymEANKr5bYoBsQzJyKpKS", "percentageOfTotalSupply": "10.43",
+     "tokenAmountUSD": "16464945.8", "buys": 0, "sells": 0, "unrealizedPnlUSD": "16464945.8",
+     "firstTradeAt": "2025-05-10T00:00:00.000Z", "labels": []},
+    {"walletAddress": "5Q54ABCDEFGHJKLMNPQRSTUVWXYZabcde4j1", "percentageOfTotalSupply": "2.53",
+     "tokenAmountUSD": "3990000", "buys": 4, "sells": 1, "unrealizedPnlUSD": "0",
+     "firstTradeAt": "2021-03-21T00:00:00.000Z", "labels": ["liquidityPool"]},
+    {"walletAddress": "SniperWalletAAAAAAAAAAAAAAAAAAAAAAAAAAA1", "percentageOfTotalSupply": "1.10",
+     "tokenAmountUSD": "1700000", "buys": 1, "sells": 0, "unrealizedPnlUSD": "1700000",
+     "firstTradeAt": "2025-01-18T00:00:00.000Z", "labels": [{"name": "sniper"}, {"name": "bundler"}]},
+]
+
+
+def test_the_holders_card_shows_share_pnl_and_flags(monkeypatch):
+    from app import mobula_meme
+
+    monkeypatch.setattr(mobula_meme, "_get", lambda path, params: HOLDERS)
+    card = mobula_meme.token_holders(f"top holders of {FARTCOIN} on solana")
+    assert "**Top 10 wallets hold 14.06% of supply**" in card and "not necessarily distinct owners" in card
+    assert "| 1 | `9SLP…KpKS` | 10.43% | $16.46M | 0/0 | $16.46M | 2025-05-10 | — |" in card
+    assert "| sniper | 1 |" in card and "| bundler | 1 |" in card
+    assert "evidence, not proof of coordination" in card
+    assert "| liquidityPool |" in card, "a pool is labelled, not hidden"
+
+
+TRADES = [
+    {"date": "2026-09-18T14:40:12.000Z", "type": "buy", "baseTokenAmountUSD": 324.94, "baseTokenPriceUSD": 0.1575,
+     "swapSenderAddress": "BuyerWalletAAAAAAAAAAAAAAAAAAAAAAAAAAAA1", "platform": {"name": "raydium"}},
+    {"date": "2026-09-18T14:39:02.000Z", "type": "sell", "baseTokenAmountUSD": 1200.0, "baseTokenPriceUSD": 0.1571,
+     "swapSenderAddress": "SellerWalletAAAAAAAAAAAAAAAAAAAAAAAAAAA2", "platform": "orca"},
+]
+
+
+def test_the_trades_card_summarises_the_flow(monkeypatch):
+    from app import mobula_meme
+
+    monkeypatch.setattr(mobula_meme, "_get", lambda path, params: TRADES)
+    card = _REAL_TRADES(f"latest trades for {FARTCOIN} on solana")
+    assert "**1 buys** ($324.94) and **1 sells** ($1.2K)" in card
+    assert "| 2026-09-18 14:40:12 | buy | $324.94 | $0.16 | `Buye…AAA1` | raydium |" in card
+    assert "| orca |" in card and "Indexed swaps only" in card
+
+
+def test_the_deployer_card_lists_what_the_dev_shipped(monkeypatch):
+    from app import mobula_meme
+
+    monkeypatch.setattr(mobula_meme, "_get", lambda path, params: [
+        {"deployedAt": "2026-04-02T00:00:00.000Z", "token": {"name": "First Coin", "symbol": "ONE", "marketCapUSD": 12000}},
+        {"deployedAt": "2026-06-11T00:00:00.000Z", "token": {"name": "Second Coin", "symbol": "TWO", "marketCapUSD": 900}},
+    ])
+    card = mobula_meme.wallet_deployer(f"what else did {WALLET} deploy on base")
+    assert "deployed **2 token(s)**" in card and "| First Coin | ONE | 2026-04-02 | $12.0K |" in card
+    assert "short-lived tokens is the pattern" in card
+
+
+def test_an_unknown_deployer_says_what_that_does_and_does_not_mean(monkeypatch):
+    from app import mobula_meme
+
+    monkeypatch.setattr(mobula_meme, "_get", lambda path, params: [])
+    card = mobula_meme.wallet_deployer(f"deployer history for {WALLET}")
+    assert "indexed no other token deployments" in card and "not proof it deployed none" in card
+
+
+@pytest.mark.parametrize("request_text,expected", [
+    (f"top holders of {FARTCOIN} on solana", "mobula_token_holders"),
+    (f"is {FARTCOIN} bundled on solana", "mobula_token_holders"),
+    (f"who deployed {WALLET} on base", "mobula_wallet_deployer"),
+])
+def test_the_meme_tools_claim_their_own_questions(request_text, expected):
+    caps = ("token_holdings", "token_security", "wallet_intelligence", "market_data")
+    ranked = [t.name for t in get_provider_router()._ranked_union(request_text, caps, (), None)]
+    assert ranked and ranked[0] == expected, ranked
+
+
+def test_a_plain_price_question_reaches_none_of_them():
+    from app import mobula_meme
+
+    assert mobula_meme._subject("price of BONK") is None
+    assert not mobula_meme.DEPLOYER_ASK.search("price of BONK")

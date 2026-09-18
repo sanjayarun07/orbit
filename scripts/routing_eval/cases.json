@@ -30,6 +30,7 @@
     "id": "holders-sol-mint",
     "query": "Top holders for DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 on Solana",
     "expected_tools": [
+      "mobula_token_holders",
       "bitquery_token_top_holders"
     ],
     "forbidden_tools": [
@@ -38,7 +39,7 @@
     ],
     "expected_intent": "research",
     "router": true,
-    "notes": "Solana holders -> bitquery (Covalent rejects Solana)"
+    "notes": "Solana holders -> bitquery (Covalent rejects Solana) Memecoin holder analysis goes to Mobula first (user direction 2026-09-18); Bitquery and the RPC fallback stay behind it."
   },
   {
     "id": "holders-bonk-symbol",

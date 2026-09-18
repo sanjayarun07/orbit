@@ -34,7 +34,7 @@ import httpx
 
 from app.provider_registry import get_provider_router
 from app.integrations import tradingview
-from app import mobula_security
+from app import mobula_meme, mobula_security
 
 # DefiLlama emissions (free): a protocol-slug list + per-slug unlock schedule whose
 # metadata.token is "chain:address" -- so a symbol-guessed slug is VERIFIED by the
@@ -213,6 +213,17 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
         else:
             dims.append(DimensionEvidence("liquidity_locks", "Liquidity locks & rug risk", "unavailable",
                                           "Mobula returned no liquidity analysis for this contract."))
+
+    # What is actually trading right now: the last indexed swaps, buy/sell
+    # split and sizes. For a memecoin this is half the thesis.
+    if mobula_meme.enabled():
+        try:
+            trades = await asyncio.to_thread(mobula_meme.token_trades, f"latest trades {address} on {chain}")
+        except Exception:
+            trades = None
+        dims.append(DimensionEvidence("latest_trades", "Latest trades", "available", trades, "mobula_token_trades", _now())
+                    if trades else
+                    DimensionEvidence("latest_trades", "Latest trades", "unavailable", "Mobula returned no indexed swaps for this contract."))
 
     # Token unlocks -- the most deterministic near-term headwind. Real, free, and
     # verified-by-address via DefiLlama emissions; unavailable when the token isn't

@@ -1296,3 +1296,28 @@ Gains Network only, on a demo gateway.
 
 Tests run with a network guard: `tests/conftest.py` points the Mobula
 callers at a stub, so a configured key never turns the suite live.
+
+### Memecoin forensics from Mobula: holders, trades, deployer (2026-09-18)
+
+User direction: memecoins on Solana, Base and BNB Chain, plus Hyperliquid
+perps, are the focus, and Orbit should answer what GMGN answers. Three more
+tools in `app/mobula_meme.py`, each verified live before it was written:
+
+- `mobula_token_holders` (`/api/2/token/holder-positions`): each wallet's
+  share of supply, USD value, buy and sell counts, unrealized PnL, first
+  trade date and Mobula's behaviour labels; a top-10 concentration line;
+  and a flagged-wallet table when labels such as sniper, bundler or insider
+  appear, stated as evidence rather than proof. First for holder questions.
+- `mobula_token_trades` (`/api/2/token/trades`): the latest indexed swaps
+  with side, size, price, wallet and venue, and the buy/sell split. The deep
+  dive calls it by name as a `latest_trades` dimension.
+- `mobula_wallet_deployer` (`/api/2/wallet/deployer`): the other tokens a
+  wallet deployed, for a developer's track record, with an honest line when
+  Mobula indexed none.
+
+Not built, because the endpoint path could not be confirmed live: the
+documented first-buyers endpoint. Holder positions carry `firstTradeAt`,
+which covers most of that question when the field is populated.
+
+The routing eval now expects Mobula first for wallet, holder and rug-check
+questions; the previous tools remain in each case's accepted set.

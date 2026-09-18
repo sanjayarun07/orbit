@@ -77,6 +77,11 @@ def _reset_account_stores(monkeypatch):
 
     monkeypatch.setattr(_msec, "token_security", _offline)
     monkeypatch.setattr(_mwallet, "_get", _offline)
+
+    from app import mobula_meme as _mmeme
+
+    monkeypatch.setattr(_mmeme, "_get", _offline)
+    monkeypatch.setattr(_mmeme, "token_trades", _offline)
     monkeypatch.setattr(_settings, "warm_caches_on_start", False)
     monkeypatch.setattr(_tradingview, "get_redis", no_redis)
     # The subject probe looks a name up on the web when the router is unsure;
