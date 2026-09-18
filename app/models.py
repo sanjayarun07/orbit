@@ -84,6 +84,11 @@ class EmailSigninVerify(BaseModel):
     token: str = Field(min_length=8, max_length=128)
 
 
+class EmailSigninCode(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
 class PreferencesUpdate(BaseModel):
     display_name: str | None = Field(default=None, max_length=60)
     risk_profile: str | None = Field(default=None, max_length=32)

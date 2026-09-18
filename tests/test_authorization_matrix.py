@@ -34,6 +34,7 @@ EXPECTED: dict[tuple[str, str], str] = {
     # --- identity establishment: unauthenticated on purpose --------------
     ("POST", "/auth/email/start"): "auth_entry",
     ("POST", "/auth/email/verify"): "auth_entry",
+    ("POST", "/auth/email/code"): "auth_entry",
     ("POST", "/auth/wallet/challenge"): "auth_entry",
     ("POST", "/auth/wallet/verify"): "auth_entry",
     ("POST", "/auth/coinbase/challenge"): "auth_entry",

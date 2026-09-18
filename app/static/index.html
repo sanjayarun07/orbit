@@ -149,8 +149,9 @@
       <div class="field-help" id="signinIntro">Enter your email to receive a secure sign-in link.</div>
       <div class="field" style="margin-top:10px"><label for="signinEmail">Email address</label><input id="signinEmail" type="email" autocomplete="email" placeholder="you@example.com" /></div>
       <div class="signin-status" id="signinStatus" role="status" aria-live="polite"></div>
+      <div class="field" id="signinCodeRow" hidden style="margin-top:12px"><label for="signinCode">Or enter the six-digit code from the email</label><input id="signinCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" /></div>
     </div>
-    <div class="dialog-footer"><button class="secondary" data-close="signinDialog">Cancel</button><button class="primary" id="signinSendBtn" type="button">Send sign-in link</button></div>
+    <div class="dialog-footer"><button class="secondary" data-close="signinDialog">Cancel</button><button class="primary" id="signinCodeBtn" type="button" hidden>Sign in with code</button><button class="primary" id="signinSendBtn" type="button">Send sign-in link</button></div>
   </div>
 </div>
 
@@ -1490,6 +1491,7 @@ async function signInWithWallet(chain,address,signMessage){
     return true;
   }catch(error){
     console.warn("Wallet sign-in skipped:",error);
+    const panel=$("#connectedProvider");if(panel&&!account?.authenticated)panel.textContent=`${panel.textContent||"Connected"} · not signed in (${String(error?.message||error).slice(0,80)}). Sign in with email to keep history.`;
     return false;
   }
 }
@@ -1516,10 +1518,14 @@ async function phantomSignMessage(message){
   const signature=result?.signature??result;
   return toHex(signature instanceof Uint8Array?signature:new Uint8Array(Object.values(signature)));
 }
+// Privy's embedded Solana provider takes the message as a base64 string and
+// answers with a base64 signature (SignMessageRequestArguments in the SDK).
+// Passing raw bytes, as before, made every Privy wallet sign-in fail silently.
 async function privySolanaSignMessage(provider,message){
-  const encoded=new TextEncoder().encode(message);
-  const result=await provider.request({method:"signMessage",params:{message:encoded}});
+  const bytes=new TextEncoder().encode(message);let binary="";for(const b of bytes)binary+=String.fromCharCode(b);
+  const result=await provider.request({method:"signMessage",params:{message:btoa(binary)}});
   const signature=result?.signature??result;
+  if(typeof signature==="string"){const raw=atob(signature);return toHex(Uint8Array.from(raw,c=>c.charCodeAt(0)));}
   return toHex(signature instanceof Uint8Array?signature:new Uint8Array(Object.values(signature)));
 }
 function setWalletConnected(address,label,addresses=[]){walletInput.value=address;walletInput.disabled=true;window.OrbitWalletContext={provider:activeProvider};syncPayChip();syncIdentityDisplay();$("#walletButton").classList.add("connected");$("#walletButton").classList.remove("readonly");$("#walletButton").title="";$("#walletLabel").textContent=shortAddress(address);$("#connectedPanel").hidden=false;$("#connectedProvider").textContent=`Connected with ${label}`;$("#connectedAddress").textContent=addresses.length?addresses.join(" · "):address;$("#walletOptions").hidden=true;$("#disconnectWalletBtn").hidden=false;}
@@ -1697,8 +1703,11 @@ async function startSignin(){const email=$("#signinEmail").value.trim();const st
   try{const res=await fetch("/auth/email/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});const data=await res.json();if(!res.ok)throw new Error(normalizeError(data,res.status));
     if(data.dev_link){status.textContent="Development mode: signing you in…";const token=data.dev_link.split("signin=")[1];await verifySignin(token);}
     else if(data.sent===false){status.textContent="The sign-in email could not be sent right now. Check the address and try again in a moment.";}
-    else status.textContent=`Check ${data.email} for your sign-in link. It expires in 15 minutes.`;
+    else{status.textContent=`Check ${data.email} for your sign-in link, or type the code from that email below. Both expire in 15 minutes.`;$("#signinCodeRow").hidden=false;$("#signinCodeBtn").hidden=false;$("#signinSendBtn").textContent="Resend";setTimeout(()=>$("#signinCode").focus(),50);}
   }catch(error){status.textContent=error.message;}finally{$("#signinSendBtn").disabled=false;}}
+async function signinWithCode(){const email=$("#signinEmail").value.trim();const code=$("#signinCode").value.trim();const status=$("#signinStatus");if(!/^\d{6}$/.test(code)){status.textContent="Enter the six-digit code from the email.";return;}const button=$("#signinCodeBtn");button.disabled=true;status.textContent="Signing you in…";
+  try{const res=await fetch("/auth/email/code",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,code})});const data=await res.json();if(!res.ok)throw new Error(normalizeError(data,res.status));account=data;renderAccount();closeDialog("signinDialog");$("#signinCode").value="";$("#signinCodeRow").hidden=true;$("#signinCodeBtn").hidden=true;$("#signinSendBtn").textContent="Send sign-in link";hydrateHistory();}
+  catch(error){status.textContent=error.message;}finally{button.disabled=false;}}
 async function verifySignin(token){const res=await fetch("/auth/email/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})});const data=await res.json();if(!res.ok)throw new Error(normalizeError(data,res.status));account=data;renderAccount();closeDialog("signinDialog");hydrateHistory();}
 async function signOut(){clearApiKeySecret();try{await fetch("/auth/signout",{method:"POST"});}catch{}setWalletDisconnected();await loadAccount();closeDialog("profileDialog");}
 function attachAccountNotice(el,detail,status){const body=$(".message-body",el);if(!body)return;const box=document.createElement("div");box.className="notice-actions";
@@ -1740,6 +1749,7 @@ $("#tvDisconnectBtn").addEventListener("click",async()=>{const b=$("#tvDisconnec
 $("#plansBtn").addEventListener("click",openPlans);
 $("#creditsChip").addEventListener("click",()=>{if(account&&!account.authenticated)openSignin();else openPlans();});
 $("#signinSendBtn").addEventListener("click",startSignin);
+$("#signinCodeBtn").addEventListener("click",signinWithCode);$("#signinCode").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();signinWithCode();}});
 $("#signinEmail").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();startSignin();}});
 $("#createApiKeyBtn").addEventListener("click",createApiKey);
 (async()=>{const connected=new URLSearchParams(location.search).get("connected");const connectError=new URLSearchParams(location.search).get("connect_error");if(connected||connectError){history.replaceState(null,"",location.pathname);setTimeout(()=>{openSettings("account");const notice=$("#tvNotice");notice.hidden=false;notice.textContent=connectError?`TradingView could not be connected: ${connectError}`:"TradingView connected. Research now uses your TradingView data.";},300);}})();

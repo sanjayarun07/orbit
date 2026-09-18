@@ -926,3 +926,22 @@ users, and against the platform's terms). Each user links their own account:
 be the public HTTPS origin: it is the OAuth redirect. Tests:
 tests/test_tradingview.py; the real registration and authorize URL were
 verified against TradingView from the dev instance.
+
+## Signing in from a phone (2026-09-18)
+
+Two faults seen on an installed iPhone app. The emailed link opens Safari,
+whose cookies the home-screen app does not share, so the app stayed signed
+out even when the email arrived. The same email now carries a six-digit
+code; the sign-in sheet shows a code field once the email is sent, and
+`POST /auth/email/code` (email + code) signs the app in on its own origin.
+The code resolves to the link's own one-time token, so using either spends
+both; five wrong guesses burn it; the /auth rate limit applies. And the
+Privy email wallet connected but never signed the account in: Privy's
+embedded Solana provider takes a base64 message and answers with a base64
+signature, and the page passed raw bytes, failing silently. A wallet
+sign-in that fails now says so on the wallet panel.
+
+Email delivery itself: with Resend in testing mode only the Resend account
+owner's address receives mail, and the sender must be `onboarding@resend.dev`
+or a verified domain. For the beta, verify a domain in Resend and set
+`EMAIL_FROM` to an address on it. Accepted sends log Resend's message id.

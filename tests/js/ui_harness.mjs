@@ -672,6 +672,36 @@ const CASES = {
     return runUseAddress("So11111111111111111111111111111111111111112");
   },
   /** Well-formed base58 of a plausible length that is not 32 bytes. */
+  // Privy's embedded Solana provider signs a base64 message and answers with
+  // a base64 signature; the page hands the server hex.
+  async privy_sign_message_uses_base64_in_and_out() {
+    const { sandbox } = load();
+    const seen = [];
+    const provider = { request: async (req) => { seen.push(req); return { signature: btoa(String.fromCharCode(1, 2, 255)) }; } };
+    const hex = await sandbox.privySolanaSignMessage(provider, "hi");
+    return { method: seen[0].method, message: seen[0].params.message, hex };
+  },
+  // After the email is sent the sheet offers the code path; the code signs
+  // the account in through /auth/email/code and closes the sheet.
+  async signin_sheet_offers_and_accepts_the_emailed_code() {
+    const { dom, sandbox } = load();
+    const posts = [];
+    sandbox.fetch = async (url, init = {}) => {
+      if (String(url) === "/auth/email/start") return answer(true, { sent: true, email: "a@b.co" });
+      if (String(url) === "/auth/email/code") { posts.push(JSON.parse(init.body)); return answer(true, { authenticated: true, user: { id: "u9", email: "a@b.co" }, plan: {}, credits: {} }); }
+      if (String(url) === "/me") return answer(true, { authenticated: true, user: { id: "u9" }, plan: {}, credits: {} });
+      return answer(true, {});
+    };
+    dom.query("#signinEmail").value = "a@b.co";
+    await sandbox.startSignin();
+    const afterSend = { codeRowHidden: dom.query("#signinCodeRow").hidden, codeBtnHidden: dom.query("#signinCodeBtn").hidden, sendLabel: dom.query("#signinSendBtn").textContent };
+    dom.query("#signinCode").value = "12345";
+    await sandbox.signinWithCode();
+    const shortCode = dom.query("#signinStatus").textContent;
+    dom.query("#signinCode").value = "123456";
+    await sandbox.signinWithCode();
+    return { afterSend, shortCode, posts, signedIn: sandbox.__getScriptVar ? undefined : true };
+  },
   // The sign-in sheet tells the truth about the email: "check your inbox"
   // only when the server sent one; a failed send says so.
   async signin_sheet_reports_a_send_that_did_not_happen() {

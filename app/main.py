@@ -66,6 +66,7 @@ from app.models import (
     ConfirmRequest,
     EmailSigninStart,
     EmailSigninVerify,
+    EmailSigninCode,
     PreferencesUpdate,
     IntentPreviewRequest,
     LifiQuoteRequest,
@@ -1112,6 +1113,21 @@ async def email_signin_start(body: EmailSigninStart, request: Request):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return result
+
+
+@app.post("/auth/email/code")
+async def email_signin_code(body: EmailSigninCode, response: Response, request: Request):
+    """The six-digit code from the same email as the link, for the installed
+    app on a phone, where the link would open the browser instead."""
+    try:
+        user, token, created = await accounts.sign_in_with_code(
+            body.email, body.code, ip=_client_identity(request), user_agent=request.headers.get("user-agent"),
+        )
+    except ValueError as exc:
+        raise HTTPException(401, str(exc)) from exc
+    _set_user_cookie(response, request, token)
+    identity = await resolve_identity_for_user(user, request)
+    return {**await _me_payload(identity), "created": created}
 
 
 @app.post("/auth/email/verify")

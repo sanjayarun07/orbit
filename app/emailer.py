@@ -51,11 +51,15 @@ async def send_email(to: str, subject: str, html: str, text: str | None = None) 
         return False
 
 
-def magic_link_html(link: str, product: str) -> str:
+def magic_link_html(link: str, product: str, code: str | None = None) -> str:
+    code_block = (
+        f"<p>Using the {product} app on your phone? Enter this code in the sign-in sheet instead:</p>"
+        f'<p style="font-size:26px;letter-spacing:6px;font-weight:600">{code}</p>'
+    ) if code else ""
     return (
         f"<p>Sign in to <strong>{product}</strong> with the button below. The link works once and "
         f"expires in {settings.magic_link_ttl_minutes} minutes.</p>"
         f'<p><a href="{link}" style="display:inline-block;padding:10px 18px;background:#5b5bd6;color:#fff;'
-        f'border-radius:8px;text-decoration:none">Sign in</a></p>'
+        f'border-radius:8px;text-decoration:none">Sign in</a></p>{code_block}'
         f"<p style=\"color:#666;font-size:12px\">If you did not request this, ignore this email.<br>{link}</p>"
     )

@@ -10,6 +10,7 @@ user rather than being an account of its own.
 
 from __future__ import annotations
 
+import hmac
 import json
 from contextlib import asynccontextmanager
 import logging
@@ -35,6 +36,7 @@ _users: dict[str, dict] = {}
 _users_by_email: dict[str, str] = {}
 _wallets: dict[tuple[str, str], tuple[str, str, str]] = {}  # (chain, address_lower) -> (user_id, address, wallet_type)
 _magic_tokens: dict[str, tuple[float, dict]] = {}
+_magic_codes: dict[str, tuple[float, dict]] = {}
 _user_sessions: dict[str, tuple[float, dict]] = {}
 _chat_sessions: dict[str, dict[str, str]] = {}  # user_id -> {session_id: last_used}
 _team_members: dict[tuple[str, str], dict] = {}  # (owner_id, email) -> member record
@@ -405,7 +407,7 @@ async def sign_in_with_wallet(chain: str, address: str, ip: str | None = None, u
 
 def _prune_memory() -> None:
     now = time.time()
-    for store in (_magic_tokens, _user_sessions):
+    for store in (_magic_tokens, _magic_codes, _user_sessions):
         for key in [k for k, (expires, _) in store.items() if expires <= now]:
             store.pop(key, None)
 
@@ -418,21 +420,72 @@ async def start_email_signin(email: str, base_url: str) -> dict:
     token = secrets.token_urlsafe(32)
     value = {"email": email, "issued_at": _now()}
     ttl = settings.magic_link_ttl_minutes * 60
+    # A six-digit code rides in the same email: on a phone the link opens the
+    # browser, whose cookies the installed app cannot see, so the app signs in
+    # by code instead. The code maps to the same one-time token; five wrong
+    # guesses burn it.
+    code = f"{secrets.randbelow(10 ** 6):06d}"
+    code_value = {"token": token, "attempts": 0}
     redis = await get_redis()
     if redis is not None:
         await redis.setex(f"magic_link:{token}", ttl, json.dumps(value))
+        await redis.setex(f"magic_code:{email}", ttl, json.dumps({**code_value, "code": code}))
     else:
         _prune_memory()
         _magic_tokens[token] = (time.time() + ttl, value)
+        _magic_codes[email] = (time.time() + ttl, {**code_value, "code": code})
     link = f"{base_url.rstrip('/')}/ui/?signin={token}"
     sent = await emailer.send_email(
-        email, f"Sign in to {settings.product_name}", emailer.magic_link_html(link, settings.product_name),
-        text=f"Sign in to {settings.product_name}: {link}",
+        email, f"Sign in to {settings.product_name}", emailer.magic_link_html(link, settings.product_name, code=code),
+        text=f"Sign in to {settings.product_name}: {link}\n\nOr enter this code in the app: {code}",
     )
     result = {"sent": sent, "email": email}
     if not sent and settings.dev_expose_magic_links:
         result["dev_link"] = link
     return result
+
+
+MAX_CODE_ATTEMPTS = 5
+
+
+async def consume_magic_code(email: str, code: str) -> str:
+    """The one-time token behind a valid code for this email, burning the
+    code; a wrong guess counts, and the fifth wrong guess burns it too."""
+    email = normalize_email(email)
+    code = (code or "").strip()
+    if not re.fullmatch(r"\d{6}", code):
+        raise ValueError("Enter the six-digit code from the email")
+    redis = await get_redis()
+    if redis is not None:
+        key = f"magic_code:{email}"
+        raw = await redis.get(key)
+        entry = json.loads(raw) if raw else None
+        if entry is None:
+            raise ValueError("This code has expired or was already used. Request a new one.")
+        if not hmac.compare_digest(entry["code"], code):
+            entry["attempts"] = int(entry.get("attempts", 0)) + 1
+            if entry["attempts"] >= MAX_CODE_ATTEMPTS:
+                await redis.delete(key)
+                raise ValueError("Too many wrong codes. Request a new one.")
+            ttl = await redis.ttl(key)
+            await redis.setex(key, max(int(ttl), 1), json.dumps(entry))
+            raise ValueError("That code is not right. Check the email and try again.")
+        await redis.delete(key)
+        return entry["token"]
+    _prune_memory()
+    stored = _magic_codes.get(email)
+    if stored is None or stored[0] <= time.time():
+        _magic_codes.pop(email, None)
+        raise ValueError("This code has expired or was already used. Request a new one.")
+    entry = stored[1]
+    if not hmac.compare_digest(entry["code"], code):
+        entry["attempts"] = int(entry.get("attempts", 0)) + 1
+        if entry["attempts"] >= MAX_CODE_ATTEMPTS:
+            _magic_codes.pop(email, None)
+            raise ValueError("Too many wrong codes. Request a new one.")
+        raise ValueError("That code is not right. Check the email and try again.")
+    _magic_codes.pop(email, None)
+    return entry["token"]
 
 
 async def consume_magic_token(token: str) -> str:
@@ -563,6 +616,13 @@ async def sign_in_with_token(token: str, ip: str | None = None, user_agent: str 
     user, created = await get_or_create_user(email)
     session = await create_user_session(user["id"], ip, user_agent)
     return user, session, created
+
+
+async def sign_in_with_code(email: str, code: str, ip: str | None = None, user_agent: str | None = None) -> tuple[dict, str, bool]:
+    """Emailed code -> (user, session token, created), through the same
+    one-time token the link carries."""
+    token = await consume_magic_code(email, code)
+    return await sign_in_with_token(token, ip=ip, user_agent=user_agent)
 
 
 # ----------------------------------------------------------------------------
