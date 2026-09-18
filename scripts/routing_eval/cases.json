@@ -325,6 +325,21 @@
     "notes": "structured 10-dimension token deep-dive lens (research_node intercept)"
   },
   {
+    "id": "risks-of-buying-bonk",
+    "query": "What are the risks of buying BONK?",
+    "expected_tools": [
+      "token_deep_dive"
+    ],
+    "forbidden_tools": [
+      "knowledge_base_search",
+      "jupiter",
+      "relay"
+    ],
+    "expected_intent": "research",
+    "router": false,
+    "notes": "ownership-risk ask about a token -> the deep-dive lens, never the protocol knowledge base (2026-09-18 transcript: KB answered that its passages say nothing about BONK)"
+  },
+  {
     "id": "adv-advice-not-exec",
     "query": "should I buy SOL right now?",
     "expected_tools": [],

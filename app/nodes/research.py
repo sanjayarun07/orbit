@@ -95,15 +95,23 @@ _GAINERS_SUPPORTED_CHAINS = {"solana", "base", "ethereum", "arbitrum", "avalanch
 # A structured token due-diligence ask -> the multi-dimension deep-dive lens
 # (evidence bundle + analysis synthesis). Distinct from a single-metric lookup
 # ("holders of X", "price of X"), which stays on the direct tool path.
+# "What are the risks of buying BONK?" is a due-diligence ask too (review of
+# 2026-09-18: it went to the protocol knowledge base, which answered that its
+# passages say nothing about BONK). Risk/safety-of-owning phrasings map to the
+# lens, whose contract-safety, liquidity, holder and unlock dimensions ARE the
+# risks of buying a token.
 _DEEPDIVE = re.compile(
     r"\b(?:deep[\s-]*dive|due[\s-]*diligence|full\s+analysis|analy[sz]e|analysis\s+of|"
-    r"thoughts?\s+on|is\s+\S+\s+a\s+good\s+(?:buy|investment)|should\s+i\s+(?:buy|invest\s+in))\b",
+    r"thoughts?\s+on|is\s+\S+\s+a\s+good\s+(?:buy|investment)|should\s+i\s+(?:buy|invest\s+in)|"
+    r"risks?\s+(?:of|in|with|to)\s+(?:buying|holding|owning|investing\s+in|aping\s+into)|"
+    r"(?:how\s+)?risky\s+(?:is|to\s+(?:buy|hold))|is\s+\S+\s+(?:risky|worth\s+(?:buying|holding))|worth\s+buying)\b",
     re.IGNORECASE,
 )
 # The token named by an analysis ask -- symbol or $ticker.
 _DEEPDIVE_TOKEN = re.compile(
     r"\b(?:deep[\s-]*dive\s+(?:on|into)|due[\s-]*diligence\s+(?:on|for)|analy[sz]e|analysis\s+of|"
-    r"thoughts?\s+on|research(?:\s+on)?|should\s+i\s+(?:buy|invest\s+in)|is)\s+(?:the\s+)?\$?"
+    r"thoughts?\s+on|research(?:\s+on)?|should\s+i\s+(?:buy|invest\s+in)|is|"
+    r"(?:buying|holding|owning|investing\s+in|aping\s+into)|risky\s+(?:is|to\s+(?:buy|hold)))\s+(?:the\s+)?\$?"
     r"([A-Za-z][A-Za-z0-9]{1,9})\b"
     r"|\$([A-Za-z][A-Za-z0-9]{1,9})\b",
     re.IGNORECASE,

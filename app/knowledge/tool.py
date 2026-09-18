@@ -81,10 +81,22 @@ def _run(coro):
         return pool.submit(asyncio.run, coro).result()
 
 
+# Whether to buy, hold or ape into a token is not a documentation question. An
+# incident in the registry ("BONK Fun exploit") made "what are the risks of
+# buying BONK?" a knowledge match (review of 2026-09-18); the answer was that
+# the passages say nothing about BONK. Such asks belong to the token tools.
+_OWNERSHIP_RISK = re.compile(
+    r"\b(?:risks?|risky|safe|safety|rug|honeypot|scam|legit)\b.{0,40}\b(?:buy|buying|hold|holding|own|owning|invest|investing|ape|aping)\b"
+    r"|\b(?:buy|buying|hold|holding|invest|investing|ape|aping)\b.{0,40}\b(?:risks?|risky|safe|safety|rug|honeypot|scam|legit)\b",
+    re.IGNORECASE,
+)
+
+
 def matches(request: str) -> bool:
     """Knowledge asks that name something in the registry and don't ask for a
-    live number. Sync and I/O-free: reads the resolver snapshot only."""
-    if not TRIGGER.search(request or "") or _LIVE.search(request or ""):
+    live number, or whether to own a token. Sync and I/O-free: reads the
+    resolver snapshot only."""
+    if not TRIGGER.search(request or "") or _LIVE.search(request or "") or _OWNERSHIP_RISK.search(request or ""):
         return False
     res = snapshot()
     if res is None or len(res) == 0:
@@ -95,10 +107,29 @@ def matches(request: str) -> bool:
     )
 
 
+def _on_topic(hits, plan) -> bool:
+    """Whether the passages are about what the question named. Retrieval
+    always returns its nearest passages; when the question resolved to an
+    entity none of them mention, they are the nearest passages about
+    something else (Lombard and Spark risk sections for a BONK question) and
+    an answer built on them can only say the passages do not cover it."""
+    entities = [e.entity for e in getattr(plan, "entities", []) or []]
+    if not entities:
+        return True
+    names = {n.lower() for e in entities for n in (e.canonical_name, e.symbol or "") if n}
+    for hit in hits:
+        haystack = " ".join([hit.protocol_name or "", hit.document_title or "", getattr(hit.chunk, "heading", "") or "", hit.chunk.content or ""]).lower()
+        if any(name in haystack for name in names):
+            return True
+    return False
+
+
 def knowledge_base_search(request: str) -> str:
     """Retrieve passages with citations for a protocol / concept question."""
     hits, plan = _run(_search_with_resolver(request))
-    if not hits:
+    if not hits or not _on_topic(hits, plan):
+        # No output means the router moves on to the next tool; a citation
+        # list that cannot mention the subject is not an answer.
         raise RuntimeError("No indexed knowledge matched this question")
     context, citations = build_context(hits)
     entities = ", ".join(f"{r.entity.canonical_name} ({r.entity.entity_type}, {r.confidence:.2f})" for r in plan.entities[:6]) or "none resolved"
