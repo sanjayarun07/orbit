@@ -35,16 +35,20 @@ def test_a_bare_solana_address_names_its_chain_and_an_evm_address_does_not():
 
 
 @pytest.mark.parametrize("ask,expected", [
-    (f"Show recent transactions for {SOL_WALLET}", {"helius_wallet_transactions"}),
+    # Wallet tracking and portfolio go to Mobula first by user decision
+    # (2026-09-18); the chain-native tools stay ranked behind it.
+    (f"Show recent transactions for {SOL_WALLET}", {"mobula_wallet_history", "helius_wallet_transactions"}),
     ("hyperliquid oi right now", {"goldrush_hyperliquid_market"}),
     ("what coins spiked hardest today", {"coingecko_gainers_losers"}),
     ("newest token profiles", {"dexscreener_latest_profiles"}),
     (f"what is {AERO} on base", {"coingecko_token_by_contract", "birdeye_token_overview"}),
-    (f"rug check {CAKE} on bsc", {"goplus_token_security"}),
+    # Mobula's card (LP burned/locked/unlocked per pool) and GoPlus's flags are
+    # both right answers to a rug check, and the multi-tool plan runs both.
+    (f"rug check {CAKE} on bsc", {"mobula_token_security", "goplus_token_security"}),
     # GoPlus reports is_honeypot and sell tax too: either security tool is a correct first pick.
     (f"can I sell {PEPE} on ethereum", {"honeypot_token_security", "goplus_token_security"}),
     (f"honeypot check {PEPE} on ethereum", {"honeypot_token_security", "goplus_token_security"}),
-    (f"what does {WALLET} hold on ethereum", {"bitquery_wallet_balances", "goldrush_wallet_balances"}),
+    (f"what does {WALLET} hold on ethereum", {"mobula_wallet_portfolio", "bitquery_wallet_balances", "goldrush_wallet_balances"}),
     ("recent delistings", {"exchange_listing_announcements"}),
 ])
 def test_the_deterministic_ranking_puts_the_right_tool_first(ask, expected):

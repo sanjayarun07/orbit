@@ -18,6 +18,8 @@ from app import token_unlocks, url_reader
 from app.integrations import tradingview
 from app.tool_catalog import TOOL_SPECS
 from app.market_providers import MARKET_PROVIDERS
+from app.mobula_wallet import MobulaWalletProvider
+from app.mobula_security import MobulaSecurityProvider
 from app.perplexity_tools import (
     perplexity_available,
     perplexity_fetch_url,
@@ -242,6 +244,8 @@ def _solana_token_security(request: str) -> str:
 @lru_cache(maxsize=1)
 def get_provider_router() -> ProviderRouter:
     router = ProviderRouter()
+    for provider_type in (MobulaWalletProvider, MobulaSecurityProvider):
+        provider_type().register(router)
     for provider_type in MARKET_PROVIDERS:
         provider_type().register(router)
     for provider_type in ADDITIONAL_PROVIDERS:

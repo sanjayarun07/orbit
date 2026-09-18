@@ -238,6 +238,7 @@
     "id": "wallet-balances-base",
     "query": "Show token balances for 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 on Base",
     "expected_tools": [
+      "mobula_wallet_portfolio",
       "goldrush_wallet_balances"
     ],
     "forbidden_tools": [
@@ -245,18 +246,20 @@
       "relay"
     ],
     "expected_intent": "research",
-    "router": true
+    "router": true,
+    "notes": "wallet tracking goes to Mobula first (user decision 2026-09-18); GoldRush stays a correct answer"
   },
   {
     "id": "wallet-txns-sol",
     "query": "Show recent transactions for GThUX1Atko4tqhN2NaiTazWSeFWMuiUvfFnyJyUghFMJ",
     "expected_tools": [
+      "mobula_wallet_history",
       "helius_wallet_transactions"
     ],
     "forbidden_tools": [],
     "expected_intent": "research",
     "router": true,
-    "notes": "Solana wallet -> Helius (top priority)"
+    "notes": "Solana wallet -> Mobula first (user decision 2026-09-18), Helius behind it"
   },
   {
     "id": "hyperliquid-positions",
@@ -1019,6 +1022,7 @@
     "id": "slang-balances-vs-tx-1",
     "query": "what's this wallet holding on base 0x1234567890abcdef1234567890abcdef12345678",
     "expected_tools": [
+      "mobula_wallet_portfolio",
       "goldrush_wallet_balances"
     ],
     "forbidden_tools": [
@@ -1026,12 +1030,13 @@
     ],
     "expected_intent": "research",
     "router": true,
-    "notes": "slang stress: 'holding' -> balances, not transactions"
+    "notes": "slang stress: 'holding' -> balances, not transactions Mobula leads wallet questions (user decision 2026-09-18)."
   },
   {
     "id": "slang-balances-vs-tx-2",
     "query": "recent activity for this wallet on ethereum 0x1234567890abcdef1234567890abcdef12345678",
     "expected_tools": [
+      "mobula_wallet_history",
       "goldrush_wallet_transactions"
     ],
     "forbidden_tools": [
@@ -1039,7 +1044,7 @@
     ],
     "expected_intent": "research",
     "router": true,
-    "notes": "slang stress: 'recent activity' -> transactions, not balances"
+    "notes": "slang stress: 'recent activity' -> transactions, not balances Mobula leads wallet questions (user decision 2026-09-18)."
   },
   {
     "id": "slang-liquidity-vs-holders-1",
@@ -1196,12 +1201,13 @@
     "id": "catalog-rug-check-addr",
     "query": "rug check 0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82 on bsc",
     "expected_tools": [
+      "mobula_token_security",
       "goplus_token_security"
     ],
     "forbidden_tools": [],
     "expected_intent": "research",
     "router": true,
-    "notes": "catalog example for goplus_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user; realised with a chain 2026-09-17: an 0x address is ambiguous across EVM chains and the node asks for one"
+    "notes": "catalog example for goplus_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user; realised with a chain 2026-09-17: an 0x address is ambiguous across EVM chains and the node asks for one Mobula's LP-lock card and GoPlus's flags are both right for a rug check; the plan runs both (2026-09-18)."
   },
   {
     "id": "catalog-can-i-sell-addr-on-ethereum",
@@ -1256,23 +1262,25 @@
     "id": "catalog-what-does-addr-hold-on-ethereum",
     "query": "what does 0xd8dA6BF26964aF9D7eEd9e03E51415D2aA6f0c8f hold on ethereum",
     "expected_tools": [
+      "mobula_wallet_portfolio",
       "bitquery_wallet_balances"
     ],
     "forbidden_tools": [],
     "expected_intent": "research",
     "router": true,
-    "notes": "catalog example for bitquery_wallet_balances; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user"
+    "notes": "catalog example for bitquery_wallet_balances; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user Mobula leads wallet questions (user decision 2026-09-18)."
   },
   {
     "id": "catalog-recent-transactions-of-addr-on-arbitrum",
     "query": "recent transactions of 0xd8dA6BF26964aF9D7eEd9e03E51415D2aA6f0c8f on arbitrum",
     "expected_tools": [
+      "mobula_wallet_history",
       "goldrush_wallet_transactions"
     ],
     "forbidden_tools": [],
     "expected_intent": "research",
     "router": true,
-    "notes": "catalog example for goldrush_wallet_transactions; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+    "notes": "catalog example for goldrush_wallet_transactions; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user Mobula leads wallet questions (user decision 2026-09-18)."
   },
   {
     "id": "catalog-open-perps-for-addr",

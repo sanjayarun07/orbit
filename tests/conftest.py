@@ -66,6 +66,17 @@ def _reset_account_stores(monkeypatch):
     _live = _router()
     _live._health.clear()
     _live._overrides.clear()
+
+    # A configured MOBULA_API_KEY makes the wallet and security tools live;
+    # no test may reach the network for them. Tests that exercise the cards
+    # patch these back with fixtures of their own.
+    from app import mobula_security as _msec, mobula_wallet as _mwallet
+
+    def _offline(*_a, **_k):
+        raise RuntimeError("network disabled in tests")
+
+    monkeypatch.setattr(_msec, "token_security", _offline)
+    monkeypatch.setattr(_mwallet, "_get", _offline)
     monkeypatch.setattr(_settings, "warm_caches_on_start", False)
     monkeypatch.setattr(_tradingview, "get_redis", no_redis)
     # The subject probe looks a name up on the web when the router is unsure;

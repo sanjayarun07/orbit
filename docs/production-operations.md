@@ -1259,3 +1259,40 @@ told a user who had pasted an address to name a token. Three fixes:
   sources do and do not cover and offers the next step that fits, instead
   of asking for a ticker. The "what I could pull is about ..." clause is
   dropped when it only restates the question.
+
+### Mobula: wallet tracking, portfolio analysis and meme rug risk (2026-09-18)
+
+User decision: use Mobula "explicitly for wallet tracking and portfolio
+analysis related queries at high priority order", and "for meme token
+complete in depth analysis". `MOBULA_API_KEY` gates every tool below;
+without it they are unregistered and nothing changes.
+
+**Wallet (app/mobula_wallet.py), priority 14, ahead of the per-chain tools.**
+`mobula_wallet_portfolio` is everything an address holds across 40+ chains
+in one call, priced, with each holding's share. `mobula_wallet_history` is
+its dated transfers and trades plus how its total value moved: this is what
+answers "when did this wallet buy X", which no source of ours could.
+`mobula_wallet_analysis` is realized PnL, win-rate and market-cap
+distribution, first funding and labels. Airdrop-spam tokens are filtered
+from both the holdings table and the activity table and counted in a
+footnote, because an unfiltered history for a real wallet is a wall of
+claim-page tokens. A token-shaped question ("recent trades of 0x… on base")
+is left to the token tools.
+
+**Meme rug risk (app/mobula_security.py).** `mobula_token_security` reports,
+per pool, how much LP is burned, locked in a named locker, held by an
+unidentified contract, or sitting in a wallet that can pull it, plus holder
+concentration at top 10/50/100, buy/sell/transfer fees and the
+mint/freeze/pause/renounce switches. It works on Solana and every EVM chain.
+It is ranked below the chain-native security tools so "is this token safe"
+still reaches Jupiter Shield or GoPlus first, and the multi-tool plan runs
+both. The token deep dive calls it by name as a `liquidity_locks` dimension,
+so a meme analysis always includes it.
+
+**Coverage checked live, not assumed.** Mobula indexes HyperEVM (chain 999)
+but not the Hyperliquid perps clearinghouse, so `goldrush_hyperliquid_positions`
+remains the source for perps. Its own perps endpoints cover Lighter and
+Gains Network only, on a demo gateway.
+
+Tests run with a network guard: `tests/conftest.py` points the Mobula
+callers at a stub, so a configured key never turns the suite live.
