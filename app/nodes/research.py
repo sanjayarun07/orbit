@@ -17,7 +17,7 @@ from app.market_overview import crypto_market_overview
 from app import composition, streaming
 from app.integrations import tradingview
 from app.routing import lexicon, subject_probe
-from app import event_calendar, token_pages, token_unlocks, why_moving
+from app import answer_gate, event_calendar, token_pages, token_unlocks, why_moving
 from app.clarify import is_clarification
 from app.market_providers import TRENDING_TOKENS
 from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available, perplexity_web_search
@@ -1469,8 +1469,6 @@ async def research_node(state: AgentState) -> dict:
         result = {"answer": answer, "trajectory": trajectory or None, **extras}
     else:
         result = await _research_node(state, sink)
-    if page and result.get("answer"):
-        result = {**result, "answer": f"{page.note()}\n\n{result['answer']}"}
     if web_part and result.get("answer") and not result.get("pending_token") and not is_clarification(result.get("answer")):
         # Search first, then the tools, read together: the web's answer is the
         # first card unless the tools' turn was that same answer already. A
@@ -1480,6 +1478,13 @@ async def research_node(state: AgentState) -> dict:
             cards, combined = composition.combine([web_part, (result["answer"], trajectory)])
             answer = await composition.synthesize(request, cards, combined)
             result = {**result, "answer": answer, "trajectory": combined or None}
+    # The way out: the answer is checked against the question as the user
+    # asked it (app/answer_gate.py) -- a wrong subject or a missing answer
+    # never ships. The link note goes on after, so the check reads the answer
+    # the tools produced.
+    result = await answer_gate.gate(state["request"], result)
+    if page and result.get("answer"):
+        result = {**result, "answer": f"{page.note()}\n\n{result['answer']}"}
     if sink.get("resolved_token") and not result.get("resolved_token"):
         result = {**result, "resolved_token": sink["resolved_token"]}
     return result

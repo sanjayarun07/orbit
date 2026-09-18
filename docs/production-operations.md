@@ -1149,3 +1149,25 @@ symbol, name, chain and contract; picks the chain where that contract has
 the most DEX liquidity; and the research node rewrites the turn into a
 token question about that contract, answered from our own tools, with one
 line saying how the link was read. News and docs links are still fetched.
+
+### The answer gate: correct over fast (2026-09-18)
+
+User rule after a day of per-phrasing fixes: "1000 ways of asking the same
+question ... even if we have to degrade performance the result should be
+correct for the query. It is always better than a wrong answer." Routing
+fixes guard the way in; `app/answer_gate.py` guards the way out. Every
+research answer (not a clarification, trade card or error) is judged by a
+small model on two tests: is it about the subject the user named, and does
+it give what was asked. A failing answer never ships: the question as
+asked goes to the web, the web's answer is judged once more, and if that
+fails too the user gets a question naming what could not be found and
+what the data was about instead. A wrong-subject answer is dropped; a
+right-subject but incomplete one is kept under the web's answer. Cost: one
+small-model call per research turn (about a second) and a web search on a
+miss. `ANSWER_GATE_ENABLED=false` turns it off; the suite runs with it off
+and `tests/test_answer_gate.py` opts in. `answer_gate` on the result
+records the verdict and how it was resolved.
+
+Rule for future transcripts: do not add a phrasing regex. Add the
+transcript as a test; if the gate let a wrong answer through, sharpen the
+AnswerCheck signature.

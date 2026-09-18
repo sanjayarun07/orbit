@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     # Related questions under an answer (app/followups.py): model-written,
     # kept only when grounded in the answer; off means the section never shows.
     followups_enabled: bool = True
+    # Every research answer is checked against the question before it is
+    # returned (app/answer_gate.py); a wrong-subject or empty answer is
+    # replaced by the web's answer or a question. Costs a model call per turn.
+    answer_gate_enabled: bool = True
     # The trading desk (team mode) on its own for advice-shaped asks about an
     # asset ("should I buy X", "thoughts on Y"); factual lookups, security
     # checks and plain swaps stay on the single path. The session's team_mode
