@@ -20,6 +20,7 @@ from app.nodes.research import research_node, _TOKEN_ADDRESS, _MIRROR_CHAINS, _c
 from app import answer_gate
 from app.token_resolve import clear_winner, token_candidates
 from app.nodes.trading import (
+    charter_precheck,
     trade_planner_node,
     risk_check_node,
     quote_and_simulate_node,
@@ -27,6 +28,7 @@ from app.nodes.trading import (
     finalize_trade_node,
 )
 from app.answer_validator import _headline_metrics
+from app.models import RiskAssessment
 from app.provider_registry import get_provider_router
 from app.tracing import trace
 
@@ -261,6 +263,17 @@ async def team_node(state: AgentState) -> dict:
             resolution = None
         if resolution is not None and resolution.clarification:
             return {"intent": "research", "answer": resolution.clarification, "pending_token": resolution.pending}
+    # A trade the charter already refuses in plain text costs nothing to
+    # refuse now: no thesis, no quote (2026-09-18). This never approves a
+    # trade -- charter_risk_node still checks the real quote against every
+    # rule, which is why the desk keeps Risk after the draft rather than
+    # beside it.
+    if subintent == "trade":
+        context = state.get("session_context") or {}
+        broken = charter_precheck(context.get("risk_charter_fields") or {}, request, tuple(state.get("chains", [])))
+        if broken and (context.get("risk_charter") or "").strip():
+            return {"intent": "trade", "answer": f"🚫 Blocked by your risk charter: {broken}. No confirmation card was created; adjust the trade or your charter and try again.",
+                    "risk_assessment": RiskAssessment(verdict="blocked", summary=broken, charter_applied=True), "trade_plan": None}
     thesis, conviction, research_trajectory, pending_token = await _market_research(state, request)
     if pending_token is not None:
         # The desk can't research an ambiguous cross-chain symbol without knowing
@@ -280,19 +293,25 @@ async def team_node(state: AgentState) -> dict:
         charter = (state.get("session_context") or {}).get("risk_charter")
         risk_line = f"User risk charter to respect when advising on sizing: {charter}" if charter else "No risk charter set (advisory)."
 
-    try:
-        streaming.emit("status", text="The Coordinator is folding the desk's answers together")
-        synth = await runtime.answer(
-            runtime.team_coordinator,
-            request=request,
-            market_research=thesis,
-            execution=execution_answer,
-            risk=risk_line,
-        )
-        answer = (getattr(synth, "answer", "") or "").strip() or thesis
-    except Exception:
-        logger.warning("team: coordinator synthesis failed; returning thesis", exc_info=True)
+    # The Coordinator exists to fold several voices into one. On an analysis
+    # turn with no charter there is exactly one voice and no rule to relate it
+    # to, so the thesis IS the answer and the call is skipped (2026-09-18).
+    if subintent != "trade" and not (state.get("session_context") or {}).get("risk_charter"):
         answer = thesis
+    else:
+        try:
+            streaming.emit("status", text="The Coordinator is folding the desk's answers together")
+            synth = await runtime.answer(
+                runtime.team_coordinator,
+                request=request,
+                market_research=thesis,
+                execution=execution_answer,
+                risk=risk_line,
+            )
+            answer = (getattr(synth, "answer", "") or "").strip() or thesis
+        except Exception:
+            logger.warning("team: coordinator synthesis failed; returning thesis", exc_info=True)
+            answer = thesis
 
     if subintent != "trade":
         # A desk analysis ships only when it answers the question (the same

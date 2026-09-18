@@ -207,9 +207,12 @@ def test_team_analysis_path_no_trade(monkeypatch):
     monkeypatch.setattr(team, "trade_planner_node", boom)
     _patch_lm(monkeypatch, thesis="SOL thesis CONVICTION 6/10", conviction=6, synth="Should you buy SOL? Desk view...")
 
+    # A charter is set, so there is a rule to relate the thesis to and the
+    # Coordinator still folds. (With no charter the thesis is the answer and
+    # the call is skipped -- tests/test_desk_parallel_20260918.py.)
     out = asyncio.run(team.team_node({
         "request": "should I buy SOL", "contextual_request": "should I buy SOL",
-        "team_subintent": "analysis", "session_context": {},
+        "team_subintent": "analysis", "session_context": {"risk_charter": "only verified tokens"},
     }))
     assert out["intent"] == "research"
     assert out["trade_plan"] is None

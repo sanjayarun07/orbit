@@ -1213,3 +1213,29 @@ Two fixes came out of that run and are in the suite:
 Test hygiene: `tests/conftest.py` clears the learned tool-outcome counts and
 the singleton router's health and overrides per test. Both are module state
 that had been reordering ranking assertions between tests.
+
+### The desk is sequential on purpose (2026-09-18)
+
+A widely shared Minara walkthrough runs Market Research, Execution and Risk
+in parallel and has the Coordinator block until all three land. Ours keeps
+the chain: Market Research writes the thesis, Execution drafts the order
+from it, Risk vetoes that draft. The reason is that Risk must judge the
+real order, with its size, slippage and route, and a Risk agent running
+beside Execution has no order to judge yet. Parallelism is used where the
+work is genuinely independent: the multi-tool plan, the four-source market
+bundle, wallet balances against positions against DeFi holdings, and the
+chart alongside the follow-up questions.
+
+Two changes did come out of the comparison:
+
+- **A trade the charter already refuses costs nothing.** `trading.charter_precheck`
+  reads what the request itself says (a dollar amount over `max_trade_usd`,
+  a chain outside `allowed_chains`, slippage over `max_slippage_bps`) and
+  the desk refuses before writing a thesis or fetching a quote. It only
+  ever refuses, never approves: `charter_risk_node` still checks the real
+  quote against every rule, and a request that says nothing about amounts
+  or chains passes straight through.
+- **One voice needs no Coordinator.** An analysis turn with no risk charter
+  returns the Market Research thesis directly, saving a model call. With a
+  charter set there is a rule to relate the thesis to, so the Coordinator
+  still folds.

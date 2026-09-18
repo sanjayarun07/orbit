@@ -17,6 +17,8 @@ from app import deployment, streaming
 from app.settings import settings
 from app.trade_context import complete_swap_fields
 
+from app.routing.entities import extract_chains
+
 logger = logging.getLogger(__name__)
 
 def _research_mode_answer(draft_text: str) -> dict:
@@ -299,6 +301,51 @@ def _charter_draft_violations(fields: dict, draft: CrossChainSwapDraft) -> tuple
         # Relay tokens are not in Jupiter's verified registry; the rule cannot pass here.
         violations.append("your charter allows only Jupiter-verified tokens, which cannot be confirmed for a cross-chain swap")
     return violations, unresolved
+
+
+# What the REQUEST already says, before any thesis or quote: a dollar amount,
+# a chain, a slippage. Only these three are legible in plain text; everything
+# else needs the real quote and stays with charter_risk_node.
+_REQUEST_USD = re.compile(r"(?:\$\s*([\d,]+(?:\.\d+)?)\s*(?:k\b)?|\b([\d,]+(?:\.\d+)?)\s*(?:k\s+)?(?:usd|usdc|usdt|dollars)\b)", re.I)
+_REQUEST_SLIPPAGE = re.compile(r"\b(\d{1,4})\s*(?:bps|basis points)\b|\bslippage\s+(?:of\s+)?(\d{1,2}(?:\.\d+)?)\s*%|(\d{1,2}(?:\.\d+)?)\s*%\s*(?:max\s+)?slippage\b", re.I)
+
+
+def charter_precheck(fields: dict, request: str, chains: tuple[str, ...] = ()) -> str | None:
+    """The one charter rule this request already breaks in plain text, or None.
+
+    Deterministic and free: it reads the words the user typed, so a request
+    outside the charter is refused before a thesis is written and a quote is
+    fetched. It never approves anything -- charter_risk_node still checks the
+    real quote against every rule (post/2026-09-18 runs Risk in parallel and
+    so can only judge the request; ours keeps that check on the draft)."""
+    if not fields:
+        return None
+    text = request or ""
+    cap = fields.get("max_trade_usd")
+    if cap is not None:
+        for whole, bare in _REQUEST_USD.findall(text):
+            raw = (whole or bare).replace(",", "")
+            try:
+                amount = float(raw)
+            except ValueError:
+                continue
+            if re.search(rf"{re.escape(raw)}\s*k\b", text, re.I) or re.search(rf"\$\s*{re.escape(raw)}\s*k\b", text, re.I):
+                amount *= 1000
+            if amount > float(cap):
+                return f"you asked for ${amount:,.2f} but your charter caps a trade at ${float(cap):,.2f}"
+    allowed = [c.lower() for c in (fields.get("allowed_chains") or [])]
+    if allowed:
+        named = [c for c in dict.fromkeys([*chains, *extract_chains(text)]) if c]
+        outside = [c for c in named if c.lower() not in allowed]
+        if outside and not any(c.lower() in allowed for c in named):
+            return f"you asked on {outside[0]} but your charter allows only {', '.join(allowed)}"
+    limit = fields.get("max_slippage_bps")
+    if limit is not None:
+        for bps, pct_after, pct_before in _REQUEST_SLIPPAGE.findall(text):
+            asked = float(bps) if bps else float(pct_after or pct_before) * 100
+            if asked > float(limit):
+                return f"you asked for {asked:g} bps of slippage but your charter caps it at {int(limit)} bps"
+    return None
 
 
 def _charter_field_violations(fields: dict, plan, total_usd: float | None, holdings: list[dict] | None = None) -> tuple[list[str], list[str]]:
