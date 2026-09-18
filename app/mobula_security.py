@@ -167,10 +167,41 @@ def token_security(request: str) -> str:
     if data.get("isLaunchpadToken") is not None:
         lines.append(f"- **Launchpad token**: {_flag(data.get('isLaunchpadToken'), 'yes', 'no')}")
 
+    copies = _logo_reuses(address, chain)
+    if copies:
+        count, samples = copies
+        lines += ["", "## Copycats",
+                  f"**{count} other token(s) reuse this exact logo.** " + ("Highest-volume lookalikes: " + "; ".join(samples) + "." if samples else "")
+                  + " Verify the contract, not the picture."]
     lines += ["", "Source: [Mobula token security](https://docs.mobula.io/cookbooks/token-security-liquidity-analysis)",
               "Lock state is read from the pool's LP-token holders; a lock that expires, or a locker this endpoint does not "
               "recognise, is not a guarantee. This is a risk read, not an audit."]
     return "\n".join(lines)
+
+
+_PULSE_CHAIN = {"solana": "solana:solana", "ethereum": "evm:1", "base": "evm:8453", "bnb smart chain (bep20)": "evm:56", "arbitrum": "evm:42161",
+                "polygon": "evm:137", "avalanche c-chain": "evm:43114", "optimism": "evm:10", "hyperevm": "evm:999"}
+
+
+def _logo_reuses(address: str, chain: str) -> tuple[int, list[str]] | None:
+    """How many other tokens reuse this exact logo, and the busiest of them:
+    byte-identical images only, so a copycat with a re-encoded picture is missed."""
+    chain_id = _PULSE_CHAIN.get(chain)
+    if not chain_id:
+        return None
+    try:
+        with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
+            response = client.get("https://production-api.mobula.io/api/2/token/logo-reuses", params={"address": address, "chainId": chain_id},
+                                  headers={"Authorization": settings.mobula_api_key or ""})
+            response.raise_for_status()
+            data = response.json().get("data") or {}
+    except Exception:
+        logger.info("logo reuse lookup failed for %s", address, exc_info=True)
+        return None
+    count = int(data.get("count") or 0)
+    tokens = sorted((t for t in (data.get("tokens") or []) if isinstance(t, dict)), key=lambda t: float(t.get("volume24hUSD") or 0), reverse=True)
+    samples = [f"{t.get('symbol') or '?'} on {t.get('chainId') or '?'} (`{str(t.get('address') or '')[:10]}…`)" for t in tokens[:3]]
+    return (count, samples) if count else None
 
 
 class MobulaSecurityProvider:

@@ -225,6 +225,16 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
                     if trades else
                     DimensionEvidence("latest_trades", "Latest trades", "unavailable", "Mobula returned no indexed swaps for this contract."))
 
+    # Who got in first and whether they are still in: the sniper / exit read.
+    if mobula_meme.enabled():
+        try:
+            first = await asyncio.to_thread(mobula_meme.token_first_buyers, f"first buyers {address} on {chain}")
+        except Exception:
+            first = None
+        dims.append(DimensionEvidence("first_buyers", "First buyers & snipers", "available", first, "mobula_token_first_buyers", _now())
+                    if first else
+                    DimensionEvidence("first_buyers", "First buyers & snipers", "unavailable", "Mobula returned no first-buyer data for this contract."))
+
     # Token unlocks -- the most deterministic near-term headwind. Real, free, and
     # verified-by-address via DefiLlama emissions; unavailable when the token isn't
     # tracked (most memecoins) rather than silently omitted.

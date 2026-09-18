@@ -46,7 +46,7 @@ def test_build_evidence_bundle_marks_coverage_and_gaps(monkeypatch):
     monkeypatch.setattr(token_deepdive, "get_provider_router", lambda: _FakeRouter(by_cap))
     bundle = asyncio.run(build_token_evidence(_MINT, "solana"))
     have, total = bundle.coverage
-    assert total == 10 and have >= 4                   # 5 composable + liquidity locks + latest trades + 3 disclosed gaps
+    assert total == 11 and have >= 4                   # 5 composable + locks + trades + first buyers + 3 disclosed gaps
     names = {d.name: d.status for d in bundle.dimensions}
     assert names["identity_safety"] == "available"
     assert names["market"] == "available"
@@ -69,7 +69,7 @@ def test_build_evidence_degrades_when_a_source_dies(monkeypatch):
             raise RuntimeError("down")
     monkeypatch.setattr(token_deepdive, "get_provider_router", lambda: _Boom())
     bundle = asyncio.run(build_token_evidence(_MINT, "solana"))
-    assert bundle.coverage == (0, 10)                   # every composable dim unavailable, never raises
+    assert bundle.coverage == (0, 11)                   # every composable dim unavailable, never raises
 
 
 # ---- the deep-dive intercept ----

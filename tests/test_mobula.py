@@ -283,3 +283,103 @@ def test_a_plain_price_question_reaches_none_of_them():
 
     assert mobula_meme._subject("price of BONK") is None
     assert not mobula_meme.DEPLOYER_ASK.search("price of BONK")
+
+
+# --- first buyers, launches, funding, copycats --------------------------------
+
+_REAL_FIRST = mobula_meme.token_first_buyers
+
+FIRST = [
+    {"address": "6P6Dp4Js5H3m5RwE42Vzns5dYQZB6eADXyr4SpmPRcGa", "initialAmount": "1000", "currentBalance": "0", "firstHoldingDate": "2024-10-18T07:25:16.000Z", "tags": [{"name": "sniper"}]},
+    {"address": "HoldsStillAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2", "initialAmount": "1000", "currentBalance": "1500", "firstHoldingDate": "2024-10-18T07:26:00.000Z", "tags": []},
+    {"address": "TrimmedAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA3", "initialAmount": "1000", "currentBalance": "400", "firstHoldingDate": "2024-10-18T07:27:00.000Z", "tags": ["sniper"]},
+]
+
+
+def test_first_buyers_reports_who_is_still_in_and_who_is_tagged(monkeypatch):
+    monkeypatch.setattr(mobula_meme, "_get_v1", lambda path, params: FIRST)
+    card = _REAL_FIRST(f"first buyers of {FARTCOIN} on solana")
+    assert "Of the first **3** buyers, **2 still hold** something, **1 added** to their position, and **1 exited**" in card
+    assert "retain about **47%**" in card, "capped at what they first bought: (0 + 1000 + 400) / 3000"
+    assert "| 1 | `6P6D…RcGa` | 2024-10-18 | no | all | sniper |" in card
+    assert "| 2 | `Hold…AAA2` | 2024-10-18 | yes | added | — |" in card
+    assert "| 3 | `Trim…AAA3` | 2024-10-18 | yes | kept 40% | sniper |" in card
+    assert "**Tagged among them**: sniper ×2" in card and "not by itself evidence of coordination" in card
+
+
+def test_the_launch_feed_lists_new_bonding_and_graduated(monkeypatch):
+    seen = {}
+
+    def fake(path, params):
+        seen.update(params)
+        item = {"tokenSymbol": "pump", "tokenName": "may the pump be with you", "source": "pump.fun", "market_cap": 4800.0, "holders_count": 12,
+                "volume_24h": 2100.0, "trades_24h": 40, "devHoldingsPercentage": 4.2, "snipersHoldingsPercentage": 11.0, "bundlersHoldingsPercentage": 0,
+                "top10HoldingsPercentage": 38.5, "created_at": "2026-09-18T14:50:00.000Z", "bondingPercentage": 63.0}
+        unnamed = dict(item, tokenSymbol=None, tokenName=None, pair={"token0": {"symbol": "SOL", "name": "Solana"}, "token1": {"symbol": "FRESH", "name": "Fresh Launch"}})
+        nothing = dict(item, tokenSymbol=None, tokenName=None, pair={})
+        return {"new": {"data": [item, unnamed, nothing]}, "bonding": {"data": []}, "bonded": {"data": [dict(item, tokenSymbol="GRAD", market_cap=91000.0)]}}
+
+    monkeypatch.setattr(mobula_meme, "_get", fake)
+    card = mobula_meme.new_launches("new launches on base")
+    assert seen == {"chainId": "evm:8453", "limit": 10}
+    assert card.startswith("# New launches — base") and "## Just launched" in card and "## Graduated (bonded)" in card and "## Bonding" not in card
+    assert "| pump (may the pump be with you) | pump.fun | $4.8K | 12 | $2.1K | 4.2% | 11.0% | 0.0% | 38.5% | 2026-09-18 |" in card
+    assert "| GRAD (may the pump be with you) | pump.fun | $91.0K |" in card
+    assert "| FRESH (Fresh Launch) | pump.fun |" in card, "a new token with no symbol yet is named from its pair"
+    assert card.count("| pump.fun |") == 3, "a row nothing identifies is dropped"
+    minutes_old = {"tokenSymbol": "BABY", "tokenName": "may the pump be with you", "source": "pump.fun", "holders_count": 1, "trades_24h": 1,
+                   "volume_24h": 1, "market_cap": 3_600_000_000.0, "created_at": "2026-09-18T15:10:00.000Z"}
+    monkeypatch.setattr(mobula_meme, "_get", lambda path, params: {"new": {"data": [minutes_old]}, "bonding": {"data": []}, "bonded": {"data": []}})
+    card = mobula_meme.new_launches("new launches on solana")
+    assert "| BABY (may the pump be with you) | pump.fun | — | 1 | — |" in card, "a pair minutes old has no believable market cap or volume"
+    assert mobula_meme._usd(3_600_000_000) == "$3.60B"
+    assert "not what is safe" in card
+
+
+@pytest.mark.parametrize("text,claims", [
+    ("new launches on solana", True), ("what's bonding on pump.fun", True), ("graduated tokens on base today", True),
+    ("price of BONK", False), ("top holders of BONK", False),
+])
+def test_launch_questions_reach_the_feed(text, claims):
+    assert bool(mobula_meme.LAUNCH_ASK.search(text)) is claims
+
+
+def test_the_deployer_card_names_the_funding_source(monkeypatch):
+    def fake(path, params):
+        if path == "/wallet/deployer":
+            return []
+        return {"from": "77dreH7tDWHW4mU1msHyyGV4EAPQ5NQKKejEP9aixMGz", "date": "2025-05-10T04:06:02.000Z", "fromWalletTag": "Binance hot wallet"}
+
+    monkeypatch.setattr(mobula_meme, "_get", fake)
+    card = mobula_meme.wallet_deployer(f"who is the dev behind {WALLET} on base")
+    assert "**First funded** on 2025-05-10 from `77dr…xMGz` (Binance hot wallet)." in card
+
+
+def test_the_security_card_warns_about_copycat_logos(monkeypatch):
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": SECURITY}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, params=None, headers=None):
+            return Response()
+
+    monkeypatch.setattr(mobula_security.httpx, "Client", Client)
+    monkeypatch.setattr(mobula_security, "_logo_reuses", lambda address, chain: (260, ["FARTCOIN on evm:196 (`0x540c6bea…`)"]))
+    card = _REAL_SECURITY(f"is {FARTCOIN} safe on solana")
+    assert "**260 other token(s) reuse this exact logo.** Highest-volume lookalikes: FARTCOIN on evm:196" in card
+    assert "Verify the contract, not the picture." in card

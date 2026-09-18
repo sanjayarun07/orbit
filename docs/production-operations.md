@@ -1321,3 +1321,32 @@ which covers most of that question when the field is populated.
 
 The routing eval now expects Mobula first for wallet, holder and rug-check
 questions; the previous tools remain in each case's accepted set.
+
+### GMGN-class Phase 1: first buyers, launch feed, funding edge, copycat logos (2026-09-18)
+
+The remaining Mobula endpoints the feasibility review named, each found by
+reading its reference page (the guessed paths had been wrong) and verified
+live before it was written:
+
+- `mobula_token_first_buyers` (`/api/1/token/first-buyers?asset=`): the
+  first hundred wallets in, when they first held, whether they still hold,
+  whether they added, trimmed or exited, and which are tagged as snipers;
+  a retention share capped at what each first bought. A `first_buyers`
+  dimension of the token deep dive.
+- `mobula_new_launches` (`/api/2/pulse?chainId=`): what is launching on
+  Solana, Base, BNB Chain, Ethereum or HyperEVM, in three tables (just
+  launched, bonding with the curve percentage, graduated), each row with
+  the GMGN columns Pulse carries: dev, sniper, bundler and top-10 holdings.
+  A brand-new token with no symbol yet is named from its pair; a row
+  nothing identifies is dropped; on a pair minutes old the market cap and
+  volume are pool artifacts and are blanked rather than printed.
+- Funding edge: the deployer card names where the wallet's first funds came
+  from and the known entity behind that address (`/api/2/wallet/funding`).
+  This is the first edge of a wallet relationship graph, not the graph.
+- Copycat logos: the security card counts other tokens reusing the exact
+  logo and names the busiest lookalikes (`/api/2/token/logo-reuses`);
+  byte-identical images only.
+
+Not built: `/api/2/token/dev-history` is alpha and returned nothing for the
+sample token; the deployer card stands in for it. Everything above is
+research and monitoring data; no execution.

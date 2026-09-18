@@ -72,6 +72,8 @@ def _usd(value) -> str:
         return "—"
     sign = "-" if amount < 0 else ""
     amount = abs(amount)
+    if amount >= 1_000_000_000:
+        return f"{sign}${amount/1_000_000_000:,.2f}B"
     if amount >= 1_000_000:
         return f"{sign}${amount/1_000_000:,.2f}M"
     if amount >= 1_000:
@@ -212,7 +214,150 @@ def wallet_deployer(request: str) -> str:
     else:
         lines.append("Mobula indexed no other token deployments for this wallet. That is not proof it deployed none: "
                      "a deployment on a chain or venue it does not index would not appear.")
+    funded = _funding_line(wallet, chain)
+    if funded:
+        lines += ["", funded]
     lines += ["", "Source: [Mobula deployer tokens](https://docs.mobula.io/rest-api-reference/endpoint/wallet-deployer)"]
+    return "\n".join(lines)
+
+
+_V1 = "https://production-api.mobula.io/api/1"
+PULSE_CHAINS = {"solana": "solana:solana", "base": "evm:8453", "bsc": "evm:56", "bnb": "evm:56", "ethereum": "evm:1", "hyperevm": "evm:999"}
+LAUNCH_ASK = re.compile(
+    r"\b(?:new\s+(?:launch\w*|tokens?|memes?|coins?|pairs?|listings?)|(?:just|recently|freshly)\s+launch\w*|fresh\s+launch\w*|launchpad|pump\.?fun|"
+    r"bonding|bonded|graduat\w+|migrat\w+\s+to\s+raydium|latest\s+(?:launch\w*|memes?)|what'?s\s+launching|new\s+on\s+(?:solana|base|bsc|bnb))\b", re.I)
+
+
+def _get_v1(path: str, params: dict) -> dict | list:
+    with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
+        response = client.get(f"{_V1}{path}", params=params, headers={"Authorization": settings.mobula_api_key or ""})
+        response.raise_for_status()
+        payload = response.json()
+    return payload.get("data", payload) if isinstance(payload, dict) else payload
+
+
+def token_first_buyers(request: str) -> str:
+    """The first wallets in: what they bought, what they still hold, who is
+    tagged. Amounts are raw units, so retention is reported as a share."""
+    subject = _subject(request)
+    if subject is None:
+        raise ValueError("No token address found in the request")
+    address, chain = subject
+    rows = _get_v1("/token/first-buyers", {"asset": address, "blockchain": chain, "limit": 100})
+    rows = [r for r in (rows or []) if isinstance(r, dict)]
+    if not rows:
+        raise RuntimeError("Mobula returned no first buyers for this token")
+    rows.sort(key=lambda r: str(r.get("firstHoldingDate") or ""))
+    initial = sum(_num(r.get("initialAmount")) for r in rows)
+    current = sum(min(_num(r.get("currentBalance")), _num(r.get("initialAmount"))) for r in rows)
+    still_in = sum(1 for r in rows if _num(r.get("currentBalance")) > 0)
+    added = sum(1 for r in rows if _num(r.get("currentBalance")) > _num(r.get("initialAmount")) > 0)
+    tagged: dict[str, int] = {}
+    for row in rows:
+        for tag in row.get("tags") or []:
+            text = tag.get("name") if isinstance(tag, dict) else str(tag)
+            if text:
+                tagged[text] = tagged.get(text, 0) + 1
+    retention = (current / initial * 100) if initial else 0.0
+    lines = [
+        "# First buyers — Mobula",
+        f"**Contract**: `{address}` · **Chain**: {chain} · **Checked**: {_stamp()}",
+        "",
+        f"Of the first **{len(rows)}** buyers, **{still_in} still hold** something, **{added} added** to their position, and "
+        f"**{len(rows) - still_in} exited**. Early buyers retain about **{retention:.0f}%** of what they first bought.",
+        "",
+        "| # | Wallet | First held | Still holding | Change | Tags |",
+        "|---:|---|---|---|---|---|",
+    ]
+    for index, row in enumerate(rows[:20], start=1):
+        first, now = _num(row.get("initialAmount")), _num(row.get("currentBalance"))
+        status = "yes" if now > 0 else "no"
+        change = "added" if now > first > 0 else ("all" if now == 0 else (f"kept {now / first * 100:.0f}%" if first else "—"))
+        tags = ", ".join((t.get("name") if isinstance(t, dict) else str(t)) for t in (row.get("tags") or [])[:3]) or "—"
+        lines.append(f"| {index} | `{_short(row.get('address'))}` | {_when(row.get('firstHoldingDate'))} | {status} | {change} | {tags} |")
+    if tagged:
+        lines += ["", "**Tagged among them**: " + ", ".join(f"{k} ×{v}" for k, v in sorted(tagged.items(), key=lambda kv: -kv[1])[:6])]
+    lines += ["", "Source: [Mobula first buyers](https://docs.mobula.io/rest-api-reference/endpoint/wallet-first-buyers)",
+              "Sniping is a label from timing and behaviour; buying early is not by itself evidence of coordination."]
+    return "\n".join(lines)
+
+
+def _funding_line(wallet: str, chain: str) -> str | None:
+    """Where a wallet's first funds came from: the first edge of a relationship graph."""
+    try:
+        data = _get("/wallet/funding", {"wallet": wallet, "blockchain": chain})
+    except Exception:
+        return None
+    if not isinstance(data, dict) or not data.get("from"):
+        return None
+    tag = data.get("fromWalletTag") or (data.get("fromWalletMetadata") or {}).get("name") if isinstance(data.get("fromWalletMetadata"), dict) else data.get("fromWalletTag")
+    return (f"**First funded** on {_when(data.get('date'))} from `{_short(str(data['from']))}`"
+            + (f" ({tag})" if tag else " (no known entity)") + ".")
+
+
+_QUOTES = {"SOL", "WSOL", "USDC", "USDT", "WETH", "ETH", "BNB", "WBNB"}
+
+
+def _launch_identity(item: dict) -> tuple[str, str]:
+    """(symbol, name) for a Pulse row. A brand-new token often has no
+    tokenSymbol yet; the pair still names both sides, and the side that is
+    not the quote asset is the token."""
+    symbol = item.get("tokenSymbol") or item.get("symbol")
+    name = item.get("tokenName") or item.get("name")
+    if not symbol:
+        pair = item.get("pair") or {}
+        for side in ("token1", "token0"):
+            token = pair.get(side) if isinstance(pair, dict) else None
+            if isinstance(token, dict) and str(token.get("symbol") or "").upper() not in _QUOTES and token.get("symbol"):
+                symbol, name = token.get("symbol"), token.get("name") or name
+                break
+    return (str(symbol) if symbol else "—", str(name or "")[:32])
+
+
+def _pct_or_dash(value) -> str:
+    return f"{_num(value):.1f}%" if value is not None and value != "" else "—"
+
+
+def new_launches(request: str) -> str:
+    """What is launching right now on a chain: new, bonding and graduated
+    tokens, each with the GMGN-style risk columns Pulse carries -- dev,
+    sniper, bundler and insider holdings and top-10 concentration."""
+    text = (request or "").lower()
+    chain = next((name for name in ("solana", "base", "bsc", "bnb", "ethereum", "hyperevm") if re.search(rf"\b{name}\b", text)), "solana")
+    data = _get("/pulse", {"chainId": PULSE_CHAINS[chain], "limit": 10})
+    if not isinstance(data, dict):
+        raise RuntimeError("Mobula returned no launch feed")
+    lines = [f"# New launches — {chain}", f"**Provider**: Mobula Pulse · **Checked**: {_stamp()}", ""]
+    for key, label in (("new", "Just launched"), ("bonding", "Bonding (on the curve)"), ("bonded", "Graduated (bonded)")):
+        items = ((data.get(key) or {}).get("data") if isinstance(data.get(key), dict) else data.get(key)) or []
+        items = [i for i in items if isinstance(i, dict)][:8]
+        if not items:
+            continue
+        lines += [f"## {label}", "| Token | Launchpad | Mcap | Holders | Vol 24h | Dev | Snipers | Bundlers | Top 10 | Age |",
+                  "|---|---|---:|---:|---:|---:|---:|---:|---:|---|"]
+        for item in items:
+            symbol, name = _launch_identity(item)
+            if symbol == "—":
+                continue                  # nothing identifies it yet: not worth a row
+            bonding = item.get("bondingPercentage")
+            launchpad = str(item.get("source") or item.get("launchpad") or "—") + (f" {_num(bonding):.0f}%" if key == "bonding" and bonding is not None else "")
+            holders = item.get("holders_count") or item.get("holdersCount") or 0
+            trades = _num(item.get("trades_24h"))
+            volume = item.get("volume_24h") if item.get("volume_24h") is not None else item.get("volume24h")
+            # On a pair minutes old the market cap is derived from a few
+            # lamports of quote and the "volume" is a trade count: blank
+            # them rather than print $3.6B for a token with one holder.
+            settled = _num(holders) >= 5 or trades >= 5
+            mcap = _usd(item.get("market_cap") or item.get("marketCap")) if settled else "—"
+            vol = _usd(volume) if settled and _num(volume) != trades else "—"
+            lines.append(f"| {symbol} ({name}) | {launchpad} | {mcap} | {holders or '—'} | {vol} | "
+                         f"{_pct_or_dash(item.get('devHoldingsPercentage'))} | {_pct_or_dash(item.get('snipersHoldingsPercentage'))} | "
+                         f"{_pct_or_dash(item.get('bundlersHoldingsPercentage'))} | {_pct_or_dash(item.get('top10HoldingsPercentage'))} | "
+                         f"{_when(item.get('created_at') or item.get('createdAt'))} |")
+        lines.append("")
+    lines += ["Dev, sniper, bundler and top-10 columns are the share of supply those wallets hold, by Mobula's labels.",
+              "Source: [Mobula Pulse](https://docs.mobula.io/rest-api-reference/endpoint/pulse-get)",
+              "A launch feed lists what exists, not what is safe: run the security and holders checks before touching any of these."]
     return "\n".join(lines)
 
 
@@ -241,6 +386,22 @@ class MobulaMemeProvider:
             keywords=("latest trades", "recent swaps", "buy sell flow"),
             cache_ttl_seconds=30, priority=6, spec=TOOL_SPECS.get("mobula_token_trades"),
             description="The latest indexed swaps for a token: time, side, size in USD, price, the wallet and the venue",
+            **common,
+        ))
+        router.register(ProviderTool(
+            "mobula_token_first_buyers", self.name, ("token_holdings", "token_security"), token_first_buyers,
+            matches=lambda request: _subject(request) is not None and bool(re.search(r"\b(?:first|earliest|early)\s+(?:buyers?|wallets?|holders?)|\bsnip\w+\b", request, re.I)),
+            keywords=("first buyers", "early buyers", "snipers", "still holding"),
+            cache_ttl_seconds=120, priority=13, spec=TOOL_SPECS.get("mobula_token_first_buyers"),
+            description="The first wallets into a token: when they bought, whether they still hold, whether they added or exited, and which are tagged as snipers",
+            **common,
+        ))
+        router.register(ProviderTool(
+            "mobula_new_launches", self.name, ("token_discovery",), new_launches,
+            matches=lambda request: bool(LAUNCH_ASK.search(request or "")),
+            keywords=("new launches", "pump.fun", "bonding", "graduated", "just launched"),
+            cache_ttl_seconds=30, priority=12, spec=TOOL_SPECS.get("mobula_new_launches"),
+            description="What is launching right now on Solana, Base or BNB Chain: new, bonding and graduated tokens with price, market cap, liquidity, holders and age",
             **common,
         ))
         router.register(ProviderTool(

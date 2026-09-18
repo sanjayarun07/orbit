@@ -940,12 +940,13 @@
     "id": "slang-newlist-1",
     "query": "what just dropped on pump.fun",
     "expected_tools": [
+      "mobula_new_launches",
       "geckoterminal_pools"
     ],
     "forbidden_tools": [],
     "expected_intent": "research",
     "router": true,
-    "notes": "slang stress: 'just dropped' as a new-listing synonym"
+    "notes": "slang stress: 'just dropped' as a new-listing synonym A pump.fun launch question goes to Mobula Pulse first (dev/sniper/bundler columns, 2026-09-18); GeckoTerminal pools stay behind it."
   },
   {
     "id": "slang-newlist-2",
