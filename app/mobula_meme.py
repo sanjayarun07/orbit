@@ -22,18 +22,23 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 import httpx
 
 from app.mobula_security import _CHAIN_NAMES, _subject
-from app.provider_router import ProviderRouter, ProviderTool
+from app.provider_router import NoData, ProviderRouter, ProviderTool
 from app.settings import settings
 from app.tool_catalog import TOOL_SPECS
 
 logger = logging.getLogger(__name__)
 
 from app import mobula_client
+
+if TYPE_CHECKING:  # pragma: no cover
+    from app.signals import Signal, Subject
 _WALLET = re.compile(r"\b(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})\b")
 
 HOLDERS_ASK = re.compile(
@@ -129,7 +134,7 @@ def token_holders(request: str) -> str:
     rows = _get("/token/holder-positions", {"address": address, "blockchain": chain, "limit": 50})
     rows = [r for r in (rows or []) if isinstance(r, dict)]
     if not rows:
-        raise RuntimeError("Mobula returned no holder positions for this token")
+        raise NoData("Mobula has no holder positions for this token")
     rows.sort(key=lambda r: _num(r.get("percentageOfTotalSupply")), reverse=True)
     top10 = sum(_num(r.get("percentageOfTotalSupply")) for r in rows[:10])
     flagged: dict[str, int] = {}
@@ -171,7 +176,7 @@ def token_trades(request: str) -> str:
     rows = _get("/token/trades", {"address": address, "blockchain": chain, "limit": 25})
     rows = [r for r in (rows or []) if isinstance(r, dict)]
     if not rows:
-        raise RuntimeError("Mobula returned no trades for this token")
+        raise NoData("Mobula has no indexed trades for this token")
     buys = sum(1 for r in rows if str(r.get("type")).lower() == "buy")
     buy_usd = sum(_num(r.get("baseTokenAmountUSD")) for r in rows if str(r.get("type")).lower() == "buy")
     sell_usd = sum(_num(r.get("baseTokenAmountUSD")) for r in rows if str(r.get("type")).lower() == "sell")
@@ -250,7 +255,7 @@ def token_first_buyers(request: str) -> str:
     rows = _get_v1("/token/first-buyers", {"asset": address, "blockchain": chain, "limit": 100})
     rows = [r for r in (rows or []) if isinstance(r, dict)]
     if not rows:
-        raise RuntimeError("Mobula returned no first buyers for this token")
+        raise NoData("Mobula has no first buyers for this token")
     rows.sort(key=lambda r: str(r.get("firstHoldingDate") or ""))
     initial = sum(_num(r.get("initialAmount")) for r in rows)
     current = sum(min(_num(r.get("currentBalance")), _num(r.get("initialAmount"))) for r in rows)
@@ -390,22 +395,41 @@ def _funding_of(wallet: str, chain: str) -> dict | None:
     return data if isinstance(data, dict) and data.get("from") else None
 
 
-def token_bundle_check(request: str) -> str:
+@dataclass
+class BundleAnalysis:
+    """The bundle read, as numbers first: the text card and the typed Signal
+    are two renderings of this one analysis, so they can never disagree."""
+
+    address: str
+    chain: str
+    level: str                      # "strong" | "some" | "none"
+    verdict: str                    # the one-line evidence statement
+    buyers: int                     # first buyers in the sample
+    traced: int                     # of which funding was traced
+    grouped: int                    # buyers in a same-second group of >= _SAME_SECOND_MIN
+    personal_funded: int            # buyers sharing a personal (non-exchange) funder
+    strongest_group: int
+    overlap: int                    # largest same-funder AND same-second overlap
+    groups: list = field(default_factory=list)
+    clusters: list = field(default_factory=list)
+    personal: list = field(default_factory=list)
+    tags: dict = field(default_factory=dict)
+    second_of: dict = field(default_factory=dict)
+
+
+def _bundle_analysis(address: str, chain: str) -> BundleAnalysis:
     """Bundle reconstruction from two independent signals: first buyers that
     entered in the same second (same block, near enough, on Solana) and first
     buyers whose wallets were first funded by the same address. Wallets that
     match on both are the strongest evidence a launch was bundled. Evidence,
     not proof: a launchpad's own router can fill a block, and one exchange hot
-    wallet funds thousands of strangers."""
+    wallet funds thousands of strangers. Raises NoData when Mobula has no
+    first buyers for the token."""
     from concurrent.futures import ThreadPoolExecutor
 
-    subject = _subject(request)
-    if subject is None:
-        raise ValueError("No token address found in the request")
-    address, chain = subject
     buyers = [r for r in (_get_v1("/token/first-buyers", {"asset": address, "blockchain": chain, "limit": 100}) or []) if isinstance(r, dict)]
     if not buyers:
-        raise RuntimeError("Mobula returned no first buyers for this token")
+        raise NoData("Mobula has no first buyers for this token")
     buyers.sort(key=lambda r: str(r.get("firstHoldingDate") or ""))
 
     # Signal 1: same second.
@@ -436,41 +460,49 @@ def token_bundle_check(request: str) -> str:
         seconds = [second_of.get(str(r.get("address"))) for r in rows]
         overlap = max(overlap, max((seconds.count(sec) for sec in set(seconds)), default=0))
 
+    strongest = max((len(g) for g in groups), default=0)
+    if overlap >= 3:
+        level, verdict = "strong", "**Strong** in the sample: wallets funded by the same address first held in the same second."
+    elif strongest >= 5 or (personal and len(personal[0][1]) >= 3):
+        level, verdict = "some", "**Some** in the sample: a same-second group or a shared funder, but not both together."
+    else:
+        level, verdict = "none", f"**None found in the sample**: the first {len(buyers)} buyers by time, with funding traced for the first {len(traced)}."
+    return BundleAnalysis(
+        address=address, chain=chain, level=level, verdict=verdict, buyers=len(buyers), traced=len(traced),
+        grouped=sum(len(g) for g in groups), personal_funded=sum(len(r) for _, r in personal),
+        strongest_group=strongest, overlap=overlap, groups=groups, clusters=clusters, personal=personal, tags=tags, second_of=second_of,
+    )
+
+
+def _render_bundle(a: BundleAnalysis) -> str:
     def retained(rows: list[dict]) -> str:
         first = sum(_num(r.get("initialAmount")) for r in rows)
         now = sum(min(_num(r.get("currentBalance")), _num(r.get("initialAmount"))) for r in rows)
         return f"{now / first * 100:.0f}%" if first else "—"
 
-    strongest = max((len(g) for g in groups), default=0)
-    if overlap >= 3:
-        verdict = "**Strong** in the sample: wallets funded by the same address first held in the same second."
-    elif strongest >= 5 or (personal and len(personal[0][1]) >= 3):
-        verdict = "**Some** in the sample: a same-second group or a shared funder, but not both together."
-    else:
-        verdict = f"**None found in the sample**: the first {len(buyers)} buyers by time, with funding traced for the first {len(traced)}."
     lines = [
         "# Bundle check",
-        f"**Provider**: Mobula · **Contract**: `{address}` · **Chain**: {chain} · **Checked**: {_stamp()}",
+        f"**Provider**: Mobula · **Contract**: `{a.address}` · **Chain**: {a.chain} · **Checked**: {_stamp()}",
         "",
-        f"Bundle evidence: {verdict}",
+        f"Bundle evidence: {a.verdict}",
         "",
-        f"Sample: the first **{len(buyers)}** buyers Mobula indexed; **{sum(len(g) for g in groups)}** of them first held in a second shared by at least "
-        f"{_SAME_SECOND_MIN} wallets; the funding source of the first **{len(traced)}** was traced and **{sum(len(r) for _, r in personal)}** "
-        f"share a personal funder with another early buyer. Buyers after the first {len(buyers)}, and funders of buyers after the first {len(traced)}, were not checked.",
+        f"Sample: the first **{a.buyers}** buyers Mobula indexed; **{a.grouped}** of them first held in a second shared by at least "
+        f"{_SAME_SECOND_MIN} wallets; the funding source of the first **{a.traced}** was traced and **{a.personal_funded}** "
+        f"share a personal funder with another early buyer. Buyers after the first {a.buyers}, and funders of buyers after the first {a.traced}, were not checked.",
     ]
-    if groups:
+    if a.groups:
         lines += ["", "## Same-second groups", "| Second (UTC) | Wallets | Still holding | Retained | Tagged |", "|---|---:|---:|---:|---:|"]
-        for rows in groups[:6]:
+        for rows in a.groups[:6]:
             tagged = sum(1 for r in rows if r.get("tags"))
             holding = sum(1 for r in rows if _num(r.get("currentBalance")) > 0)
             lines.append(f"| {_when_time(rows[0].get('firstHoldingDate'))} | {len(rows)} | {holding} | {retained(rows)} | {tagged} |")
-    if clusters:
+    if a.clusters:
         lines += ["", "## Shared funding sources", "| Funder | Known as | Wallets funded | Same second |", "|---|---|---:|---:|"]
-        for funder, rows in clusters[:6]:
-            seconds = [second_of.get(str(r.get("address"))) for r in rows]
+        for funder, rows in a.clusters[:6]:
+            seconds = [a.second_of.get(str(r.get("address"))) for r in rows]
             same = max((seconds.count(sec) for sec in set(seconds)), default=0)
-            known = tags.get(funder) or ("system / burn" if _NOT_A_FUNDER.search(funder) else "—")
-            counted = "" if not _impersonal(funder, tags.get(funder)) else " (not counted)"
+            known = a.tags.get(funder) or ("system / burn" if _NOT_A_FUNDER.search(funder) else "—")
+            counted = "" if not _impersonal(funder, a.tags.get(funder)) else " (not counted)"
             lines.append(f"| `{_short(funder)}` | {known}{counted} | {len(rows)} | {same} |")
         lines += ["", "An exchange, the system program or a burn address funds strangers and is not counted; an untagged funder feeding several first buyers is the pattern to weigh."]
     lines += ["", "Source: [Mobula first buyers](https://docs.mobula.io/rest-api-reference/endpoint/wallet-first-buyers) and "
@@ -479,6 +511,45 @@ def token_bundle_check(request: str) -> str:
               "produces two to three slots a second, so block-level bundling needs slot and transaction data this check does not have. "
               "Indexed data only; evidence, not proof of intent."]
     return "\n".join(lines)
+
+
+def token_bundle_check(request: str) -> str:
+    """The bundle check as a text card (router tool)."""
+    subject = _subject(request)
+    if subject is None:
+        raise ValueError("No token address found in the request")
+    address, chain = subject
+    return _render_bundle(_bundle_analysis(address, chain))
+
+
+# Conviction a bundle read carries on its own. Bundling is a bearish fact
+# about the launch, never a bullish one: a clean sample is a real neutral vote
+# (it dilutes the blend), not evidence for the token.
+_BUNDLE_CONVICTION = {"strong": -0.8, "some": -0.4, "none": 0.0}
+BUNDLE_MODEL = "bundle_check"
+
+
+def bundle_signal(subject: "Subject", as_of: str, analysis: BundleAnalysis | None = None) -> "Signal":
+    """The bundle check as an analyst vote. Runs the analysis unless one is
+    passed in (the deep-dive renders the card from the same object). No first
+    buyers -> abstain, with the reason; never a neutral that hides a gap."""
+    from app.signals import Signal
+
+    if analysis is None:
+        try:
+            analysis = _bundle_analysis(subject.id, subject.chain or "")
+        except NoData as exc:
+            return Signal.abstain(BUNDLE_MODEL, subject, as_of, str(exc))
+        except Exception as exc:  # noqa: BLE001 - a broken call is not a view either
+            return Signal.abstain(BUNDLE_MODEL, subject, as_of, f"bundle check failed: {type(exc).__name__}")
+    return Signal(
+        model_name=BUNDLE_MODEL, subject=subject, as_of=as_of, value=_BUNDLE_CONVICTION[analysis.level],
+        reasoning=re.sub(r"\*\*", "", analysis.verdict),
+        components={"same_second_grouped": float(analysis.grouped), "personal_funded": float(analysis.personal_funded),
+                    "strongest_group": float(analysis.strongest_group), "funder_and_second_overlap": float(analysis.overlap),
+                    "sample_buyers": float(analysis.buyers), "sample_traced": float(analysis.traced)},
+        metadata={"abstained": False, "level": analysis.level, "source": "mobula_token_bundle"},
+    )
 
 
 class MobulaMemeProvider:

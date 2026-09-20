@@ -46,7 +46,11 @@ def test_build_evidence_bundle_marks_coverage_and_gaps(monkeypatch):
     monkeypatch.setattr(token_deepdive, "get_provider_router", lambda: _FakeRouter(by_cap))
     bundle = asyncio.run(build_token_evidence(_MINT, "solana"))
     have, total = bundle.coverage
-    assert total == 11 and have >= 4                   # 5 composable + locks + trades + first buyers + 3 disclosed gaps
+    assert total == 12 and have >= 4                   # 5 composable + locks + trades + first buyers + bundle + 3 disclosed gaps
+    # The bundle check could not run offline: the dimension says so AND the
+    # typed vote abstains with the same fact, never a neutral that hides it.
+    assert {d.name: d.status for d in bundle.dimensions}["bundle"] == "unavailable"
+    assert [s.model_name for s in bundle.signals] == ["bundle_check"] and bundle.signals[0].abstained
     names = {d.name: d.status for d in bundle.dimensions}
     assert names["identity_safety"] == "available"
     assert names["market"] == "available"
@@ -69,7 +73,7 @@ def test_build_evidence_degrades_when_a_source_dies(monkeypatch):
             raise RuntimeError("down")
     monkeypatch.setattr(token_deepdive, "get_provider_router", lambda: _Boom())
     bundle = asyncio.run(build_token_evidence(_MINT, "solana"))
-    assert bundle.coverage == (0, 11)                   # every composable dim unavailable, never raises
+    assert bundle.coverage == (0, 12)                   # every composable dim unavailable, never raises
 
 
 # ---- the deep-dive intercept ----
@@ -92,12 +96,44 @@ def _coro(value):
 
 
 def test_deepdive_intercept_resolves_and_synthesizes(monkeypatch):
+    from app import decision_records
+    decision_records.reset_for_test()
     resolved = research._TokenResolution(f"top holders of BONK {_MINT} on solana", chain="solana")
     _mock_deepdive_pieces(monkeypatch, resolved)
     out = asyncio.run(research._run_token_deep_dive({"capabilities": ["web_research"], "chains": []}, "deep dive on BONK"))
     assert out is not None
     assert out["trajectory"]["tool_name_0"] == "token_deep_dive"
     assert "flip this" in out["answer"].lower()
+    # A receipt was written. The lens returned prose but no typed stance, so
+    # its vote abstains rather than being read as neutral.
+    rows = asyncio.run(decision_records.for_subject(f"solana:{_MINT.lower()}"))
+    assert len(rows) == 1 and rows[0]["kind"] == "deep_dive"
+    analyst = rows[0]["signals"][0]
+    assert analyst["model_name"] == "token_deep_dive" and analyst["metadata"]["abstained"] is True
+    assert "stance not parsed" in analyst["metadata"]["abstain_reason"]
+
+
+def test_deepdive_typed_stance_becomes_a_vote_on_the_receipt(monkeypatch):
+    from app import decision_records
+    decision_records.reset_for_test()
+    resolved = research._TokenResolution(f"top holders of BONK {_MINT} on solana", chain="solana")
+    _mock_deepdive_pieces(monkeypatch, resolved)
+
+    async def typed(program, **kw):
+        return SimpleNamespace(answer="Bottom line: cautious, medium confidence.\nWhat would flip this: LP unlock.",
+                               stance="bearish", confidence="medium")
+    monkeypatch.setattr(runtime, "_call_lm", typed)
+    token = decision_records.bind_turn("user-1")
+    try:
+        asyncio.run(research._run_token_deep_dive({"capabilities": ["web_research"], "chains": []}, "deep dive on BONK"))
+    finally:
+        decision_records.current_user.reset(token)
+    rows = asyncio.run(decision_records.list_for("user-1"))
+    assert len(rows) == 1
+    vote = rows[0]["signals"][0]
+    assert vote["value"] == -0.6 and vote["metadata"]["stance"] == "bearish"
+    receipt = decision_records.why(rows[0])
+    assert "token_deep_dive | bearish | -0.60" in receipt and "LP unlock" in receipt
 
 
 def test_deepdive_intercept_asks_on_ambiguous_ticker(monkeypatch):

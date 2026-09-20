@@ -416,6 +416,11 @@ class TokenDeepDive(dspy.Signature):
     learned_lessons: str = dspy.InputField(
         desc="Prior process lessons for this asset (advisory only; never override safety), or 'none'")
     answer: str = dspy.OutputField(desc="Structured due-diligence verdict with confidence + flip-variable")
+    # The typed view behind the prose: one word each, so the verdict can be
+    # folded into a Signal and blended, compared and replayed without parsing
+    # the answer text. Neutral when the evidence is mixed or too thin.
+    stance: str = dspy.OutputField(desc="Exactly one of: bullish, bearish, neutral -- the direction of the bottom line")
+    confidence: str = dspy.OutputField(desc="Exactly one of: high, medium, low -- the same confidence level the answer states")
 
 
 class RoleReflection(dspy.Signature):

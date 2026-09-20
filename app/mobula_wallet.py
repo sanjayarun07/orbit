@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from app.provider_router import ProviderRouter, ProviderTool
+from app.provider_router import NoData, ProviderRouter, ProviderTool
 from app.settings import settings
 from app.tool_catalog import TOOL_SPECS
 
@@ -241,7 +241,7 @@ def analysis(request: str) -> str:
         raise ValueError("No wallet address found in the request")
     data = _get("/api/2/wallet/analysis", {"wallet": wallet})
     if not isinstance(data, dict) or not data:
-        raise RuntimeError("Mobula returned no wallet analysis")
+        raise NoData("Mobula has no analysis for this wallet")
     stat = data.get("stat") or {}
     lines = [
         f"# Wallet analysis — {_short(wallet)}",

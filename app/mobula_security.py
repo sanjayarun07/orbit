@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from app.provider_router import ProviderRouter, ProviderTool
+from app.provider_router import NoData, ProviderRouter, ProviderTool
 from app.settings import settings
 from app.tool_catalog import TOOL_SPECS
 
@@ -127,7 +127,7 @@ def token_security(request: str) -> str:
     address, chain = subject
     data = mobula_client.get(2, "/token/security", {"blockchain": chain, "address": address})
     if not isinstance(data, dict) or not data:
-        raise RuntimeError("Mobula returned no security analysis for this token")
+        raise NoData("Mobula has no security analysis for this token")
 
     lines = [
         "# Token security & liquidity",

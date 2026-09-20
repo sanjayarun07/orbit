@@ -87,7 +87,7 @@ from app.db import get_pg_pool, get_redis
 from app.settings import settings
 from pydantic import BaseModel
 
-from app import execution_policy, token_unlocks, user_memory
+from app import decision_records, execution_policy, token_unlocks, user_memory
 from app.portfolio import build_portfolio_snapshot
 from app.wallet_insights import portfolio_scenario, wallet_health
 from app.wallet_auth import (
@@ -1394,6 +1394,15 @@ async def set_memory_preference(body: MemoryPreference, identity: Identity = Dep
     facts stay listed until deleted."""
     await accounts.update_user(identity.user["id"], preferences={"memory_opt_out": not body.enabled})
     return {"enabled": body.enabled}
+
+
+@app.get("/me/decisions")
+async def my_decisions(limit: int = 20, identity: Identity = Depends(require_browser_session)):
+    """The signed-in user's decision receipts, newest first: every analyst's
+    vote or abstention behind a verdict, what was not seen, and the verdict
+    as given. Answers "why did Orbit say that" from the record alone."""
+    rows = await decision_records.list_for(identity.user["id"], limit=max(1, min(int(limit), 100)))
+    return {"decisions": [{**decision_records.public(r), "receipt": decision_records.why(r)} for r in rows]}
 
 
 @app.get("/me/conversations")

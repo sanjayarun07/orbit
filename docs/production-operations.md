@@ -1473,3 +1473,73 @@ scope means **Robinhood Chain** (Mobula name "Robinhood Chain", chain id
 not in scope and no adapter is planned for them. "Binance" means the
 exchange, answered by `binance_spot_listing`; BNB Chain memecoins are
 covered by the on-chain tools like any other chain.
+
+## Typed analyst views, no-data honesty, and decision receipts (2026-09-20)
+
+Phase 0 of the design taken from the ai-hedge-fund v2 discussion. The user
+set the order: contracts first, asset-class agnostic, before any equities
+data layer, personas, or paper desk. Nothing here trades or sizes yet; it
+makes today's answers checkable and gives the later phases one shape to
+speak.
+
+**`app/signals.py`** (pure, no I/O)
+
+- `Subject` -- a token is (chain, address), an equity a ticker, a wallet
+  (chain, address); `key` is the stable identity across records.
+- `Signal` -- one analyst's view: `value` in [-1, +1], `reasoning`,
+  `components` (a quant model's decomposition), `metadata`. `Signal.abstain`
+  marks a NON-view (no data, model failed, answer unparseable); an abstain is
+  excluded from every blend, a real neutral vote dilutes. `Signal.from_stance`
+  folds a one-word stance and a confidence word (or 0-100) into a conviction
+  and abstains on anything it cannot read, rather than guessing a direction.
+- `AlphaModel` -- `predict(subject, as_of, data) -> Signal`, the one interface
+  every future analyst implements (quant model or persona).
+- `blend_signals`, `apply_limits`, `limits_from_charter` -- the ai-hedge-fund
+  arithmetic: weighted mean over voting models, optional market-neutral
+  demeaning, per-position cap then proportional gross scale with a
+  `ClampEvent` per firing, freed exposure never redistributed. The charter's
+  `max_position_pct` is in PERCENT; the converter turns it into a fraction
+  and returns None when the user set no cap (advisory, no invented limit).
+
+**No data is not a failure.** `app/provider_router.NoData` (a RuntimeError
+subclass, so old `except RuntimeError` sites still work). A handler raises it
+when the provider answered and has nothing for this subject. The router
+records the call as healthy (no circuit-breaker step, no reliability
+penalty), lists `<tool>: no data (<reason>)` in `failures`, does not cache,
+and still tries the next candidate. The Mobula holders, trades, first-buyers,
+bundle, security and wallet-analysis tools raise it on an empty result. Before
+this, ten unindexed tokens in a row opened the circuit on a working provider.
+
+**Decision receipts.** `app/decision_records.py`, table `decision_records`
+(per user, cascading on account deletion; anonymous decisions carry no
+owner; bounded in-memory fallback without Postgres). One record per decision:
+the `Subject`, every `Signal` (votes and abstentions with reasons), the
+coverage envelope, every skipped dimension with its reason (`SubjectSkip`),
+the price at the time, and the verdict as given. `why(row)` renders it as the
+answer to "why did Orbit say that". `GET /me/decisions` lists the signed-in
+user's receipts newest first, each with its rendered receipt. The turn's user
+is bound through `decision_records.bind_turn` in execution_policy, the same
+way the TradingView token is.
+
+**Retrofits.**
+
+- The deep-dive signature (`TokenDeepDive`) now returns `stance` and
+  `confidence` as one word each beside the prose; the lens's vote is
+  `Signal.from_stance("token_deep_dive", ...)`, abstaining when the words do
+  not parse. Synthesis failure abstains with "synthesis failed".
+- The bundle check is split into `_bundle_analysis` (numbers), `_render_bundle`
+  (the card) and `bundle_signal` (the vote: strong -0.8, some -0.4, none 0.0
+  as a real neutral, no first buyers -> abstain), so the card and the vote
+  can never disagree. The deep-dive bundle gained a `bundle` dimension (12
+  dimensions now) whose vote lands on the receipt.
+
+**Verified live** on :8001 (2026-09-20): "deep dive on BONK" as a signed-in
+user produced a receipt with a typed neutral/medium lens vote, a live bundle
+check over 100 first buyers (25 funders traced, none clustered) voting
+neutral, and four dimensions listed as not seen.
+
+**Not done yet, by decision:** the equities point-in-time data client and
+snapshot, persona analysts, the meme holder snapshot ledger, and any blend
+or clamp CALLER -- the arithmetic exists and is tested, nothing feeds it a
+book. Those are the next phases in the agreed order (contracts, equities PIT
+data, personas, meme snapshot ledger, equities paper desk).

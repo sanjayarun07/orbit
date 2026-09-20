@@ -60,6 +60,20 @@ _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 _RETRY_BACKOFF_SECONDS = 0.3
 
 
+class NoData(RuntimeError):
+    """The provider answered and has nothing for this subject.
+
+    A RuntimeError subclass so every existing `except RuntimeError` around a
+    direct handler call keeps working; the router itself catches it first.
+
+    Raised by a tool handler instead of a RuntimeError when the call itself
+    worked -- Mobula has not indexed this token, DefiLlama does not track it --
+    so the router can tell "no data" from "the provider failed": the call
+    counts as healthy (no circuit breaker, no reliability penalty), the next
+    candidate is still tried, and the failure list names it honestly. A
+    silent empty would poison the outcome scores and, later, any replay."""
+
+
 def _is_transient(exc: Exception) -> bool:
     if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError)):
         return True
@@ -648,6 +662,13 @@ class ProviderRouter:
                     self._record(tool, True, (time.monotonic() - started) * 1000)
                     self._cache_set(cache_capability, request, output, tool.cache_ttl_seconds)
                     return ProviderResult(output, tool.name, tool.provider, False, tuple(attempted), tuple(failures))
+                except NoData as exc:
+                    # The provider worked; it just has nothing here. Healthy
+                    # call, honest reason, and the next candidate may have it.
+                    self._record(tool, True, (time.monotonic() - started) * 1000)
+                    increment(f"provider_{tool.provider}_no_data")
+                    failures.append(f"{tool.name}: no data ({exc})" if str(exc) else f"{tool.name}: no data")
+                    continue
                 except Exception as exc:
                     self._record(tool, False, (time.monotonic() - started) * 1000)
                     increment(f"provider_{tool.provider}_errors")

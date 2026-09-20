@@ -33,8 +33,10 @@ from datetime import datetime, timezone
 import httpx
 
 from app.provider_registry import get_provider_router
+from app.provider_router import NoData
 from app.integrations import tradingview
 from app import mobula_meme, mobula_security
+from app.signals import Signal, Subject, SubjectSkip
 
 # DefiLlama emissions (free): a protocol-slug list + per-slug unlock schedule whose
 # metadata.token is "chain:address" -- so a symbol-guessed slug is VERIFIED by the
@@ -92,6 +94,9 @@ class TokenEvidenceBundle:
     address: str
     chain: str
     dimensions: list[DimensionEvidence] = field(default_factory=list)
+    # Typed analyst votes formed while composing the evidence (a quant read
+    # such as the bundle check). The lens's own vote is added by the caller.
+    signals: list[Signal] = field(default_factory=list)
 
     @property
     def coverage(self) -> tuple[int, int]:
@@ -99,8 +104,28 @@ class TokenEvidenceBundle:
         return available, len(self.dimensions)
 
 
+def coverage_rows(bundle: TokenEvidenceBundle) -> list[dict]:
+    """The coverage envelope as plain rows for a receipt."""
+    return [{"name": d.name, "status": d.status, "source": d.source} for d in bundle.dimensions]
+
+
+def evidence_skips(bundle: TokenEvidenceBundle) -> list[SubjectSkip]:
+    """Every dimension the verdict could not see, with its reason -- recorded,
+    never dropped, because a missing dimension bounds how far the verdict can
+    be trusted."""
+    return [SubjectSkip(subject=d.label, reason=d.detail) for d in bundle.dimensions if d.status != "available"]
+
+
+def bundle_signals(bundle: TokenEvidenceBundle) -> list[Signal]:
+    return list(getattr(bundle, "signals", None) or [])
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 # The DefiLlama emissions client lives in app/token_unlocks.py (the router
@@ -175,6 +200,8 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
     available (with its source) or unavailable (with a reason). Never raises -- a
     dead source degrades that one dimension, not the bundle."""
     ch = (chain,) if chain else ()
+    subject = Subject(kind="token", id=address, chain=chain, symbol=symbol)
+    signals: list[Signal] = []
     # (dimension id, label, query, capabilities, chains) -- the composable dims.
     specs = [
         ("identity_safety", "Identity & contract safety",
@@ -235,6 +262,25 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
                     if first else
                     DimensionEvidence("first_buyers", "First buyers & snipers", "unavailable", "Mobula returned no first-buyer data for this contract."))
 
+    # Was the launch bundled: same-second first buyers sharing a funder. One
+    # analysis feeds both the evidence card and a typed vote, so the two can
+    # never disagree. No first buyers -> the dimension is unavailable AND the
+    # vote abstains, with the same reason.
+    if mobula_meme.enabled():
+        try:
+            analysis = await asyncio.to_thread(mobula_meme._bundle_analysis, address, chain)
+        except NoData as exc:
+            analysis, reason = None, str(exc)
+        except Exception as exc:  # noqa: BLE001 - a dead source degrades one dimension
+            analysis, reason = None, f"Bundle check did not complete ({type(exc).__name__})."
+        if analysis is not None:
+            dims.append(DimensionEvidence("bundle", "Bundle check (launch coordination)", "available",
+                                          mobula_meme._render_bundle(analysis), "mobula_token_bundle", _now()))
+            signals.append(mobula_meme.bundle_signal(subject, _now_iso(), analysis))
+        else:
+            dims.append(DimensionEvidence("bundle", "Bundle check (launch coordination)", "unavailable", reason))
+            signals.append(Signal.abstain(mobula_meme.BUNDLE_MODEL, subject, _now_iso(), reason))
+
     # Token unlocks -- the most deterministic near-term headwind. Real, free, and
     # verified-by-address via DefiLlama emissions; unavailable when the token isn't
     # tracked (most memecoins) rather than silently omitted.
@@ -260,7 +306,7 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
     ):
         dims.append(DimensionEvidence(name, label, "unavailable", reason))
 
-    return TokenEvidenceBundle(address=address, chain=chain, dimensions=dims)
+    return TokenEvidenceBundle(address=address, chain=chain, dimensions=dims, signals=signals)
 
 
 _PRICE = re.compile(r"price[^$\n]{0,24}\$\s*([0-9][0-9,]*\.?[0-9]*)", re.IGNORECASE)
