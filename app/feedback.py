@@ -63,7 +63,7 @@ async def _save(session_id: str, revision: int, record: dict, account_id: str | 
         return
     redis = await get_redis()
     if redis is not None:
-        await redis.setex(f"chat_feedback:{session_id}:{revision}", _TTL, json.dumps(record))
+        await redis.set(f"chat_feedback:{session_id}:{revision}", json.dumps(record), ex=_TTL)
         return
     _memory[(session_id, revision)] = record
 

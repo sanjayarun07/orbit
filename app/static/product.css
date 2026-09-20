@@ -195,3 +195,4 @@ body.home .home-below { display: block; animation: orbit-enter var(--motion-ente
 .memory-item > span { flex: 1 1 auto; }
 .memory-item .icon-button { flex: 0 0 auto; border: 0; background: transparent; color: var(--muted); cursor: pointer; font: inherit; padding: 2px 6px; }
 .memory-item .icon-button:hover, .memory-item .icon-button:focus-visible { color: var(--text); }
+.memory-switch { display: flex; align-items: center; gap: 8px; margin: 8px 0 4px; font-size: 13px; }

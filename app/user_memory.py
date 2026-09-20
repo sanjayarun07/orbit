@@ -99,6 +99,11 @@ def enabled() -> bool:
     return bool(settings.user_memory_enabled)
 
 
+def opted_out(user: dict | None) -> bool:
+    """The user's own switch (Settings > Data & privacy > Memory)."""
+    return bool(((user or {}).get("preferences") or {}).get("memory_opt_out"))
+
+
 # ----------------------------------------------------------------------------
 # embeddings
 # ----------------------------------------------------------------------------
@@ -236,11 +241,10 @@ async def recall(user_id: str, message: str, k: int = RECALL_K) -> list[dict]:
     except Exception:
         logger.info("user_memory: embedding failed; recalling most recent", exc_info=True)
         query = []
+    # Only facts about the message. Filling the rest with recent facts put
+    # unrelated ones into every turn (review, 2026-09-20).
     scored = sorted(((_cosine(query, f.get("embedding") or []), f) for f in facts), key=lambda pair: -pair[0])
     picked = [f for score, f in scored if score >= RECALL_FLOOR][:k]
-    if len(picked) < k:
-        seen = {f["id"] for f in picked}
-        picked += [f for f in facts if f["id"] not in seen][: k - len(picked)]
     return [{key: value for key, value in f.items() if key != "embedding"} for f in picked]
 
 

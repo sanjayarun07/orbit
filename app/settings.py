@@ -213,7 +213,7 @@ class Settings(BaseSettings):
     # contract if you have one.
     birdeye_request_cost_usd: float = 0.0
     mobula_api_key: str | None = None
-    mobula_base_url: str = "https://api.mobula.io/api/2"
+    mobula_base_url: str = "https://api.mobula.io/api/2"   # every Mobula call derives its host from this (app/mobula_client.py)
     mobula_requests_per_minute: int = 60
     # How long the wallet-portfolio intercept waits for Mobula before the
     # per-chain balances answer instead.

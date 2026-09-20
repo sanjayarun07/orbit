@@ -30,9 +30,7 @@ from app.tool_catalog import TOOL_SPECS
 
 logger = logging.getLogger(__name__)
 
-# The v1 wallet routes live beside the v2 ones the token tool uses.
-_V1 = "https://production-api.mobula.io/api/1"
-_V2 = "https://production-api.mobula.io/api/2"
+from app import mobula_client
 _ADDRESS = re.compile(r"\b(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})\b")
 # A wallet question: the words that mean "this address's own holdings or
 # activity", as opposed to a token's market data.
@@ -86,11 +84,12 @@ def matches(request: str) -> bool:
 
 
 def _get(url: str, params: dict) -> dict | list:
-    with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
-        response = client.get(url, params=params, headers={"Authorization": settings.mobula_api_key or ""})
-        response.raise_for_status()
-        payload = response.json()
-    return payload.get("data", payload) if isinstance(payload, dict) else payload
+    """`url` is "/api/<v><path>" relative to the configured Mobula origin (kept
+    as a string so tests can stub by suffix); the shared client applies the
+    budget, concurrency cap and metrics."""
+    version = 1 if "/api/1/" in url else 2
+    path = url.split(f"/api/{version}", 1)[1]
+    return mobula_client.get(version, path, params)
 
 
 def _usd(value) -> str:
@@ -140,7 +139,7 @@ def portfolio(request: str) -> str:
     wallet = address_in(request)
     if not wallet:
         raise ValueError("No wallet address found in the request")
-    data = _get(f"{_V1}/wallet/portfolio", {"wallet": wallet, "unlistedAssets": "true"})
+    data = _get("/api/1/wallet/portfolio", {"wallet": wallet, "unlistedAssets": "true"})
     if not isinstance(data, dict):
         raise RuntimeError("Mobula returned no portfolio")
     rows, spam, dust = [], 0, 0
@@ -188,7 +187,7 @@ def history(request: str) -> str:
     wallet = address_in(request)
     if not wallet:
         raise ValueError("No wallet address found in the request")
-    transactions = _get(f"{_V1}/wallet/transactions", {"wallet": wallet})
+    transactions = _get("/api/1/wallet/transactions", {"wallet": wallet})
     entries = (transactions or {}).get("transactions") if isinstance(transactions, dict) else transactions
     entries = [e for e in (entries or []) if isinstance(e, dict)]
     indexed = len(entries)
@@ -220,7 +219,7 @@ def history(request: str) -> str:
     else:
         lines.append("Mobula has no indexed transactions for this wallet.")
     try:
-        series = _get(f"{_V1}/wallet/history", {"wallet": wallet})
+        series = _get("/api/1/wallet/history", {"wallet": wallet})
         points = (series or {}).get("balance_history") if isinstance(series, dict) else None
         if points:
             first, last = points[0], points[-1]
@@ -240,7 +239,7 @@ def analysis(request: str) -> str:
     wallet = address_in(request)
     if not wallet:
         raise ValueError("No wallet address found in the request")
-    data = _get(f"{_V2}/wallet/analysis", {"wallet": wallet})
+    data = _get("/api/2/wallet/analysis", {"wallet": wallet})
     if not isinstance(data, dict) or not data:
         raise RuntimeError("Mobula returned no wallet analysis")
     stat = data.get("stat") or {}

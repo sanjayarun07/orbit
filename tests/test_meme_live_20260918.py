@@ -170,3 +170,72 @@ def test_a_whale_ask_that_names_a_bare_symbol_is_not_asked_back(monkeypatch):
     except RuntimeError:
         pass
     assert "ANSEM" in seen.get("request", ""), "the whale intercept must not ask which token when one is named"
+
+
+# --- review 2026-09-20: a bare EVM contract never defaults to Ethereum ------------
+
+def test_a_bare_evm_contract_is_placed_on_its_chain_or_asked_about(monkeypatch):
+    from app.nodes import research as r
+
+    async def no_token(request, capabilities, user_chains=()):
+        return r._TokenResolution(request)
+
+    monkeypatch.setattr(r, "_resolve_named_token", no_token)
+    monkeypatch.setattr(r, "direct_mcp_request", lambda request, token_subject=False: None)
+    monkeypatch.setattr(r, "is_crypto_trends_query", lambda request: False)
+    seen = {}
+
+    async def gathered(request, capabilities, chains, state, scope_web=False):
+        seen["request"], seen["chains"] = request, tuple(chains)
+        return {"answer": "# Token holders", "trajectory": {"tool_name_0": "mobula_token_holders"}}
+
+    monkeypatch.setattr(r, "_gather_planned", gathered)
+    monkeypatch.setattr(r, "_router_eligible_capabilities", lambda request, caps, chains: ("token_holdings",))
+    monkeypatch.setattr(r, "get_provider_router", lambda: __import__("types").SimpleNamespace(matched_capabilities=lambda *a: (), try_route_across=lambda *a, **k: None, plan_across=lambda *a, **k: []))
+    aero = "0x940181a94A35A4569E4529A3CDfB74e38FD98631"
+    monkeypatch.setattr(r, "_chains_for_contract", lambda address: ["base"])
+    out = asyncio.run(r._research_node({"request": f"top holders of {aero}", "capabilities": ["token_holdings"], "chains": [], "session_context": {}}, {}))
+    assert out["answer"] == "# Token holders" and seen["chains"] == ("base",) and seen["request"].endswith("on base"), "one chain known: placed there"
+
+    monkeypatch.setattr(r, "_chains_for_contract", lambda address: ["base", "ethereum"])
+    out = asyncio.run(r._research_node({"request": f"top holders of {aero}", "capabilities": ["token_holdings"], "chains": [], "session_context": {}}, {}))
+    assert out["answer"].startswith(f"Which chain is `{aero}` on (base, ethereum)?"), "several chains: asked, never Ethereum by default"
+
+    monkeypatch.setattr(r, "_chains_for_contract", lambda address: [])
+    out = asyncio.run(r._research_node({"request": f"is {aero} safe", "capabilities": ["token_security"], "chains": [], "session_context": {}}, {}))
+    assert out["answer"].startswith(f"Which chain is `{aero}` on (Ethereum, Base")
+
+
+def test_the_chain_lookup_reads_dex_screener_and_drops_decoys(monkeypatch):
+    """The first version swallowed a NameError (httpx was never imported) and
+    returned nothing for every contract; a stubbed response pins the parsing."""
+    from app.nodes import research as r
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"pairs": [
+                {"chainId": "base", "baseToken": {"address": "0x940181a94A35A4569E4529A3CDfB74e38FD98631"}, "liquidity": {"usd": 34_240_468.0}, "volume": {"h24": 2_747_794.0}},
+                {"chainId": "ethereum", "baseToken": {"address": "0x940181a94A35A4569E4529A3CDfB74e38FD98631"}, "liquidity": {"usd": 5_000_000.0}, "volume": {"h24": 12.0}},   # decoy
+                {"chainId": "bsc", "baseToken": {"address": "0xSOMETHINGELSE"}, "liquidity": {"usd": 9_000_000.0}, "volume": {"h24": 900_000.0}},                            # another token
+                {"chainId": "arbitrum", "baseToken": {"address": "0x940181a94A35A4569E4529A3CDfB74e38FD98631"}, "liquidity": {"usd": 400.0}, "volume": {"h24": 40.0}},        # dust
+            ]}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url):
+            assert url.endswith("/latest/dex/tokens/0x940181a94A35A4569E4529A3CDfB74e38FD98631")
+            return Response()
+
+    monkeypatch.setattr(r.httpx, "Client", Client)
+    assert r._chains_for_contract("0x940181a94A35A4569E4529A3CDfB74e38FD98631") == ["base"]

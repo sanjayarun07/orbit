@@ -12,7 +12,12 @@ from app.provider_registry import get_provider_router
 from app.settings import settings
 
 # conftest points these at a network guard; the card tests drive the real ones.
-from app import mobula_meme
+from app import mobula_client as _mobula_client, mobula_meme
+
+_REAL_CLIENT_GET = _mobula_client.get
+_REAL_WALLET_GET = mobula_wallet._get
+_REAL_MEME_GET = mobula_meme._get
+_REAL_MEME_GET_V1 = mobula_meme._get_v1
 
 _REAL_SECURITY = mobula_security.token_security
 _REAL_TRADES = mobula_meme.token_trades
@@ -151,10 +156,11 @@ SECURITY = {
     (f"is {FARTCOIN} safe on solana", FARTCOIN, "solana"),
     (f"{FARTCOIN} rug check", FARTCOIN, "solana"),
     ("0x6982508145454ce325ddbe47a25d4ec3d2311933 on ethereum", "0x6982508145454ce325ddbe47a25d4ec3d2311933", "ethereum"),
+    ("0x6982508145454ce325ddbe47a25d4ec3d2311933", None, None),    # an EVM address alone names no chain
     ("0x6982508145454ce325ddbe47a25d4ec3d2311933 on bsc", "0x6982508145454ce325ddbe47a25d4ec3d2311933", "bnb smart chain (bep20)"),
 ])
 def test_the_subject_and_chain_it_asks_about(request_text, address, chain):
-    assert mobula_security._subject(request_text) == (address, chain)
+    assert mobula_security._subject(request_text) == ((address, chain) if address else None)
 
 
 def test_the_security_card_names_the_pullable_pool(monkeypatch):
@@ -181,7 +187,7 @@ def test_the_security_card_names_the_pullable_pool(monkeypatch):
             assert params["blockchain"] == "solana" and params["address"] == FARTCOIN
             return Response()
 
-    monkeypatch.setattr(mobula_security.httpx, "Client", Client)
+    monkeypatch.setattr(mobula_security.mobula_client, "get", lambda version, path, params, timeout=None: SECURITY if path == "/token/security" else {})
     card = _REAL_SECURITY(f"is {FARTCOIN} safe on solana")
     assert "| raydium | 0.00% | 99.78% | 0.00% | 0.21% | locked (raydium permanent liquidity) |" in card
     assert "| orca | 0.00% | 0.00% | 0.00% | 100.00% | **pullable** |" in card
@@ -229,8 +235,10 @@ def test_the_holders_card_shows_share_pnl_and_flags(monkeypatch):
     assert "| liquidityPool |" in card, "a pool is labelled, not hidden"
 
 
+# Mobula returns trade dates as epoch MILLISECONDS (review, 2026-09-20: the
+# ISO fixture had hidden raw "1789896849862" in the live "When" column).
 TRADES = [
-    {"date": "2026-09-18T14:40:12.000Z", "type": "buy", "baseTokenAmountUSD": 324.94, "baseTokenPriceUSD": 0.1575,
+    {"date": 1789742412000, "type": "buy", "baseTokenAmountUSD": 324.94, "baseTokenPriceUSD": 0.1575,
      "swapSenderAddress": "BuyerWalletAAAAAAAAAAAAAAAAAAAAAAAAAAAA1", "platform": {"name": "raydium"}},
     {"date": "2026-09-18T14:39:02.000Z", "type": "sell", "baseTokenAmountUSD": 1200.0, "baseTokenPriceUSD": 0.1571,
      "swapSenderAddress": "SellerWalletAAAAAAAAAAAAAAAAAAAAAAAAAAA2", "platform": "orca"},
@@ -243,7 +251,8 @@ def test_the_trades_card_summarises_the_flow(monkeypatch):
     monkeypatch.setattr(mobula_meme, "_get", lambda path, params: TRADES)
     card = _REAL_TRADES(f"latest trades for {FARTCOIN} on solana")
     assert "**1 buys** ($324.94) and **1 sells** ($1.2K)" in card
-    assert "| 2026-09-18 14:40:12 | buy | $324.94 | $0.16 | `Buye…AAA1` | raydium |" in card
+    assert "| 2026-09-18 14:40:12 | buy | $324.94 | $0.16 | `Buye…AAA1` | raydium |" in card, "epoch milliseconds render as a time"
+    assert "| 2026-09-18 14:39:02 | sell |" in card, "ISO still renders"
     assert "| orca |" in card and "Indexed swaps only" in card
 
 
@@ -379,7 +388,7 @@ def test_the_security_card_warns_about_copycat_logos(monkeypatch):
         def get(self, url, params=None, headers=None):
             return Response()
 
-    monkeypatch.setattr(mobula_security.httpx, "Client", Client)
+    monkeypatch.setattr(mobula_security.mobula_client, "get", lambda version, path, params, timeout=None: SECURITY if path == "/token/security" else {})
     monkeypatch.setattr(mobula_security, "_logo_reuses", lambda address, chain: (260, ["FARTCOIN on evm:196 (`0x540c6bea…`)"]))
     card = _REAL_SECURITY(f"is {FARTCOIN} safe on solana")
     assert "**260 other token(s) reuse this exact logo.** Highest-volume lookalikes: FARTCOIN on evm:196" in card
@@ -404,7 +413,7 @@ def test_a_bundled_launch_shows_same_second_groups_funded_by_one_wallet(monkeypa
     monkeypatch.setattr(mobula_meme, "_get_v1", lambda path, params: buyers)
     monkeypatch.setattr(mobula_meme, "_get", lambda path, params: funding.get(params["wallet"]))
     card = _REAL_BUNDLE(f"is {FARTCOIN} bundled on solana")
-    assert "Bundle evidence: **Strong**" in card
+    assert "Bundle evidence: **Strong** in the sample" in card
     assert "| 2026-09-18 12:00:05 | 4 | 0 | 0% | 0 |" in card, "the same-second group, all exited"
     assert "| `FUND…FFFF` | — | 4 | 4 |" in card and "| `CEXH…CCCC` | Binance hot wallet (not counted) | 2 | 1 |" in card
     assert "evidence, not proof of intent" in card
@@ -420,9 +429,9 @@ def test_the_system_program_and_exchanges_never_make_a_cluster(monkeypatch):
     monkeypatch.setattr(mobula_meme, "_get_v1", lambda path, params: buyers)
     monkeypatch.setattr(mobula_meme, "_get", lambda path, params: funding.get(params["wallet"]))
     card = _REAL_BUNDLE(f"is {FARTCOIN} bundled on solana")
-    assert "Bundle evidence: **None found**" in card, card
+    assert "Bundle evidence: **None found in the sample**" in card, card
     assert "| `1111…1114` | system / burn (not counted) | 4 | 4 |" in card and "OKX hot wallet (not counted)" in card
-    assert "**0** share a personal funder" in card
+    assert "**0** share a personal funder" in card and "were not checked" in card
 
 
 def test_an_organic_launch_reports_none_found(monkeypatch):
@@ -430,7 +439,7 @@ def test_an_organic_launch_reports_none_found(monkeypatch):
     monkeypatch.setattr(mobula_meme, "_get_v1", lambda path, params: buyers)
     monkeypatch.setattr(mobula_meme, "_get", lambda path, params: None)
     card = _REAL_BUNDLE(f"bundle check {FARTCOIN} on solana")
-    assert "Bundle evidence: **None found**" in card and "## Same-second groups" not in card and "## Shared funding" not in card
+    assert "Bundle evidence: **None found in the sample**" in card and "## Same-second groups" not in card and "## Shared funding" not in card
 
 
 def test_bundle_questions_reach_the_check():
@@ -445,3 +454,67 @@ def test_wallets_holding_a_token_is_a_token_question():
     assert not mobula_wallet.matches(f"What are the largest known smart money wallets holding ANSEM tokens on Solana? {mint} on solana")
     assert not mobula_wallet.matches(f"top holders of {mint} on solana")
     assert mobula_wallet.matches(f"{WALLET} wallet portfolio") and mobula_wallet.matches(f"what does {WALLET} hold")
+
+
+# --- the shared client: one budget for every Mobula caller (review 2026-09-20) ---
+
+def test_every_mobula_call_goes_through_the_budgeted_client(monkeypatch):
+    from app import mobula_client
+    from app.settings import settings as _s
+
+    calls = []
+    monkeypatch.setattr(mobula_client, "get", lambda version, path, params, timeout=None: calls.append((version, path)) or [])
+    monkeypatch.setattr(mobula_wallet, "_get", _REAL_WALLET_GET)
+    monkeypatch.setattr(mobula_meme, "_get", _REAL_MEME_GET)
+    monkeypatch.setattr(mobula_meme, "_get_v1", _REAL_MEME_GET_V1)
+    monkeypatch.setattr(mobula_meme, "token_trades", _REAL_TRADES)
+    monkeypatch.setattr(mobula_meme, "token_first_buyers", _REAL_FIRST)
+    monkeypatch.setattr(_s, "mobula_base_url", "https://example.test/api/2")
+    for fn, req in ((mobula_wallet.portfolio, f"{WALLET} wallet portfolio"), (mobula_meme.token_trades, f"trades of {FARTCOIN} on solana"),
+                    (mobula_meme.token_first_buyers, f"first buyers of {FARTCOIN} on solana")):
+        try:
+            fn(req)
+        except RuntimeError:
+            pass
+    assert (1, "/wallet/portfolio") in calls and (2, "/token/trades") in calls and (1, "/token/first-buyers") in calls
+    assert mobula_client.url(1, "/wallet/portfolio") == "https://example.test/api/1/wallet/portfolio", "the host comes from settings"
+
+
+def test_the_budget_refuses_a_burst_instead_of_exceeding_the_limit(monkeypatch):
+    from app import mobula_client
+    from app.settings import settings as _s
+
+    monkeypatch.setattr(_s, "mobula_requests_per_minute", 3)
+    monkeypatch.setattr(_s, "mobula_api_key", "test-key")
+    monkeypatch.setattr(mobula_client, "MAX_WAIT_SECONDS", 0.05)
+    mobula_client.reset_for_test()
+    sent = []
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": []}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, params=None, headers=None):
+            sent.append(url)
+            return Response()
+
+    monkeypatch.setattr(mobula_client.httpx, "Client", Client)
+    real_get = mobula_client.get.__wrapped__ if hasattr(mobula_client.get, "__wrapped__") else _REAL_CLIENT_GET
+    for _ in range(3):
+        real_get(2, "/token/trades", {})
+    with pytest.raises(mobula_client.MobulaBudgetExceeded):
+        real_get(2, "/token/trades", {})
+    assert len(sent) == 3, "the fourth request never left the process"

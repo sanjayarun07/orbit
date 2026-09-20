@@ -85,7 +85,9 @@ from app.plans import get_plan
 from app.provider_registry import get_provider_router, save_provider_overrides
 from app.db import get_pg_pool, get_redis
 from app.settings import settings
-from app import token_unlocks, user_memory
+from pydantic import BaseModel
+
+from app import execution_policy, token_unlocks, user_memory
 from app.portfolio import build_portfolio_snapshot
 from app.wallet_insights import portfolio_scenario, wallet_health
 from app.wallet_auth import (
@@ -157,6 +159,9 @@ async def lifespan(_app: FastAPI):
         kb_warm.cancel()
         kb_tool.set_loop(None)
         await asyncio.gather(reconciliation, relay_reconciliation, outcomes_refresh, task_worker, kb_worker, kb_warm, discovery, return_exceptions=True)
+        drained = await execution_policy.drain_background()
+        if drained:
+            logger.info("drained %d background task(s) on shutdown", drained)
         await asyncio.to_thread(close_mcp_gateway)
 
 
@@ -1363,7 +1368,8 @@ async def export_my_data(identity: Identity = Depends(require_browser_session)):
 @app.get("/me/memory")
 async def my_memory(identity: Identity = Depends(require_browser_session)):
     """Every fact Orbit remembers about the signed-in user, with its source."""
-    return {"facts": await user_memory.list_facts(identity.user["id"]), "enabled": user_memory.enabled()}
+    return {"facts": await user_memory.list_facts(identity.user["id"]),
+            "enabled": user_memory.enabled() and not user_memory.opted_out(identity.user)}
 
 
 @app.delete("/me/memory/{fact_id}")
@@ -1376,6 +1382,18 @@ async def forget_memory(fact_id: str, identity: Identity = Depends(require_brows
 @app.delete("/me/memory")
 async def clear_memory(identity: Identity = Depends(require_browser_session)):
     return {"status": "cleared", "count": await user_memory.clear(identity.user["id"])}
+
+
+class MemoryPreference(BaseModel):
+    enabled: bool
+
+
+@app.put("/me/memory")
+async def set_memory_preference(body: MemoryPreference, identity: Identity = Depends(require_browser_session)):
+    """The user's own switch: off stops both collection and recall; existing
+    facts stay listed until deleted."""
+    await accounts.update_user(identity.user["id"], preferences={"memory_opt_out": not body.enabled})
+    return {"enabled": body.enabled}
 
 
 @app.get("/me/conversations")

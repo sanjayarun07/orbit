@@ -26,7 +26,7 @@ from app.tool_catalog import TOOL_SPECS
 
 logger = logging.getLogger(__name__)
 
-_URL = "https://production-api.mobula.io/api/2/token/security"
+from app import mobula_client
 _EVM = re.compile(r"\b(0x[0-9a-fA-F]{40})\b")
 _SOL = re.compile(r"(?<![A-Za-z0-9])([1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])")
 _CHAIN = re.compile(r"\bon\s+([A-Za-z][A-Za-z ]{2,20}?)\b(?:\s|$|,|\.)", re.I)
@@ -45,16 +45,26 @@ def enabled() -> bool:
 
 
 def _subject(request: str) -> tuple[str, str] | None:
-    """(address, chain) for a security lookup, or None."""
+    """(address, chain) for a token lookup, or None. A base58 address is
+    Solana. An EVM address is valid on every EVM chain, so without a named
+    chain there is no subject: the research node asks which chain rather
+    than a tool answering for Ethereum by default (review, 2026-09-20)."""
     text = request or ""
     evm, sol = _EVM.search(text), _SOL.search(text)
     named = _CHAIN.search(text)
     chain = _CHAIN_NAMES.get((named.group(1) if named else "").strip().lower()) if named else None
     if evm:
-        return evm.group(1), chain or "ethereum"
+        return (evm.group(1), chain) if chain else None
     if sol:
         return sol.group(1), chain or "solana"
     return None
+
+
+def evm_without_chain(request: str) -> bool:
+    """An EVM contract in the request and no chain named beside it."""
+    text = request or ""
+    named = _CHAIN.search(text)
+    return bool(_EVM.search(text)) and not (named and _CHAIN_NAMES.get(named.group(1).strip().lower()))
 
 
 # The words that make a question about whether a token is safe to hold or
@@ -115,12 +125,7 @@ def token_security(request: str) -> str:
     if subject is None:
         raise ValueError("No token address found in the request")
     address, chain = subject
-    with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
-        response = client.get(_URL, params={"blockchain": chain, "address": address},
-                              headers={"Authorization": settings.mobula_api_key or ""})
-        response.raise_for_status()
-        payload = response.json()
-    data = payload.get("data", payload) if isinstance(payload, dict) else payload
+    data = mobula_client.get(2, "/token/security", {"blockchain": chain, "address": address})
     if not isinstance(data, dict) or not data:
         raise RuntimeError("Mobula returned no security analysis for this token")
 
@@ -191,11 +196,7 @@ def _logo_reuses(address: str, chain: str) -> tuple[int, list[str]] | None:
     if not chain_id:
         return None
     try:
-        with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
-            response = client.get("https://production-api.mobula.io/api/2/token/logo-reuses", params={"address": address, "chainId": chain_id},
-                                  headers={"Authorization": settings.mobula_api_key or ""})
-            response.raise_for_status()
-            data = response.json().get("data") or {}
+        data = mobula_client.get(2, "/token/logo-reuses", {"address": address, "chainId": chain_id}) or {}
     except Exception:
         logger.info("logo reuse lookup failed for %s", address, exc_info=True)
         return None

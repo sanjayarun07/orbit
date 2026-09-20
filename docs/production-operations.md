@@ -1433,3 +1433,39 @@ turns the feature off.
 Also today: a ticker on a named chain with several real namesakes resolves
 to the clear liquidity winner and the answer opens by saying which one was
 read; with no clear winner it asks, listing them.
+
+### Review of 2026-09-20: nine findings, eight closed
+
+- **One Mobula door.** `app/mobula_client.py` is the only place a Mobula
+  request is made: the host comes from `MOBULA_BASE_URL`, a process-wide
+  token bucket enforces `MOBULA_REQUESTS_PER_MINUTE` across the wallet,
+  security, meme and deep-dive callers, at most six requests are in flight,
+  every request is counted (`mobula_requests`, `mobula_budget_exceeded`),
+  and a caller that would exceed the budget waits up to eight seconds then
+  fails with a clear error rather than bursting. A bundle check is still up
+  to twenty-six requests, but now inside the same budget as everything else.
+- **An EVM contract never defaults to Ethereum.** A bare 0x address with no
+  chain named is placed by one free DEX Screener look-up (the chains where
+  that exact contract has a real pool); one chain places it, several or
+  none ask the user. This applies to every token-data question, not only
+  security. `mobula_security._subject` returns no subject for a chainless
+  EVM address.
+- **Timestamps.** Mobula trade and transfer dates are epoch milliseconds;
+  one reader handles milliseconds, seconds and ISO. The fixture now uses
+  the real shape.
+- **Bundle wording.** Verdicts say "in the sample", state the sample (first
+  hundred buyers; funding for the first twenty-five) and what was not
+  checked, and no longer call a shared second a shared block.
+- **Memory.** Recall returns only facts near the message; the recency fill
+  is gone. Users can switch memory off for their account (Settings > Data &
+  privacy, `PUT /me/memory`), which stops both collection and recall.
+- **Background work is tracked.** `execution_policy.background()` keeps the
+  task and shutdown drains outstanding work for up to fifteen seconds.
+- **Binance listing status** comes from Binance itself (`binance_spot_listing`,
+  public exchangeInfo, no key, cached ten minutes): pairs and status, or
+  "not listed on spot", with futures and Alpha named as unchecked.
+- **Noise.** Every `setex` is now `set(..., ex=)`; the per-chain wallet
+  fallback is built lazily so no coroutine is created un-awaited.
+
+Open: whether "Robinhood" in scope means Robinhood Chain (built) or the
+Robinhood app's crypto list (no public authoritative source found yet).

@@ -428,8 +428,8 @@ async def start_email_signin(email: str, base_url: str) -> dict:
     code_value = {"token": token, "attempts": 0}
     redis = await get_redis()
     if redis is not None:
-        await redis.setex(f"magic_link:{token}", ttl, json.dumps(value))
-        await redis.setex(f"magic_code:{email}", ttl, json.dumps({**code_value, "code": code}))
+        await redis.set(f"magic_link:{token}", json.dumps(value), ex=ttl)
+        await redis.set(f"magic_code:{email}", json.dumps({**code_value, "code": code}), ex=ttl)
     else:
         _prune_memory()
         _magic_tokens[token] = (time.time() + ttl, value)
@@ -468,7 +468,7 @@ async def consume_magic_code(email: str, code: str) -> str:
                 await redis.delete(key)
                 raise ValueError("Too many wrong codes. Request a new one.")
             ttl = await redis.ttl(key)
-            await redis.setex(key, max(int(ttl), 1), json.dumps(entry))
+            await redis.set(key, json.dumps(entry), ex=max(int(ttl), 1))
             raise ValueError("That code is not right. Check the email and try again.")
         await redis.delete(key)
         return entry["token"]
@@ -519,7 +519,7 @@ async def create_user_session(user_id: str, ip: str | None = None, user_agent: s
     redis = await get_redis()
     if redis is not None:
         async with redis.pipeline(transaction=True) as pipe:
-            pipe.setex(f"user_session:{token}", USER_SESSION_TTL, json.dumps(record))
+            pipe.set(f"user_session:{token}", json.dumps(record), ex=USER_SESSION_TTL)
             pipe.sadd(f"user_sessions_index:{user_id}", token)
             pipe.expire(f"user_sessions_index:{user_id}", USER_SESSION_TTL)
             await pipe.execute()

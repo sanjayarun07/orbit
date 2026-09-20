@@ -1,3 +1,4 @@
+import httpx
 import json
 from app.nodes.state import AgentState, effective_request as _effective_request
 from app.nodes import runtime
@@ -269,18 +270,20 @@ async def _compose_wallet_portfolio(wallet: str, chain: str | None) -> tuple[str
     """
     is_evm = wallet.startswith("0x")
     resolved_chain = chain or ("solana" if not is_evm else None)
+    # The per-chain fallback is built only if Mobula does not answer: a
+    # coroutine created and never awaited is a warning and a leak.
     if not is_evm:
         # A base58 wallet has exactly one possible chain -- no sweep needed.
-        balances_coro = _bitquery_balances_supplement(wallet, "solana")
+        per_chain = lambda: _bitquery_balances_supplement(wallet, "solana")
     elif chain:
         # An explicit chain was named (or resolved from context) -- respect
         # it rather than searching every chain that wasn't asked about.
-        balances_coro = _bitquery_balances_supplement(wallet, chain)
+        per_chain = lambda: _bitquery_balances_supplement(wallet, chain)
     else:
         # No chain was named at all -- sweep supported EVM chains (primary
         # tier first) rather than guessing one, same as the standalone
         # Nansen-Token-Holdings-failure fallback used elsewhere.
-        balances_coro = _bitquery_balances_supplement_all_chains(wallet)
+        per_chain = lambda: _bitquery_balances_supplement_all_chains(wallet)
     async def _holdings() -> tuple[str | None, str]:
         # Mobula first for wallet tracking (user decision 2026-09-18): every
         # chain in one call, priced, spam filtered. The per-chain path stays
@@ -297,7 +300,7 @@ async def _compose_wallet_portfolio(wallet: str, chain: str | None) -> tuple[str
                     return card, "mobula_wallet_portfolio"
             except Exception:
                 logger.info("mobula portfolio unavailable or slow for %s; per-chain fallback", wallet[:8], exc_info=True)
-        return await balances_coro, "goldrush_wallet_balances"
+        return await per_chain(), "goldrush_wallet_balances"
 
     (balances, balances_tool), hyperliquid, defi = await asyncio.gather(
         _holdings(),
@@ -969,6 +972,29 @@ try:
     _EQUITY_SYMBOLS = {str(row.get("symbol") or "").lower() for row in _EQUITY_REGISTRY} | {a.lower() for row in _EQUITY_REGISTRY for a in (row.get("aliases") or [])}
 except Exception:            # the registry is a convenience, never a dependency
     _EQUITY_SYMBOLS = set()
+
+
+def _chains_for_contract(address: str) -> list[str]:
+    """The chains on which this exact contract has a real DEX Screener pool,
+    best liquidity first, no decoys. Empty when nothing is known."""
+    try:
+        with httpx.Client(timeout=12) as client:
+            response = client.get(f"https://api.dexscreener.com/latest/dex/tokens/{address}")
+            response.raise_for_status()
+            pairs = response.json().get("pairs") or []
+    except Exception:
+        return []
+    by_chain: dict[str, float] = {}
+    for pair in pairs:
+        if not isinstance(pair, dict) or str((pair.get("baseToken") or {}).get("address") or "").lower() != address.lower():
+            continue
+        chain = _chain_key(str(pair.get("chainId") or ""))
+        liquidity = float((pair.get("liquidity") or {}).get("usd") or 0)
+        volume = float((pair.get("volume") or {}).get("h24") or 0)
+        if not chain or _decoy_pool({"liquidity_usd": liquidity, "volume_24h_usd": volume}):
+            continue
+        by_chain[chain] = by_chain.get(chain, 0.0) + liquidity
+    return [c for c, _ in sorted(by_chain.items(), key=lambda kv: -kv[1]) if by_chain[c] >= 1_000]
 
 
 def _ds_namesakes(ticker: str, chain: str) -> list[dict]:
@@ -1888,21 +1914,26 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         # unnecessary clarification round trip for the common case. This
         # matches the inference direct_mcp_request already makes elsewhere.
         chains = ("solana",)
-    if "token_security" in capabilities and not chains and address_match and address_match.group(1):
-        # An EVM contract's security providers (GoPlus, Honeypot.is,
-        # DexScreener) all require a specific chain -- the same 0x address
-        # can exist with different, unrelated code on different chains.
-        # Without this, the capability silently falls through to
-        # token_discovery below and answers with unrelated market data,
-        # with no disclosure that no security check actually ran.
-        return {
-            "answer": (
-                f"Which chain is `{address_match.group(1)}` on (Ethereum, Base, Arbitrum, BNB, "
-                "Polygon, Avalanche, ...)? A security check needs the exact chain -- the same "
-                "contract address can exist with different, unrelated code on different chains."
-            ),
-            "trajectory": None,
-        }
+    if not chains and address_match and address_match.group(1) and ("token_security" in capabilities or _DATA_ASK.search(request)):
+        # The same 0x address can exist with different, unrelated code on
+        # different chains. Every token tool keyed on a contract (security,
+        # holders, trades, first buyers, Mobula's lookups) needs the chain;
+        # none may default to Ethereum (review, 2026-09-20). One free look-up
+        # first: DEX Screener knows which chains carry this exact contract.
+        chains_found = await asyncio.to_thread(_chains_for_contract, address_match.group(1))
+        if len(chains_found) == 1:
+            request = f"{request} on {chains_found[0]}"
+            chains = (chains_found[0],)
+            state = {**state, "chains": [chains_found[0]]}
+        else:
+            options = ", ".join(chains_found) if chains_found else "Ethereum, Base, Arbitrum, BNB, Polygon, Avalanche, Robinhood Chain, ..."
+            return {
+                "answer": (
+                    f"Which chain is `{address_match.group(1)}` on ({options})? The same contract address can exist with "
+                    "different, unrelated code on different chains, so I won't pick one."
+                ),
+                "trajectory": None,
+            }
     if "equity_research" in capabilities and not address_match:
         # A contract address is never a stock: "deep dive on 0x… on robinhood"
         # is a Robinhood Chain token, not the HOOD equity (live, 2026-09-18).

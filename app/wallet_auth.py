@@ -65,7 +65,7 @@ async def create_challenge(address: str, domain: str, uri: str, chain_id: int = 
     }
     redis = await get_redis()
     if redis is not None:
-        await redis.setex(f"wallet_auth_challenge:{nonce}", CHALLENGE_TTL, json.dumps(value))
+        await redis.set(f"wallet_auth_challenge:{nonce}", json.dumps(value), ex=CHALLENGE_TTL)
     else:
         _prune()
         _challenges[nonce] = (time.time() + CHALLENGE_TTL, value)
@@ -149,7 +149,7 @@ async def verify_challenge(address: str, nonce: str, signature: str) -> tuple[st
                "chain_id": int(value.get("chain_id", 1)),
                "authenticated_at": datetime.now(timezone.utc).isoformat()}
     if redis is not None:
-        await redis.setex(f"wallet_auth_session:{token}", SESSION_TTL, json.dumps(session))
+        await redis.set(f"wallet_auth_session:{token}", json.dumps(session), ex=SESSION_TTL)
     else:
         _sessions[token] = (time.time() + SESSION_TTL, session)
     return token, session
@@ -185,7 +185,7 @@ async def create_solana_challenge(address: str, domain: str, uri: str) -> dict:
     value = {"address": address, "message": message, "expires_at": expires.isoformat()}
     redis = await get_redis()
     if redis is not None:
-        await redis.setex(f"wallet_auth_challenge_sol:{nonce}", _SOLANA_CHALLENGE_TTL, json.dumps(value))
+        await redis.set(f"wallet_auth_challenge_sol:{nonce}", json.dumps(value), ex=_SOLANA_CHALLENGE_TTL)
     else:
         _prune_solana()
         _solana_challenges[nonce] = (time.time() + _SOLANA_CHALLENGE_TTL, value)

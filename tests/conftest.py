@@ -87,6 +87,11 @@ def _reset_account_stores(monkeypatch):
 
     monkeypatch.setattr(_mmeme, "_get", _offline)
     monkeypatch.setattr(_mmeme, "_get_v1", _offline)
+    from app import exchange_listings as _listings, mobula_client as _mclient
+
+    monkeypatch.setattr(_mclient, "get", _offline)
+    monkeypatch.setattr(_listings, "_symbols", _offline)
+    _mclient.reset_for_test()
     monkeypatch.setattr(_mmeme, "token_trades", _offline)
     monkeypatch.setattr(_mmeme, "token_first_buyers", _offline)
     monkeypatch.setattr(_mmeme, "token_bundle_check", _offline)

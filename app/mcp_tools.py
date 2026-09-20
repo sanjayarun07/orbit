@@ -338,7 +338,7 @@ class MCPGateway:
         client = await self._redis_client()
         if client is not None:
             try:
-                await client.setex(f"mcp:result:{key}", ttl, value)
+                await client.set(f"mcp:result:{key}", value, ex=ttl)
             except Exception:
                 logger.debug("MCP Redis cache write failed", exc_info=True)
 

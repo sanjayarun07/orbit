@@ -18,6 +18,26 @@ from app.experience import (advance_session_context, build_context_capsules, bui
 from app.graph import run_agent
 from app.identity import Identity, current_identity, service_identity
 from app import charts, followups, user_memory
+
+# Fire-and-forget work that must still finish: kept here so a shutdown can
+# wait for it instead of dropping it (asyncio keeps only weak references to
+# tasks nobody holds) -- review, 2026-09-20.
+_BACKGROUND: set[asyncio.Task] = set()
+
+
+def background(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _BACKGROUND.add(task)
+    task.add_done_callback(_BACKGROUND.discard)
+    return task
+
+
+async def drain_background(timeout: float = 15.0) -> int:
+    """Wait for outstanding background work; how many were pending."""
+    pending = [t for t in _BACKGROUND if not t.done()]
+    if pending:
+        await asyncio.wait(pending, timeout=timeout)
+    return len(pending)
 from app.integrations import tradingview
 from app.limits import acquire_chat_slot, allow_chat_request, allow_chat_request_from_ip, release_chat_slot
 from app.metrics import increment
@@ -181,7 +201,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         history = history_text_from_messages(messages)
         # What Orbit remembers about a signed-in user from earlier chats, as
         # context the general and research paths read (app/user_memory.py).
-        memory_user = identity.user["id"] if getattr(identity, "signed_in", False) and identity.user else None
+        memory_user = identity.user["id"] if getattr(identity, "signed_in", False) and identity.user and not user_memory.opted_out(identity.user) else None
         if memory_user and user_memory.enabled():
             try:
                 recalled = await asyncio.wait_for(user_memory.recall(memory_user, body.message), timeout=6)
@@ -370,7 +390,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         chart, suggestions = await asyncio.gather(_chart(), followups.generate(body.message, answer, run.intent, plan))
         if memory_user and user_memory.enabled() and plan is None:
             # Off the turn's critical path: the answer is already written.
-            asyncio.create_task(user_memory.extract(memory_user, session_id, body.message, answer, run.intent))
+            background(user_memory.extract(memory_user, session_id, body.message, answer, run.intent))
         assistant_metadata = {
             "chart": chart,
             "routing_decision": getattr(run, "routing_decision", None),

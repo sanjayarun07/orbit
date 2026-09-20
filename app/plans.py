@@ -59,7 +59,7 @@ def _prune_memory() -> None:
 async def store_prepared_transaction(plan_id: str, transaction: str) -> None:
     redis = await get_redis()
     if redis is not None:
-        await redis.setex(f"trade_transaction:{plan_id}", settings.plan_ttl_seconds, transaction)
+        await redis.set(f"trade_transaction:{plan_id}", transaction, ex=settings.plan_ttl_seconds)
         return
     _prune_memory()
     _prepared_transactions[plan_id] = transaction

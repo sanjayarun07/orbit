@@ -80,6 +80,8 @@ def test_recall_returns_the_nearest_facts_then_the_most_recent_and_renders_a_blo
     ], "s1"))
     facts = asyncio.run(user_memory.recall(USER, "should I add to my BONK bag on solana", k=2))
     assert facts[0]["fact"] == "Holds BONK and WIF on Solana"
+    assert all(f["fact"] != "Prefers Base for DeFi yield" for f in asyncio.run(user_memory.recall(USER, "zzz qqq unrelated", k=5))), \
+        "nothing near the message means nothing recalled; recent facts no longer fill in (review 2026-09-20)"
     text = user_memory.with_block("user: hi\nassistant: hello", facts)
     assert text.startswith("What Orbit knows about this user from earlier conversations") and "- Holds BONK and WIF on Solana" in text
     assert text.endswith("user: hi\nassistant: hello") and "never for whether a trade is allowed" in text
@@ -172,10 +174,10 @@ def test_a_turn_reads_the_block_and_schedules_extraction(monkeypatch):
     sign_in(client, email="memory@example.com")
     user_id = client.get("/me/export").json()["user"]["id"]
     asyncio.run(user_memory.remember(user_id, [{"fact": "Holds BONK and WIF on Solana", "kind": "holding", "confidence": 0.9}], "s0"))
-    response = client.post("/chat", json={"message": "how is BONK doing"}, headers={"X-Orbit-Device": "memory-turn"})
+    response = client.post("/chat", json={"message": "how are my BONK and WIF on Solana doing"}, headers={"X-Orbit-Device": "memory-turn"})
     assert response.status_code == 200, response.text
     assert seen["history"].startswith("What Orbit knows about this user") and "- Holds BONK and WIF on Solana" in seen["history"]
-    assert extracted == [("how is BONK doing", "research")]
+    assert extracted == [("how are my BONK and WIF on Solana doing", "research")]
 
 
 # --- "what should I look at today?" with remembered holdings ----------------------
@@ -209,3 +211,61 @@ def _coro(value):
     async def run():
         return value
     return run()
+
+
+def test_a_user_can_switch_memory_off_for_their_account(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app import execution_policy, sessions
+    from app.graph import AgentRun
+    from tests.conftest import sign_in
+
+    monkeypatch.setattr(sessions, "get_redis", AsyncMock(return_value=None))
+    monkeypatch.setattr(execution_policy, "allow_chat_request", AsyncMock(return_value=(True, 0)))
+    monkeypatch.setattr(execution_policy, "allow_chat_request_from_ip", AsyncMock(return_value=(True, 0)))
+    monkeypatch.setattr(execution_policy.tool_outcomes, "record_turn", AsyncMock())
+    monkeypatch.setattr(execution_policy.research_gaps, "record", AsyncMock())
+    monkeypatch.setattr(execution_policy.notifications, "maybe_low_credit_alert", AsyncMock())
+    seen = {}
+
+    async def agent(message, wallet, history, context, action):
+        seen["history"] = history
+        return AgentRun(answer="BONK is up 12% today on strong volume. " * 6, trajectory=None, trade_plan=None, intent="research", capabilities=["market_data"])
+
+    monkeypatch.setattr(execution_policy, "run_agent", agent)
+    extracted = []
+
+    async def fake_extract(*args):
+        extracted.append(args)
+        return []
+
+    monkeypatch.setattr(user_memory, "extract", fake_extract)
+    client = TestClient(main.app)
+    sign_in(client, email="optout@example.com")
+    user_id = client.get("/me/export").json()["user"]["id"]
+    asyncio.run(user_memory.remember(user_id, [{"fact": "Holds BONK and WIF on Solana", "kind": "holding", "confidence": 0.9}], "s0"))
+    assert client.put("/me/memory", json={"enabled": False}).json() == {"enabled": False}
+    assert client.get("/me/memory").json()["enabled"] is False, "the switch shows in Settings"
+    client.post("/chat", json={"message": "how are my BONK and WIF on Solana doing"}, headers={"X-Orbit-Device": "optout"})
+    assert not seen["history"].startswith("What Orbit knows about this user") and extracted == [], "off means no recall and no collection"
+    client.put("/me/memory", json={"enabled": True})
+    client.post("/chat", json={"message": "how are my BONK and WIF on Solana doing"}, headers={"X-Orbit-Device": "optout"})
+    assert seen["history"].startswith("What Orbit knows about this user") and len(extracted) == 1
+
+
+def test_background_work_is_tracked_and_drained():
+    from app import execution_policy
+
+    async def run():
+        done = []
+
+        async def work():
+            await asyncio.sleep(0.05)
+            done.append(True)
+
+        execution_policy.background(work())
+        pending = await execution_policy.drain_background(timeout=2)
+        return pending, done
+
+    pending, done = asyncio.run(run())
+    assert pending == 1 and done == [True]

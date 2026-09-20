@@ -33,7 +33,7 @@ from app.tool_catalog import TOOL_SPECS
 
 logger = logging.getLogger(__name__)
 
-_BASE = "https://production-api.mobula.io/api/2"
+from app import mobula_client
 _WALLET = re.compile(r"\b(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})\b")
 
 HOLDERS_ASK = re.compile(
@@ -52,11 +52,7 @@ def enabled() -> bool:
 
 
 def _get(path: str, params: dict) -> dict | list:
-    with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
-        response = client.get(f"{_BASE}{path}", params=params, headers={"Authorization": settings.mobula_api_key or ""})
-        response.raise_for_status()
-        payload = response.json()
-    return payload.get("data", payload) if isinstance(payload, dict) else payload
+    return mobula_client.get(2, path, params)
 
 
 def _num(value, default: float = 0.0) -> float:
@@ -81,16 +77,29 @@ def _usd(value) -> str:
     return f"{sign}${amount:,.2f}"
 
 
-def _when(value) -> str:
-    if not value:
-        return "—"
+def _moment(value) -> datetime | None:
+    """Mobula dates arrive as epoch milliseconds (trades, transfers), epoch
+    seconds, or ISO strings (first buyers, funding); one reader for all."""
+    if value in (None, "", 0):
+        return None
     try:
-        text = str(value)
-        if text.isdigit():
-            return datetime.fromtimestamp(int(text) / (1000 if len(text) > 10 else 1), tz=timezone.utc).strftime("%Y-%m-%d")
-        return text[:10]
+        text = str(value).strip()
+        if re.fullmatch(r"\d{9,14}", text):
+            number = int(text)
+            return datetime.fromtimestamp(number / (1000 if number > 10_000_000_000 else 1), tz=timezone.utc)
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
     except Exception:
-        return "—"
+        return None
+
+
+def _when(value) -> str:
+    moment = _moment(value)
+    return moment.strftime("%Y-%m-%d") if moment else "—"
+
+
+def _when_time(value) -> str:
+    moment = _moment(value)
+    return moment.strftime("%Y-%m-%d %H:%M:%S") if moment else "—"
 
 
 def _short(address: str) -> str:
@@ -176,7 +185,7 @@ def token_trades(request: str) -> str:
         "|---|---|---:|---:|---|---|",
     ]
     for row in rows[:15]:
-        when = str(row.get("date") or "")[:19].replace("T", " ")
+        when = _when_time(row.get("date"))
         platform = row.get("platform")
         venue = (platform.get("name") if isinstance(platform, dict) else platform) or row.get("blockchain") or "—"
         wallet = row.get("swapSenderAddress") or row.get("transactionSenderAddress")
@@ -221,7 +230,6 @@ def wallet_deployer(request: str) -> str:
     return "\n".join(lines)
 
 
-_V1 = "https://production-api.mobula.io/api/1"
 PULSE_CHAINS = {"solana": "solana:solana", "base": "evm:8453", "bsc": "evm:56", "bnb": "evm:56", "ethereum": "evm:1", "hyperevm": "evm:999", "robinhood": "evm:4663"}
 LAUNCH_ASK = re.compile(
     r"\b(?:new\s+(?:launch\w*|tokens?|memes?|coins?|pairs?|listings?)|(?:just|recently|freshly)\s+launch\w*|fresh\s+launch\w*|launchpad|pump\.?fun|"
@@ -229,11 +237,7 @@ LAUNCH_ASK = re.compile(
 
 
 def _get_v1(path: str, params: dict) -> dict | list:
-    with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
-        response = client.get(f"{_V1}{path}", params=params, headers={"Authorization": settings.mobula_api_key or ""})
-        response.raise_for_status()
-        payload = response.json()
-    return payload.get("data", payload) if isinstance(payload, dict) else payload
+    return mobula_client.get(1, path, params)
 
 
 def token_first_buyers(request: str) -> str:
@@ -407,7 +411,7 @@ def token_bundle_check(request: str) -> str:
     # Signal 1: same second.
     by_second: dict[str, list[dict]] = {}
     for row in buyers:
-        by_second.setdefault(str(row.get("firstHoldingDate") or "")[:19], []).append(row)
+        by_second.setdefault(_when_time(row.get("firstHoldingDate")), []).append(row)
     groups = sorted((rows for rows in by_second.values() if len(rows) >= _SAME_SECOND_MIN), key=len, reverse=True)
 
     # Signal 2: shared funder, for the earliest buyers.
@@ -426,7 +430,7 @@ def token_bundle_check(request: str) -> str:
     personal = [(f, rows) for f, rows in clusters if not _impersonal(f, tags.get(f))]
 
     # Overlap: same (personal) funder AND same second.
-    second_of = {str(r.get("address")): str(r.get("firstHoldingDate") or "")[:19] for r in buyers}
+    second_of = {str(r.get("address")): _when_time(r.get("firstHoldingDate")) for r in buyers}
     overlap = 0
     for _, rows in personal:
         seconds = [second_of.get(str(r.get("address"))) for r in rows]
@@ -439,27 +443,27 @@ def token_bundle_check(request: str) -> str:
 
     strongest = max((len(g) for g in groups), default=0)
     if overlap >= 3:
-        verdict = "**Strong**: wallets funded by the same address bought in the same second."
+        verdict = "**Strong** in the sample: wallets funded by the same address first held in the same second."
     elif strongest >= 5 or (personal and len(personal[0][1]) >= 3):
-        verdict = "**Some**: a same-second group or a shared funder, but not both together."
+        verdict = "**Some** in the sample: a same-second group or a shared funder, but not both together."
     else:
-        verdict = "**None found** among the first buyers Mobula indexed."
+        verdict = f"**None found in the sample**: the first {len(buyers)} buyers by time, with funding traced for the first {len(traced)}."
     lines = [
         "# Bundle check",
         f"**Provider**: Mobula · **Contract**: `{address}` · **Chain**: {chain} · **Checked**: {_stamp()}",
         "",
         f"Bundle evidence: {verdict}",
         "",
-        f"Of the first **{len(buyers)}** buyers, **{sum(len(g) for g in groups)}** entered in a second shared by at least "
+        f"Sample: the first **{len(buyers)}** buyers Mobula indexed; **{sum(len(g) for g in groups)}** of them first held in a second shared by at least "
         f"{_SAME_SECOND_MIN} wallets; the funding source of the first **{len(traced)}** was traced and **{sum(len(r) for _, r in personal)}** "
-        f"share a personal funder with another early buyer.",
+        f"share a personal funder with another early buyer. Buyers after the first {len(buyers)}, and funders of buyers after the first {len(traced)}, were not checked.",
     ]
     if groups:
         lines += ["", "## Same-second groups", "| Second (UTC) | Wallets | Still holding | Retained | Tagged |", "|---|---:|---:|---:|---:|"]
         for rows in groups[:6]:
             tagged = sum(1 for r in rows if r.get("tags"))
             holding = sum(1 for r in rows if _num(r.get("currentBalance")) > 0)
-            lines.append(f"| {str(rows[0].get('firstHoldingDate') or '')[:19].replace('T', ' ')} | {len(rows)} | {holding} | {retained(rows)} | {tagged} |")
+            lines.append(f"| {_when_time(rows[0].get('firstHoldingDate'))} | {len(rows)} | {holding} | {retained(rows)} | {tagged} |")
     if clusters:
         lines += ["", "## Shared funding sources", "| Funder | Known as | Wallets funded | Same second |", "|---|---|---:|---:|"]
         for funder, rows in clusters[:6]:
@@ -471,7 +475,9 @@ def token_bundle_check(request: str) -> str:
         lines += ["", "An exchange, the system program or a burn address funds strangers and is not counted; an untagged funder feeding several first buyers is the pattern to weigh."]
     lines += ["", "Source: [Mobula first buyers](https://docs.mobula.io/rest-api-reference/endpoint/wallet-first-buyers) and "
               "[wallet funding](https://docs.mobula.io/rest-api-reference/endpoint/wallet-funding)",
-              "Same-second entry approximates same-block on Solana. This reconstructs from indexed data only; it is evidence, not proof of intent."]
+              "A shared second is timing evidence, not a shared block: Mobula's first-holding times have one-second resolution and Solana "
+              "produces two to three slots a second, so block-level bundling needs slot and transaction data this check does not have. "
+              "Indexed data only; evidence, not proof of intent."]
     return "\n".join(lines)
 
 
