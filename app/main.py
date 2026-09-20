@@ -87,7 +87,7 @@ from app.db import get_pg_pool, get_redis
 from app.settings import settings
 from pydantic import BaseModel
 
-from app import decision_records, execution_policy, token_unlocks, user_memory
+from app import decision_records, execution_policy, holder_snapshots, token_unlocks, user_memory
 from app.portfolio import build_portfolio_snapshot
 from app.wallet_insights import portfolio_scenario, wallet_health
 from app.wallet_auth import (
@@ -143,9 +143,13 @@ async def lifespan(_app: FastAPI):
         asyncio.create_task(asyncio.to_thread(token_unlocks.warm))
         asyncio.create_task(tradingview.warm())
     kb_worker = asyncio.create_task(kb_ingest.worker())
+    # The holder snapshot ledger records tracked meme tokens in the
+    # background; history only exists from the day recording starts.
+    snapshot_worker = asyncio.create_task(holder_snapshots.worker())
     _workers.update({
         "reconciliation": reconciliation, "relay_reconciliation": relay_reconciliation,
         "tool_outcomes": outcomes_refresh, "tasks": task_worker, "knowledge_ingest": kb_worker,
+        "holder_snapshots": snapshot_worker,
     })
     try:
         async with mcp_server.mcp.session_manager.run():
@@ -157,8 +161,9 @@ async def lifespan(_app: FastAPI):
         task_worker.cancel()
         kb_worker.cancel()
         kb_warm.cancel()
+        snapshot_worker.cancel()
         kb_tool.set_loop(None)
-        await asyncio.gather(reconciliation, relay_reconciliation, outcomes_refresh, task_worker, kb_worker, kb_warm, discovery, return_exceptions=True)
+        await asyncio.gather(reconciliation, relay_reconciliation, outcomes_refresh, task_worker, kb_worker, kb_warm, snapshot_worker, discovery, return_exceptions=True)
         drained = await execution_policy.drain_background()
         if drained:
             logger.info("drained %d background task(s) on shutdown", drained)

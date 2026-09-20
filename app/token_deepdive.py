@@ -35,7 +35,7 @@ import httpx
 from app.provider_registry import get_provider_router
 from app.provider_router import NoData
 from app.integrations import tradingview
-from app import mobula_meme, mobula_security
+from app import holder_snapshots, mobula_meme, mobula_security
 from app.signals import Signal, Subject, SubjectSkip
 
 # DefiLlama emissions (free): a protocol-slug list + per-slug unlock schedule whose
@@ -280,6 +280,17 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
         else:
             dims.append(DimensionEvidence("bundle", "Bundle check (launch coordination)", "unavailable", reason))
             signals.append(Signal.abstain(mobula_meme.BUNDLE_MODEL, subject, _now_iso(), reason))
+
+    # How the structure has moved since Orbit first recorded this token (the
+    # snapshot ledger). Only when there is history: a single row is the
+    # present, which the dimensions above already show.
+    if holder_snapshots.enabled():
+        try:
+            card = await holder_snapshots.history_card(subject)
+        except Exception:
+            card = None
+        if card:
+            dims.append(DimensionEvidence("history", "Holder history (Orbit ledger)", "available", card, "holder_snapshots", _now()))
 
     # Token unlocks -- the most deterministic near-term headwind. Real, free, and
     # verified-by-address via DefiLlama emissions; unavailable when the token isn't

@@ -223,6 +223,16 @@ class Settings(BaseSettings):
     # tiers (only the 10k-credit/month free tier is public) -- same
     # reasoning as Birdeye above.
     mobula_request_cost_usd: float = 0.0
+    # The holder snapshot ledger (app/holder_snapshots.py): periodic rows of
+    # a tracked meme token's structure, recorded in the background so history
+    # exists later. Three Mobula calls per row through the budgeted door.
+    holder_snapshots_enabled: bool = True
+    holder_snapshot_tick_seconds: int = 60
+    holder_snapshot_fresh_minutes: int = 10        # while a token is under a day old
+    holder_snapshot_interval_minutes: int = 60     # afterwards
+    holder_snapshot_max_per_tick: int = 10
+    holder_snapshot_pulse_chains: str = "solana,base,bsc"
+    holder_snapshot_min_holders: int = 10          # a launch with fewer holders is not tracked yet
     bitquery_api_key: str | None = None
     bitquery_graphql_url: str = "https://streaming.bitquery.io/eap"
     bitquery_requests_per_minute: int = 30

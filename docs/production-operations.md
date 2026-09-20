@@ -1543,3 +1543,59 @@ snapshot, persona analysts, the meme holder snapshot ledger, and any blend
 or clamp CALLER -- the arithmetic exists and is tested, nothing feeds it a
 book. Those are the next phases in the agreed order (contracts, equities PIT
 data, personas, meme snapshot ledger, equities paper desk).
+
+## The holder snapshot ledger (2026-09-21)
+
+`app/holder_snapshots.py`. Mobula answers what a meme token's holder
+structure is NOW and has no yesterday, so a state-based meme signal ("top-10
+under 20% and LP locked") could only be backtested with today's state on
+past prices, which is lookahead. The ledger records the structure on a
+schedule so history exists from the day recording starts. The user chose to
+start it early, before the equities data layer, for exactly that reason.
+
+**A row** (`holder_snapshots`): top-10 / top-50 concentration, the largest
+20 positions with Mobula's labels, the share held by dev / sniper / bundler
+/ insider labelled wallets, LP burned / locked / unlocked for the main pool,
+the contract switches, price, liquidity and market cap, and `flags.missing`
+naming every part Mobula returned nothing for. Zeros are never invented: a
+concentration figure of 0 on a token minutes old is "not computed" and is
+stored as null; when security says nothing, top-10 is summed from the
+largest positions with pool and curve wallets left out.
+
+**What is tracked** (`tracked_tokens`): every token a user deep-dived (14
+days, extended on each ask) and every new or bonding launch Pulse lists on
+`holder_snapshot_pulse_chains` with at least `holder_snapshot_min_holders`
+holders (3 days). The Pulse row itself is stored once as the token's first
+ledger row at no extra cost (cohort shares, holder count, price, market cap;
+no liquidity, since Pulse's pair figure is one-sided and not comparable to
+the market endpoint's). A token whose snapshots come back dark twice in a
+row (no holders, no market) stops being tracked.
+
+**Cadence**: every `holder_snapshot_fresh_minutes` (10) while under a day
+old, then every `holder_snapshot_interval_minutes` (60); at most
+`holder_snapshot_max_per_tick` (10) snapshots per 60 s tick, fresh launches
+first. Three Mobula calls per row through the budgeted door
+(app/mobula_client.py), so the worker takes at most half the bucket and a
+user's turn always gets through. The worker starts in the lifespan; off via
+`holder_snapshots_enabled`. Tests run against the in-memory store (conftest
+patches the pool for this module and for decision_records).
+
+**What it feeds today**: the deep-dive gains a `history` dimension when the
+ledger holds two or more rows for the token ("Top-10 share 41% → 23%", "LP
+locked 0% → 95%", wallets that left or entered the top 20, switches that
+flipped), with a "latest step" line when it differs from the whole span.
+`as_of(subject_key, moment)` is the point-in-time read a backtest is allowed
+to use; `diff(older, newer)` is what an alert will read.
+
+**Verified live** on the dev database (2026-09-21): the worker discovered
+Solana, Base and BNB launches and recorded snapshots within minutes; the
+first live history card showed three problems that are now fixed and tested:
+a Pulse row re-stored on every discovery pass, Pulse's 0% concentration read
+as a real 100% → 0% move, and a missing holder list read as wallets leaving.
+Rows recorded before those fixes carry the same flaws; nothing downstream
+reads them yet.
+
+**Known limits**: `--reload` in development restarts the worker on every
+file save, so overlapping processes can take duplicate rows seconds apart;
+label-derived cohort shares depend on Mobula's labelling; holder count is
+only known for Pulse-sourced rows.

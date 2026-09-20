@@ -14,11 +14,12 @@ def _reset_account_stores(monkeypatch):
     async def no_pool():
         return None
 
-    from app import user_memory as _user_memory
+    from app import decision_records as _decision_records, holder_snapshots as _holder_snapshots, user_memory as _user_memory
 
-    for module in (accounts, credits, api_keys, billing, tasks, _user_memory):
+    for module in (accounts, credits, api_keys, billing, tasks, _user_memory, _decision_records, _holder_snapshots):
         monkeypatch.setattr(module, "get_pg_pool", no_pool)
     _user_memory.reset_for_test()
+    _decision_records.reset_for_test()
     from app.integrations import tradingview as _tradingview
 
     monkeypatch.setattr(_tradingview, "get_pg_pool", no_pool)
@@ -97,6 +98,12 @@ def _reset_account_stores(monkeypatch):
     monkeypatch.setattr(_mmeme, "token_bundle_check", _offline)
     monkeypatch.setattr(_msec, "_logo_reuses", lambda address, chain: None)
     monkeypatch.setattr(_settings, "warm_caches_on_start", False)
+    # The snapshot ledger's worker and its deep-dive hook never reach Mobula
+    # in the suite; tests of the ledger stub `take` themselves.
+    monkeypatch.setattr(_settings, "holder_snapshots_enabled", False)
+    from app import holder_snapshots as _snapshots
+
+    _snapshots.reset_for_test()
     monkeypatch.setattr(_tradingview, "get_redis", no_redis)
     # The subject probe looks a name up on the web when the router is unsure;
     # the suite never reaches Perplexity for that. Tests of the probe itself

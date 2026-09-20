@@ -29,7 +29,7 @@ from app.token_resolve import bitquery_evm_lookup, clear_winner, token_candidate
 from app.token_deepdive import (
     ANALYSIS_RULES, build_token_evidence, bundle_signals, coverage_rows, evidence_skips, extract_market_price, format_evidence_bundle,
 )
-from app import decision_records, role_memory
+from app import decision_records, holder_snapshots, role_memory
 from app.signals import Signal, Subject
 from app.source_cards import extract_source_cards
 from app.web_search import append_web_sources, is_crypto_trends_query, web_search
@@ -1396,6 +1396,7 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
 
     streaming.emit("status", text=f"Composing the evidence bundle for {symbol or address}")
     bundle = await build_token_evidence(address, chain, symbol)
+    bundle_has_history = any(d.name == "history" and d.status == "available" for d in getattr(bundle, "dimensions", []) or [])
     evidence = format_evidence_bundle(bundle)
     charter = (state.get("session_context") or {}).get("risk_charter")
 
@@ -1438,6 +1439,15 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
         kind="deep_dive", subject=subject, signals=[analyst, *bundle_signals(bundle)], verdict=answer,
         coverage=coverage_rows(bundle), skipped=evidence_skips(bundle), price=price_now,
     )
+    # A token someone looked at is worth recording: the ledger keeps its
+    # structure from now on, so the next deep-dive can say what moved.
+    if holder_snapshots.enabled():
+        try:
+            await holder_snapshots.track(subject, "deep_dive", days=holder_snapshots.DEEP_DIVE_DAYS)
+            if not bundle_has_history:
+                await holder_snapshots.snapshot(subject)
+        except Exception:
+            logger.warning("holder_snapshots: could not track %s", subject.key, exc_info=True)
 
     # STORE this decision for a future bias-free reflection (advisory memory only;
     # never a trade or a safety override).
