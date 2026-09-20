@@ -1467,5 +1467,9 @@ read; with no clear winner it asks, listing them.
 - **Noise.** Every `setex` is now `set(..., ex=)`; the per-chain wallet
   fallback is built lazily so no coroutine is created un-awaited.
 
-Open: whether "Robinhood" in scope means Robinhood Chain (built) or the
-Robinhood app's crypto list (no public authoritative source found yet).
+Finding 3, settled by the user (2026-09-20): "Robinhood" in the product
+scope means **Robinhood Chain** (Mobula name "Robinhood Chain", chain id
+4663), which is what is built. Tokens tradable in the Robinhood app are
+not in scope and no adapter is planned for them. "Binance" means the
+exchange, answered by `binance_spot_listing`; BNB Chain memecoins are
+covered by the on-chain tools like any other chain.
