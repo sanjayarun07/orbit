@@ -7,6 +7,8 @@ caller and translate ServiceError into their response format.
 from __future__ import annotations
 
 import asyncio
+import json
+import time
 import logging
 import re
 from uuid import uuid4
@@ -17,7 +19,7 @@ from app.experience import (advance_session_context, build_context_capsules, bui
     with_resolved_token, build_gas_advisory, build_intent_lock, build_trade_readiness)
 from app.graph import run_agent
 from app.identity import Identity, current_identity, service_identity
-from app import charts, decision_records, followups, user_memory
+from app import charts, decision_records, followups, streaming, turn_log, user_memory
 
 # Fire-and-forget work that must still finish: kept here so a shutdown can
 # wait for it instead of dropping it (asyncio keeps only weak references to
@@ -55,6 +57,35 @@ logger = logging.getLogger(__name__)
 
 
 async def execute_chat_turn(body: ChatRequest, identity: Identity | str) -> AgentResponse:
+    """One chat turn, logged whatever happens (app/turn_log.py): the answer
+    with its tools, validation and gate verdicts on success; the status and
+    detail on every refusal, timeout and crash. Then the turn itself."""
+    resolved = identity if not isinstance(identity, str) else (current_identity.get() or service_identity(identity))
+    transport = "stream" if streaming.active() else ("mcp" if resolved.kind == "service" else "json")
+    started = time.monotonic()
+
+    async def log(status: str, http_status: int, **fields) -> None:
+        # The log is never a reason for a turn to fail or a refusal to change.
+        try:
+            await turn_log.record(message=body.message, status=status, latency_ms=int((time.monotonic() - started) * 1000), http_status=http_status,
+                                  transport=transport, identity=resolved, wallet=body.wallet_address, **fields)
+        except Exception:
+            logger.warning("turn log failed", exc_info=True)
+
+    try:
+        response = await _admitted_chat_turn(body, resolved)
+    except ServiceError as exc:
+        detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, default=str)
+        await log("error", exc.status_code, error=detail, session_id=body.session_id)
+        raise
+    except BaseException as exc:
+        await log("error", 500, error=f"{type(exc).__name__}: {exc}"[:500], session_id=body.session_id)
+        raise
+    await log("ok", 200, session_id=response.session_id, response=response)
+    return response
+
+
+async def _admitted_chat_turn(body: ChatRequest, identity: Identity | str) -> AgentResponse:
     """One chat turn with the same admission, per-session locking, budgets and
     persistence as POST /chat. Also the entry point for the MCP server.
 
@@ -456,6 +487,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             team_mode=bool(next_context.get("team_mode")),
             risk_charter=next_context.get("risk_charter") or None,
             risk_charter_fields=next_context.get("risk_charter_fields") or None,
+            answer_gate=getattr(run, "answer_gate", None),
         )
     except asyncio.TimeoutError as exc:
         increment("chat_timeouts")

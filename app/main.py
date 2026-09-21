@@ -85,9 +85,9 @@ from app.plans import get_plan
 from app.provider_registry import get_provider_router, save_provider_overrides
 from app.db import get_pg_pool, get_redis
 from app.settings import settings
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from app import decision_records, execution_policy, holder_snapshots, token_unlocks, user_memory
+from app import decision_records, execution_policy, holder_snapshots, token_unlocks, turn_log, user_memory
 from app.portfolio import build_portfolio_snapshot
 from app.wallet_insights import portfolio_scenario, wallet_health
 from app.wallet_auth import (
@@ -1762,6 +1762,51 @@ async def admin_knowledge_protocols(limit: int = 100, _admin: None = Depends(_re
         out.append({"id": p.id, "slug": p.slug, "name": p.name, "symbol": p.symbol, "category": p.category, "tvl_usd": p.tvl_usd, "chains": p.chains,
                     "docs_url": kb_registry.guess_docs_url(p), "github_org": p.github_org, "governance_url": p.governance_url, "forum_url": p.forum_url, "defillama_slug": p.defillama_slug})
     return {"protocols": out}
+
+
+class TurnFlag(BaseModel):
+    note: str | None = Field(default=None, max_length=1000)
+    resolved: bool = False
+
+
+@app.get("/admin/turns/summary")
+async def admin_turns_summary(days: float = 1.0, _admin: None = Depends(_require_admin)):
+    """The review numbers for a period: turns, errors by status, latency,
+    open flags, thumbs-down, validation warnings, gate interventions."""
+    return await turn_log.summary(days=max(0.01, min(days, 365)))
+
+
+@app.get("/admin/turns")
+async def admin_turns(days: float = 1.0, status: str | None = None, user: str | None = None, session: str | None = None,
+                      q: str | None = None, flagged: bool | None = None, intent: str | None = None, limit: int = 100,
+                      _admin: None = Depends(_require_admin)):
+    """Every chat turn in the period, newest first: request, answer preview,
+    status, latency, tools, rating. `user` is an email or a user id;
+    `status` is ok or error; `flagged=true` lists open issues."""
+    user_id = None
+    if user:
+        found = await accounts.get_user_by_email(user) if "@" in user else None
+        user_id = found["id"] if found else user
+    rows = await turn_log.list_turns(days=max(0.01, min(days, 365)), status=status, user_id=user_id, session_id=session, q=q,
+                                     flagged=flagged, intent=intent, limit=max(1, min(limit, 1000)))
+    return {"turns": [turn_log.public(r) for r in rows], "count": len(rows)}
+
+
+@app.get("/admin/turns/{turn_id}")
+async def admin_turn(turn_id: str, _admin: None = Depends(_require_admin)):
+    row = await turn_log.get_turn(turn_id)
+    if row is None:
+        raise HTTPException(404, "No such turn")
+    return turn_log.public(row, full=True)
+
+
+@app.post("/admin/turns/{turn_id}/flag")
+async def admin_turn_flag(turn_id: str, body: TurnFlag, _admin: None = Depends(_require_admin)):
+    """Flag a turn as an issue with a note, or resolve it (`resolved: true`)."""
+    row = await turn_log.flag(turn_id, body.note, resolved=body.resolved)
+    if row is None:
+        raise HTTPException(404, "No such turn")
+    return turn_log.public(row)
 
 
 @app.get("/admin/research/gaps")

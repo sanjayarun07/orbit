@@ -1647,3 +1647,43 @@ priced-first with the unpriced count and the ⚠ mark for unverified tokens;
 nothing could be priced so GoldRush still gets its turn. Live: the same
 wallet answered in six seconds, 156 holdings priced (USDC, SOL, PENGU
 included), 358 with no Jupiter price, total shown as a floor.
+
+## The turn log: every request and response, for the closed beta (2026-09-21)
+
+User decision: "keep track of all requests and response. we need to fix all
+issues and keep them logged so we know what happened." `app/turn_log.py`
+records one row per chat turn in `chat_turns` (Postgres; bounded in-memory
+fallback), wrapped around `execute_chat_turn` so it sees every transport
+(JSON, stream, MCP) and every outcome:
+
+- **Answered**: message, answer, intent, capabilities, the tools that ran,
+  the public tool activity (bounded at 60 KB, with the tool names kept when
+  it is larger), the validator's verdict, the answer gate's verdict when it
+  rewrote or replaced the answer (`answer_gate` now travels on AgentState,
+  AgentRun and AgentResponse), the risk assessment, the credits charged,
+  the plan id, latency, user, account, API key, session and revision.
+- **Refused or failed**: the same identity fields plus the HTTP status and
+  detail -- rate limited (429), out of credits (402), sign-in required (401),
+  timed out (504), bad request (400), crashed (500 with the reference id).
+
+Ratings join in: `GET /admin/turns` shows the user's thumbs-up or -down for
+each turn (from `chat_feedback`, keyed by session and revision), and a
+thumbs-down flags the turn as an open issue automatically.
+
+**Review surface.** Admin page › Turns: period, status (all / errors /
+answered / open issues), user email, free text; each row opens the full
+turn with request, error, answer, gate, validation and tool activity, and
+Flag / Resolve buttons that take a note. Routes: `GET /admin/turns`,
+`GET /admin/turns/summary`, `GET /admin/turns/{id}`,
+`POST /admin/turns/{id}/flag` (`{note, resolved}`). The digest:
+
+    .venv/bin/python scripts/turn_review.py --days 1        # problems only
+    .venv/bin/python scripts/turn_review.py --days 7 --all  # every turn
+
+writes `reports/turns-<stamp>/review.md` and `turns.json` (untracked).
+
+**Retention and privacy.** Rows are kept indefinitely for now (closed beta);
+deleting an account nulls `user_id` on its rows rather than deleting them,
+since the log is the operator's record. Answers are stored up to 20 KB and
+messages up to 4 KB. Nothing here is on a turn's critical path: a store
+failure is logged and the answer still goes out.

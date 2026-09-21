@@ -70,6 +70,13 @@ async def _save(session_id: str, revision: int, record: dict, account_id: str | 
 
 async def rate(session_id: str, revision: int, rating: str, comment: str | None = None, account_id: str | None = None) -> dict:
     """Apply a rating to a turn and return {rating, tools, changed}."""
+    if rating == "down":
+        # The operator's log sees every thumbs-down as an open issue (app/turn_log.py).
+        try:
+            from app import turn_log
+            await turn_log.flag_by_revision(session_id, revision, f"user rated down: {comment or 'no comment'}")
+        except Exception:
+            logger.warning("turn_log flag on feedback failed", exc_info=True)
     if rating not in RATINGS:
         raise ValueError("rating must be 'up', 'down' or 'none'")
     turn = await _turn(session_id, revision)

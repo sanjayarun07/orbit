@@ -348,6 +348,8 @@ class AgentResponse(BaseModel):
     risk_charter: str | None = None
     risk_charter_fields: dict | None = None
     chart: ChartCard | None = None
+    # The answer gate's verdict when it rewrote or replaced the answer (None otherwise).
+    answer_gate: dict | None = None
 
 
 class IntentPreviewRequest(BaseModel):

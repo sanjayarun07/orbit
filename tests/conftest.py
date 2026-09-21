@@ -14,12 +14,13 @@ def _reset_account_stores(monkeypatch):
     async def no_pool():
         return None
 
-    from app import decision_records as _decision_records, holder_snapshots as _holder_snapshots, user_memory as _user_memory
+    from app import decision_records as _decision_records, holder_snapshots as _holder_snapshots, turn_log as _turn_log, user_memory as _user_memory
 
-    for module in (accounts, credits, api_keys, billing, tasks, _user_memory, _decision_records, _holder_snapshots):
+    for module in (accounts, credits, api_keys, billing, tasks, _user_memory, _decision_records, _holder_snapshots, _turn_log):
         monkeypatch.setattr(module, "get_pg_pool", no_pool)
     _user_memory.reset_for_test()
     _decision_records.reset_for_test()
+    _turn_log.reset_for_test()
     from app.integrations import tradingview as _tradingview
 
     monkeypatch.setattr(_tradingview, "get_pg_pool", no_pool)
