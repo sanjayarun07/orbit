@@ -29,7 +29,7 @@ from app.token_resolve import bitquery_evm_lookup, clear_winner, token_candidate
 from app.token_deepdive import (
     ANALYSIS_RULES, build_token_evidence, bundle_signals, coverage_rows, evidence_skips, extract_market_price, format_evidence_bundle,
 )
-from app import decision_records, handles, holder_snapshots, role_memory
+from app import decision_records, handles, holder_snapshots, listed_asset, role_memory
 from app.signals import Signal, Subject
 from app.source_cards import extract_source_cards
 from app.web_search import append_web_sources, is_crypto_trends_query, web_search
@@ -1144,6 +1144,15 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
     # SOL is Solana's native asset by construction -- never ambiguous across chains.
     if ticker in {"SOL", "WSOL"}:
         return _TokenResolution(f"{request} {WRAPPED_SOL_MINT} on solana", chain="solana")
+    # A question about the LISTED asset (supply, market cap, rank, ATH: "total
+    # supply of $ZEC", live 2026-09-21) is about the coin CoinGecko ranks, not
+    # about whichever wrapped copy sits on which chain: no chain question,
+    # the coin id goes into the request and the listed-asset tool answers.
+    if listed_asset.LISTED_ASK.search(request):
+        lead = await _listed_leader(ticker)
+        if lead:
+            return _TokenResolution(f"{request} (CoinGecko id {lead['id']})",
+                                    note=f"_Read **{ticker}** as {lead['name']}, CoinGecko rank {lead['rank']}._")
 
     def _resolved(candidate: dict) -> _TokenResolution:
         return _TokenResolution(f"{request} {candidate['address']} on {candidate['chain']}", chain=candidate["chain"])
@@ -1273,6 +1282,15 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
     return _build_ask(request, ticker, entries)
 
 
+async def _listed_leader(ticker: str) -> dict | None:
+    """CoinGecko's clear leader for a ticker, or None (no listing, or two close)."""
+    try:
+        listed = await asyncio.to_thread(symbol_registry.listed, ticker)
+    except Exception:
+        return None
+    return symbol_registry.leader(listed)
+
+
 async def _listed_resolution(request: str, ticker: str) -> "_TokenResolution | None":
     """The resolution CoinGecko's listing gives for a ticker: the clear leader
     resolved to its contract, or a question naming the ranked coins; None
@@ -1290,6 +1308,10 @@ async def _listed_resolution(request: str, ticker: str) -> "_TokenResolution | N
         where = await asyncio.to_thread(symbol_registry.contract, lead["id"])
         if where:
             return _TokenResolution(f"{request} {where[1]} on {where[0]}", chain=where[0])
+        # A native coin (Zcash, Bitcoin): no contract on any chain the tools
+        # cover, so the listed-asset tool answers by coin id, never a chain ask.
+        return _TokenResolution(f"{request} (CoinGecko id {lead['id']})",
+                                note=f"_Read **{ticker}** as {lead['name']}, a native coin (CoinGecko rank {lead['rank']}); wrapped copies on other chains are separate tokens._")
     candidates = []
     for row in ranked[:3]:
         where = await asyncio.to_thread(symbol_registry.contract, row["id"])

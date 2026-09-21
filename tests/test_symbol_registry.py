@@ -68,8 +68,26 @@ def test_open_token_resolves_to_openledger_never_the_index(monkeypatch):
 
 
 def test_two_close_listings_become_a_question_naming_them(monkeypatch):
+    # Pinned to genuinely close ranks: live, Monad (144) pulled clear of MON
+    # Protocol (1,360 and falling), which is the next test's case.
+    monkeypatch.setattr(symbol_registry, "listed", lambda symbol: [{"id": "monad", "name": "Monad", "symbol": "MON", "rank": 144},
+                                                                    {"id": "mon-protocol", "name": "MON Protocol", "symbol": "MON", "rank": 200}])
+    monkeypatch.setattr(symbol_registry, "contract", lambda coin_id: None)
     monkeypatch.setattr(research, "_jupiter_solana_mint", lambda t: None)
     monkeypatch.setattr(research, "token_candidates", lambda t: [{"chain": "solana", "symbol": "MON", "name": "MON", "address": "So1" + "1" * 40, "liquidity_usd": 270_000.0}])
     out = asyncio.run(research._resolve_named_token("price of MON", {"market_data"}))
-    assert out.clarification and "(Monad, CoinGecko rank 144)" in out.clarification and "(MON Protocol, CoinGecko rank 1360)" in out.clarification
+    assert out.clarification and "(Monad, CoinGecko rank 144)" in out.clarification and "(MON Protocol, CoinGecko rank 200)" in out.clarification
     assert "a chain the tools do not cover (Monad" in out.clarification and "So1" not in out.clarification, "pool dust is never offered"
+
+
+def test_a_clear_native_leader_resolves_to_the_listed_asset_not_a_question(monkeypatch):
+    """Monad leads MON clearly and has no contract anywhere: the listed-asset
+    tool answers by coin id (2026-09-21); before, the lack of a contract
+    became a question the user could not usefully answer."""
+    monkeypatch.setattr(symbol_registry, "listed", lambda symbol: [{"id": "monad", "name": "Monad", "symbol": "MON", "rank": 144},
+                                                                    {"id": "mon-protocol", "name": "MON Protocol", "symbol": "MON", "rank": 1360}])
+    monkeypatch.setattr(symbol_registry, "contract", lambda coin_id: None)
+    monkeypatch.setattr(research, "_jupiter_solana_mint", lambda t: None)
+    monkeypatch.setattr(research, "token_candidates", lambda t: [{"chain": "solana", "symbol": "MON", "name": "MON", "address": "So1" + "1" * 40, "liquidity_usd": 270_000.0}])
+    out = asyncio.run(research._resolve_named_token("price of MON", {"market_data"}))
+    assert not out.clarification and out.request.endswith("(CoinGecko id monad)") and "native coin" in out.note

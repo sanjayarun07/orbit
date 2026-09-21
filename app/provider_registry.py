@@ -22,6 +22,7 @@ from app.mobula_wallet import MobulaWalletProvider
 from app.mobula_security import MobulaSecurityProvider
 from app.mobula_meme import MobulaMemeProvider
 from app.exchange_listings import ExchangeListingsProvider
+from app.listed_asset import ListedAssetProvider
 from app.perplexity_tools import (
     perplexity_available,
     perplexity_fetch_url,
@@ -246,7 +247,7 @@ def _solana_token_security(request: str) -> str:
 @lru_cache(maxsize=1)
 def get_provider_router() -> ProviderRouter:
     router = ProviderRouter()
-    for provider_type in (MobulaWalletProvider, MobulaSecurityProvider, MobulaMemeProvider, ExchangeListingsProvider):
+    for provider_type in (MobulaWalletProvider, MobulaSecurityProvider, MobulaMemeProvider, ExchangeListingsProvider, ListedAssetProvider):
         provider_type().register(router)
     for provider_type in MARKET_PROVIDERS:
         provider_type().register(router)

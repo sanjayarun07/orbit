@@ -1759,3 +1759,29 @@ seconds, so the default sample is 40 tweets with a 12-second per-page
 timeout (`x_tweets_default_sample`, `twitterapi_io_timeout_seconds`); and a
 19-tweet sample had produced a conviction of 1.0, so the Signal is now
 scaled by sample size (full weight at 50 tweets, `FULL_WEIGHT_SAMPLE`).
+
+## A listed coin's own facts: supply, market cap, rank (2026-09-21)
+
+Live: "What is the current total supply and circulating supply of the $ZEC
+token?" got a chain question (the Solana wrapper or the BNB one?). Zcash is
+a native coin, CoinGecko rank 9; its supply is a fact about the asset, and
+every market tool keyed off a contract, so nothing could answer by name.
+
+`app/listed_asset.py` adds `coingecko_coin_snapshot`: CoinGecko's coin page
+(rank, price, market cap, FDV, circulating / total / max supply with the
+share of max, 24h-7d-30d change, ATH and ATL with dates, categories,
+contracts per chain or "native coin", homepage). It matches a listed-asset
+question (supply, market cap, FDV, rank, ATH/ATL, halving, tokenomics) that
+names a ticker and no address, and answers by the ticker's clear CoinGecko
+leader or by a "(CoinGecko id X)" marker.
+
+The resolver puts that marker in: a listed-asset question about a ticker
+with a clear leader is rewritten with the coin id and never reaches the
+chain question, with a note saying how the ticker was read ("Read ZEC as
+Zcash, CoinGecko rank 9"); and a native coin with no contract anywhere
+resolves the same way for any question, since no on-chain tool can see it.
+A chain question about a multi-chain ticker ("top holders of ZEC") still
+asks, as before.
+
+Verified live: ZEC (rank 9, 16.94M of 21M), BONK (rank 151, 88T) and BTC
+(rank 1) each answered in about seven seconds from the new tool alone.
