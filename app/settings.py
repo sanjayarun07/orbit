@@ -119,8 +119,13 @@ class Settings(BaseSettings):
     # are cached by id; a re-ask pays only for the ones posted since.
     twitterapi_io_key: str | None = None
     twitterapi_io_base_url: str = "https://api.twitterapi.io"
-    x_tweets_default_sample: int = 100
+    # Live 2026-09-21: with min_faves:2 a page holds about ten tweets and one
+    # page took over twenty seconds, so a 100-tweet sample is minutes. Forty
+    # tweets in two to four pages keeps a chat turn short; each page has its
+    # own timeout.
+    x_tweets_default_sample: int = 40
     x_tweets_cache_hours: float = 24.0
+    twitterapi_io_timeout_seconds: float = 12.0
     # --- Knowledge service (app/knowledge) ---
     knowledge_embedding_provider: str = "openai"      # openai | hashing
     knowledge_embedding_model: str = "text-embedding-3-small"
@@ -224,10 +229,13 @@ class Settings(BaseSettings):
     mobula_requests_per_minute: int = 60
     # The bucket never holds more than this many tokens: the per-minute rate
     # is a sustained rate, not a burst (a 60-request burst drew 429s live).
-    # Half the rate fits one deep-dive (about thirty calls) in a single
-    # burst; background work only draws while the bucket is at least half
-    # full, so it never takes more than fifteen before waiting for refill.
-    mobula_burst: int = 30
+    # The full minute fits one deep-dive (about forty calls: security, trades,
+    # first buyers, and a bundle check's twenty-six) in a single burst; at
+    # thirty the bundle check was refused by our own budget (live, 2026-09-21).
+    # Background work only draws while the bucket is at least half full, so
+    # the ledger never takes more than thirty before waiting for refill, and
+    # a 429 from Mobula still pauses everyone.
+    mobula_burst: int = 60
     # After a 429 or 5xx from Mobula, every caller pauses this long (or the
     # Retry-After header, when sent); background callers are refused outright.
     mobula_cooldown_seconds: float = 20.0

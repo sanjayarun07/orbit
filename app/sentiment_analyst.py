@@ -42,6 +42,7 @@ MOOD_LEVELS = ["Extreme fear / capitulation", "Cautious / bearish", "Mixed / neu
 CATALYST_LEVELS = ["No news, retail noise", "Rumour or minor update", "Moderate milestone or listing", "Major market-moving event"]
 MIN_SAMPLE = 10
 ORGANIC_DAMPING_BELOW = 0.4    # a sample that reads as a push carries half the weight
+FULL_WEIGHT_SAMPLE = 50        # conviction grows with the sample; 19 tweets do not earn 1.0 (live, 2026-09-21)
 
 _cache: dict[str, tuple[float, dict]] = {}
 _lock = threading.Lock()
@@ -119,14 +120,16 @@ def to_signal(subject: Subject, as_of: str, social_stats: dict, judgement: dict 
         lean = {"bullish": 1.0, "bearish": -1.0, "neutral": 0.0}[judgement["stance"]] * float(judgement.get("stance_confidence") or 0.5)
     organic = float(judgement.get("organic_probability", 0.5))
     damped = organic < ORGANIC_DAMPING_BELOW
-    value = max(-1.0, min(1.0, lean * (0.5 if damped else 1.0)))
+    weight = min(1.0, float(social_stats.get("sample_size", 0)) / FULL_WEIGHT_SAMPLE)
+    value = max(-1.0, min(1.0, lean * weight * (0.5 if damped else 1.0)))
     return Signal(
         model_name=MODEL_NAME, subject=subject, as_of=as_of, value=value,
         reasoning=(f"X leans {judgement['stance']} on {social_stats.get('sample_size', 0)} tweets ({social_stats.get('author_diversity_pct', 0)}% distinct authors); "
                    f"mood {judgement['mood'].lower()}; catalyst: {judgement['catalyst'].lower()}" + ("; sample reads as a coordinated push, weight halved" if damped else "")),
         components={"p_bullish": float(probs.get("bullish", 0.0)), "p_bearish": float(probs.get("bearish", 0.0)), "p_neutral": float(probs.get("neutral", 0.0)),
                     "mood_score": float(judgement["mood_score"]), "catalyst_score": float(judgement["catalyst_score"]), "organic_probability": organic,
-                    "sample_size": float(social_stats.get("sample_size", 0)), "author_diversity_pct": float(social_stats.get("author_diversity_pct", 0.0))},
+                    "sample_size": float(social_stats.get("sample_size", 0)), "author_diversity_pct": float(social_stats.get("author_diversity_pct", 0.0)),
+                    "sample_weight": weight},
         metadata={"abstained": False, "stance": judgement["stance"], "mood": judgement["mood"], "catalyst": judgement["catalyst"], "damped": damped,
                   "source": "twitterapi.io + jev", "model": judgement.get("model")},
     )

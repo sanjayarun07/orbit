@@ -185,7 +185,7 @@ def _page(query: str, cursor: str | None) -> dict:
     if cursor:
         params["cursor"] = cursor
     increment("twitterapi_requests")
-    with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
+    with httpx.Client(timeout=settings.twitterapi_io_timeout_seconds) as client:
         response = client.get(f"{settings.twitterapi_io_base_url}/twitter/tweet/advanced_search", params=params,
                               headers={"X-API-Key": settings.twitterapi_io_key})
         response.raise_for_status()

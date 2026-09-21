@@ -1611,9 +1611,9 @@ allowance in a four-second burst, Mobula answered 429 to everything for a
 while, the Mobula-first portfolio path degraded to the per-chain fallback.
 `app/mobula_client.py` now enforces three rules:
 
-- The bucket holds at most `mobula_burst` (30) tokens: sixty a minute is a
-  sustained rate, not sixty at once. A deep-dive's thirty-odd calls fit one
-  burst.
+- The bucket holds at most `mobula_burst` tokens (60, the minute rate, after
+  30 refused a deep-dive's own bundle check): the cap exists so the background
+  lane, which draws only above half, can never take the whole minute.
 - A 429 or 5xx starts a cooldown of `mobula_cooldown_seconds` (20, or the
   Retry-After header). Background callers are refused during it; a user's
   call waits within its usual eight-second bound, then degrades honestly.
@@ -1748,7 +1748,14 @@ appends the card under the market data as evidence for the thesis. The
 sync router tool reaches the app loop through `sentiment_analyst.set_loop`
 (registered in the lifespan), since the tweet store is bound to it.
 
-**Keys.** `TWITTERAPI_IO_KEY` (new; add to .env) and `TYPESAFE_API_KEY`
-(already present). Without either the analyst is off and every surface
-behaves as before. Not yet verified live: the TwitterAPI.io key was not in
-the env when this shipped.
+**Keys.** `TWITTERAPI_IO_KEY` and `TYPESAFE_API_KEY`. Without either the
+analyst is off and every surface behaves as before.
+
+**Verified live (2026-09-21, after the key went in).** BONK: 19 tweets over
+5.4 hours from two pages, 16 distinct authors, Jev judged in under a second
+(about 3,200 input tokens): bullish 100%, mood euphoric, no catalyst,
+organic 74%. Two corrections from that run: a page can take over twenty
+seconds, so the default sample is 40 tweets with a 12-second per-page
+timeout (`x_tweets_default_sample`, `twitterapi_io_timeout_seconds`); and a
+19-tweet sample had produced a conviction of 1.0, so the Signal is now
+scaled by sample size (full weight at 50 tweets, `FULL_WEIGHT_SAMPLE`).

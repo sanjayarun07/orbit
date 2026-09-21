@@ -113,9 +113,10 @@ def test_signal_is_the_stance_lean_halved_when_the_sample_is_a_push():
     j = {"stance": "bullish", "stance_probabilities": {"bullish": 0.7, "bearish": 0.1, "neutral": 0.2}, "stance_confidence": 0.8,
          "mood": "Optimistic / bullish", "mood_score": 3.2, "catalyst": "No news, retail noise", "catalyst_score": 0.0, "organic_probability": 0.85}
     s = sa.to_signal(subject, NOW.isoformat(), stats, j)
-    assert s.value == pytest.approx(0.6) and not s.abstained and s.components["p_bullish"] == 0.7 and "leans bullish on 40 tweets" in s.reasoning
+    assert s.value == pytest.approx(0.6 * 0.8) and not s.abstained and s.components["p_bullish"] == 0.7 and "leans bullish on 40 tweets" in s.reasoning
+    assert sa.to_signal(subject, NOW.isoformat(), {**stats, "sample_size": 100}, j).value == pytest.approx(0.6)   # a full sample carries the whole lean
     pushed = sa.to_signal(subject, NOW.isoformat(), stats, {**j, "organic_probability": 0.2})
-    assert pushed.value == pytest.approx(0.3) and pushed.metadata["damped"] and "coordinated push" in pushed.reasoning
+    assert pushed.value == pytest.approx(0.6 * 0.8 * 0.5) and pushed.metadata["damped"] and "coordinated push" in pushed.reasoning
     assert sa.to_signal(subject, NOW.isoformat(), stats, None, "only 3 tweets").abstained
 
 
@@ -127,7 +128,7 @@ def test_analyze_abstains_on_a_thin_sample_and_caches_the_judgement(keys, monkey
     calls = []
     monkeypatch.setattr(x_tweets.httpx, "Client", _http([{"tweets": [_tweet(i, author=f"a{i}") for i in range(30)], "has_next_page": False}], calls))
     out = asyncio.run(sa.analyze("BONK"))
-    assert out["judgement"]["stance"] == "bullish" and out["signal"].value == pytest.approx(0.6)
+    assert out["judgement"]["stance"] == "bullish" and out["signal"].value == pytest.approx(0.6 * 30 / 50)
     assert "**Crowd stance: bullish** (bullish 70% · bearish 10% · neutral 20%)" in out["card"] and "30 distinct authors (100.0%)" in out["card"]
     n = len(calls)
     asyncio.run(sa.analyze("BONK"))
@@ -161,7 +162,7 @@ def test_the_deep_dive_gains_the_dimension_and_the_vote(keys, monkeypatch):
     dim = next(d for d in bundle.dimensions if d.name == "x_sentiment")
     assert dim.status == "available" and dim.source == "x_sentiment_analyst"
     vote = next(s for s in bundle.signals if s.model_name == "x_sentiment")
-    assert vote.value == pytest.approx(0.6) and vote.subject.symbol == "BONK"
+    assert vote.value == pytest.approx(0.6 * 30 / 50) and vote.subject.symbol == "BONK"
 
 
 def test_without_a_symbol_the_deep_dive_has_no_x_dimension(keys, monkeypatch):
