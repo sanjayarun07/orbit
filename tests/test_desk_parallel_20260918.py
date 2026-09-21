@@ -74,11 +74,18 @@ def _coro(value):
     return run()
 
 
+async def _resolved(request, caps, chains=()):
+    """A resolver that found the token without a question (BONK on Solana)."""
+    from app.nodes import research as research_mod
+    return research_mod._TokenResolution(f"{request} DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 on solana", chain="solana")
+
+
 def test_an_analysis_turn_with_no_charter_skips_the_coordinator(monkeypatch):
     async def research(state, request):
         return "Structure: ...\nCONVICTION 6/10\nWRONG IF it loses $1.20", 6, {"tool_name_0": "birdeye_token_overview"}, None
 
     monkeypatch.setattr(team, "_market_research", research)
+    monkeypatch.setattr(team, "_resolve_named_token", _resolved)   # the live resolver is not under test here
     monkeypatch.setattr(team.runtime, "answer", lambda *a, **k: (_ for _ in ()).throw(AssertionError("one voice needs no Coordinator")))
     monkeypatch.setattr(team.answer_gate, "gate", lambda question, result: _coro(result))
     out = asyncio.run(team.team_node({"request": "thoughts on BONK", "team_subintent": "analysis", "chains": [], "session_context": {}}))
@@ -96,6 +103,7 @@ def test_a_charter_still_gets_the_coordinator_on_an_analysis_turn(monkeypatch):
         return SimpleNamespace(answer="folded against your charter")
 
     monkeypatch.setattr(team, "_market_research", research)
+    monkeypatch.setattr(team, "_resolve_named_token", _resolved)
     monkeypatch.setattr(team.runtime, "answer", synth)
     monkeypatch.setattr(team.answer_gate, "gate", lambda question, result: _coro(result))
     out = asyncio.run(team.team_node({"request": "thoughts on BONK", "team_subintent": "analysis", "chains": [],

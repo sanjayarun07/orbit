@@ -503,23 +503,57 @@ async def history_card(subject: Subject) -> str | None:
 # ---------------------------------------------------------------------------
 
 def launch_address(item: dict) -> str | None:
-    """The launched token's address in a Pulse row: the pair's base token,
-    else whichever side is not a quote asset (token1 first, like the card)."""
+    """The launched token's address in a Pulse row. `pair.baseToken` is a
+    POINTER ("token0" / "token1") to the side that is the token, not an
+    object (probed live 2026-09-21: a BNB pair read token1-first picked
+    Binance-peg DOGE as the launch). Then the side whose symbol is the row's
+    own tokenSymbol; only then whichever side is not a quote asset."""
     from app import mobula_meme
 
     pair = item.get("pair") or {}
     if not isinstance(pair, dict):
         return None
+    sides = {name: pair.get(name) for name in ("token0", "token1") if isinstance(pair.get(name), dict) and pair[name].get("address")}
     base = pair.get("baseToken")
+    if isinstance(base, str) and base in sides:
+        return str(sides[base]["address"])
     if isinstance(base, dict) and base.get("address"):
         return str(base["address"])
-    if isinstance(base, str) and len(base) >= 32:
-        return base
-    for side in ("token1", "token0"):
-        token = pair.get(side)
-        if isinstance(token, dict) and token.get("address") and str(token.get("symbol") or "").upper() not in mobula_meme._QUOTES:
+    symbol = str(item.get("tokenSymbol") or item.get("symbol") or "").strip().upper()
+    if symbol:
+        for token in sides.values():
+            if str(token.get("symbol") or "").strip().upper() == symbol:
+                return str(token["address"])
+    for name in ("token1", "token0"):
+        token = sides.get(name)
+        if token and str(token.get("symbol") or "").upper() not in mobula_meme._QUOTES:
             return str(token["address"])
     return None
+
+
+def launch_symbol(item: dict, address: str) -> str | None:
+    """The symbol of the side `launch_address` chose -- never a symbol from
+    one side with the address of the other (live: a GRND/HOMO pair was
+    tracked as HOMO at GRND's address)."""
+    pair = item.get("pair") if isinstance(item.get("pair"), dict) else {}
+    for name in ("token0", "token1"):
+        token = pair.get(name)
+        if isinstance(token, dict) and str(token.get("address") or "") == address and token.get("symbol"):
+            return str(token["symbol"])
+    symbol = item.get("tokenSymbol") or item.get("symbol")
+    return str(symbol) if symbol else None
+
+
+# A launch row's holder count above this is not the launch's (a pointer to the
+# wrong side, or a program-level figure); market cap is only kept once a few
+# wallets hold the token, the same rule the launch card applies.
+_LAUNCH_MAX_HOLDERS = 100_000
+_LAUNCH_MIN_HOLDERS_FOR_MCAP = 5
+
+
+def _launch_holders(item: dict) -> int | None:
+    count = int(_num(item.get("holders_count"), 0) or 0)
+    return count if 0 < count <= _LAUNCH_MAX_HOLDERS else None
 
 
 def row_from_pulse(item: dict) -> dict:
@@ -531,14 +565,14 @@ def row_from_pulse(item: dict) -> dict:
     return {
         "id": uuid.uuid4().hex, "taken_at": _now(),
         "top10_pct": _positive(item.get("top10HoldingsPercentage")), "top50_pct": _positive(item.get("top50HoldingsPercentage")),
-        "holders_count": int(_num(item.get("holders_count"), 0) or 0) or None,
+        "holders_count": _launch_holders(item),
         "dev_pct": _num(item.get("devHoldingsPercentage")), "sniper_pct": _num(item.get("snipersHoldingsPercentage")),
         "bundler_pct": _num(item.get("bundlersHoldingsPercentage")), "insider_pct": _num(item.get("insidersHoldingsPercentage")),
         "lp_burned_pct": None, "lp_locked_pct": None, "lp_unlocked_pct": None,
         # Pulse's pair liquidity is one side of the pool; the market endpoint
         # reports both. Not the same number, so it is not recorded here.
         "price_usd": _num(item.get("price") or item.get("latest_price")), "liquidity_usd": None,
-        "market_cap_usd": _num(item.get("market_cap")),
+        "market_cap_usd": _num(item.get("market_cap")) if (_launch_holders(item) or 0) >= _LAUNCH_MIN_HOLDERS_FOR_MCAP else None,
         "top_holders": [],
         "flags": {"source": "pulse", "deployer": item.get("deployer"), "bonded": item.get("bonded"), "bonding_pct": _num(item.get("bondingPercentage")),
                   "launchpad": item.get("source") or item.get("sourceFactory"), "missing": ["liquidity", "top_holders"]},
@@ -573,8 +607,7 @@ async def discover_launches() -> int:
                 # hour, and each one tracked costs three calls per snapshot.
                 if _num(item.get("holders_count"), 0.0) < settings.holder_snapshot_min_holders:
                     continue
-                symbol, _name = mobula_meme._launch_identity(item)
-                subject = Subject(kind="token", id=address, chain="bnb" if chain == "bsc" else chain, symbol=None if symbol == "—" else symbol)
+                subject = Subject(kind="token", id=address, chain="bnb" if chain == "bsc" else chain, symbol=launch_symbol(item, address))
                 launched = _dt(item.get("created_at") or item.get("createdAt"))
                 first_sight = not await is_tracked(subject.key)
                 await track(subject, "pulse", days=LAUNCH_DAYS, launched_at=launched)

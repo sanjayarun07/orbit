@@ -115,11 +115,24 @@ def _pulse_item(address, symbol, **fields):
             **fields}
 
 
-def test_launch_address_prefers_the_base_token_then_the_non_quote_side():
+def test_launch_address_follows_the_base_pointer_then_the_symbol_then_the_non_quote_side():
     assert hs.launch_address(_pulse_item(_NEW, "BUTTCOIN")) == _NEW
+    # Live BNB shape: baseToken is the POINTER "token0"; token1 is Binance-peg DOGE, not the launch.
+    doge = "0xbA2aE424d960c26247Dd6c32edC70B295c744C43"
+    bnb = {"tokenSymbol": "BEEGE", "pair": {"baseToken": "token0", "quoteToken": "token1",
+                                             "token0": {"address": "0x" + "b" * 40, "symbol": "BEEGE"}, "token1": {"address": doge, "symbol": "DOGE"}}}
+    assert hs.launch_address(bnb) == "0x" + "b" * 40
+    by_symbol = {"tokenSymbol": "GRND", "pair": {"token0": {"address": "G" * 44, "symbol": "GRND"}, "token1": {"address": "H" * 44, "symbol": "HOMO"}}}
+    assert hs.launch_address(by_symbol) == "G" * 44
     two_memes = {"pair": {"token0": {"address": "X" * 44, "symbol": "SHITCOIN"}, "token1": {"address": _NEW, "symbol": "BUTTCOIN"}}}
-    assert hs.launch_address(two_memes) == _NEW           # token1 first, as the launch card reads it
+    assert hs.launch_address(two_memes) == _NEW           # no pointer, no symbol: token1 first, as the launch card reads it
     assert hs.launch_address({"pair": {"token0": {"address": "So1", "symbol": "SOL"}}}) is None
+
+
+def test_pulse_rows_drop_implausible_holder_counts_and_unsettled_market_caps():
+    assert hs.row_from_pulse(_pulse_item(_NEW, "X", holders_count=252503))["holders_count"] is None
+    thin = hs.row_from_pulse(_pulse_item(_NEW, "X", holders_count=2))
+    assert thin["holders_count"] == 2 and thin["market_cap_usd"] is None
 
 
 def test_discovery_tracks_launches_and_records_the_pulse_row_for_free(monkeypatch):
@@ -262,3 +275,10 @@ def test_diff_does_not_read_a_missing_holder_list_as_wallets_leaving():
     pulse = _row(t, top_holders=[], flags={"source": "pulse", "missing": ["top_holders"]})
     later = _row(t, top10_pct=41.0)
     assert not any("left the top" in line or "entered the top" in line for line in hs.diff(pulse, later))
+
+
+def test_launch_symbol_belongs_to_the_chosen_side():
+    item = {"tokenSymbol": "HOMO", "pair": {"baseToken": "token0", "token0": {"address": "G" * 44, "symbol": "GRND"}, "token1": {"address": "H" * 44, "symbol": "HOMO"}}}
+    address = hs.launch_address(item)
+    assert address == "G" * 44 and hs.launch_symbol(item, address) == "GRND"
+    assert hs.launch_symbol({"tokenSymbol": "X", "pair": {}}, "Q" * 44) == "X"
