@@ -37,7 +37,10 @@ async def _price_mints(mints: list[str]) -> dict[str, dict]:
     except Exception:
         logger.warning("portfolio: batched price lookup failed", exc_info=True)
         found = {}
-    missing = [m for m in mints if m not in found][:_FALLBACK_LOOKUPS]
+    missing = [m for m in mints if m not in found]
+    # SOL's own price prices the wallet's SOL balance and is the one row every
+    # Solana wallet has: never let it fall outside the bounded retries.
+    missing = ([WRAPPED_SOL_MINT] if WRAPPED_SOL_MINT in missing else []) + [m for m in missing if m != WRAPPED_SOL_MINT][:_FALLBACK_LOOKUPS]
     if missing:
         retried = await asyncio.gather(*(_price_lookup(m) for m in missing))
         found.update({m: info for m, info in zip(missing, retried) if info is not None})

@@ -29,7 +29,7 @@ from app.token_resolve import bitquery_evm_lookup, clear_winner, token_candidate
 from app.token_deepdive import (
     ANALYSIS_RULES, build_token_evidence, bundle_signals, coverage_rows, evidence_skips, extract_market_price, format_evidence_bundle,
 )
-from app import decision_records, holder_snapshots, role_memory
+from app import decision_records, handles, holder_snapshots, role_memory
 from app.signals import Signal, Subject
 from app.source_cards import extract_source_cards
 from app.web_search import append_web_sources, is_crypto_trends_query, web_search
@@ -1674,6 +1674,12 @@ def _remembered_holdings(state: AgentState) -> list[str]:
 async def research_node(state: AgentState) -> dict:
     sink: dict = {}
     request = _effective_request(state)
+    # "@frankdegods wallet analysis" (live, 2026-09-21): a handle is not an
+    # address and Orbit cannot resolve one; say so instead of answering for
+    # whichever wallet happens to be connected.
+    handle = handles.social_handle(request)
+    if handle:
+        return {"answer": handles.answer_for(handle), "trajectory": None}
     if _PERSONAL_ASK.search(request) and not _mentions_asset(request):
         holdings = _remembered_holdings(state)
         if holdings:

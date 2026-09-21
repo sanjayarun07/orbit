@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import threading
 
 import httpx
@@ -19,6 +20,8 @@ def normalize_mint(value: str) -> str:
     if mint.upper() == "SOL":
         return WRAPPED_SOL_MINT
     return mint
+
+logger = logging.getLogger(__name__)
 
 
 class JupiterClient:
@@ -78,12 +81,24 @@ class JupiterClient:
         Mints the registry does not return are simply absent from the result."""
         found: dict[str, dict] = {}
         unique = list(dict.fromkeys(normalize_mint(m) for m in mints if m))
+        failed = 0
         for start in range(0, len(unique), 100):
             chunk = unique[start:start + 100]
-            for item in await self.search_tokens(",".join(chunk)):
+            try:
+                items = await self.search_tokens(",".join(chunk))
+            except Exception:
+                # One chunk failing (a rate limit on the twelfth call of a
+                # large wallet, live 2026-09-21) must not throw away the
+                # eleven that answered: keep what was found, note the miss.
+                failed += 1
+                logger.warning("jupiter: batch %d-%d of %d mints failed", start, start + len(chunk), len(unique), exc_info=True)
+                continue
+            for item in items:
                 mint = item.get("id")
                 if mint in chunk and mint not in found:
                     found[mint] = item
+        if failed and not found:
+            raise RuntimeError(f"Jupiter token search failed for every batch ({failed})")
         return found
 
     async def shield(self, mints: list[str]) -> dict:

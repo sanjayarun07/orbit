@@ -1687,3 +1687,28 @@ deleting an account nulls `user_id` on its rows rather than deleting them,
 since the log is the operator's record. Answers are stored up to 20 KB and
 messages up to 4 KB. Nothing here is on a turn's critical path: a store
 failure is logged and the answer still goes out.
+
+## First beta review (2026-09-21): two wrong answers found in the turn log
+
+The first outside user's eight turns, read from the log the same evening.
+
+- **"@frankdegods wallet analysis"** ran the portfolio tools on the user's
+  own connected EVM wallet and then said the address "appears to be an
+  Ethereum-style address". A handle is not an address and Orbit cannot
+  resolve one. `app/handles.py` recognises a handle in a wallet ask (no
+  address present, not an email, wallet words nearby); both the portfolio
+  and research nodes answer that handles are not resolved yet and ask for
+  the address. Separately, an EVM connected wallet with a holdings or
+  balance ask is now composed per chain (the pasted-address path) instead
+  of being read from Solana RPC; a wallet-health ask on an EVM wallet says
+  the check is Solana-only.
+- **A 1,170-token Solana wallet showed "$177 priced, SOL unpriced".** The
+  real value is $1.21M (BP, USDC). Jupiter's batched registry search was
+  called twelve times in a row; one call failing threw away every batch,
+  and the ten bounded retries happened to miss the positions that matter.
+  `tokens_by_mints` now keeps the batches that answered and logs the one
+  that did not; `_price_mints` always retries wrapped SOL first.
+
+Both turns are flagged and resolved in the log with the fix noted. The
+review routine that found them: `scripts/turn_review.py --days 1`, or the
+admin page › Turns.

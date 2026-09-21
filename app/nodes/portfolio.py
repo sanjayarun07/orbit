@@ -9,7 +9,8 @@ from app.portfolio import build_portfolio_snapshot
 from app.provider_registry import get_provider_router
 from app.trade_context import complete_swap_fields
 from app.wallet_insights import portfolio_scenario, wallet_health
-from app.nodes.research import _goldrush_hyperliquid_supplement, _nansen_wallet_tool_call, _provider_trajectory, _sanitize_react_answer, call_direct_mcp_tool
+from app.nodes.research import _compose_wallet_portfolio, _goldrush_hyperliquid_supplement, _nansen_wallet_tool_call, _provider_trajectory, _sanitize_react_answer, call_direct_mcp_tool
+from app import handles
 
 async def _perp_positions(wallet: str, request: str) -> dict:
     """Open perps for a wallet, from the focused Hyperliquid positions tool.
@@ -38,6 +39,11 @@ async def _perp_positions(wallet: str, request: str) -> dict:
 
 @trace(name="portfolio", as_type="agent")
 async def portfolio_node(state: AgentState) -> dict:
+    handle = handles.social_handle(_effective_request(state))
+    if handle:
+        # A handle names someone else's wallet, which Orbit cannot resolve;
+        # the connected wallet is not what was asked about (live, 2026-09-21).
+        return {"answer": handles.answer_for(handle), "trajectory": None}
     if not state.get("wallet_address"):
         # Parked like a swap without a wallet: "connected" on the next turn
         # re-runs this request instead of falling through to a clarification.
@@ -105,6 +111,14 @@ async def portfolio_node(state: AgentState) -> dict:
                 "observation_0": f"Wallet activity lookup failed: {router_error}",
             },
         }
+    if state["wallet_address"].startswith("0x") and capabilities & {"token_balance", "token_holdings", "wallet_health"}:
+        # The snapshot below reads Solana RPC; an EVM wallet is composed the
+        # way a pasted EVM address is (balances per chain, Hyperliquid, DeFi).
+        if "wallet_health" in capabilities:
+            return {"answer": ("Wallet health checks read Solana balances, and your connected wallet is an EVM (0x) address. "
+                               "Ask for its portfolio instead, or connect a Solana wallet for the health check."), "trajectory": None}
+        answer, trajectory = await _compose_wallet_portfolio(state["wallet_address"], next(iter(state.get("chains") or []), None))
+        return {"answer": answer, "trajectory": trajectory}
     if "token_balance" in capabilities:
         snapshot = await build_portfolio_snapshot(state["wallet_address"])
         reference = extract_token_reference(request)
