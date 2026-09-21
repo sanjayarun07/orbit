@@ -114,6 +114,13 @@ class Settings(BaseSettings):
     # metrics (galaxy score, alt rank, sentiment, interactions, top creators/posts).
     # Preferred over X API and Perplexity for the sentiment tool when set.
     lunarcrush_api_key: str | None = None
+    # TwitterAPI.io (user decision 2026-09-21): the tweet source for the X
+    # sentiment analyst (app/x_tweets.py, app/sentiment_analyst.py). Tweets
+    # are cached by id; a re-ask pays only for the ones posted since.
+    twitterapi_io_key: str | None = None
+    twitterapi_io_base_url: str = "https://api.twitterapi.io"
+    x_tweets_default_sample: int = 100
+    x_tweets_cache_hours: float = 24.0
     # --- Knowledge service (app/knowledge) ---
     knowledge_embedding_provider: str = "openai"      # openai | hashing
     knowledge_embedding_model: str = "text-embedding-3-small"

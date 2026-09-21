@@ -87,7 +87,7 @@ from app.db import get_pg_pool, get_redis
 from app.settings import settings
 from pydantic import BaseModel, Field
 
-from app import decision_records, execution_policy, holder_snapshots, token_unlocks, turn_log, user_memory
+from app import decision_records, execution_policy, holder_snapshots, sentiment_analyst, token_unlocks, turn_log, user_memory
 from app.portfolio import build_portfolio_snapshot
 from app.wallet_insights import portfolio_scenario, wallet_health
 from app.wallet_auth import (
@@ -138,6 +138,7 @@ async def lifespan(_app: FastAPI):
     outcomes_refresh = asyncio.create_task(tool_outcomes.refresh_worker())
     task_worker = asyncio.create_task(tasks.worker())
     kb_tool.set_loop(asyncio.get_running_loop())
+    sentiment_analyst.set_loop(asyncio.get_running_loop())
     kb_warm = asyncio.create_task(_warm_knowledge())
     if settings.warm_caches_on_start:
         asyncio.create_task(asyncio.to_thread(token_unlocks.warm))
@@ -163,6 +164,7 @@ async def lifespan(_app: FastAPI):
         kb_warm.cancel()
         snapshot_worker.cancel()
         kb_tool.set_loop(None)
+        sentiment_analyst.set_loop(None)
         await asyncio.gather(reconciliation, relay_reconciliation, outcomes_refresh, task_worker, kb_worker, kb_warm, snapshot_worker, discovery, return_exceptions=True)
         drained = await execution_policy.drain_background()
         if drained:

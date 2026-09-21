@@ -1712,3 +1712,43 @@ The first outside user's eight turns, read from the log the same evening.
 Both turns are flagged and resolved in the log with the fix noted. The
 review routine that found them: `scripts/turn_review.py --days 1`, or the
 admin page › Turns.
+
+## The X sentiment analyst: TwitterAPI.io tweets, Jev's typed judgement (2026-09-21)
+
+Taken from brainstormity/Jev-X-Sentiment-Analysis after review; user
+decisions: use TwitterAPI.io as the tweet source, and put the analyst in the
+deep-dive, the desk, and the standalone "what is X saying about BONK" card.
+Not taken from that repo: its invented funding rate, canned entry/stop/target
+levels, fabricated fallback confidence, keyword polarity, and an
+unauthenticated endpoint that wrote API keys to disk.
+
+**Tweets** (`app/x_tweets.py`). Advanced search `$SYM lang:en -is:retweet
+min_faves:2` (plus the name when it is a real word), newest first, 20 a page,
+up to `x_tweets_default_sample` (100). Paging stops at the first tweet already
+in the `x_tweets` table, so an intraday re-ask pays only for the new ones;
+the store fills the rest from the last `x_tweets_cache_hours`. Stats are
+computed in code before any model reads a tweet: sample size, distinct
+authors and their share, the busiest author's share, verified share,
+engagement, time span, and a stratified sample of the 25 most engaged plus
+the 25 latest tweets.
+
+**Judge** (`app/sentiment_analyst.py`). One Jev System One call over
+{asset, social_stats, representative_tweets} with four typed questions about
+the crowd, never a trade: `stance` (bullish/bearish/neutral with the
+probability distribution), `mood` (five levels), `catalyst` (four levels),
+`organic` (probability the sample is organic rather than a push). The Signal
+is p(bullish) - p(bearish), halved when organic < 0.4. Fewer than 10 tweets,
+or a failed call, abstains with the reason. One judgement per symbol per
+`social_sentiment_ttl_seconds`.
+
+**Surfaces.** `x_kol_sentiment` renders the analyst's card first and falls
+back to LunarCrush, the X API and Perplexity as before. The deep-dive gains
+an `x_sentiment` dimension and the vote lands on the receipt. The desk
+appends the card under the market data as evidence for the thesis. The
+sync router tool reaches the app loop through `sentiment_analyst.set_loop`
+(registered in the lifespan), since the tweet store is bound to it.
+
+**Keys.** `TWITTERAPI_IO_KEY` (new; add to .env) and `TYPESAFE_API_KEY`
+(already present). Without either the analyst is off and every surface
+behaves as before. Not yet verified live: the TwitterAPI.io key was not in
+the env when this shipped.

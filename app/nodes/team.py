@@ -17,7 +17,7 @@ from app import streaming
 from app.nodes.state import AgentState, effective_request as _effective_request
 from app.nodes import runtime
 from app.nodes.research import research_node, _TOKEN_ADDRESS, _is_mirror, _chain_key, _resolve_named_token, _mentions_asset, _named_tickers, _SYMBOL_LIKE, _SYMBOL_STOP
-from app import answer_gate
+from app import answer_gate, sentiment_analyst
 from app.token_resolve import clear_winner, token_candidates
 from app.nodes.trading import (
     charter_precheck,
@@ -227,6 +227,20 @@ async def _market_research(state: AgentState, request: str) -> tuple[str, int | 
         # A disambiguation question is not a thesis -- surface it verbatim and
         # skip synthesis so the desk asks cleanly.
         return market_data, None, trajectory, pending_token
+    # The X crowd's lean sits under the market data as evidence the thesis
+    # must weigh (user decision 2026-09-21); never a reason for the desk to fail.
+    symbol = next(iter(_named_tickers(request) or []), None)
+    if symbol and sentiment_analyst.enabled():
+        try:
+            out = await sentiment_analyst.analyze(symbol)
+            if out.get("judgement") is not None:
+                market_data = f"{market_data}\n\n{out['card']}"
+                trajectory = dict(trajectory or {})
+                index = sum(1 for k in trajectory if k.startswith("tool_name_"))
+                trajectory[f"tool_name_{index}"] = "x_sentiment_analyst"
+                trajectory[f"observation_{index}"] = out["card"]
+        except Exception:
+            logger.warning("team: X sentiment unavailable for %s", symbol, exc_info=True)
     try:
         streaming.emit("status", text="Market Research is writing the thesis")
         result = await runtime._call_lm(runtime.market_research_agent, asset=request, market_data=market_data)

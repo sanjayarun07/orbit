@@ -15,9 +15,12 @@ def _reset_account_stores(monkeypatch):
         return None
 
     from app import decision_records as _decision_records, holder_snapshots as _holder_snapshots, turn_log as _turn_log, user_memory as _user_memory
+    from app import sentiment_analyst as _sentiment, x_tweets as _x_tweets
 
-    for module in (accounts, credits, api_keys, billing, tasks, _user_memory, _decision_records, _holder_snapshots, _turn_log):
+    for module in (accounts, credits, api_keys, billing, tasks, _user_memory, _decision_records, _holder_snapshots, _turn_log, _x_tweets):
         monkeypatch.setattr(module, "get_pg_pool", no_pool)
+    _x_tweets.reset_for_test()
+    _sentiment.reset_for_test()
     _user_memory.reset_for_test()
     _decision_records.reset_for_test()
     _turn_log.reset_for_test()
@@ -102,6 +105,9 @@ def _reset_account_stores(monkeypatch):
     # The snapshot ledger's worker and its deep-dive hook never reach Mobula
     # in the suite; tests of the ledger stub `take` themselves.
     monkeypatch.setattr(_settings, "holder_snapshots_enabled", False)
+    # The X sentiment analyst needs TwitterAPI.io and TypeSafe; the suite
+    # never reaches either. Tests of the analyst set the keys and stub HTTP.
+    monkeypatch.setattr(_settings, "twitterapi_io_key", None)
     from app import holder_snapshots as _snapshots
 
     _snapshots.reset_for_test()

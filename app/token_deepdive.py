@@ -35,7 +35,7 @@ import httpx
 from app.provider_registry import get_provider_router
 from app.provider_router import NoData
 from app.integrations import tradingview
-from app import holder_snapshots, mobula_meme, mobula_security
+from app import holder_snapshots, mobula_meme, mobula_security, sentiment_analyst
 from app.signals import Signal, Subject, SubjectSkip
 
 # DefiLlama emissions (free): a protocol-slug list + per-slug unlock schedule whose
@@ -280,6 +280,22 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
         else:
             dims.append(DimensionEvidence("bundle", "Bundle check (launch coordination)", "unavailable", reason))
             signals.append(Signal.abstain(mobula_meme.BUNDLE_MODEL, subject, _now_iso(), reason))
+
+    # What X is saying, judged: a dimension for the lens and a vote on the
+    # receipt (user decision 2026-09-21). Needs a symbol to search for.
+    if symbol and sentiment_analyst.enabled():
+        try:
+            out = await sentiment_analyst.analyze(symbol, subject=subject)
+        except Exception as exc:  # noqa: BLE001
+            out = None
+            dims.append(DimensionEvidence("x_sentiment", "X sentiment (crowd lean)", "unavailable", f"X sentiment did not complete ({type(exc).__name__})."))
+            signals.append(Signal.abstain(sentiment_analyst.MODEL_NAME, subject, _now_iso(), f"analyst failed: {type(exc).__name__}"))
+        if out is not None:
+            if out.get("judgement") is not None:
+                dims.append(DimensionEvidence("x_sentiment", "X sentiment (crowd lean)", "available", out["card"], "x_sentiment_analyst", _now()))
+            else:
+                dims.append(DimensionEvidence("x_sentiment", "X sentiment (crowd lean)", "unavailable", out.get("abstain_reason") or "no judgement"))
+            signals.append(out["signal"])
 
     # How the structure has moved since Orbit first recorded this token (the
     # snapshot ledger). Only when there is history: a single row is the

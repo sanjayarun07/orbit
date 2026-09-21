@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 
 import httpx
 
+from app import sentiment_analyst
 from app.perplexity_tools import _invoke as perplexity_invoke, perplexity_available
 from app.settings import settings
 
@@ -68,7 +69,18 @@ def x_kol_sentiment(request: str) -> str:
         cached = _cache.get(symbol)
         if cached and cached[0] > now:
             return cached[1]
-    card = _from_lunarcrush(symbol) if settings.lunarcrush_api_key else None
+    card = None
+    # TwitterAPI.io + Jev first (user decision 2026-09-21): a measured sample
+    # and a typed judgement, cached by tweet id. The older paths stay as the
+    # fallback when a key is missing or the analyst abstains.
+    if sentiment_analyst.enabled():
+        try:
+            out = sentiment_analyst.analyze_blocking(symbol)
+            card = out["card"] if out.get("judgement") is not None else None
+        except Exception:
+            logger.warning("social_sentiment: analyst path failed for %s", symbol, exc_info=True)
+    if card is None and settings.lunarcrush_api_key:
+        card = _from_lunarcrush(symbol)
     if card is None and settings.x_bearer_token:
         card = _from_x_api(symbol)
     if card is None:
