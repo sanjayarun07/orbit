@@ -215,6 +215,15 @@ class Settings(BaseSettings):
     mobula_api_key: str | None = None
     mobula_base_url: str = "https://api.mobula.io/api/2"   # every Mobula call derives its host from this (app/mobula_client.py)
     mobula_requests_per_minute: int = 60
+    # The bucket never holds more than this many tokens: the per-minute rate
+    # is a sustained rate, not a burst (a 60-request burst drew 429s live).
+    # Half the rate fits one deep-dive (about thirty calls) in a single
+    # burst; background work only draws while the bucket is at least half
+    # full, so it never takes more than fifteen before waiting for refill.
+    mobula_burst: int = 30
+    # After a 429 or 5xx from Mobula, every caller pauses this long (or the
+    # Retry-After header, when sent); background callers are refused outright.
+    mobula_cooldown_seconds: float = 20.0
     # How long the wallet-portfolio intercept waits for Mobula before the
     # per-chain balances answer instead.
     mobula_portfolio_timeout_seconds: float = 20.0
@@ -230,7 +239,7 @@ class Settings(BaseSettings):
     holder_snapshot_tick_seconds: int = 60
     holder_snapshot_fresh_minutes: int = 10        # while a token is under a day old
     holder_snapshot_interval_minutes: int = 60     # afterwards
-    holder_snapshot_max_per_tick: int = 10
+    holder_snapshot_max_per_tick: int = 5           # three calls each: a quarter of the minute rate
     holder_snapshot_pulse_chains: str = "solana,base,bsc"
     holder_snapshot_min_holders: int = 10          # a launch with fewer holders is not tracked yet
     bitquery_api_key: str | None = None
@@ -347,7 +356,7 @@ class Settings(BaseSettings):
     # priced (largest balances first), within this many seconds; the rest is
     # returned unpriced with partial=true. The risk node's own snapshot fetch
     # has a shorter guard so a quote is never blocked on pricing.
-    portfolio_max_priced_holdings: int = 300
+    portfolio_max_priced_holdings: int = 1200   # Jupiter prices 100 mints a call; a 1,500-token wallet is 15 calls, and its largest positions by VALUE are rarely its largest by count
     portfolio_snapshot_timeout_seconds: float = 25.0
     risk_snapshot_timeout_seconds: float = 20.0
     memory_plan_max_entries: int = 1000

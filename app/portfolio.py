@@ -5,6 +5,7 @@ perform balance arithmetic.
 
 import asyncio
 import logging
+import math
 
 from app.jupiter import jupiter
 from app.settings import settings
@@ -120,3 +121,60 @@ async def build_portfolio_snapshot(wallet_address: str) -> dict:
         "unpriced_holdings": sum(1 for h in holdings if h["usd_value"] is None),
         "partial": partial,
     }
+
+
+def _usd(value: float | None) -> str:
+    if value is None:
+        return "—"
+    if abs(value) >= 1_000_000:
+        return f"${value / 1_000_000:,.2f}M"
+    if abs(value) >= 1_000:
+        return f"${value / 1_000:,.1f}K"
+    if abs(value) >= 1:
+        return f"${value:,.2f}"
+    if abs(value) >= 0.01:
+        return f"${value:.4f}"
+    # A meme price is often 0.00001122: show three significant digits, never "$0.0000".
+    digits = 2 - math.floor(math.log10(abs(value))) if value else 4
+    return "$" + f"{value:.{min(digits, 12)}f}".rstrip("0")
+
+
+def render_card(snapshot: dict, limit: int = 20) -> str | None:
+    """The snapshot as a balances card, priced rows first, for the wallet
+    portfolio answer when Mobula rejects a Solana wallet and GoldRush prices
+    nothing (live, 2026-09-21). None when nothing at all could be priced --
+    then this card would say no more than the fallback it replaces."""
+    sol = snapshot.get("sol") or {}
+    holdings = snapshot.get("holdings") or []
+    priced = [h for h in holdings if h.get("usd_value") is not None]
+    if sol.get("usd_value") is None and not priced:
+        return None
+    unpriced = len(holdings) - len(priced)
+    total = snapshot.get("total_usd_value")
+    lines = [
+        "# Wallet token balances",
+        f"**Provider**: Orbit (Solana RPC balances, Jupiter prices) · **Priced total**: {_usd(total)} "
+        f"({len(priced) + (1 if sol.get('usd_value') is not None else 0)} priced, {unpriced} without a Jupiter price)",
+        "",
+        "| Token | Balance | Price | USD Value | Share |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    if sol.get("amount") is not None:
+        lines.append(f"| SOL | {sol['amount']:,.4f} | {_usd(sol.get('usd_price'))} | {_usd(sol.get('usd_value'))} | "
+                     f"{sol['allocation_pct']:.1f}% |" if sol.get("allocation_pct") is not None else
+                     f"| SOL | {sol['amount']:,.4f} | {_usd(sol.get('usd_price'))} | {_usd(sol.get('usd_value'))} | — |")
+    for h in priced[:limit]:
+        share = f"{h['allocation_pct']:.1f}%" if h.get("allocation_pct") is not None else "—"
+        mint = h["mint"]
+        name = h["symbol"] if h.get("symbol") and h["symbol"] != "UNKNOWN" else f"{mint[:4]}…{mint[-4:]}"
+        lines.append(f"| {name}{'' if h.get('verified') else ' ⚠'} | {h['amount']:,.4f} | {_usd(h.get('usd_price'))} | {_usd(h['usd_value'])} | {share} |")
+    if len(priced) > limit:
+        lines.append(f"| … {len(priced) - limit} more priced holdings | | | | |")
+    notes = []
+    if unpriced:
+        notes.append(f"{unpriced} holding(s) have no Jupiter price (not in its registry: dust, unlisted or dead tokens) and are not in the total.")
+    if snapshot.get("partial"):
+        notes.append("Only the largest balances were priced; the total is a floor, not the whole wallet.")
+    notes.append("⚠ marks a token Jupiter has not verified. Balances read from the chain; prices from Jupiter at request time.")
+    lines += ["", " ".join(notes)]
+    return "\n".join(lines)

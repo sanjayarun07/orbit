@@ -518,3 +518,82 @@ def test_the_budget_refuses_a_burst_instead_of_exceeding_the_limit(monkeypatch):
     with pytest.raises(mobula_client.MobulaBudgetExceeded):
         real_get(2, "/token/trades", {})
     assert len(sent) == 3, "the fourth request never left the process"
+
+
+# --- the budget is a sustained rate with a small burst, a cooldown on 429, and a background lane (2026-09-21) ---
+
+def _fake_http(monkeypatch, status=200, headers=None, sent=None):
+    class Response:
+        status_code = status
+        def __init__(self):
+            self.headers = headers or {}
+        def raise_for_status(self):
+            if status >= 400:
+                raise _mobula_client.httpx.HTTPStatusError("x", request=None, response=self)
+        def json(self):
+            return {"data": []}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def get(self, url, params=None, headers=None):
+            (sent if sent is not None else []).append(url)
+            return Response()
+    monkeypatch.setattr(_mobula_client.httpx, "Client", Client)
+
+
+def test_the_bucket_never_holds_more_than_the_burst(monkeypatch):
+    from app.settings import settings as _s
+    monkeypatch.setattr(_s, "mobula_requests_per_minute", 60)
+    monkeypatch.setattr(_s, "mobula_burst", 3)
+    monkeypatch.setattr(_s, "mobula_api_key", "test-key")
+    monkeypatch.setattr(_mobula_client, "MAX_WAIT_SECONDS", 0.05)
+    _mobula_client.reset_for_test()
+    sent = []
+    _fake_http(monkeypatch, sent=sent)
+    for _ in range(3):
+        _REAL_CLIENT_GET(2, "/token/trades", {})
+    with pytest.raises(_mobula_client.MobulaBudgetExceeded):
+        _REAL_CLIENT_GET(2, "/token/trades", {})
+    assert len(sent) == 3, "sixty a minute is not sixty at once"
+
+
+def test_a_429_pauses_everyone_and_refuses_background_outright(monkeypatch):
+    from app.settings import settings as _s
+    monkeypatch.setattr(_s, "mobula_api_key", "test-key")
+    monkeypatch.setattr(_s, "mobula_cooldown_seconds", 30.0)
+    monkeypatch.setattr(_mobula_client, "MAX_WAIT_SECONDS", 0.05)
+    _mobula_client.reset_for_test()
+    _fake_http(monkeypatch, status=429, headers={"Retry-After": "45"})
+    with pytest.raises(_mobula_client.httpx.HTTPStatusError):
+        _REAL_CLIENT_GET(2, "/token/security", {})
+    assert _mobula_client.cooling() and not _mobula_client.background_ok()
+    with pytest.raises(_mobula_client.MobulaBudgetExceeded) as bg:
+        _REAL_CLIENT_GET(2, "/token/security", {}, background=True)
+    assert "slow down" in str(bg.value)
+    with pytest.raises(_mobula_client.MobulaBudgetExceeded):
+        _REAL_CLIENT_GET(2, "/token/security", {})     # a user call waits its bound, then degrades honestly
+    _mobula_client.reset_for_test()
+    assert not _mobula_client.cooling() and _mobula_client.background_ok()
+
+
+def test_background_takes_only_from_a_half_full_bucket(monkeypatch):
+    from app.settings import settings as _s
+    monkeypatch.setattr(_s, "mobula_requests_per_minute", 60)
+    monkeypatch.setattr(_s, "mobula_burst", 4)
+    monkeypatch.setattr(_s, "mobula_api_key", "test-key")
+    monkeypatch.setattr(_mobula_client, "MAX_WAIT_SECONDS", 0.05)
+    _mobula_client.reset_for_test()
+    sent = []
+    _fake_http(monkeypatch, sent=sent)
+    for _ in range(3):
+        _REAL_CLIENT_GET(2, "/pulse", {}, background=True)  # 4 -> 3 -> 2 -> 1: allowed while at least half full
+    with pytest.raises(_mobula_client.MobulaBudgetExceeded):
+        _REAL_CLIENT_GET(2, "/pulse", {}, background=True)  # below half: the rest is for users
+    assert not _mobula_client.background_ok()
+    _REAL_CLIENT_GET(2, "/token/trades", {})               # a user still gets one
+    assert len(sent) == 4

@@ -17,7 +17,7 @@ def _subject(address=_BONK, symbol="BONK"):
 
 def _live_mobula(holders=None, security=None, market=None):
     """A stand-in for the budgeted door returning the live shapes probed on 2026-09-21."""
-    def get(version, path, params, timeout=None):
+    def get(version, path, params, timeout=None, background=False):
         if path == "/token/holder-positions":
             return holders if holders is not None else [
                 {"walletAddress": "A" * 44, "percentageOfTotalSupply": 12.5, "labels": [{"name": "Dev"}]},
@@ -58,11 +58,12 @@ def test_take_says_what_is_missing_instead_of_inventing_zeros(monkeypatch):
 
 
 def test_take_survives_a_dead_endpoint(monkeypatch):
-    def broken(version, path, params, timeout=None):
+    def broken(version, path, params, timeout=None, background=False):
         raise RuntimeError("down")
     monkeypatch.setattr(mobula_client, "get", broken)
     row = hs.take("solana", _BONK)
     assert set(row["flags"]["missing"]) == {"holders", "security", "liquidity", "market"}
+    assert set(row["flags"]["failed"]) == {"holders", "security", "market"} and hs.blank(row)
 
 
 # ---- tracking and cadence ----
@@ -139,7 +140,7 @@ def test_discovery_tracks_launches_and_records_the_pulse_row_for_free(monkeypatc
     monkeypatch.setattr(settings, "holder_snapshot_pulse_chains", "solana")
     calls = []
 
-    def get(version, path, params, timeout=None):
+    def get(version, path, params, timeout=None, background=False):
         calls.append(path)
         return {"new": {"data": [_pulse_item(_NEW, "BUTTCOIN")]}, "bonding": [], "bonded": []}
     monkeypatch.setattr(mobula_client, "get", get)
@@ -229,12 +230,12 @@ def test_deep_dive_gains_a_history_dimension_only_when_the_ledger_has_history(mo
 
 def test_discovery_skips_launches_nobody_holds_yet(monkeypatch):
     monkeypatch.setattr(settings, "holder_snapshot_pulse_chains", "solana")
-    monkeypatch.setattr(mobula_client, "get", lambda v, p, params, timeout=None: {"new": {"data": [_pulse_item(_NEW, "BUTTCOIN", holders_count=3)]}})
+    monkeypatch.setattr(mobula_client, "get", lambda v, p, params, timeout=None, background=False: {"new": {"data": [_pulse_item(_NEW, "BUTTCOIN", holders_count=3)]}})
     assert asyncio.run(hs.discover_launches()) == 0 and asyncio.run(hs.tracked()) == []
 
 
 def test_two_dark_rows_stop_tracking(monkeypatch):
-    def nothing(version, path, params, timeout=None):
+    def nothing(version, path, params, timeout=None, background=False):
         return [] if path == "/token/holder-positions" else {}
     monkeypatch.setattr(mobula_client, "get", nothing)
     monkeypatch.setattr(settings, "holder_snapshot_interval_minutes", 0)
@@ -264,7 +265,7 @@ def test_pulse_rows_never_claim_zero_concentration_or_a_one_sided_liquidity():
 
 def test_discovery_records_the_pulse_row_once_per_token(monkeypatch):
     monkeypatch.setattr(settings, "holder_snapshot_pulse_chains", "solana")
-    monkeypatch.setattr(mobula_client, "get", lambda v, p, params, timeout=None: {"new": {"data": [_pulse_item(_NEW, "BUTTCOIN")]}})
+    monkeypatch.setattr(mobula_client, "get", lambda v, p, params, timeout=None, background=False: {"new": {"data": [_pulse_item(_NEW, "BUTTCOIN")]}})
     asyncio.run(hs.discover_launches())
     asyncio.run(hs.discover_launches())
     assert len(asyncio.run(hs.history(f"solana:{_NEW.lower()}"))) == 1
@@ -282,3 +283,61 @@ def test_launch_symbol_belongs_to_the_chosen_side():
     address = hs.launch_address(item)
     assert address == "G" * 44 and hs.launch_symbol(item, address) == "GRND"
     assert hs.launch_symbol({"tokenSymbol": "X", "pair": {}}, "Q" * 44) == "X"
+
+
+# ---- the ledger yields to users (found live 2026-09-21: the worker drew 429s during a wallet turn) ----
+
+def test_tick_stops_when_mobula_has_no_room_to_spare(monkeypatch):
+    monkeypatch.setattr(mobula_client, "get", _live_mobula())
+    monkeypatch.setattr(mobula_client, "background_ok", lambda: False)
+    asyncio.run(hs.track(_subject(), "deep_dive", days=14))
+    assert asyncio.run(hs.tick()) == 0
+    assert asyncio.run(hs.tracked())[0]["last_snapshot"] is None       # still due next tick
+
+
+def test_a_blank_snapshot_is_not_a_row_and_not_a_mark(monkeypatch):
+    def refused(version, path, params, timeout=None, background=False):
+        raise mobula_client.MobulaBudgetExceeded("slow down")
+    monkeypatch.setattr(mobula_client, "get", refused)
+    s = _subject()
+    asyncio.run(hs.track(s, "deep_dive", days=14))
+    assert asyncio.run(hs.tick()) == 0
+    assert asyncio.run(hs.history(s.key)) == [] and asyncio.run(hs.tracked())[0]["last_snapshot"] is None
+
+
+def test_the_ledger_calls_mobula_in_the_background_lane(monkeypatch):
+    lanes = []
+
+    def get(version, path, params, timeout=None, background=False):
+        lanes.append(background)
+        return _live_mobula()(version, path, params)
+    monkeypatch.setattr(mobula_client, "get", get)
+    hs.take("solana", _BONK)
+    assert lanes == [True, True, True]
+
+
+def test_only_the_lease_holder_runs(monkeypatch):
+    from app import db
+
+    class _Redis:
+        def __init__(self):
+            self.store = {}
+        async def set(self, key, value, nx=False, ex=None):
+            if nx and key in self.store:
+                return None
+            self.store[key] = value
+            return True
+        async def get(self, key):
+            return self.store.get(key)
+        async def expire(self, key, ttl):
+            return True
+
+    redis = _Redis()
+
+    async def fake_redis():
+        return redis
+    monkeypatch.setattr(db, "get_redis", fake_redis)
+    assert asyncio.run(hs.is_leader()) is True
+    assert asyncio.run(hs.is_leader()) is True                 # renews its own lease
+    monkeypatch.setattr(hs, "_leader_id", "another-process")
+    assert asyncio.run(hs.is_leader()) is False                # the other process yields

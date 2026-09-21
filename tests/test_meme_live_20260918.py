@@ -56,6 +56,7 @@ def test_the_per_chain_path_is_the_fallback_when_mobula_has_nothing(monkeypatch)
         return None
 
     monkeypatch.setattr(research, "_bitquery_balances_supplement", goldrush)
+    monkeypatch.setattr(research, "_solana_own_snapshot", nothing)
     monkeypatch.setattr(research, "_goldrush_hyperliquid_supplement", nothing)
     monkeypatch.setattr(research, "_nansen_defi_positions", nothing)
     answer, trajectory = asyncio.run(research._compose_wallet_portfolio("HDixbrzwwLXczhDBk1JVrurPQsuLE8FUKnW2pucSXN3o", None))
@@ -129,10 +130,50 @@ def test_a_slow_mobula_portfolio_yields_to_the_per_chain_path(monkeypatch):
         return None
 
     monkeypatch.setattr(research, "_bitquery_balances_supplement", goldrush)
+    monkeypatch.setattr(research, "_solana_own_snapshot", nothing)
     monkeypatch.setattr(research, "_goldrush_hyperliquid_supplement", nothing)
     monkeypatch.setattr(research, "_nansen_defi_positions", nothing)
     answer, trajectory = asyncio.run(research._compose_wallet_portfolio("HDixbrzwwLXczhDBk1JVrurPQsuLE8FUKnW2pucSXN3o", None))
     assert "| SOL | 12.5 |" in answer and trajectory["tool_name_0"] == "goldrush_wallet_balances"
+
+
+def test_a_rejected_solana_wallet_is_read_from_the_chain_before_goldrush(monkeypatch):
+    """Live 2026-09-21: Mobula answered 400 "Unsupported wallet" and GoldRush
+    priced none of 1,548 balances; the chain plus Jupiter priced it."""
+    monkeypatch.setattr(settings, "mobula_api_key", "test-key")
+    monkeypatch.setattr(mobula_wallet, "portfolio", lambda request: (_ for _ in ()).throw(RuntimeError("400 Unsupported wallet")))
+
+    async def never(*a, **k):
+        raise AssertionError("GoldRush must not run when the chain read priced the wallet")
+
+    async def own(wallet):
+        return "# Wallet token balances\n**Provider**: Orbit (Solana RPC balances, Jupiter prices)\n| USDC | 15,390.7847 | $1.00 | $15.4K | 2.2% |"
+
+    async def nothing(*a, **k):
+        return None
+
+    monkeypatch.setattr(research, "_bitquery_balances_supplement", never)
+    monkeypatch.setattr(research, "_solana_own_snapshot", own)
+    monkeypatch.setattr(research, "_goldrush_hyperliquid_supplement", nothing)
+    monkeypatch.setattr(research, "_nansen_defi_positions", nothing)
+    answer, trajectory = asyncio.run(research._compose_wallet_portfolio("HDixbrzwwLXczhDBk1JVrurPQsuLE8FUKnW2pucSXN3o", None))
+    assert "| USDC | 15,390.7847 |" in answer and trajectory["tool_name_0"] == "solana_rpc_portfolio"
+
+
+def test_render_card_prices_first_and_refuses_an_unpriced_snapshot():
+    from app.portfolio import render_card
+
+    snapshot = {"sol": {"amount": 47.734, "usd_price": 140.0, "usd_value": 6682.76, "allocation_pct": 30.2},
+                "holdings": [{"mint": "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump", "symbol": "ANSEM", "amount": 3754834.1193, "usd_price": 0.0041, "usd_value": 15394.8, "verified": True, "allocation_pct": 69.8},
+                             {"mint": "A8WG" + "x" * 36 + "W61g", "symbol": "UNKNOWN", "amount": 50119234.2, "usd_price": None, "usd_value": None, "verified": False, "allocation_pct": None}],
+                "total_usd_value": 22077.56, "unpriced_holdings": 1, "partial": False}
+    card = render_card(snapshot)
+    assert "| SOL | 47.7340 | $140.00 | $6.7K | 30.2% |" in card and "| ANSEM | 3,754,834.1193 |" in card
+    assert "2 priced, 1 without a Jupiter price" in card and "not in the total" in card
+    assert "$0.0000" not in card and "| $0.00 |" not in card
+    from app.portfolio import _usd
+    assert _usd(0.00001122) == "$0.0000112" and _usd(0.0041) == "$0.0041" and _usd(19084.8) == "$19.1K"
+    assert render_card({"sol": {"amount": 1.0, "usd_value": None}, "holdings": [{"mint": "m", "usd_value": None}], "total_usd_value": None}) is None
 
 
 # --- transcript 2026-09-18 22:22: "ANSEM top holders on solana" ------------------

@@ -1599,3 +1599,51 @@ reads them yet.
 file save, so overlapping processes can take duplicate rows seconds apart;
 label-derived cohort shares depend on Mobula's labelling; holder count is
 only known for Pulse-sourced rows.
+
+## Mobula: a sustained rate, a cooldown, and a background lane (2026-09-21)
+
+Found live within hours of the ledger going in: a wallet-portfolio turn
+came back from GoldRush with every balance at "$0.00000000" (PENGU and WIF
+included). Two faults, one behind the other.
+
+**The ledger starved the user's turn.** The worker drew its full per-minute
+allowance in a four-second burst, Mobula answered 429 to everything for a
+while, the Mobula-first portfolio path degraded to the per-chain fallback.
+`app/mobula_client.py` now enforces three rules:
+
+- The bucket holds at most `mobula_burst` (30) tokens: sixty a minute is a
+  sustained rate, not sixty at once. A deep-dive's thirty-odd calls fit one
+  burst.
+- A 429 or 5xx starts a cooldown of `mobula_cooldown_seconds` (20, or the
+  Retry-After header). Background callers are refused during it; a user's
+  call waits within its usual eight-second bound, then degrades honestly.
+- `get(..., background=True)` is a second lane: it never waits, takes a
+  token only while the bucket is at least half full, and is refused during
+  a cooldown. Every ledger call uses it, `tick` checks `background_ok()`
+  before each snapshot and stops for the tick when the answer is no, and a
+  snapshot whose calls all failed is neither stored nor counted as taken.
+  `holder_snapshot_max_per_tick` is 5 (fifteen calls a minute).
+- One worker per deployment: a Redis lease (`holder_snapshots:leader`, 180 s,
+  renewed each tick) so two servers on one key, or a reloader's overlapping
+  processes, never both record. Without Redis a single process is assumed.
+
+**GoldRush printed unknown as zero.** A balance with no `quote_rate` is now
+"unknown (no price)", the header counts priced and unpriced rows, and when
+nothing is priced the card says so in words ("value is unknown -- not
+zero"). Unpriced rows are capped at eight with a count of the rest.
+
+Rows the ledger recorded during the 429 stretch carry `flags.failed`; the
+new rule would not have stored them.
+
+**The wallet itself.** Mobula answers 400 "Unsupported wallet" for this
+Solana address (the open item about Solana wallets Mobula rejects), so the
+Mobula-first path can never serve it. The order for a Solana wallet is now
+Mobula, then Orbit's own read (balances from Solana RPC, prices from
+Jupiter in batches of 100, `portfolio_max_priced_holdings` raised to 1,200
+because a wallet's largest positions by value are rarely its largest by
+token count), then GoldRush. `app/portfolio.render_card` renders the read
+priced-first with the unpriced count and the ⚠ mark for unverified tokens;
+`research._solana_own_snapshot` is the step, and it returns None when
+nothing could be priced so GoldRush still gets its turn. Live: the same
+wallet answered in six seconds, 156 holdings priced (USDC, SOL, PENGU
+included), 358 with no Jupiter price, total shown as a floor.

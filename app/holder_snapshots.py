@@ -270,12 +270,14 @@ def take(chain: str, address: str) -> dict:
     gets its price and pool state recorded, and the row says what is missing
     (`flags.missing`) rather than inventing zeros."""
     mchain = _mobula_chain(chain)
-    missing: list[str] = []
+    missing: list[str] = []      # Mobula answered and had nothing
+    failed: list[str] = []       # the call did not happen or did not succeed
 
     holders: list[dict] = []
     try:
-        holders = [r for r in (mobula_client.get(2, "/token/holder-positions", {"address": address, "blockchain": mchain, "limit": 50}) or []) if isinstance(r, dict)]
+        holders = [r for r in (mobula_client.get(2, "/token/holder-positions", {"address": address, "blockchain": mchain, "limit": 50}, background=True) or []) if isinstance(r, dict)]
     except Exception:
+        failed.append("holders")
         logger.info("holder_snapshots: holder positions failed for %s", address, exc_info=True)
     if not holders:
         missing.append("holders")
@@ -291,9 +293,10 @@ def take(chain: str, address: str) -> dict:
 
     security: dict = {}
     try:
-        data = mobula_client.get(2, "/token/security", {"blockchain": mchain, "address": address})
+        data = mobula_client.get(2, "/token/security", {"blockchain": mchain, "address": address}, background=True)
         security = data if isinstance(data, dict) else {}
     except Exception:
+        failed.append("security")
         logger.info("holder_snapshots: security failed for %s", address, exc_info=True)
     if not security:
         missing.append("security")
@@ -304,11 +307,12 @@ def take(chain: str, address: str) -> dict:
 
     market: dict = {}
     try:
-        data = mobula_client.get(1, "/market/data", {"asset": address, "blockchain": mchain})
+        data = mobula_client.get(1, "/market/data", {"asset": address, "blockchain": mchain}, background=True)
         market = (data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data) or {}
         if not isinstance(market, dict):
             market = {}
     except Exception:
+        failed.append("market")
         logger.info("holder_snapshots: market data failed for %s", address, exc_info=True)
     if not market:
         missing.append("market")
@@ -336,7 +340,7 @@ def take(chain: str, address: str) -> dict:
         "price_usd": _num(market.get("price")), "liquidity_usd": _num(market.get("liquidity")), "market_cap_usd": _num(market.get("market_cap")),
         "top_holders": top_holders,
         "flags": {"mintable": security.get("isMintable"), "freezable": security.get("isFreezable"), "honeypot": security.get("isHoneypot"),
-                  "renounced": security.get("renounced"), "pools": len(pools), "missing": missing},
+                  "renounced": security.get("renounced"), "pools": len(pools), "missing": missing, "failed": failed},
     }
 
 
@@ -591,7 +595,7 @@ async def discover_launches() -> int:
         if not chain_id:
             continue
         try:
-            data = await asyncio.to_thread(mobula_client.get, 2, "/pulse", {"chainId": chain_id, "limit": 20})
+            data = await asyncio.to_thread(lambda: mobula_client.get(2, "/pulse", {"chainId": chain_id, "limit": 20}, background=True))
         except Exception:
             logger.info("holder_snapshots: pulse failed for %s", chain, exc_info=True)
             continue
@@ -625,8 +629,17 @@ async def tick(now: datetime | None = None) -> int:
     rows = due(await tracked(now), now)[: max(1, settings.holder_snapshot_max_per_tick)]
     taken = 0
     for row in rows:
+        # The ledger is background work: it runs only while Mobula has room
+        # to spare and stops the moment a user's turn might need the budget.
+        if not mobula_client.background_ok():
+            logger.info("holder_snapshots: Mobula budget reserved for users; %d due token(s) wait for the next tick", len(rows) - taken)
+            break
         try:
             snap = await asyncio.to_thread(take, row["chain"], row["address"])
+            if blank(snap):
+                # Nothing came back at all (budget refused, or Mobula down):
+                # not a fact about the token, so no row and no "taken" mark.
+                continue
             await store(row["subject_key"], snap)
             taken += 1
             if dark(snap):
@@ -637,6 +650,13 @@ async def tick(now: datetime | None = None) -> int:
         except Exception:
             logger.warning("holder_snapshots: snapshot failed for %s", row["subject_key"], exc_info=True)
     return taken
+
+
+def blank(row: dict) -> bool:
+    """Every call failed or was refused: the snapshot did not happen. An
+    answered-but-empty row is different -- that is a fact about the token."""
+    failed = set((row.get("flags") or {}).get("failed") or [])
+    return {"holders", "security", "market"} <= failed
 
 
 def dark(row: dict) -> bool:
@@ -659,6 +679,37 @@ async def untrack(subject_key: str) -> None:
             _tracked[subject_key]["until"] = now
 
 
+_LEADER_KEY = "holder_snapshots:leader"
+_LEADER_TTL = 180
+_leader_id = uuid.uuid4().hex
+
+
+async def is_leader() -> bool:
+    """Only one process records the ledger. With Redis configured, the lease
+    is a key set NX with a TTL and renewed by its holder every tick, so two
+    servers sharing one Mobula key (or a reloader's overlapping processes)
+    never both run; without Redis a single process is assumed."""
+    from app.db import get_redis
+
+    try:
+        client = await get_redis()
+    except Exception:
+        client = None
+    if client is None:
+        return True
+    try:
+        if await client.set(_LEADER_KEY, _leader_id, nx=True, ex=_LEADER_TTL):
+            return True
+        holder = await client.get(_LEADER_KEY)
+        if holder == _leader_id:
+            await client.expire(_LEADER_KEY, _LEADER_TTL)
+            return True
+        return False
+    except Exception:
+        logger.info("holder_snapshots: leader check failed; running", exc_info=True)
+        return True
+
+
 async def worker() -> None:
     """Background loop: discover launches every hour, snapshot due tokens every tick."""
     if not enabled():
@@ -666,6 +717,9 @@ async def worker() -> None:
     last_discovery: datetime | None = None
     while True:
         try:
+            if not await is_leader():
+                await asyncio.sleep(max(15, settings.holder_snapshot_tick_seconds))
+                continue
             now = _now()
             if last_discovery is None or (now - last_discovery) >= timedelta(hours=1):
                 await discover_launches()

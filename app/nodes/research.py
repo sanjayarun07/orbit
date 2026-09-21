@@ -263,6 +263,20 @@ async def _nansen_defi_positions(wallet: str, chain: str | None) -> str | None:
     return observation
 
 
+async def _solana_own_snapshot(wallet: str) -> str | None:
+    """Balances from Solana RPC priced by Jupiter, as a card; None when the
+    read fails or nothing could be priced. Bounded by the snapshot's own
+    pricing timeout plus a short allowance for the RPC calls."""
+    from app.portfolio import build_portfolio_snapshot, render_card
+
+    try:
+        snapshot = await asyncio.wait_for(build_portfolio_snapshot(wallet), timeout=settings.portfolio_snapshot_timeout_seconds + 10.0)
+    except Exception:
+        logger.info("own Solana snapshot unavailable for %s", wallet[:8], exc_info=True)
+        return None
+    return render_card(snapshot)
+
+
 async def _compose_wallet_portfolio(wallet: str, chain: str | None) -> tuple[str, dict]:
     """The primary wallet-portfolio path: balances + Hyperliquid from
     GoldRush (falling back to Bitquery for balances if GoldRush isn't
@@ -303,6 +317,14 @@ async def _compose_wallet_portfolio(wallet: str, chain: str | None) -> tuple[str
                     return card, "mobula_wallet_portfolio"
             except Exception:
                 logger.info("mobula portfolio unavailable or slow for %s; per-chain fallback", wallet[:8], exc_info=True)
+        if not is_evm:
+            # Mobula rejects some Solana wallets outright ("Unsupported
+            # wallet", live 2026-09-21) and GoldRush priced none of the same
+            # wallet's 1,548 balances. Our own read -- balances from the
+            # chain, prices from Jupiter -- is the honest middle step.
+            card = await _solana_own_snapshot(wallet)
+            if card:
+                return card, "solana_rpc_portfolio"
         return await per_chain(), "goldrush_wallet_balances"
 
     (balances, balances_tool), hyperliquid, defi = await asyncio.gather(

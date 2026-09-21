@@ -76,8 +76,8 @@ def test_helius_key_can_come_from_configured_rpc_url(monkeypatch):
 def test_goldrush_balances_normalizes_atomic_amounts_and_filters_zero_rows(monkeypatch):
     captured = {}
     payload = {"data": {"items": [
-        {"contract_ticker_symbol": "USDC", "contract_decimals": 6, "balance": "36000000000", "quote": 36000.0},
-        {"contract_ticker_symbol": "DUST", "contract_decimals": 18, "balance": "0", "quote": 0.0},
+        {"contract_ticker_symbol": "USDC", "contract_decimals": 6, "balance": "36000000000", "quote": 36000.0, "quote_rate": 1.0},
+        {"contract_ticker_symbol": "DUST", "contract_decimals": 18, "balance": "0", "quote": 0.0, "quote_rate": 0.0},
     ]}}
     _client(monkeypatch, payload, captured)
     monkeypatch.setattr(settings, "goldrush_api_key", "goldrush-key")
@@ -85,8 +85,28 @@ def test_goldrush_balances_normalizes_atomic_amounts_and_filters_zero_rows(monke
     assert captured["url"].endswith("/base-mainnet/address/" + EVM_TOKEN + "/balances_v2/")
     assert captured["headers"]["Authorization"] == "Bearer goldrush-key"
     assert captured["params"] == {"quote-currency": "USD", "no-spam": "true"}
-    assert "USDC" in output and "36,000.0000" in output
+    assert "USDC" in output and "36,000.0000" in output and "$36.0K" in output
     assert "DUST" not in output  # zero balance filtered out
+
+
+def test_goldrush_balances_without_a_price_are_unknown_not_zero(monkeypatch):
+    """Live (2026-09-21): a Solana KOL wallet came back with PENGU and WIF at
+    "$0.00000000" because GoldRush sent no quote_rate; a reader took the
+    wallet as worthless."""
+    mint = "HDixbrzwwLXczhDBk1JVrurPQsuLE8FUKnW2pucSXN3o"
+    payload = {"data": {"items": [
+        {"contract_ticker_symbol": "PENGU", "contract_decimals": 6, "balance": "26875801400", "quote": 0.0, "quote_rate": None},
+        {"contract_ticker_symbol": "$WIF", "contract_decimals": 6, "balance": "41610400", "quote": None, "quote_rate": None},
+    ] + [{"contract_ticker_symbol": None, "contract_address": f"{i:0>4}" + "x" * 40, "contract_decimals": 6, "balance": "5000000000", "quote": 0.0, "quote_rate": None}
+         for i in range(12)]}}
+    _client(monkeypatch, payload, {})
+    monkeypatch.setattr(settings, "goldrush_api_key", "goldrush-key")
+    output = GoldRushProvider().balances(f"Show token balances and holdings for {mint} on solana")
+    assert "$0.00000000" not in output and "$0.00" not in output
+    assert "| PENGU | 26,875.8014 | unknown (no price) |" in output
+    assert "no USD prices for any of these balances" in output and "not zero" in output
+    assert "0 priced, 14 without a price" in output
+    assert "… 6 more without a price" in output           # 8 shown, the rest counted
 
 
 def test_goldrush_balances_matcher_accepts_solana_base58_but_transactions_stays_evm_only():

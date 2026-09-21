@@ -675,21 +675,45 @@ class GoldRushProvider:
         entries.sort(key=lambda item: as_float(item[0].get("quote")), reverse=True)
         if not entries:
             return f"# Wallet token balances\n\nNo positive token balances were returned for `{address}` on {chain}.\n\nSource: [GoldRush Balances](https://goldrush.dev/docs/)"
+
+        # A balance GoldRush could not price is UNKNOWN, never $0: live, a
+        # Solana wallet came back with PENGU and WIF at "$0.00000000" because
+        # no quote_rate was returned, and a reader took that as worthless.
+        def priced(row: dict) -> bool:
+            return row.get("quote_rate") is not None and row.get("quote") is not None
+
+        with_price = [(row, amount) for row, amount in entries if priced(row)]
+        without_price = [(row, amount) for row, amount in entries if not priced(row)]
+        total = sum(as_float(row.get("quote")) for row, _ in with_price)
         lines = [
             "# Wallet token balances",
-            f"**Provider**: GoldRush · **Checked**: {_utc()}",
+            f"**Provider**: GoldRush · **Checked**: {_utc()} · **Priced total**: {_money(total) if with_price else '—'} "
+            f"({len(with_price)} priced, {len(without_price)} without a price)",
             "",
-            "| Token | Balance | USD Value |",
-            "|---|---:|---:|",
         ]
-        for row, amount in entries[:25]:
+        if not with_price:
+            lines += ["GoldRush returned no USD prices for any of these balances, so their value is unknown -- not zero. "
+                      "Ask for a specific token's price, or try the wallet again in a moment.", ""]
+        lines += ["| Token | Balance | USD Value |", "|---|---:|---:|"]
+
+        def name(row: dict) -> str:
             # Solana SPL entries can come back with a null ticker/display
             # name (verified live) -- fall back to a shortened mint address
             # rather than showing a bare "?" for an otherwise-real balance.
             contract = str(row.get("contract_address") or "")
             fallback = f"{contract[:4]}…{contract[-4:]}" if len(contract) > 10 else "?"
-            symbol = row.get("contract_ticker_symbol") or row.get("contract_display_name") or fallback
-            lines.append(f"| {symbol} | {amount:,.4f} | {_money(row.get('quote'))} |")
+            return row.get("contract_ticker_symbol") or row.get("contract_display_name") or fallback
+
+        for row, amount in with_price[:25]:
+            lines.append(f"| {name(row)} | {amount:,.4f} | {_money(row.get('quote'))} |")
+        shown = 0
+        for row, amount in without_price:
+            if shown >= 8:
+                break
+            lines.append(f"| {name(row)} | {amount:,.4f} | unknown (no price) |")
+            shown += 1
+        if len(without_price) > shown:
+            lines.append(f"| … {len(without_price) - shown} more without a price | | |")
         lines.extend(["", "Source: [GoldRush Balances](https://goldrush.dev/docs/)"])
         return compact_tool_result("\n".join(lines))
 
