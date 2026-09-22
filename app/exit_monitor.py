@@ -679,7 +679,13 @@ async def _maybe_alert(row: dict, rows: list[dict]) -> dict | None:
     rules = row.get("rules") or {}
     drop_threshold = float(rules.get("drop_pct", settings.exit_alert_drop_pct))
     discount_threshold = rules.get("discount_pct")
-    last_at = (row.get("last_alert") or {}).get("at")
+    last = row.get("last_alert") or {}
+    if last.get("email_pending") and row.get("user_id") and rules.get("channel") == "email":
+        # The inbox row exists and the cooldown runs, but the email did not
+        # go: try again each tick until it does (review, 2026-09-23).
+        if await _email(row["user_id"], last.get("title") or "Exit alert", last.get("body") or ""):
+            await _update(row["id"], last_alert={**last, "email_pending": False})
+    last_at = last.get("at")
     if last_at and (_now() - datetime.fromisoformat(last_at)).total_seconds() < settings.exit_alert_cooldown_hours * 3600:
         return None
     symbol = row.get("symbol") or baseline.get("symbol") or row["mint"][:6]
@@ -727,22 +733,25 @@ async def _maybe_alert(row: dict, rows: list[dict]) -> dict | None:
     if row.get("user_id"):
         _item, new = await tasks.notify(row["user_id"], title, body, kind="exit_alert", task_id=row["id"], occurrence=occurrence)
         if new and rules.get("channel") == "email":
-            await _email(row["user_id"], title, body)
+            alert.update({"title": title, "body": body, "email_pending": not await _email(row["user_id"], title, body)})
     await _update(row["id"], last_alert=alert)
     return alert
 
 
-async def _email(user_id: str, title: str, body: str) -> None:
-    """The alert by email too, when the position's rules ask for it; the
-    inbox row is the delivery record, so this runs only when it was new."""
+async def _email(user_id: str, title: str, body: str) -> bool:
+    """The alert by email too, when the position's rules ask for it; True
+    when the provider accepted it. An account without an email address
+    counts as delivered: there is nothing to retry."""
     from app import accounts, emailer
 
     try:
         user = await accounts.get_user(user_id)
-        if user and user.get("email"):
-            await emailer.send_email(user["email"], f"{settings.product_name}: {title}", "<p>" + body.replace("\n", "<br>") + "</p>", text=body)
+        if not user or not user.get("email"):
+            return True
+        return bool(await emailer.send_email(user["email"], f"{settings.product_name}: {title}", "<p>" + body.replace("\n", "<br>") + "</p>", text=body))
     except Exception:
         logger.warning("exit_monitor: email delivery failed for %s", user_id[:8], exc_info=True)
+        return False
 
 
 jobs.register(KIND, monitor, version="2026-09-22.1", settings_keys=("exit_monitor_interval_minutes", "exit_alert_drop_pct", "exit_alert_cooldown_hours"))

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app import composition, exit_controls, exit_monitor, holder_snapshots, jobs, mobula_meme, product_actions, snapshot_compare, streaming
+from app import accounts, composition, emailer, exit_controls, exit_monitor, holder_snapshots, jobs, mobula_meme, product_actions, snapshot_compare, streaming, tasks
 from app.experience import build_context_capsules
 from app.nodes import general
 from app.routing import subject_probe
@@ -252,3 +252,72 @@ def test_a_clause_that_asks_back_does_not_make_the_answer_a_clarification(monkey
                                               "contextual_request": None, "history": "", "session_context": {}}))
     assert out["answer"].startswith("**No saved snapshot of ANSEM for September 21, 2026.**")
     assert "Which token should I check" in out["answer"] and "# Holders — ANSEM" in out["answer"]      # every ask kept; the lead still leads
+
+
+# ---- review of c8bf7764 (2026-09-23) --------------------------------------
+
+def test_a_dollar_ticker_is_carried_whole():
+    req = "Show $BONK holders. Check liquidity."
+    assert composition.carry_subject(composition.split_asks(req), req) == ["Show $BONK holders", "Check liquidity (BONK token)"]
+
+
+def test_sizing_accepts_a_mint_with_digits(chain):
+    ask = f"Compare buying $500 of {BONK}"
+    m = exit_controls._SIZES.match(ask)
+    assert m and m.group("t1") == BONK
+    reply = asyncio.run(exit_controls.handle(ask, None, None))
+    assert reply.startswith("# Sizing — BONK")
+
+
+def test_since_entry_after_selling_everything_and_with_two_wallets(chain, monkeypatch):
+    user = {"id": "u1"}
+    other = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"
+    asyncio.run(exit_controls.handle("watch my exit on BONK", user, WALLET))
+    asyncio.run(exit_controls.handle("watch my exit on BONK", user, other))
+    ask = "What changed since I entered BONK?"
+    reply = asyncio.run(exit_controls.handle(ask, user, other))
+    assert reply.count("# Since entry — BONK") == 1 and f"`{other[:6]}…{other[-4:]}`" in reply       # the connected wallet's watch
+    reply = asyncio.run(exit_controls.handle(ask, user, None))
+    assert reply.count("# Since entry — BONK") == 2                                                    # no wallet: every watch, each on its own
+    chain["amount"] = 0
+    async def none(wallet):
+        return {"value": []}
+    monkeypatch.setattr(exit_monitor, "get_token_accounts", none)
+    reply = asyncio.run(exit_controls.handle(ask, user, WALLET))
+    assert "this wallet no longer holds the token" in reply and "1,000,000 → 0 BONK" in reply
+
+
+def test_holding_change_is_read_against_the_baseline_not_the_latest_tick(chain, monkeypatch):
+    user = {"id": "u1"}
+    asyncio.run(exit_controls.handle("watch my exit on BONK", user, WALLET))
+    watched = asyncio.run(exit_monitor.list_for("u1"))[0]
+    chain["amount"] = 995_000_00000                                     # -0.5%: below the re-baseline threshold
+    asyncio.run(jobs.run(asyncio.run(jobs.get(watched["job_id"]))))    # the tick updates the row's quantity, not the baseline
+    row = asyncio.run(exit_monitor.list_for("u1"))[0]
+    assert int(row["quantity_raw"]) == 995_000_00000 and int(row["entry"]["quantity_raw"]) == 1_000_000_00000
+    reply = asyncio.run(exit_controls.handle("What changed since I entered BONK?", user, WALLET))
+    assert "- **Holding**: 1,000,000 → 995,000 BONK (-0.5%)." in reply
+
+
+def test_a_failed_alert_email_is_retried_on_the_next_tick(chain, monkeypatch):
+    sent, ok = [], {"value": False}
+
+    async def send_email(to, subject, html, text=None):
+        sent.append(subject)
+        return ok["value"]
+    async def get_user(user_id, db=None):
+        return {"id": user_id, "email": "holder@example.com"}
+    monkeypatch.setattr(emailer, "send_email", send_email)
+    monkeypatch.setattr(accounts, "get_user", get_user)
+    asyncio.run(exit_controls.handle("watch my exit on BONK", {"id": "u1"}, WALLET))
+    watched = asyncio.run(exit_monitor.list_for("u1"))[0]
+    asyncio.run(exit_monitor.set_rules(watched["id"], channel="email", drop_pct=10.0))
+    monkeypatch.setattr(exit_monitor, "simulate_swap", _sim(0.000015, 2.0))
+    asyncio.run(jobs.run(asyncio.run(jobs.get(watched["job_id"]))))
+    assert len(sent) == 1 and asyncio.run(exit_monitor.list_for("u1"))[0]["last_alert"]["email_pending"] is True
+    ok["value"] = True
+    asyncio.run(jobs.run(asyncio.run(jobs.get(watched["job_id"]))))                 # inside the cooldown: no new alert, the email retried
+    row = asyncio.run(exit_monitor.list_for("u1"))[0]
+    assert len(sent) == 2 and row["last_alert"]["email_pending"] is False and len(asyncio.run(tasks.inbox("u1"))) == 1
+    asyncio.run(jobs.run(asyncio.run(jobs.get(watched["job_id"]))))
+    assert len(sent) == 2                                                            # delivered: nothing more to send

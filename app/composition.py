@@ -56,7 +56,7 @@ def split_asks(request: str) -> list[str]:
 
 
 _ADDRESS = re.compile(r"(?<![A-Za-z0-9])(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])")
-_OWN_SUBJECT = re.compile(r"\$[A-Za-z]|\b[A-Z][A-Z0-9]{2,9}\b")
+_OWN_SUBJECT = re.compile(r"\$[A-Za-z][A-Za-z0-9._-]{0,15}|\b[A-Z][A-Z0-9]{2,9}\b")
 _CHAIN_WORD = re.compile(r"\b(solana|base|ethereum|arbitrum|optimism|polygon|bsc|bnb|avalanche)\b", re.I)
 
 

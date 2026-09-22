@@ -30,10 +30,16 @@ _CHANNEL = re.compile(r"^\s*(?:(?:email|send)\s+me\s+my\s+exit\s+alerts(?:\s+by\
 # The command may carry the chain and trailing instructions: "compare buying
 # $500, $2,000 and $5,000 of ANSEM on Solana. Show entry quotes and immediate
 # reverse-exit estimates. Do not prepare or execute any trade." (2026-09-23).
+def _named(name: str) -> str:
+    """The token pattern as a named group, so a mint with digits in it is
+    read as the token and never discarded (review, 2026-09-23)."""
+    return f"(?P<{name}>" + _TOKEN[1:]
+
+
 _SIZES = re.compile(
-    rf"^\s*(?:compare\s+buying\s+(?P<amounts>[\$\d,.\s]+(?:and|or)?[\$\d,.\s]*)\s+(?:of|worth\s+of|in)\s+{_TOKEN}"
-    rf"|size\s+check\s+{_TOKEN}\s+(?:at|for|with)\s+(?P<amounts2>[\$\d,.\s]+(?:and|or)?[\$\d,.\s]*)"
-    rf"|what\s+would\s+(?P<amounts3>\$[\d,.]+)\s+(?:of|in)\s+{_TOKEN}\s+cost\s+to\s+(?:enter\s+and\s+exit|buy\s+and\s+sell|get\s+in\s+and\s+out(?:\s+of)?))"
+    rf"^\s*(?:compare\s+buying\s+(?P<amounts>[\$\d,.\s]+(?:and|or)?[\$\d,.\s]*)\s+(?:of|worth\s+of|in)\s+{_named('t1')}"
+    rf"|size\s+check\s+{_named('t2')}\s+(?:at|for|with)\s+(?P<amounts2>[\$\d,.\s]+(?:and|or)?[\$\d,.\s]*)"
+    rf"|what\s+would\s+(?P<amounts3>\$[\d,.]+)\s+(?:of|in)\s+{_named('t3')}\s+cost\s+to\s+(?:enter\s+and\s+exit|buy\s+and\s+sell|get\s+in\s+and\s+out(?:\s+of)?))"
     rf"(?:\s+on\s+solana)?\s*[?.!]?(?:\s.*)?$", re.I | re.S)
 # "What changed since I entered ANSEM? Separate token price movement, changes
 # in my holdings, and worsening exit liquidity." -- the decomposition against
@@ -61,15 +67,20 @@ async def _since_entry(p: dict) -> str:
     baseline = exit_monitor.full_exit(entry.get("rows") or [])
     if baseline is None:
         return f"Your {symbol} watch has no valid entry quote yet (the first quote failed), so there is no baseline to compare against."
+    scale = 10 ** int(p.get("decimals") or 0)
+    q0 = int(entry.get("quantity_raw") or p.get("quantity_raw") or 0)              # the baseline's holding, not the latest tick's
+    head = f"# Since entry — {symbol}\n**Entry recorded**: {(entry.get('at') or p.get('created_at') or '')[:16].replace('T', ' ')} UTC · **Wallet**: `{p['wallet'][:6]}…{p['wallet'][-4:]}`\n"
     try:
         position = await exit_monitor.position_of(p["wallet"], p["mint"])
     except exit_monitor.BalanceUnavailable as exc:
-        return f"# Since entry — {symbol}\n\nYour current balance could not be read ({exc}), so neither the holding nor the exit can be compared right now. Nothing here is a price alert."
+        return head + f"\nYour current balance could not be read ({exc}), so neither the holding nor the exit can be compared right now. Nothing here is a price alert."
+    if position is None:
+        return head + (f"\n- **Holding**: {exit_monitor._qty(q0 / scale)} → 0 {symbol}: this wallet no longer holds the token, so there is no position to quote an exit for. "
+                       f"Entry quote was {exit_monitor._usd(baseline['quoted_usdc'])}. Say `stop watching my exit on {symbol}` to close the watch.")
     rows = await exit_monitor.quote_exit(p["mint"], position["quantity_raw"])
     now_full = exit_monitor.full_exit(rows)
-    q0, q1 = int(p.get("quantity_raw") or 0), int(position["quantity_raw"])
-    scale = 10 ** int(p.get("decimals") or 0)
-    lines = [f"# Since entry — {symbol}", f"**Entry recorded**: {(entry.get('at') or p.get('created_at') or '')[:16].replace('T', ' ')} UTC · **Wallet**: `{p['wallet'][:6]}…{p['wallet'][-4:]}`", ""]
+    q1 = int(position["quantity_raw"])
+    lines = [head]
     if q0 and q1 != q0:
         lines.append(f"- **Holding**: {exit_monitor._qty(q0 / scale)} → {exit_monitor._qty(q1 / scale)} {symbol} ({(q1 - q0) / q0 * 100:+.1f}%).")
     else:
@@ -226,10 +237,13 @@ async def handle(message: str, user: dict | None, wallet: str | None) -> str | N
             return (f"I have no entry snapshot for {symbol or token}: you are not watching an exit on it, so there is nothing to compare against. "
                     f"Say `watch my exit on {symbol or token}` with your wallet connected; from then on I can separate the price move, "
                     "your holding and the route's discount.")
-        return await _since_entry(rows[0])
+        # The connected wallet's watch when it has one; otherwise every wallet
+        # watching this token, each read on its own (review, 2026-09-23).
+        mine = [p for p in rows if wallet and p["wallet"] == wallet]
+        return "\n\n---\n\n".join([await _since_entry(p) for p in (mine or rows)])
     m = _SIZES.match(text)
     if m:
-        token = next((g for g in m.groups() if g and not any(ch.isdigit() for ch in g) and g.lower() not in ("and", "or")), None)
+        token = m.group("t1") or m.group("t2") or m.group("t3")
         amounts = _amounts(m.group("amounts") or m.group("amounts2") or m.group("amounts3") or "")
         if not token or not amounts:
             return "Name the token and the dollar amounts, for example: `compare buying $500, $2,000 and $5,000 of BONK`."

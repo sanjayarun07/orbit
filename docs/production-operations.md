@@ -2354,3 +2354,9 @@ with backoff (1.5 s, 3 s) on 429: six in a row hit the public limit live.
 - **Dated comparisons.** `snapshot_compare.dated_ask` recognises "between/since <date>" asks; the answer opens
   with the ledger's two-row comparison (`holder_snapshots.as_of` + `diff`) or the limitation ("No saved
   snapshot of X for <date>… everything below is current data").
+
+**Review of c8bf7764 (2026-09-23).** `$BONK` is carried whole into subject-less clauses; the sizing pattern uses
+named token groups so a mint with digits is the token; `what changed since I entered X` prefers the connected
+wallet's watch (else every watch, each on its own), reads the holding against the baseline's quantity, and says
+when the wallet no longer holds the token; a rejected alert email leaves `last_alert.email_pending` set and is
+retried every tick until the provider accepts it (the inbox row and the cooldown stand meanwhile).
