@@ -1404,5 +1404,20 @@
     "expected_intent": "research",
     "router": false,
     "notes": "symbol -> verified-Solana canonical -> bitquery (needs research_node resolution)"
+  },
+  {
+    "id": "bundle-address-ask",
+    "query": "bundle check 9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump on solana",
+    "expected_tools": [
+      "mobula_token_bundle"
+    ],
+    "forbidden_tools": [
+      "mobula_wallet_portfolio",
+      "mcp_nansen_address_portfolio",
+      "jupiter"
+    ],
+    "expected_intent": "research",
+    "router": false,
+    "notes": "a pasted address beside launch-forensics words is the token, not a wallet (live, 2026-09-23)"
   }
 ]

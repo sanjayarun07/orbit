@@ -726,7 +726,7 @@ def _detect_wallet_request(request: str) -> tuple[str, str | None] | None:
         r"positions?|exposure)\b",
         lowered,
     )
-    token_subject = re.search(r"\b(?:token|coin|contract|mint|memecoin|meme coin|erc-?20)\b", lowered)
+    token_subject = re.search(r"\b(?:token|coin|contract|mint|memecoin|meme coin|erc-?20)\b", lowered) or lexicon.TOKEN_SHAPED.search(request)
     explicit_wallet = re.search(r"\b(?:wallet|portfolio|balances?|pnl|transactions?|counterparties)\b", lowered)
     if not (address_match and wallet_lookup and (not token_subject or explicit_wallet)):
         return None

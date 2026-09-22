@@ -160,3 +160,23 @@ def test_anchors_are_capped_and_the_public_form_carries_them():
         env.add_anchor(evidence.tx(f"h{i}", "p", "solana"))
     assert len(env.anchors) == evidence.MAX_ANCHORS and len(env.public()["anchors"]) == evidence.MAX_ANCHORS
     assert env.public()["interpreter"] == env.interpreter
+
+
+def test_the_wallet_envelope_anchors_its_record_and_each_shown_holding(monkeypatch, turn):
+    payload = {"total_wallet_balance": 5000.0, "assets": [
+        {"asset": {"id": 1, "name": "Ethereum", "symbol": "ETH", "blockchains": ["Ethereum"]}, "estimated_balance": 4000.0, "price": 4000.0, "token_balance": 1},
+        {"asset": {"id": 2, "name": "USD Coin", "symbol": "USDC", "blockchains": ["Base"]}, "estimated_balance": 1000.0, "price": 1.0, "token_balance": 1000}]}
+    monkeypatch.setattr(mobula_wallet, "_get", lambda path, params: payload)
+    mobula_wallet.portfolio("portfolio of 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045")
+    env = evidence.collected()[0]
+    assert [a.kind for a in env.anchors] == ["record"] * 3 and env.anchors[0].note == "wallet portfolio record"
+    assert env.anchors[1].ref.endswith(":ETH") and env.anchors[1].chain == "ethereum" and "priced $4.00K" in env.anchors[1].note
+
+
+def test_a_pasted_address_beside_forensics_words_is_a_token_not_a_wallet():
+    from app.nodes import research
+    mint = "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump"
+    assert research._detect_wallet_request(f"bundle check {mint} on solana") is None
+    assert research._detect_wallet_request(f"who sniped {mint}") is None
+    assert research._detect_wallet_request(f"check {mint}") is not None                       # a bare check on an address is still a wallet
+    assert research._detect_wallet_request(f"wallet portfolio of {mint}") is not None         # a wallet word wins outright
