@@ -26,6 +26,9 @@ tests/
 scripts/
 # ...except the operator scripts the runbook runs inside the image.
 !scripts/kb_ingest.py
+!scripts/preflight.py
+!scripts/turn_review.py
+!scripts/kb_fixture.py
 !scripts/routing_eval/
 scripts/routing_eval/__pycache__/
 scripts/routing_eval/runs/

@@ -210,6 +210,8 @@ on precisely because sign-up is open.
 
 ## Staging: the production stack, rehearsed
 
+On Google Cloud, the same steps as one Compute Engine VM, command by command: [deploy-gcp.md](../deploy-gcp.md).
+
 Staging is the same image, compose files and gates as production, on its
 own host, hostname and stores, with `ENVIRONMENT=staging` (audited exactly
 like production) and swaps off until they are rehearsed there. Nothing
