@@ -19,7 +19,7 @@ from app.experience import (advance_session_context, build_context_capsules, bui
     with_resolved_token, build_gas_advisory, build_intent_lock, build_trade_readiness)
 from app.graph import run_agent
 from app.identity import Identity, current_identity, service_identity
-from app import charts, decision_records, followups, jobs, streaming, turn_log, user_memory
+from app import charts, decision_records, exit_controls, followups, jobs, streaming, turn_log, user_memory
 from app import evidence as evidence_envelopes
 
 # Fire-and-forget work that must still finish: kept here so a shutdown can
@@ -327,6 +327,8 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         remembered_wallet = ((session_context or {}).get("connected_wallet") or {}).get("address")
         effective_wallet = body.wallet_address or remembered_wallet or ""
         task_reply = await task_scheduling.handle_chat_control(body, identity, action)
+        if task_reply is None and action is None and identity.signed_in and exit_controls.is_exit_control(body.message):
+            task_reply = await exit_controls.handle(body.message, identity.user, effective_wallet or None)
         if task_reply is not None:
             from app.graph import AgentRun
             # No trajectory: a task control is a plain (1-credit) turn, not a tool turn.

@@ -2140,3 +2140,42 @@ coverage check, the receipt and the job row; answer requirements
 (`evals/answers/cases.json`, `scripts/answer_eval.py`, replayed on pinned
 snapshots by `tests/test_answer_eval.py`); and the holders job pilot
 (`app/jobs_holders.py`, measured by `scripts/holders_pilot.py`).
+
+## The exit monitor (2026-09-22): can this position get out, and has that changed
+
+The second capability of the narrowed proposition ("understand who
+controls the supply, whether your position can exit, and when those
+conditions change"). `app/exit_monitor.py` reads the wallet's real balance
+of a token from the chain (both token programs), asks Jupiter for an
+exact-size sell quote to USDC at 25, 50 and 100 percent, and shows four
+numbers never conflated: marked value (quantity times reference price),
+quoted proceeds (what the route returns for that size), minimum output
+(the transaction's floor at the quoted slippage), and, not here, realised
+proceeds. A failed route is a row that says why ("no route", "quote
+provider rate-limited"), never a missing row. Partial exits are separate
+scenarios and do not add up; the card says so. Nothing prepares or
+submits a trade: the quote path is `plans.simulate_swap`, the read-only
+one.
+
+**Watching.** `watch my exit on BONK` persists the position with its
+entry quotes (`exit_positions`, `exit_quotes`) and schedules a durable
+job (`exit_monitor`) that re-reads the balance, quotes, records and
+compares every `exit_monitor_interval_minutes` (15). The job engine now
+lets a handler reschedule its own row (`next_run_at` in the result), so
+one row runs for the life of the position. The card shows the change
+since entry and the full-exit quote over time. `exit analysis for X`,
+`can I exit my X position`, `how is my exit on X`, `stop watching my
+exit on X` and `show my exits` are anchored chat controls
+(`app/exit_controls.py`) for signed-in users with a connected or named
+Solana wallet; a symbol resolves through Jupiter's registry, one verified
+match wins and several ask for the mint. Ten watched positions per user.
+
+**The deterioration alert** (the third capability's first alert): when
+the full-exit quote falls by more than `exit_alert_drop_pct` (20%) against
+the entry quote or the last alert's quote, an inbox item carries both
+quotes, both price impacts, the route and the marked value, and says it is
+neither a price alert nor a sell instruction; at most once per
+`exit_alert_cooldown_hours` (6). Positions are in the export and cascade
+with the user. Verified live against a real BONK holder on the test
+server; `tests/test_exit_monitor.py` covers the quotes, the card, the
+reschedule, the alert with its cooldown, stopping, and the controls.

@@ -571,10 +571,19 @@ async def _settle(ctx: JobContext, status: str, *, result: dict | None = None, e
         patch["result"] = _jsonable(result)
         if isinstance(result, dict) and result.get("receipt_id"):
             patch["receipt_id"] = result["receipt_id"]
+        # A recurring handler returns next_run_at: the row goes back to
+        # `scheduled` with its plan and cache intact, one row for every run.
+        next_at = result.get("next_run_at") if isinstance(result, dict) else None
+        if status == "succeeded" and next_at:
+            patch.update({"status": "scheduled", "next_run_at": datetime.fromisoformat(next_at) if isinstance(next_at, str) else next_at,
+                          "settled_at": None, "plan": [], "attempts": 0})
+            status = "scheduled"
     fresh = await cas(ctx.id, {"lease_id": ctx.lease_id, "status": "running"}, patch)
     if fresh is None:
         return await get(ctx.id)
-    await _event(ctx.id, "settled", status, error)
+    await _event(ctx.id, "settled" if status != "scheduled" else "rescheduled", status, error)
+    if status == "scheduled":
+        return fresh
     await deliver(fresh)
     _notify_settled(ctx.id)
     return await get(ctx.id) or fresh            # as delivered, not as settled
