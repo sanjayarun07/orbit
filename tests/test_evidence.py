@@ -10,6 +10,7 @@ from app.answer_validator import validate_answer
 from app.provider_router import NoData
 
 FART = "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump"
+_REAL_TRADES = mobula_meme.token_trades          # captured before the suite's offline patch replaces it
 
 
 @pytest.fixture
@@ -109,3 +110,53 @@ def test_a_spam_holding_never_inflates_the_total(monkeypatch, turn):
     card = mobula_wallet.portfolio("portfolio of 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045")
     assert "**Total**: $4.00K" in card and "$100,000" not in card
     assert evidence.collected()[0].data["total_usd"] == 4000.0
+
+
+# ---- anchors (2026-09-23): what each observation rests on ----
+
+def test_the_bundle_envelope_anchors_every_shared_funder_claim_to_its_funding_transaction(monkeypatch, turn):
+    buyers = [{"address": f"W{i:02d}" + "A" * 30, "firstHoldingDate": "2026-09-18T12:00:05Z", "initialAmount": "1", "currentBalance": "0"} for i in range(4)]
+    buyers += [{"address": f"S{i:02d}" + "A" * 30, "firstHoldingDate": f"2026-09-18T12:00:{10 + i:02d}Z", "initialAmount": "1", "currentBalance": "1"} for i in range(4)]
+    monkeypatch.setattr(mobula_meme, "_get_v1", lambda path, params: buyers)
+    funding = {b["address"]: {"from": "FUNDER" + "F" * 30, "txHash": f"TX{i}" + "h" * 40, "date": "2026-09-18T11:59:00Z"} for i, b in enumerate(buyers[:4])}
+    monkeypatch.setattr(mobula_meme, "_get", lambda path, params: funding.get(params["wallet"]))
+    analysis = mobula_meme._bundle_analysis(FART, "solana")
+    env = mobula_meme.bundle_evidence(analysis)
+    txs = [a for a in env.anchors if a.kind == "tx"]
+    assert len(txs) == 4 and txs[0].ref.startswith("TX0") and txs[0].at == "2026-09-18T11:59:00Z" and txs[0].provider == "mobula" and "funded by FUNDER" in txs[0].note
+    # a cluster that is not counted (a burn address, an exchange) still anchors its transactions, marked as such
+    burn = {b["address"]: {"from": "1" * 32 + "4", "txHash": f"BURN{i}" + "h" * 40, "date": "2026-09-18T11:58:00Z"} for i, b in enumerate(buyers[4:])}
+    monkeypatch.setattr(mobula_meme, "_get", lambda path, params: {**funding, **burn}.get(params["wallet"]))
+    env2 = mobula_meme.bundle_evidence(mobula_meme._bundle_analysis(FART, "solana"))
+    burn_txs = [a for a in env2.anchors if a.kind == "tx" and a.ref.startswith("BURN")]
+    assert len(burn_txs) == 4 and all(a.note.endswith(", not counted") for a in burn_txs)
+    assert txs[0].link() == f"https://solscan.io/tx/{txs[0].ref}"
+    records = [a for a in env.anchors if a.kind == "record"]
+    assert len(records) == 4 and all(r.note == "first held in a shared second" for r in records)
+    card = mobula_meme._render_bundle(analysis)
+    assert "| Funding transactions |" in card and "[TX0h…hhhh](https://solscan.io/tx/TX0h" in card and "+1" in card
+    assert env.public()["anchors"][0]["kind"] == "tx" and env.anchored()
+
+
+def test_the_holders_and_trades_envelopes_anchor_their_rows(monkeypatch, turn):
+    holders = [{"walletAddress": f"H{i}" + "A" * 40, "percentageOfTotalSupply": 10 - i, "labels": [], "lastTradeAt": "2026-09-20T00:00:00Z"} for i in range(3)]
+    trades = [{"transactionHash": f"T{i}" + "x" * 60, "date": "2026-09-22T10:00:00Z", "type": "buy", "baseTokenAmountUSD": 12.5, "platform": "Raydium",
+               "baseToken": {"symbol": "F"}, "quoteToken": {"symbol": "SOL"}, "baseTokenAmount": 1, "quoteTokenAmount": 1, "swapSenderAddress": "S" * 40} for i in range(2)]
+    monkeypatch.setattr(mobula_meme, "_get", lambda path, params: holders if "holder" in path else trades)
+    mobula_meme.token_holders(f"top holders of {FART} on solana")
+    try:
+        _REAL_TRADES(f"latest trades {FART} on solana")
+    except Exception:
+        pass                                                                          # the card's renderer is not under test here
+    by_tool = {e.tool: e for e in evidence.collected()}
+    assert [a.kind for a in by_tool["mobula_token_holders"].anchors] == ["record"] * 3 and by_tool["mobula_token_holders"].anchors[0].at == "2026-09-20T00:00:00Z"
+    assert "mobula_token_trades" in by_tool and [a.kind for a in by_tool["mobula_token_trades"].anchors] == ["tx", "tx"]
+    assert by_tool["mobula_token_trades"].anchors[0].note == "buy $12.50 on Raydium"
+
+
+def test_anchors_are_capped_and_the_public_form_carries_them():
+    env = evidence.Evidence(tool="t", status="complete")
+    for i in range(80):
+        env.add_anchor(evidence.tx(f"h{i}", "p", "solana"))
+    assert len(env.anchors) == evidence.MAX_ANCHORS and len(env.public()["anchors"]) == evidence.MAX_ANCHORS
+    assert env.public()["interpreter"] == env.interpreter

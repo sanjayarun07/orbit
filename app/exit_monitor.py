@@ -168,6 +168,7 @@ async def quote_exit(mint: str, quantity_raw: int, fractions: tuple[float, ...] 
             "price_impact_pct": sim["price_impact_pct"], "slippage_bps": int(quote.get("slippageBps") or 50),
             "route": [(hop.get("swapInfo") or {}).get("label") for hop in quote.get("routePlan") or [] if isinstance(hop, dict)],
             "quoted_at": _now().isoformat(),
+            "slot": quote.get("contextSlot"),                                     # the anchor: the slot the route was computed at
         })
     return rows
 
@@ -278,6 +279,9 @@ def render_card(position: dict, rows: list[dict], entry: dict | None = None, his
             lines.append(f"| {(h.get('taken_at') or '')[:16].replace('T', ' ')} | {_qty(h.get('quantity_raw', 0) / (10 ** position.get('decimals', 0)))} | "
                          f"{_usd(f['quoted_usdc']) if f else '—'} | {f['price_impact_pct']:.2f}% |" if f else
                          f"| {(h.get('taken_at') or '')[:16].replace('T', ' ')} | {_qty(h.get('quantity_raw', 0) / (10 ** position.get('decimals', 0)))} | — | — |")
+    slots = sorted({str(r.get("slot")) for r in rows if r.get("ok") and r.get("slot")})
+    if slots:
+        lines += ["", f"Quotes computed at slot {' and '.join(slots)} (Jupiter's contextSlot): the book these numbers came from."]
     lines += ["", "Quoted proceeds are an estimate until a sale executes; the minimum is what the transaction would refuse to go below. "
                   "Each exit size is quoted on the whole current book, so partial exits do not add up. Nothing here prepares or submits a trade."]
     return "\n".join(lines)

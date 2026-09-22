@@ -116,6 +116,7 @@ def coverage_rows(bundle: TokenEvidenceBundle) -> list[dict]:
         if d.envelope:
             row["evidence"] = d.envelope.get("status")
             row["coverage"] = d.envelope.get("coverage")
+            row["anchors"] = len(d.envelope.get("anchors") or [])
             if d.envelope.get("errors"):
                 row["errors"] = d.envelope["errors"]
         rows.append(row)

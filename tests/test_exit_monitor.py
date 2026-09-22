@@ -24,7 +24,8 @@ def _sim(price_per_token: float, impact: float, fee: float = 0.0):
         out = tokens * price_per_token * (1 - impact / 100) - fee
         return {"input_token": SimpleNamespace(symbol="BONK", usd_price=price_per_token, decimals=5), "output_token": SimpleNamespace(symbol="USDC", decimals=6),
                 "input_amount": tokens, "input_value_usd": tokens * price_per_token, "output_amount": out, "output_value_usd": out, "price_impact_pct": impact,
-                "quote": {"otherAmountThreshold": str(int(out * 0.995 * 1e6)), "slippageBps": 50, "routePlan": [{"swapInfo": {"label": "Raydium"}}, {"swapInfo": {"label": "Orca"}}]}}
+                "quote": {"otherAmountThreshold": str(int(out * 0.995 * 1e6)), "slippageBps": 50, "contextSlot": 449450578,
+                          "routePlan": [{"swapInfo": {"label": "Raydium"}}, {"swapInfo": {"label": "Orca"}}]}}
     return simulate_swap
 
 
@@ -51,11 +52,11 @@ def test_quotes_keep_marked_value_quoted_proceeds_and_minimum_apart(chain):
     assert [r["fraction"] for r in rows] == [0.25, 0.5, 1.0] and all(r["ok"] for r in rows)
     full = exit_monitor.full_exit(rows)
     assert full["marked_value_usd"] == pytest.approx(20.0) and full["quoted_usdc"] == pytest.approx(19.7) and full["minimum_usdc"] == pytest.approx(19.6015, abs=1e-3)
-    assert full["route"] == ["Raydium", "Orca"]
+    assert full["route"] == ["Raydium", "Orca"] and full["slot"] == 449450578
     card = exit_monitor.render_card({"wallet": WALLET, "mint": MINT, "symbol": "BONK", **pos}, rows)
     assert "| 100% | 1,000,000 | $20.00 | **$19.70** | $19.60 | 1.50% | Raydium → Orca |" in card
     assert "**1.5%** is the cost of getting out at this size" in card and "partial exits do not add up" in card
-    assert "Nothing here prepares or submits a trade" in card
+    assert "Nothing here prepares or submits a trade" in card and "Quotes computed at slot 449450578" in card
 
 
 def test_a_failed_route_is_a_row_that_says_so(monkeypatch, chain):

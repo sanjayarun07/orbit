@@ -140,11 +140,14 @@ def token_holders(request: str) -> str:
         raise NoData("Mobula has no holder positions for this token")
     rows.sort(key=lambda r: _num(r.get("percentageOfTotalSupply")), reverse=True)
     top10 = sum(_num(r.get("percentageOfTotalSupply")) for r in rows[:10])
-    evidence.complete("mobula_token_holders", subject_env,
-                      {"positions_indexed": len(rows), "top10_pct_of_supply": round(top10, 2),
-                       "top10_definition": "sum of the ten largest indexed positions; pools, exchanges and burn addresses included",
-                       "largest": [{"wallet": r.get("walletAddress"), "pct": round(_num(r.get("percentageOfTotalSupply")), 4), "labels": _labels_of(r)[:3]} for r in rows[:10]]},
-                      [evidence.source("mobula", "token/holder-positions")])
+    env = evidence.complete("mobula_token_holders", subject_env,
+                            {"positions_indexed": len(rows), "top10_pct_of_supply": round(top10, 2),
+                             "top10_definition": "sum of the ten largest indexed positions; pools, exchanges and burn addresses included",
+                             "largest": [{"wallet": r.get("walletAddress"), "pct": round(_num(r.get("percentageOfTotalSupply")), 4), "labels": _labels_of(r)[:3]} for r in rows[:10]]},
+                            [evidence.source("mobula", "token/holder-positions")])
+    for r in rows[:15]:
+        env.add_anchor(evidence.record(str(r.get("walletAddress") or ""), "mobula", chain, at=r.get("lastTradeAt") or r.get("firstTradeAt"),
+                                       note=f"{_num(r.get('percentageOfTotalSupply')):.2f}% of supply, indexed position"))
     flagged: dict[str, int] = {}
     for row in rows:
         for label in _labels_of(row):
@@ -183,6 +186,16 @@ def token_trades(request: str) -> str:
         raise ValueError("No token address found in the request")
     address, chain = subject
     rows = _get("/token/trades", {"address": address, "blockchain": chain, "limit": 25})
+    trade_rows = [r for r in (rows or []) if isinstance(r, dict)]
+    if trade_rows:
+        env = evidence.complete("mobula_token_trades", {"kind": "token", "id": address, "chain": chain},
+                                {"trades": len(trade_rows), "buys": sum(1 for r in trade_rows if str(r.get("type") or "").lower() == "buy"),
+                                 "sells": sum(1 for r in trade_rows if str(r.get("type") or "").lower() == "sell")},
+                                [evidence.source("mobula", "token/trades")])
+        for r in trade_rows[:25]:
+            if r.get("transactionHash"):
+                env.add_anchor(evidence.tx(r["transactionHash"], "mobula", chain, at=r.get("date"),
+                                           note=f"{str(r.get('type') or '').lower()} {_usd(r.get('baseTokenAmountUSD'))} on {r.get('platform') or '?'}"))
     rows = [r for r in (rows or []) if isinstance(r, dict)]
     if not rows:
         raise NoData("Mobula has no indexed trades for this token")
@@ -432,6 +445,7 @@ class BundleAnalysis:
     tags: dict = field(default_factory=dict)
     second_of: dict = field(default_factory=dict)
     lookups_failed: int = 0         # attempted lookups whose call failed (rate limit, outage)
+    funding: dict = field(default_factory=dict)   # wallet -> {"from", "txHash", "date"}: the transaction each funding claim rests on
 
 
 def _bundle_analysis(address: str, chain: str) -> BundleAnalysis:
@@ -462,10 +476,12 @@ def _bundle_analysis(address: str, chain: str) -> BundleAnalysis:
     by_funder: dict[str, list[dict]] = {}
     tags: dict[str, str] = {}
     lookups_failed = sum(1 for info in funding if info is _LOOKUP_FAILED)
+    funding_of: dict[str, dict] = {}
     for row, info in zip(traced, funding):
         if info and info is not _LOOKUP_FAILED:
             funder = str(info["from"])
             by_funder.setdefault(funder, []).append(row)
+            funding_of[str(row.get("address") or "")] = {"from": funder, "txHash": info.get("txHash"), "date": info.get("date")}
             if info.get("fromWalletTag"):
                 tags[funder] = str(info["fromWalletTag"])
     clusters = sorted(((f, rows) for f, rows in by_funder.items() if len(rows) >= 2), key=lambda kv: -len(kv[1]))
@@ -493,7 +509,7 @@ def _bundle_analysis(address: str, chain: str) -> BundleAnalysis:
     else:
         level, verdict = "none", f"**None found in the sample**: the first {len(buyers)} buyers by time, with funding traced for the first {len(traced)}."
     return BundleAnalysis(
-        address=address, chain=chain, level=level, verdict=verdict, buyers=len(buyers), traced=len(traced), lookups_failed=lookups_failed,
+        address=address, chain=chain, level=level, verdict=verdict, buyers=len(buyers), traced=len(traced), lookups_failed=lookups_failed, funding=funding_of,
         grouped=sum(len(g) for g in groups), personal_funded=sum(len(r) for _, r in personal),
         strongest_group=strongest, overlap=overlap, groups=groups, clusters=clusters, personal=personal, tags=tags, second_of=second_of,
     )
@@ -524,13 +540,17 @@ def _render_bundle(a: BundleAnalysis) -> str:
             holding = sum(1 for r in rows if _num(r.get("currentBalance")) > 0)
             lines.append(f"| {_when_time(rows[0].get('firstHoldingDate'))} | {len(rows)} | {holding} | {retained(rows)} | {tagged} |")
     if a.clusters:
-        lines += ["", "## Shared funding sources", "| Funder | Known as | Wallets funded | Same second |", "|---|---|---:|---:|"]
+        lines += ["", "## Shared funding sources", "| Funder | Known as | Wallets funded | Same second | Funding transactions |", "|---|---|---:|---:|---|"]
         for funder, rows in a.clusters[:6]:
             seconds = [a.second_of.get(str(r.get("address"))) for r in rows]
             same = max((seconds.count(sec) for sec in set(seconds)), default=0)
             known = a.tags.get(funder) or ("system / burn" if _NOT_A_FUNDER.search(funder) else "—")
             counted = "" if not _impersonal(funder, a.tags.get(funder)) else " (not counted)"
-            lines.append(f"| `{_short(funder)}` | {known}{counted} | {len(rows)} | {same} |")
+            hashes = [(a.funding.get(str(r.get("address")) or "") or {}).get("txHash") for r in rows]
+            hashes = [h for h in hashes if h]
+            txs = ", ".join(f"[{h[:4]}…{h[-4:]}](https://solscan.io/tx/{h})" if a.chain == "solana" else f"`{h[:4]}…{h[-4:]}`" for h in hashes[:3])
+            txs += f" +{len(hashes) - 3}" if len(hashes) > 3 else ""
+            lines.append(f"| `{_short(funder)}` | {known}{counted} | {len(rows)} | {same} | {txs or '—'} |")
         lines += ["", "An exchange, the system program or a burn address funds strangers and is not counted; an untagged funder feeding several first buyers is the pattern to weigh."]
     lines += ["", "Source: [Mobula first buyers](https://docs.mobula.io/rest-api-reference/endpoint/wallet-first-buyers) and "
               "[wallet funding](https://docs.mobula.io/rest-api-reference/endpoint/wallet-funding)",
@@ -565,10 +585,28 @@ def bundle_evidence(a: BundleAnalysis) -> "evidence.Evidence":
     sources = [evidence.source("mobula", "token/first-buyers"), evidence.source("mobula", "wallet/funding")]
     attempted = 1 + a.traced
     if a.lookups_failed:
-        return evidence.partial("mobula_token_bundle", subject_env, data, sources, attempted=attempted, successful=attempted - a.lookups_failed,
-                                missing=[f"funding source of {a.lookups_failed} of {a.traced} early buyers"],
-                                errors=[{"operation": "wallet/funding", "reason": "lookup failed (rate limit or outage)", "count": a.lookups_failed}])
-    return evidence.complete("mobula_token_bundle", subject_env, data, sources, attempted=attempted)
+        env = evidence.partial("mobula_token_bundle", subject_env, data, sources, attempted=attempted, successful=attempted - a.lookups_failed,
+                               missing=[f"funding source of {a.lookups_failed} of {a.traced} early buyers"],
+                               errors=[{"operation": "wallet/funding", "reason": "lookup failed (rate limit or outage)", "count": a.lookups_failed}])
+    else:
+        env = evidence.complete("mobula_token_bundle", subject_env, data, sources, attempted=attempted)
+    # The anchors: the funding transaction behind every funding claim (a
+    # cluster that is not counted still rests on real transactions), and
+    # the first-holding time behind every same-second claim. Transactions
+    # first, so the cap never crowds them out.
+    for funder, rows in a.clusters:
+        counted = "" if not _impersonal(funder, a.tags.get(funder)) else ", not counted"
+        for r in rows:
+            wallet = str(r.get("address") or "")
+            info = a.funding.get(wallet) or {}
+            if info.get("txHash"):
+                env.add_anchor(evidence.tx(info["txHash"], "mobula", a.chain, at=info.get("date"), note=f"{wallet[:6]}… funded by {funder[:6]}…{counted}"))
+            else:
+                env.add_anchor(evidence.record(wallet, "mobula", a.chain, at=info.get("date"), note=f"funded by {funder[:6]}… (no transaction returned){counted}"))
+    for group in a.groups:
+        for r in group[:10]:
+            env.add_anchor(evidence.record(str(r.get("address") or ""), "mobula", a.chain, at=r.get("firstHoldingDate"), note="first held in a shared second"))
+    return env
 
 
 # Conviction a bundle read carries on its own. Bundling is a bearish fact

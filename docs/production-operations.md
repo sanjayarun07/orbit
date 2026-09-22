@@ -2290,3 +2290,28 @@ analyst can be trusted here is the evidence the proposition names: the
 launch's transactions and relationships, and the position's exit quote.
 The benchmark is the gate those additions have to pass. Re-label as the
 ledger grows; the runs under `evals/structure/runs/` are the record.
+
+## Evidence anchors (2026-09-23)
+
+An envelope's observations now carry anchors: where each can be verified
+without trusting us. An anchor is a transaction signature, a slot, or a
+provider record, with the provider's own time for the fact (`at`), kept
+apart from our collection time (`as_of`), and the envelope names the
+version of the code that read the provider's answer (`interpreter`).
+Built from fields the providers already return: Mobula's funding lookups
+carry a transaction hash and date, its trades a transaction hash, its
+holder positions a first and last trade time; every Jupiter quote carries
+`contextSlot`.
+
+Where they land: the bundle check anchors every shared-funder claim to
+the funding transaction (the card's "Shared funding sources" table links
+them on Solana) and every same-second claim to the first-holding time;
+the holders envelope anchors its top rows to the provider's records; the
+trades tool now records an envelope with one transaction anchor per
+trade; the exit monitor's quote rows carry the slot and the card says
+which slot the numbers came from; the deep dive's coverage rows count the
+anchors per dimension. Anchors are capped at 60 per envelope and travel
+in the public form, on the job row and beside the answer. A claim without
+an anchor is still a claim, marked as unanchored by `Evidence.anchored()`,
+never silently dropped. This is what the launch dossier will show as
+"the transactions supporting each inference".

@@ -31,6 +31,28 @@ _GAP_WORDS = ("unavailable", "not available", "failed", "could not", "couldn't",
               "partial", "missing", "did not complete", "no data", "not traced", "lookups failed", "left out")
 
 
+class Anchor(BaseModel):
+    """Where one observation can be verified without trusting us: a
+    transaction, a slot or block, a provider record, or a quote at a slot.
+    `at` is the provider's own time for the fact, never our collection time."""
+    kind: Literal["tx", "slot", "record", "quote"]
+    ref: str                                   # signature, slot number, record id (a wallet, a pool), quote id
+    provider: str
+    chain: str | None = None
+    at: str | None = None
+    note: str | None = None                    # what the anchor supports, in a few words
+
+    def link(self) -> str | None:
+        if self.kind == "tx" and self.chain == "solana":
+            return f"https://solscan.io/tx/{self.ref}"
+        if self.kind == "tx" and (self.chain or "").startswith("evm:"):
+            return None
+        return None
+
+
+MAX_ANCHORS = 60
+
+
 class Evidence(BaseModel):
     tool: str
     status: Status
@@ -39,7 +61,16 @@ class Evidence(BaseModel):
     sources: list[dict[str, Any]] = Field(default_factory=list)    # {"provider", "endpoint", "as_of"}
     coverage: dict[str, Any] = Field(default_factory=lambda: {"attempted": 0, "successful": 0, "missing": []})
     errors: list[dict[str, Any]] = Field(default_factory=list)     # {"operation", "reason", "count"?}
-    as_of: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    anchors: list[Anchor] = Field(default_factory=list)            # what each observation rests on (capped at MAX_ANCHORS)
+    interpreter: str = "2026-09-23.1"                              # the code version that read the provider's answer
+    as_of: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())    # collection time; anchors carry the provider's
+
+    def anchored(self) -> bool:
+        return bool(self.anchors)
+
+    def add_anchor(self, anchor: Anchor) -> None:
+        if len(self.anchors) < MAX_ANCHORS:
+            self.anchors.append(anchor)
 
     def gap(self) -> str:
         """One sentence naming what was not seen, for a card or an answer."""
@@ -57,9 +88,11 @@ class Evidence(BaseModel):
         return f"{head} from {self.tool}: " + "; ".join(parts) if parts else f"{head} from {self.tool}."
 
     def public(self) -> dict:
-        """What the API returns beside the answer: no bulk data."""
+        """What the API returns beside the answer: no bulk data, the anchors
+        that make the observations checkable."""
         return {"tool": self.tool, "status": self.status, "subject": self.subject, "sources": self.sources,
-                "coverage": self.coverage, "errors": self.errors, "as_of": self.as_of}
+                "coverage": self.coverage, "errors": self.errors, "as_of": self.as_of, "interpreter": self.interpreter,
+                "anchors": [a.model_dump(mode="json") for a in self.anchors[:MAX_ANCHORS]]}
 
 
 _registry: ContextVar[list[Evidence] | None] = ContextVar("evidence_registry", default=None)
@@ -73,7 +106,7 @@ def end_turn(token: Token) -> None:
     _registry.reset(token)
 
 
-def record(item: Evidence) -> Evidence:
+def keep(item: Evidence) -> Evidence:
     """Keep the envelope for whoever is listening this turn; return it."""
     bucket = _registry.get()
     if bucket is not None:
@@ -85,23 +118,35 @@ def collected() -> list[Evidence]:
     return list(_registry.get() or [])
 
 
+def tx(ref: str, provider: str, chain: str | None, at: str | None = None, note: str | None = None) -> Anchor:
+    return Anchor(kind="tx", ref=str(ref), provider=provider, chain=chain, at=at, note=note)
+
+
+def record(ref: str, provider: str, chain: str | None, at: str | None = None, note: str | None = None) -> Anchor:
+    return Anchor(kind="record", ref=str(ref), provider=provider, chain=chain, at=at, note=note)
+
+
+def slot(ref: int | str, provider: str, chain: str | None, at: str | None = None, note: str | None = None) -> Anchor:
+    return Anchor(kind="slot", ref=str(ref), provider=provider, chain=chain, at=at, note=note)
+
+
 def source(provider: str, endpoint: str | None = None) -> dict:
     return {"provider": provider, "endpoint": endpoint, "as_of": datetime.now(timezone.utc).isoformat()}
 
 
 def complete(tool: str, subject: dict, data: dict, sources: list[dict], attempted: int = 1) -> Evidence:
-    return record(Evidence(tool=tool, status="complete", subject=subject, data=data, sources=sources,
+    return keep(Evidence(tool=tool, status="complete", subject=subject, data=data, sources=sources,
                            coverage={"attempted": attempted, "successful": attempted, "missing": []}))
 
 
 def partial(tool: str, subject: dict, data: dict, sources: list[dict], *, attempted: int, successful: int,
             missing: list[str] | None = None, errors: list[dict] | None = None) -> Evidence:
-    return record(Evidence(tool=tool, status="partial", subject=subject, data=data, sources=sources,
+    return keep(Evidence(tool=tool, status="partial", subject=subject, data=data, sources=sources,
                            coverage={"attempted": attempted, "successful": successful, "missing": list(missing or [])}, errors=list(errors or [])))
 
 
 def unavailable(tool: str, subject: dict, reason: str, sources: list[dict] | None = None, attempted: int = 1) -> Evidence:
-    return record(Evidence(tool=tool, status="unavailable", subject=subject, sources=list(sources or []),
+    return keep(Evidence(tool=tool, status="unavailable", subject=subject, sources=list(sources or []),
                            coverage={"attempted": attempted, "successful": 0, "missing": [reason]}, errors=[{"operation": tool, "reason": reason}]))
 
 
