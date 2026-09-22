@@ -390,3 +390,45 @@ def test_an_http_400_whose_body_says_no_route_is_a_no_route(monkeypatch):
     assert exit_monitor._route_error(exc) == "no route"
     other = httpx.HTTPStatusError("Server error '502'", request=request, response=httpx.Response(502, text="bad gateway", request=request))
     assert exit_monitor._route_error(other) == "quote provider outage"
+
+
+# ---- the fifth review (2026-09-22): a failed background charge is retried ----
+
+def test_a_failed_background_charge_is_retried_even_though_the_message_exists(monkeypatch):
+    store: dict[str, list] = {}
+
+    async def append_turn(session_id, role, content, metadata=None):
+        store.setdefault(session_id, []).append({"role": role, "content": content, **(metadata or {})})
+    async def get_messages(session_id):
+        return list(store.get(session_id, []))
+    monkeypatch.setattr(sessions, "append_turn", append_turn)
+    monkeypatch.setattr(sessions, "get_messages", get_messages)
+    from app import credits
+    charges = {"n": 0}
+
+    async def charge_once(*a, **k):
+        charges["n"] += 1
+        if charges["n"] == 1:
+            raise RuntimeError("ledger unavailable")
+    monkeypatch.setattr(credits, "charge_once", charge_once)
+
+    async def handler(job, ctx):
+        return {"answer": "x"}
+    jobs.register("t", handler)
+    job = asyncio.run(jobs.create("t", {}, user_id="u1", account_id="acct", session_id="s"))
+    asyncio.run(jobs._set(job["id"], attached=False))
+    out = asyncio.run(jobs.run(job))                                                 # appended, charge failed: still pending
+    assert out["delivered"] is False and len(store["s"]) == 1 and store["s"][0]["delivered_by"] == "job"
+    with jobs._lock:
+        jobs._memory[job["id"]]["delivering_until"] = None
+    asyncio.run(jobs.maintain())                                                     # the retry charges, does not append again
+    assert charges["n"] == 2 and len(store["s"]) == 1 and asyncio.run(jobs.get(job["id"]))["delivered"] is True
+
+    # and a message the TURN committed is still never charged twice
+    store["t"] = [{"role": "assistant", "content": "x", "job_id": "job-turn"}]
+    turn_job = asyncio.run(jobs.create("t", {}, user_id="u1", account_id="acct", session_id="t"))
+    with jobs._lock:
+        jobs._memory[turn_job["id"]].update({"attached": False, "status": "succeeded", "result": {"answer": "x"}})
+        store["t"][0]["job_id"] = turn_job["id"]
+    asyncio.run(jobs.deliver(asyncio.run(jobs.get(turn_job["id"]))))
+    assert charges["n"] == 2 and asyncio.run(jobs.get(turn_job["id"]))["delivered"] is True
