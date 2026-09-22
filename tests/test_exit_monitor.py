@@ -100,7 +100,8 @@ def test_the_deterioration_alert_fires_once_per_cooldown_with_both_quotes(chain,
     asyncio.run(jobs.run(job))
     inbox = asyncio.run(tasks.inbox("u1"))
     assert len(inbox) == 1 and inbox[0]["kind"] == "exit_alert" and "deteriorated 33%" in inbox[0]["title"]
-    assert "quoted at $13.16, down 33.2% from $19.70" in inbox[0]["body"] and "not a price alert and not a sell instruction" in inbox[0]["body"]
+    assert inbox[0]["body"].startswith("Your full-position exit quote fell 33.2%. The reference price fell 30.0%, while the quote's discount to that reference widened from 1.5% to 6.0%.")
+    assert "now quoted at $13.16 (was $19.70 at" in inbox[0]["body"] and "not a price alert and not a sell instruction" in inbox[0]["body"]
     monkeypatch.setattr(exit_monitor, "simulate_swap", _sim(0.000010, 8.0))            # worse again, inside the cooldown
     asyncio.run(jobs.run(asyncio.run(jobs.get(job["id"]))))
     assert len(asyncio.run(tasks.inbox("u1"))) == 1

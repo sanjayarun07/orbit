@@ -22,6 +22,7 @@ with the two quotes side by side. Solana only, through Jupiter.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -55,11 +56,13 @@ CREATE TABLE IF NOT EXISTS exit_positions (
     quantity_raw NUMERIC NOT NULL DEFAULT 0,
     entry JSONB,
     last_alert JSONB,
+    rules JSONB,
     job_id TEXT,
     status TEXT NOT NULL DEFAULT 'active',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE exit_positions ADD COLUMN IF NOT EXISTS rules JSONB;
 CREATE INDEX IF NOT EXISTS exit_positions_user_idx ON exit_positions (user_id, created_at DESC);
 CREATE TABLE IF NOT EXISTS exit_quotes (
     id UUID PRIMARY KEY,
@@ -81,11 +84,12 @@ def _now() -> datetime:
 
 
 def reset_for_test() -> None:
-    global _ready
+    global _ready, QUOTE_GAP_S, RATE_LIMIT_PAUSES_S
     with _lock:
         _positions.clear()
         _history.clear()
     _ready = False
+    QUOTE_GAP_S, RATE_LIMIT_PAUSES_S = 0, (0, 0)                     # tests never wait on the quote pacing
 
 
 async def _pool():
@@ -144,6 +148,26 @@ async def _token_accounts_2022(wallet: str) -> dict:
     return await rpc("getTokenAccountsByOwner", [wallet, {"programId": TOKEN_2022_PROGRAM}, {"encoding": "jsonParsed", "commitment": "confirmed"}])
 
 
+RATE_LIMIT_PAUSES_S = (1.5, 3.0)
+QUOTE_GAP_S = 0.5
+
+
+async def _quote(input_mint: str, output_mint: str, amount_raw: int) -> dict:
+    """One Jupiter quote, paced and retried with backoff when the provider
+    rate-limits: a card of six quotes in a row hit the public limit live
+    (2026-09-23), and a limit is a delay, not a finding."""
+    for pause in (*RATE_LIMIT_PAUSES_S, None):
+        try:
+            result = await simulate_swap(input_mint, output_mint, amount_raw)
+            await asyncio.sleep(QUOTE_GAP_S)
+            return result
+        except Exception as exc:  # noqa: BLE001
+            if pause is None or _route_error(exc) != "quote provider rate-limited":
+                raise
+            await asyncio.sleep(pause)
+    raise RuntimeError("unreachable")
+
+
 async def quote_exit(mint: str, quantity_raw: int, fractions: tuple[float, ...] = FRACTIONS) -> list[dict]:
     """One exact-size sell quote to USDC per fraction. Each row stands alone:
     a failed route is a row that says so, never a missing row."""
@@ -154,7 +178,7 @@ async def quote_exit(mint: str, quantity_raw: int, fractions: tuple[float, ...] 
             rows.append({"fraction": fraction, "amount_raw": 0, "ok": False, "error": "nothing to sell"})
             continue
         try:
-            sim = await simulate_swap(mint, USDC_MINT, amount)
+            sim = await _quote(mint, USDC_MINT, amount)
         except Exception as exc:  # noqa: BLE001 - the quote's failure is the finding
             rows.append({"fraction": fraction, "amount_raw": amount, "ok": False, "error": _route_error(exc)})
             continue
@@ -226,6 +250,17 @@ def _usd(v) -> str:
     return "—" if v is None else f"${v:,.2f}"
 
 
+def _price(v) -> str:
+    """A unit price: two decimals above a dollar, four significant figures below."""
+    if v is None or v <= 0:
+        return "—"
+    if v >= 1:
+        return f"${v:,.2f}"
+    import math
+    decimals = 3 - math.floor(math.log10(v))                   # four significant figures, plain decimals
+    return f"${v:.{min(decimals, 12)}f}"
+
+
 def _qty(v) -> str:
     """Token quantities with thousands separators and no scientific notation."""
     if v is None:
@@ -288,6 +323,68 @@ def render_card(position: dict, rows: list[dict], entry: dict | None = None, his
 
 
 # ----------------------------------------------------------------------------
+# sizing before entry: entry quotes and immediate reverse exits
+# ----------------------------------------------------------------------------
+
+async def size_comparison(mint: str, usd_amounts: tuple[float, ...]) -> list[dict]:
+    """For each dollar amount: the entry quote (USDC to the token) and the
+    immediate reverse quote of exactly what that entry would receive. The
+    round trip is a liquidity diagnostic, never a forecast: it shows what
+    the book charges to enter and leave at that size right now."""
+    rows = []
+    for usd in usd_amounts:
+        amount_raw = int(round(usd * 1e6))
+        try:
+            entry = await _quote(USDC_MINT, mint, amount_raw)
+        except Exception as exc:  # noqa: BLE001
+            rows.append({"usd": usd, "ok": False, "error": _route_error(exc)})
+            continue
+        tokens_raw = int((entry.get("quote") or {}).get("outAmount") or 0)
+        row = {"usd": usd, "ok": True, "tokens": entry["output_amount"], "symbol": entry["output_token"].symbol,
+               "entry_price_usd": (usd / entry["output_amount"]) if entry.get("output_amount") else None,
+               "reference_price_usd": entry["output_token"].usd_price, "entry_impact_pct": entry["price_impact_pct"],
+               "entry_route": [(h.get("swapInfo") or {}).get("label") for h in (entry.get("quote") or {}).get("routePlan") or [] if isinstance(h, dict)],
+               "entry_slot": (entry.get("quote") or {}).get("contextSlot"), "quoted_at": _now().isoformat()}
+        if tokens_raw <= 0:
+            row.update({"exit_ok": False, "exit_error": "nothing received"})
+            rows.append(row)
+            continue
+        try:
+            back = await _quote(mint, USDC_MINT, tokens_raw)
+            row.update({"exit_ok": True, "exit_usdc": back["output_amount"], "exit_impact_pct": back["price_impact_pct"],
+                        "exit_route": [(h.get("swapInfo") or {}).get("label") for h in (back.get("quote") or {}).get("routePlan") or [] if isinstance(h, dict)],
+                        "exit_slot": (back.get("quote") or {}).get("contextSlot"),
+                        "round_trip_cost_pct": (1 - back["output_amount"] / usd) * 100 if back.get("output_amount") is not None else None})
+        except Exception as exc:  # noqa: BLE001
+            row.update({"exit_ok": False, "exit_error": _route_error(exc)})
+        rows.append(row)
+    return rows
+
+
+def render_sizes(symbol: str, mint: str, rows: list[dict]) -> str:
+    lines = [f"# Sizing — {symbol}", f"**Contract**: `{mint}` · **Quoted**: {_now().strftime('%Y-%m-%d %H:%M UTC')} · Jupiter, USDC in and out",
+             "", "| Buy | Tokens received | Entry price | Entry impact | Immediate exit | Round trip | Routes |", "|---:|---:|---:|---:|---:|---:|---|"]
+    for r in rows:
+        if not r.get("ok"):
+            lines.append(f"| {_usd(r['usd'])} | — | — | — | **{r.get('error', 'no quote')}** | — | — |")
+            continue
+        exit_cell = _usd(r["exit_usdc"]) if r.get("exit_ok") else f"**{r.get('exit_error', 'no route')}**"
+        rt = f"{r['round_trip_cost_pct']:.1f}%" if r.get("exit_ok") and r.get("round_trip_cost_pct") is not None else "—"
+        routes = (" → ".join(x for x in r.get("entry_route") or [] if x) or "—") + " / " + ((" → ".join(x for x in r.get("exit_route") or [] if x) or "—") if r.get("exit_ok") else "—")
+        lines.append(f"| {_usd(r['usd'])} | {_qty(r['tokens'])} | {_price(r['entry_price_usd'])} | {r['entry_impact_pct']:.2f}% | {exit_cell} | {rt} | {routes} |")
+    ok = [r for r in rows if r.get("ok") and r.get("exit_ok")]
+    if ok:
+        worst = max(ok, key=lambda r: r.get("round_trip_cost_pct") or 0)
+        lines += ["", f"The round trip is what the book charges to enter and leave at once: {worst['round_trip_cost_pct']:.1f}% at {_usd(worst['usd'])}, the largest size that quoted. "
+                      "It is a liquidity diagnostic, not a forecast and not a guaranteed result; a real exit happens later, on a different book."]
+    slots = sorted({str(r.get(k)) for r in rows for k in ("entry_slot", "exit_slot") if r.get(k)})
+    if slots:
+        lines.append(f"Quotes computed at slot {' and '.join(slots[:2])}{' …' if len(slots) > 2 else ''}.")
+    lines += ["", "Nothing here prepares or submits a trade."]
+    return "\n".join(lines)
+
+
+# ----------------------------------------------------------------------------
 # persistence
 # ----------------------------------------------------------------------------
 
@@ -296,9 +393,10 @@ def _from_db(r) -> dict:
     row["id"] = str(row["id"]).replace("-", "")
     row["user_id"] = str(row["user_id"]) if row.get("user_id") else None
     row["quantity_raw"] = int(row["quantity_raw"] or 0)
-    for key in ("entry", "last_alert"):
+    for key in ("entry", "last_alert", "rules"):
         if isinstance(row.get(key), str):
             row[key] = json.loads(row[key])
+    row["rules"] = row.get("rules") or {}
     for key in ("created_at", "updated_at"):
         if isinstance(row.get(key), datetime):
             row[key] = row[key].isoformat()
@@ -322,7 +420,7 @@ async def watch(user_id: str, wallet: str, mint: str, symbol: str | None, positi
     job = await jobs.create(KIND, {"position_id": position_id}, user_id=user_id,
                             next_run_at=_now() + timedelta(minutes=settings.exit_monitor_interval_minutes))
     row = {"id": position_id, "user_id": user_id, "wallet": wallet, "mint": position["mint"], "chain": "solana", "symbol": symbol,
-           "decimals": position["decimals"], "quantity_raw": position["quantity_raw"], "entry": entry,
+           "decimals": position["decimals"], "quantity_raw": position["quantity_raw"], "entry": entry, "rules": {},
            "last_alert": None, "job_id": job["id"], "status": "active", "created_at": _now().isoformat(), "updated_at": _now().isoformat()}
     try:
         pool = await _pool()
@@ -370,8 +468,8 @@ async def _update(position_id: str, **fields) -> None:
     if pool is not None:
         sets, args = [], []
         for i, (k, v) in enumerate(fields.items(), start=1):
-            sets.append(f"{k} = ${i}::jsonb" if k in ("entry", "last_alert") else f"{k} = ${i}")
-            args.append(json.dumps(v) if k in ("entry", "last_alert") else v)
+            sets.append(f"{k} = ${i}::jsonb" if k in ("entry", "last_alert", "rules") else f"{k} = ${i}")
+            args.append(json.dumps(v) if k in ("entry", "last_alert", "rules") else v)
         await pool.execute(f"UPDATE exit_positions SET {', '.join(sets)}, updated_at = NOW() WHERE id = ${len(args) + 1}", *args, uuid.UUID(position_id))
         return
     with _lock:
@@ -442,7 +540,66 @@ async def scrub_user(user_id: str) -> int:
 
 
 def public(row: dict) -> dict:
-    return {k: row.get(k) for k in ("id", "wallet", "mint", "chain", "symbol", "decimals", "quantity_raw", "entry", "last_alert", "status", "created_at", "updated_at")}
+    return {k: row.get(k) for k in ("id", "wallet", "mint", "chain", "symbol", "decimals", "quantity_raw", "entry", "last_alert", "rules", "status", "created_at", "updated_at")}
+
+
+async def set_rules(position_id: str, **rules) -> dict | None:
+    """Per-position alert rules: drop_pct (proceeds fall vs baseline),
+    discount_pct (the quote's discount to the reference price, absolute),
+    channel ("inapp" | "email"). None removes a rule."""
+    row = await get(position_id)
+    if row is None:
+        return None
+    merged = {**(row.get("rules") or {}), **rules}
+    merged = {k: v for k, v in merged.items() if v is not None}
+    await _update(position_id, rules=merged)
+    return {**row, "rules": merged}
+
+
+# ----------------------------------------------------------------------------
+# what changed: price, holding, the route's discount, or the data
+# ----------------------------------------------------------------------------
+
+def discount_pct(quote: dict | None) -> float | None:
+    """The quote's discount to the reference price: 1 - proceeds / marked value."""
+    if not quote or not quote.get("marked_value_usd") or quote.get("quoted_usdc") is None:
+        return None
+    return (1 - quote["quoted_usdc"] / quote["marked_value_usd"]) * 100
+
+
+def explain_change(baseline: dict | None, now: dict | None) -> dict | None:
+    """Decompose a change in full-exit proceeds into the reference price's
+    move and the route's discount widening (the holding is held constant by
+    the re-baseline rule; missing data is a separate state). The alert says
+    these apart instead of one percentage (product decision, 2026-09-23)."""
+    if not baseline or not now or not baseline.get("quoted_usdc") or now.get("quoted_usdc") is None:
+        return None
+    drop = (baseline["quoted_usdc"] - now["quoted_usdc"]) / baseline["quoted_usdc"] * 100
+    p0, p1 = baseline.get("reference_price_usd"), now.get("reference_price_usd")
+    price_change = ((p1 - p0) / p0 * 100) if p0 and p1 is not None else None
+    d0, d1 = discount_pct(baseline), discount_pct(now)
+    return {"drop_pct": drop, "price_change_pct": price_change, "discount_then_pct": d0, "discount_now_pct": d1,
+            "discount_widening_pts": (d1 - d0) if d0 is not None and d1 is not None else None,
+            "impact_then_pct": baseline.get("price_impact_pct"), "impact_now_pct": now.get("price_impact_pct"),
+            "route_then": [x for x in baseline.get("route") or [] if x], "route_now": [x for x in now.get("route") or [] if x]}
+
+
+def explain_sentence(change: dict) -> str:
+    parts = [f"Your full-position exit quote fell {change['drop_pct']:.1f}%."]
+    if change.get("price_change_pct") is not None:
+        pc = change["price_change_pct"]
+        parts.append(f"The reference price {'fell' if pc < 0 else 'rose'} {abs(pc):.1f}%")
+        if change.get("discount_widening_pts") is not None:
+            w = change["discount_widening_pts"]
+            parts[-1] += (f", while the quote's discount to that reference widened from {change['discount_then_pct']:.1f}% to {change['discount_now_pct']:.1f}%."
+                          if w > 0.05 else f"; the quote's discount to that reference did not widen ({change['discount_now_pct']:.1f}%).")
+        else:
+            parts[-1] += "."
+    route_then, route_now = " → ".join(change.get("route_then") or []) or "unknown", " → ".join(change.get("route_now") or []) or "unknown"
+    if route_then != route_now:
+        parts.append(f"The route changed from {route_then} to {route_now}.")
+    parts.append("Review the latest route and liquidity observations.")
+    return " ".join(parts)
 
 
 # ----------------------------------------------------------------------------
@@ -519,6 +676,9 @@ async def _maybe_alert(row: dict, rows: list[dict]) -> dict | None:
     baseline = (row.get("last_alert") or {}).get("quote") or full_exit(entry.get("rows") or [])
     if baseline is None:
         return None
+    rules = row.get("rules") or {}
+    drop_threshold = float(rules.get("drop_pct", settings.exit_alert_drop_pct))
+    discount_threshold = rules.get("discount_pct")
     last_at = (row.get("last_alert") or {}).get("at")
     if last_at and (_now() - datetime.fromisoformat(last_at)).total_seconds() < settings.exit_alert_cooldown_hours * 3600:
         return None
@@ -539,22 +699,50 @@ async def _maybe_alert(row: dict, rows: list[dict]) -> dict | None:
                 ". This compares Jupiter quotes for your exact size; it is not a sell instruction.")
         alert = {"at": _now().isoformat(), "quote": None, "baseline": baseline, "drop_pct": None, "kind": "no_route", "reason": reason}
     else:
-        drop = deterioration_pct(baseline, now_full)
-        if drop is None or drop < settings.exit_alert_drop_pct:
+        change = explain_change(baseline, now_full)
+        drop = change["drop_pct"] if change else None
+        now_discount = discount_pct(now_full)
+        by_drop = drop is not None and drop >= drop_threshold
+        by_discount = discount_threshold is not None and now_discount is not None and now_discount >= float(discount_threshold)
+        if not by_drop and not by_discount:
             return None
-        title = f"Exit for {symbol} deteriorated {drop:.0f}%"
-        body = (f"A full exit of your {symbol} position is now quoted at {_usd(now_full['quoted_usdc'])}, down {drop:.1f}% from {_usd(baseline['quoted_usdc'])} "
-                f"({baseline_at[:16].replace('T', ' ')} UTC). Price impact {now_full['price_impact_pct']:.2f}% now vs {baseline.get('price_impact_pct', 0):.2f}% then; "
-                f"route {' → '.join(x for x in now_full.get('route') or [] if x) or 'unknown'}. Marked value {_usd(now_full.get('marked_value_usd'))}. "
-                "This compares two Jupiter quotes for your exact size; it is not a price alert and not a sell instruction.")
-        alert = {"at": _now().isoformat(), "quote": now_full, "baseline": baseline, "drop_pct": round(drop, 2), "kind": "deterioration"}
+        if by_drop:
+            title = f"Exit for {symbol} deteriorated {drop:.0f}%"
+            body = (explain_sentence(change) + f" A full exit is now quoted at {_usd(now_full['quoted_usdc'])} (was {_usd(baseline['quoted_usdc'])} at "
+                    f"{baseline_at[:16].replace('T', ' ')} UTC); marked value {_usd(now_full.get('marked_value_usd'))}; price impact "
+                    f"{now_full['price_impact_pct']:.2f}% now vs {baseline.get('price_impact_pct', 0):.2f}% then. "
+                    "This compares two Jupiter quotes for your exact size; it is not a price alert and not a sell instruction.")
+            kind = "deterioration"
+        else:
+            title = f"Exit for {symbol}: discount {now_discount:.1f}%"
+            body = (f"A full exit of your {symbol} position is quoted at {_usd(now_full['quoted_usdc'])} against a marked value of {_usd(now_full.get('marked_value_usd'))}: "
+                    f"a {now_discount:.1f}% discount to the reference price, past your {float(discount_threshold):.1f}% rule. Price impact {now_full['price_impact_pct']:.2f}%; "
+                    f"route {' → '.join(x for x in now_full.get('route') or [] if x) or 'unknown'}. Not a price alert and not a sell instruction.")
+            kind = "discount"
+        alert = {"at": _now().isoformat(), "quote": now_full, "baseline": baseline, "drop_pct": round(drop, 2) if drop is not None else None,
+                 "discount_pct": round(now_discount, 2) if now_discount is not None else None, "kind": kind, "change": change}
     # One occurrence per baseline: a retry after a failed checkpoint notifies
     # with the same key and the inbox keeps one (review, 2026-09-22).
     occurrence = f"{row['id']}:{baseline.get('quoted_at') or baseline_at}:{alert['kind']}"
     if row.get("user_id"):
-        await tasks.notify(row["user_id"], title, body, kind="exit_alert", task_id=row["id"], occurrence=occurrence)
+        _item, new = await tasks.notify(row["user_id"], title, body, kind="exit_alert", task_id=row["id"], occurrence=occurrence)
+        if new and rules.get("channel") == "email":
+            await _email(row["user_id"], title, body)
     await _update(row["id"], last_alert=alert)
     return alert
+
+
+async def _email(user_id: str, title: str, body: str) -> None:
+    """The alert by email too, when the position's rules ask for it; the
+    inbox row is the delivery record, so this runs only when it was new."""
+    from app import accounts, emailer
+
+    try:
+        user = await accounts.get_user(user_id)
+        if user and user.get("email"):
+            await emailer.send_email(user["email"], f"{settings.product_name}: {title}", "<p>" + body.replace("\n", "<br>") + "</p>", text=body)
+    except Exception:
+        logger.warning("exit_monitor: email delivery failed for %s", user_id[:8], exc_info=True)
 
 
 jobs.register(KIND, monitor, version="2026-09-22.1", settings_keys=("exit_monitor_interval_minutes", "exit_alert_drop_pct", "exit_alert_cooldown_hours"))
