@@ -1,5 +1,6 @@
 """Fixes from the first beta user's logged turns (turn log, 2026-09-21)."""
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -105,7 +106,7 @@ def test_a_forecast_ask_is_answered_as_the_tape_not_refused(monkeypatch):
     monkeypatch.setattr(research.composition, "synthesize", synth)
     out = asyncio.run(research.research_node({"request": "What will happen for BTC in next 5-10 hours ?", "capabilities": ["web_research"], "chains": [], "session_context": {}}))
     joined = " | ".join(seen)
-    assert len(seen) == 4 and all("BTC" in r for r in seen) and "next 5-10 hours" not in joined      # one clause per tool
+    assert len(seen) == 3 and all("BTC" in r for r in seen) and "next 5-10 hours" not in joined      # one clause per tool
     assert "funding rate and open interest on Hyperliquid" in joined and "liquidations" in joined and "support and resistance" in joined
     assert out["answer"].startswith("Nobody's data says where BTC goes in the next 5-10 hours") and "price $85,821" in out["answer"]
 
@@ -137,3 +138,25 @@ def test_the_gate_keeps_a_partial_answer_and_names_the_gap(monkeypatch):
     out = asyncio.run(answer_gate.gate("BTC price, funding rate and open interest", {"answer": "# Bitcoin\n- **Price**: $85,349", "trajectory": {"tool_name_0": "coingecko_coin_snapshot"}}))
     assert out["answer"].startswith("# Bitcoin") and "Not covered by the sources this turn: funding rate and open interest" in out["answer"]
     assert out["answer_gate"]["resolved_by"] == "partial" and out["trajectory"]["tool_name_0"] == "coingecko_coin_snapshot"
+
+
+def test_the_desk_reads_the_tape_for_a_forecast_ask(monkeypatch):
+    from app.nodes import team
+
+    seen = {}
+
+    async def fake_research(state):
+        seen["request"] = state["request"]
+        return {"answer": "# BTC\nprice $86,400 · funding +0.006%", "trajectory": {"tool_name_0": "coingecko_coin_snapshot"}}
+    monkeypatch.setattr(team, "research_node", fake_research)
+    monkeypatch.setattr(team, "_resolve_research_asset", AsyncMock(side_effect=AssertionError("a forecast ask is not a chain resolution")))
+
+    async def synth(program, **kwargs):
+        seen["market_data"] = kwargs["market_data"]
+        return SimpleNamespace(thesis="Choppy, slight bullish bias.", conviction=5)
+    monkeypatch.setattr(team.runtime, "_call_lm", synth)
+    thesis, conviction, trajectory, pending = asyncio.run(team._market_research({"request": "What will happen for BTC in next 5-10 hours ?", "chains": [], "session_context": {}},
+                                                                                 "What will happen for BTC in next 5-10 hours ?"))
+    assert "on Hyperliquid" in seen["request"] and seen["market_data"].startswith("Nobody's data says where BTC goes in the next 5-10 hours")
+    assert "price $86,400" in seen["market_data"] and pending is None
+    assert thesis.startswith("Nobody's data says where BTC goes in the next 5-10 hours") and thesis.endswith("Choppy, slight bullish bias.")

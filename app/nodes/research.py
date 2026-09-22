@@ -1361,6 +1361,27 @@ _FORECAST_ASK = re.compile(r"\b(?:will\s+\S+\s+(?:go|be|move)\s+(?:up|down|highe
 _HORIZON = re.compile(r"\b(?:next|coming)\s+\d+\s*(?:-\s*\d+\s*)?(?:hours?|hrs?|days?|weeks?|months?)\b", re.I)
 
 
+def tape_for(request: str) -> tuple[str, str, str] | None:
+    """A forecast ask about a named asset as (frame, tape request, asset), or
+    None. The frame says nobody's data calls the horizon; the tape request is
+    four sentence-split asks (price and 24h change; funding and open interest
+    on Hyperliquid; liquidations; key levels), one per tool. Used by the
+    research node and the desk alike."""
+    if not _FORECAST_ASK.search(request or ""):
+        return None
+    named = _named_tickers(request) or _bare_symbols(request)
+    if not named:
+        return None
+    asset = named[-1]
+    horizon = _HORIZON.search(request)
+    when = (f"the {horizon.group(0)}" if horizon and not horizon.group(0).lower().startswith("the ") else horizon.group(0)) if horizon else "the short term"
+    frame = (f"Nobody's data says where {asset} goes in {when}, and I won't guess. Here is the tape right now, "
+             "which is what a short-term view has to be built on.")
+    tape = (f"{asset} price and 24h change. {asset} funding rate and open interest on Hyperliquid. "
+            f"{asset} key support and resistance levels and liquidations in the last 24 hours")
+    return frame, tape, asset
+
+
 _DEEPDIVE_STOP = _NAMED_STOP | {
     "MARKET", "MARKETS", "CRYPTO", "TOKEN", "COIN", "GOOD", "BUY", "INVEST",
     "PRICE", "CHART", "PROJECT", "THIS", "THAT", "SOL",
@@ -1722,22 +1743,12 @@ async def research_node(state: AgentState) -> dict:
     # funding and open interest, key levels and news, under a line that says
     # no one calls the next few hours. The question becomes a data question.
     tape_frame = None
-    if _FORECAST_ASK.search(request):
-        named = _named_tickers(request) or _bare_symbols(request)
-        if named:
-            asset = named[-1]
-            horizon = _HORIZON.search(request)
-            when = (f"the {horizon.group(0)}" if horizon and not horizon.group(0).lower().startswith("the ") else horizon.group(0)) if horizon else "the short term"
-            tape_frame = (f"Nobody's data says where {asset} goes in {when}, and I won't guess. Here is the tape right now, "
-                          "which is what a short-term view has to be built on.")
-            # Four asks in sentences, so the compound path routes each to its
-            # tool: the listed snapshot, Hyperliquid's funding and open
-            # interest, and the web for liquidations and levels.
-            request = (f"{asset} price and 24h change. {asset} funding rate and open interest on Hyperliquid. "
-                       f"{asset} liquidations in the last 24 hours. {asset} key support and resistance levels right now")
-            state = {**state, "request": request, "contextual_request": None,
-                     "capabilities": sorted(set(state.get("capabilities") or []) | {"market_data", "derivatives"})}
-            streaming.emit("status", text=f"Reading the tape for {asset}")
+    tape = tape_for(request)
+    if tape:
+        tape_frame, request, asset = tape
+        state = {**state, "request": request, "contextual_request": None,
+                 "capabilities": sorted(set(state.get("capabilities") or []) | {"market_data", "derivatives"})}
+        streaming.emit("status", text=f"Reading the tape for {asset}")
     if _PERSONAL_ASK.search(request) and not _mentions_asset(request):
         holdings = _remembered_holdings(state)
         if holdings:
@@ -1767,9 +1778,20 @@ async def research_node(state: AgentState) -> dict:
         # path, the cards combined and read together. One card and silence
         # for the rest is what this replaces.
         parts, extras = [], {}
-        for clause in clauses:
-            streaming.emit("status", text=f"Working on: {clause}")
-            part = await _research_node({**state, "request": clause, "contextual_request": None}, sink)
+        streaming.emit("status", text="Working on: " + " · ".join(c[:40] for c in clauses))
+
+        async def one(clause: str) -> dict:
+            # Each clause on its own path, all at once: a four-ask tape ran
+            # past the turn timeout when the asks were answered one by one
+            # (live, 2026-09-22). Order is kept when the results are read.
+            try:
+                return await _research_node({**state, "request": clause, "contextual_request": None}, sink)
+            except Exception:
+                logger.warning("compound ask clause failed: %r", clause[:60], exc_info=True)
+                return {"answer": "", "trajectory": None}
+
+        results = await asyncio.gather(*(one(clause) for clause in clauses))
+        for clause, part in zip(clauses, results):
             if part.get("answer") and not (part.get("trajectory") or {}).get("tool_name_0", "").startswith("_"):
                 streaming.emit("card", markdown=part["answer"], tool=(part.get("trajectory") or {}).get("tool_name_0"))
             parts.append((part.get("answer") or "", part.get("trajectory") or {}))

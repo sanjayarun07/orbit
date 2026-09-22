@@ -16,7 +16,7 @@ from app.jupiter import WRAPPED_SOL_MINT
 from app import streaming
 from app.nodes.state import AgentState, effective_request as _effective_request
 from app.nodes import runtime
-from app.nodes.research import research_node, _TOKEN_ADDRESS, _is_mirror, _chain_key, _resolve_named_token, _mentions_asset, _named_tickers, _SYMBOL_LIKE, _SYMBOL_STOP
+from app.nodes.research import research_node, tape_for, _TOKEN_ADDRESS, _is_mirror, _chain_key, _resolve_named_token, _mentions_asset, _named_tickers, _SYMBOL_LIKE, _SYMBOL_STOP
 from app import answer_gate, polymarket_odds, sentiment_analyst
 from app.token_resolve import clear_winner, token_candidates
 from app.nodes.trading import (
@@ -196,10 +196,27 @@ async def _market_research(state: AgentState, request: str) -> tuple[str, int | 
     trajectory = None
     pending_token = None
 
-    # Resolve the asset to a concrete (address, chain) so the providers have a
-    # real lookup target (they key off addresses, so a bare "should I buy SOL"
-    # otherwise returns thin data). On a hit, pull a real snapshot + holders.
-    mint, chain = await _resolve_research_asset(request, tuple(state.get("chains", [])))
+    # A forecast ask ("what will BTC do in the next 5 hours") is the tape,
+    # framed honestly, not a chain resolution of the ticker (live, 2026-09-22:
+    # the desk's fallback had nothing and the web answered instead).
+    tape = tape_for(request)
+    if tape:
+        frame, tape_request, asset = tape
+        streaming.emit("status", text=f"Reading the tape for {asset}")
+        try:
+            update = await research_node({**state, "request": tape_request, "contextual_request": None,
+                                          "capabilities": ["market_data", "derivatives"]})
+            market_data = f"{frame}\n\n{update.get('answer') or ''}".strip()
+            trajectory = update.get("trajectory")
+        except Exception:
+            logger.warning("team: tape research failed", exc_info=True)
+            market_data = ""
+        mint, chain = None, None
+    else:
+        # Resolve the asset to a concrete (address, chain) so the providers have a
+        # real lookup target (they key off addresses, so a bare "should I buy SOL"
+        # otherwise returns thin data). On a hit, pull a real snapshot + holders.
+        mint, chain = await _resolve_research_asset(request, tuple(state.get("chains", [])))
     if mint:
         market_data, asset_trajectory = await _asset_market_data(mint, chain or "solana")
         # Surface the per-source snapshot observations so the step-7 validator can
@@ -260,6 +277,9 @@ async def _market_research(state: AgentState, request: str) -> tuple[str, int | 
     except Exception:
         logger.warning("team: market research synthesis failed; using raw data", exc_info=True)
         thesis, conviction = market_data, None
+    if tape and thesis and not thesis.startswith(tape[0]):
+        # The honest frame leads the desk's read too, not only its evidence.
+        thesis = f"{tape[0]}\n\n{thesis}"
     return thesis, conviction, trajectory, None
 
 
