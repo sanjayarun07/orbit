@@ -77,4 +77,4 @@ def _profile_top10(card: str | None) -> float | None:
     return float(m.group(1)) if m else None
 
 
-jobs.register(KIND, inspect_holders)
+jobs.register(KIND, inspect_holders, version="2026-09-22.1", settings_keys=("mobula_base_url",))

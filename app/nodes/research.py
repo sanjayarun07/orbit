@@ -1609,7 +1609,8 @@ async def _deep_dive_job(job: dict, ctx: "jobs.JobContext") -> dict:
     }
 
 
-jobs.register("deep_dive", _deep_dive_job)
+jobs.register("deep_dive", _deep_dive_job, version="2026-09-22.1",
+              settings_keys=("model", "synthesis_model", "mobula_base_url", "job_volatile_max_age_seconds", "twitterapi_io_key", "polymarket_enabled"))
 
 
 # The knowledge synthesis saying the passages do not answer the question --

@@ -545,4 +545,4 @@ async def _maybe_alert(row: dict, rows: list[dict]) -> dict | None:
     return alert
 
 
-jobs.register(KIND, monitor)
+jobs.register(KIND, monitor, version="2026-09-22.1", settings_keys=("exit_monitor_interval_minutes", "exit_alert_drop_pct", "exit_alert_cooldown_hours"))

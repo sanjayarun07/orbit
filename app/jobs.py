@@ -64,11 +64,13 @@ CREATE TABLE IF NOT EXISTS jobs (
     attached BOOLEAN NOT NULL DEFAULT TRUE,
     delivered BOOLEAN NOT NULL DEFAULT FALSE,
     delivering_until TIMESTAMPTZ,
+    fingerprint TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     settled_at TIMESTAMPTZ
 );
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS delivering_until TIMESTAMPTZ;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS fingerprint TEXT;
 CREATE INDEX IF NOT EXISTS jobs_user_idx ON jobs (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS jobs_due_idx ON jobs (status, next_run_at, lease_until);
 CREATE TABLE IF NOT EXISTS job_events (
@@ -95,6 +97,7 @@ _memory: dict[str, dict] = {}
 _events: dict[str, list[dict]] = {}
 _lock = threading.Lock()
 _handlers: dict[str, Callable[["dict", "JobContext"], Awaitable[dict]]] = {}
+_assumptions: dict[str, tuple[str, tuple[str, ...]]] = {}     # kind -> (handler version, settings the cache depends on)
 _active: dict[str, asyncio.Task] = {}
 _worker_running = False
 _settled: dict[str, asyncio.Event] = {}      # attach() waits on these in-process
@@ -119,8 +122,24 @@ def bind_turn(user_id: str | None, account_id: str | None, session_id: str | Non
     return current_owner.set((user_id, account_id, session_id))
 
 
-def register(kind: str, handler: Callable[["dict", "JobContext"], Awaitable[dict]]) -> None:
+def register(kind: str, handler: Callable[["dict", "JobContext"], Awaitable[dict]], *, version: str = "1",
+             settings_keys: tuple[str, ...] = ()) -> None:
+    """A handler registers with the assumptions its cached evidence depends
+    on: its own version and the settings that shape what it fetches. They
+    make up the job's fingerprint (see `fingerprint`)."""
     _handlers[kind] = handler
+    _assumptions[kind] = (version, tuple(settings_keys))
+
+
+def fingerprint(kind: str, spec: dict) -> str:
+    """What a job's checkpoints were built under: kind, spec, handler
+    version and the named settings. A resumed job whose fingerprint no
+    longer matches the running code drops its cache and restarts its plan,
+    so evidence gathered under one set of assumptions is never mixed with
+    another (TradingAgents' checkpoint identity, adapted 2026-09-22)."""
+    version, keys = _assumptions.get(kind, ("1", ()))
+    basis = {"kind": kind, "spec": spec, "version": version, "settings": {k: getattr(settings, k, None) for k in keys}}
+    return hashlib.sha256(json.dumps(basis, sort_keys=True, default=str).encode()).hexdigest()[:32]
 
 
 def reset_for_test() -> None:
@@ -187,6 +206,7 @@ def _new_row(kind: str, spec: dict, *, user_id: str | None, account_id: str | No
         "status": "scheduled" if next_run_at else "queued", "spec": dict(spec or {}), "plan": [], "state": {}, "evidence": [],
         "operations": {}, "signals": [], "attempts": 0, "lease_id": None, "lease_until": None, "next_run_at": _iso(next_run_at),
         "question": None, "action_id": None, "result": None, "receipt_id": None, "error": None, "attached": True, "delivered": False, "delivering_until": None,
+        "fingerprint": fingerprint(kind, dict(spec or {})),
         "created_at": now.isoformat(), "updated_at": now.isoformat(), "settled_at": None,
     }
 
@@ -203,9 +223,9 @@ async def create(kind: str, spec: dict, *, user_id: str | None = None, account_i
     pool = await _pool()
     if pool is not None:
         await pool.execute(
-            "INSERT INTO jobs (id, user_id, account_id, session_id, kind, status, spec, next_run_at) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)",
-            uuid.UUID(row["id"]), row["user_id"], row["account_id"], row["session_id"], kind, row["status"], json.dumps(row["spec"]), next_run_at)
+            "INSERT INTO jobs (id, user_id, account_id, session_id, kind, status, spec, next_run_at, fingerprint) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)",
+            uuid.UUID(row["id"]), row["user_id"], row["account_id"], row["session_id"], kind, row["status"], json.dumps(row["spec"]), next_run_at, row["fingerprint"])
     else:
         with _lock:
             _memory[row["id"]] = row
@@ -499,6 +519,14 @@ async def run(row: dict) -> dict | None:
     if claimed is None:
         return None
     job, lease_id = claimed
+    current = fingerprint(job["kind"], job.get("spec") or {})
+    if job.get("fingerprint") != current:
+        # The assumptions changed since the checkpoints were written (a
+        # deploy, a setting): nothing cached may be reused.
+        job = await cas(job["id"], {"lease_id": lease_id, "status": "running"},
+                        {"plan": [], "state": {}, "operations": {}, "evidence": [], "signals": [], "fingerprint": current}) or job
+        await _event(job["id"], "reset", "Assumptions changed; the plan restarts without its cache",
+                     f"{(row.get('fingerprint') or 'none')[:12]} -> {current[:12]}")
     ctx = JobContext(job, lease_id)
     handler = _handlers.get(job["kind"])
     if handler is None:

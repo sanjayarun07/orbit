@@ -2238,3 +2238,23 @@ not a market fact and raises nothing.
 3. **No-route is read from the provider's body.** An HTTP 400 whose JSON
    says `COULD_NOT_FIND_ANY_ROUTE` is a no-route; a 502 with a text body is
    an outage.
+
+## Checkpoint fingerprints (2026-09-22)
+
+From TradingAgents' checkpoint identity, adapted. A job row carries a
+fingerprint of what its checkpoints were built under: kind, spec, the
+handler's declared version and the settings the handler names at
+registration (`jobs.register(kind, handler, version=..., settings_keys=...)`).
+At every claim the engine recomputes it; a mismatch (a deploy that bumped
+the handler version, a changed setting) drops the plan, state, operation
+cache, evidence and signals, records a `reset` event, and the plan
+restarts, so evidence gathered under one set of assumptions is never
+mixed with another. The deep dive names the model, the synthesis model,
+the Mobula host, the volatile-cache age and the sentiment and Polymarket
+switches; the exit monitor its interval, threshold and cooldown; the
+holders pilot the Mobula host. Bump a handler's version whenever its
+evidence shape changes.
+
+Also this pass: a background delivery retry charges even when its message
+already exists (`delivered_by = job` on the messages it writes); only a
+message the attached turn committed skips the charge.
