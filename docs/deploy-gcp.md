@@ -231,13 +231,110 @@ The tag that passed on staging, with `deploy/beta.env.example` and its own
 secrets on the production host, following the same steps. Never a tag
 staging did not run.
 
+## Shape A: managed Postgres and Redis (Cloud SQL and Memorystore)
+
+The same VM, the same API container and Caddy, with the two stores moved
+to Google's managed services. No application change: the app creates its
+own schema at startup, including `CREATE EXTENSION IF NOT EXISTS vector`,
+and needs a Redis with eviction off. The compose file for this shape is
+`docker-compose.managed.yml`, used **alone** (the base file insists on a
+password for the Postgres it would run itself). Steps 1 to 5 above are
+unchanged; this replaces steps 6 and 7 and adds the stores first. About
+$120 to $150 a month all in.
+
+### A1. Private connectivity, once
+
+Both stores get private addresses in the `default` network; the VM reaches
+them because it is in that network, and nothing else can.
+
+```bash
+gcloud services enable sqladmin.googleapis.com redis.googleapis.com servicenetworking.googleapis.com
+gcloud compute addresses create google-managed-services-default --global --purpose=VPC_PEERING --prefix-length=16 --network=default
+gcloud services vpc-peerings connect --service=servicenetworking.googleapis.com --ranges=google-managed-services-default --network=default
+```
+
+### A2. Cloud SQL for PostgreSQL 16
+
+Smallest dedicated shape, private IP only, daily backups with point-in-time
+recovery. The `vector` extension is available on Cloud SQL and the user you
+create below may install it, which the app does on first start.
+
+```bash
+gcloud sql instances create orbit-pg --database-version=POSTGRES_16 --tier=db-custom-1-3840 \
+  --region=us-central1 --network=projects/<project-id>/global/networks/default --no-assign-ip \
+  --storage-size=20GB --storage-auto-increase --backup-start-time=03:00 --enable-point-in-time-recovery \
+  --deletion-protection
+gcloud sql databases create orbit --instance=orbit-pg
+gcloud sql users create orbit --instance=orbit-pg --password=<generate with: openssl rand -hex 24>
+gcloud sql instances describe orbit-pg --format='value(ipAddresses[0].ipAddress)'     # the private address
+```
+
+(The password passes through your shell history with `--password`; run
+`history -d` on that line, or set it afterwards with
+`gcloud sql users set-password orbit --instance=orbit-pg --prompt-for-password`.)
+
+### A3. Memorystore for Redis 7
+
+One gigabyte is generous for sessions, turn locks, retained history and the
+counters. Eviction off is required, not a preference: a held turn lock that
+gets evicted lets a second caller into the same conversation. Snapshots
+every hour are the persistence Memorystore offers (the local stack uses an
+append-only log); a restart loses at most an hour of retained history.
+
+```bash
+gcloud redis instances create orbit-redis --region=us-central1 --tier=basic --size=1 \
+  --redis-version=redis_7_0 --network=projects/<project-id>/global/networks/default \
+  --redis-config maxmemory-policy=noeviction --persistence-mode=rdb --rdb-snapshot-period=1h
+gcloud redis instances describe orbit-redis --region=us-central1 --format='value(host,port)'
+```
+
+Use `--tier=standard` for a replicated instance with automatic failover
+when the beta grows past a handful of people.
+
+### A4. On the VM: the env file and up
+
+```bash
+cd ~/orbit && cp deploy/staging.env.example .env && chmod 600 .env && nano .env
+```
+
+Leave `POSTGRES_PASSWORD` blank and set, from A2 and A3:
+
+```
+DATABASE_URL=postgresql://orbit:<password>@<cloud-sql-private-ip>:5432/orbit?sslmode=require
+REDIS_URL=redis://<memorystore-host>:6379/0
+```
+
+Then the preflight from the image, and up with the managed file alone:
+
+```bash
+docker run --rm -v "$PWD/.env:/env:ro" ghcr.io/sanjayarun07/orbit:sha-<7 chars> python scripts/preflight.py /env
+docker compose -f docker-compose.managed.yml pull
+docker compose -f docker-compose.managed.yml up -d
+docker compose -f docker-compose.managed.yml logs -f caddy      # until "certificate obtained"
+curl -s https://staging.<yourdomain>/readyz | jq '{status, failed, degraded}'
+```
+
+`postgres` and `redis` in the readiness checks now describe the managed
+instances. Steps 8 to 12 are unchanged, with `-f docker-compose.managed.yml`
+in place of the two-file form; the nightly `pg_dump` in step 10 is replaced
+by Cloud SQL's own backups (`gcloud sql backups list --instance=orbit-pg`),
+and the disk snapshot then only protects the VM itself.
+
+### What to check once, after the first start
+
+- `docker compose -f docker-compose.managed.yml logs api | grep -i vector`
+  should not say the extension was unavailable; if it does, connect once
+  as the `orbit` user and run `CREATE EXTENSION vector;` by hand.
+- `gcloud redis instances describe orbit-redis --region=us-central1 --format='value(redisConfigs)'`
+  shows `maxmemory-policy=noeviction`.
+
 ## What is deliberately not here
 
 - No Secret Manager: for one VM, a `chmod 600 .env` on a disk only you can
   reach is the simpler control. Move secrets to Secret Manager when a second
   person or a second machine needs them.
-- No Cloud SQL or Memorystore: the Compose services are what the code was
-  tested against (pgvector image, Redis `noeviction`). Managed services come
-  with the Cloud Run move.
+- No Cloud Run: the API's background workers, its two local state files and
+  its proxy trust all need work before it can run there (the assessment of
+  2026-09-22 lists them). Managed stores alone are Shape A above.
 - No custom service account or Workload Identity: the VM makes no Google
   API calls.

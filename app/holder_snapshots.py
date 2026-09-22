@@ -40,7 +40,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from app import mobula_client
-from app.db import get_pg_pool
+from app.db import apply_schema, get_pg_pool
 from app.mobula_security import _CHAIN_NAMES
 from app.settings import settings
 from app.signals import Subject
@@ -135,8 +135,7 @@ async def _pool():
         return None
     if pool is not None and not _schema_ready:
         try:
-            async with pool.acquire() as conn:
-                await conn.execute(_TABLE_SQL)
+            await apply_schema(pool, _TABLE_SQL)
             _schema_ready = True
         except Exception:
             logger.warning("holder_snapshots: schema not ready; using memory store", exc_info=True)

@@ -26,7 +26,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
-from app.db import get_pg_pool
+from app.db import apply_schema, get_pg_pool
 from app.metrics import increment
 from app.settings import settings
 
@@ -126,8 +126,7 @@ async def _pool():
         return None
     if pool is not None and not _ready:
         try:
-            async with pool.acquire() as conn:
-                await conn.execute(_TABLE_SQL)
+            await apply_schema(pool, _TABLE_SQL)
             _ready = True
         except Exception:
             logger.warning("x_tweets: schema not ready; using memory store", exc_info=True)

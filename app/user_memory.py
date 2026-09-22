@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 
 import dspy
 
-from app.db import get_pg_pool, memory_is_the_store
+from app.db import apply_schema, get_pg_pool, memory_is_the_store
 from app.knowledge.embeddings import get_embedder
 from app.settings import settings
 
@@ -134,8 +134,7 @@ async def _pool():
     pool = await get_pg_pool()
     if pool is not None and not _schema_ready:
         try:
-            async with pool.acquire() as conn:
-                await conn.execute(_TABLE_SQL)
+            await apply_schema(pool, _TABLE_SQL)
             _schema_ready = True
         except Exception:
             logger.warning("user_memory: schema not ready; using memory store", exc_info=True)

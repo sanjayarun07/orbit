@@ -1,0 +1,68 @@
+# Managed stores: the API and Caddy on this host, Postgres and Redis elsewhere
+# (Cloud SQL and Memorystore, or any managed pair). Used ALONE, not layered:
+#
+#   docker compose -f docker-compose.managed.yml pull
+#   docker compose -f docker-compose.managed.yml up -d
+#
+# because the base file demands POSTGRES_PASSWORD at parse time for its own
+# Postgres, which this shape does not run. Set DATABASE_URL and REDIS_URL in
+# .env (private addresses; the stores must be reachable from this host's
+# network only). The API service here mirrors docker-compose.yml plus the
+# production overlay line for line -- tests/test_deploy_templates.py keeps
+# the hardening identical -- so the container that was tested is the one
+# that runs.
+#
+# What the managed stores must provide (see docs/deploy-gcp.md, "Shape A"):
+#   Postgres 16 with the pgvector extension allowed for the app's user
+#   (the app runs CREATE EXTENSION IF NOT EXISTS vector itself);
+#   Redis 7 with maxmemory-policy=noeviction (a held turn lock must never be
+#   evicted) and snapshot persistence.
+name: orbit
+
+services:
+  api:
+    image: ghcr.io/sanjayarun07/orbit:${ORBIT_IMAGE_TAG:-main}
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env to the managed Postgres}
+      REDIS_URL: ${REDIS_URL:?set REDIS_URL in .env to the managed Redis}
+      ALLOW_MEMORY_FALLBACK: "false"
+      # X-Forwarded-* is trusted from the private compose network only, where
+      # Caddy is the sole caller; the application-level rate limits key on the
+      # same proxy name.
+      FORWARDED_ALLOW_IPS: "*"
+      TRUSTED_PROXY_HOSTS: caddy
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-1}
+    volumes:
+      - orbit-data:/app/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      ORBIT_DOMAIN: ${ORBIT_DOMAIN:?set ORBIT_DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  orbit-data:
+  caddy-data:
+  caddy-config:

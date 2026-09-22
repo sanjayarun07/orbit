@@ -276,6 +276,39 @@ UPDATE chat_feedback f SET principal_id = 'user:' || s.user_id::text FROM user_c
 """
 
 
+SCHEMA_LOCK = "orbit-schema"
+
+
+async def apply_schema(pool, sql: str) -> None:
+    """Run schema statements (CREATE ... IF NOT EXISTS, ADD COLUMN IF NOT
+    EXISTS) under one deployment-wide advisory lock, in a transaction. Every
+    worker of every replica runs the same statements at startup; two of them
+    running at once deadlocked on a managed-store boot with two uvicorn
+    workers (2026-09-22). The lock serialises them; the statements are
+    idempotent, so the second runner finds everything in place."""
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", SCHEMA_LOCK)
+            await conn.execute(sql)
+
+
+class schema_lock:
+    """The same lock as a session-level context manager, for schema work
+    that cannot be one transaction (the knowledge schema tries the vector
+    extension and falls back)."""
+
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        await self.conn.execute("SELECT pg_advisory_lock(hashtext($1))", SCHEMA_LOCK)
+        return self.conn
+
+    async def __aexit__(self, *exc):
+        await self.conn.execute("SELECT pg_advisory_unlock(hashtext($1))", SCHEMA_LOCK)
+        return False
+
+
 def memory_is_the_store() -> bool:
     """Is process memory the configured store (no DATABASE_URL: tests and
     keyless dev), rather than a fallback for a database that is down? A
@@ -312,8 +345,7 @@ async def _initialize_pg_pool() -> asyncpg.Pool | None:
             min_size=settings.postgres_pool_min_size,
             max_size=settings.postgres_pool_max_size,
         )
-        async with _pg_pool.acquire() as conn:
-            await conn.execute(_PLANS_TABLE_SQL)
+        await apply_schema(_pg_pool, _PLANS_TABLE_SQL)
     except Exception:
         logger.warning("Postgres unavailable; falling back to in-memory plans")
         if _pg_pool is not None:

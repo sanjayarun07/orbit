@@ -2050,3 +2050,29 @@ definitions. Provider entitlements the report found missing are the
 operator's to decide: Bitquery answers 402 (credits), RootData wants a
 higher tier, most Nansen tools need `NANSEN-API-KEY` on the MCP side,
 Reddit and CoinMarketCap are unset.
+
+## Managed stores, and startup schema under one lock (2026-09-22)
+
+**Shape A.** `docker-compose.managed.yml` runs the API and Caddy on the
+host with Postgres and Redis elsewhere (Cloud SQL and Memorystore in
+`docs/deploy-gcp.md`). It is used alone, not layered: the base file
+demands `POSTGRES_PASSWORD` at parse time for the Postgres it would run,
+and Compose interpolates every file before merging, so an override cannot
+get past that guard. `tests/test_deploy_templates.py` keeps the managed
+file's API service identical to the local stack's in every hardening
+setting, so the tested container is the one that runs. Both env templates
+carry `DATABASE_URL` and `REDIS_URL` for this shape. What the managed
+stores must provide: Postgres 16 with the `vector` extension allowed for
+the app's user (the app creates it), and Redis 7 with
+`maxmemory-policy=noeviction` and snapshot persistence.
+
+**The deadlock.** The first boot of that shape with two uvicorn workers
+against one Postgres logged `DeadlockDetectedError`: both workers ran the
+same startup DDL at once. Seven sites ran schema statements on a bare
+connection (the base schema, five per-store schemas, the knowledge
+schema). All of them now go through `db.apply_schema`, which takes one
+deployment-wide advisory lock inside a transaction, or hold the same lock
+as a session lock where the sequence tries pgvector and falls back. Forty
+concurrent schema runs against a real Postgres, three rounds, produced no
+error. `tests/test_schema_lock.py` refuses any store that runs its
+`_TABLE_SQL` on a bare connection again.

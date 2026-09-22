@@ -154,7 +154,10 @@ SQL_EMBEDDING_TYPE = "SELECT udt_name FROM information_schema.columns WHERE tabl
 async def ensure_schema(pool, embedding_dim: int) -> bool:
     """Create the tables. Returns True when pgvector is available (native
     vector search), False when embeddings live in a float array."""
+    from app.db import schema_lock
+
     async with pool.acquire() as conn:
+      async with schema_lock(conn):          # one worker at a time (app/db.py)
         await conn.execute(DDL_BASE)
         try:
             await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")

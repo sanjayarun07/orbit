@@ -29,7 +29,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from app.db import get_pg_pool, memory_is_the_store
+from app.db import apply_schema, get_pg_pool, memory_is_the_store
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +104,7 @@ async def _pool():
         return None
     if pool is not None and not _ready:
         try:
-            async with pool.acquire() as conn:
-                await conn.execute(_TABLE_SQL)
+            await apply_schema(pool, _TABLE_SQL)
             _ready = True
         except Exception:
             logger.warning("turn_log: schema not ready; using memory store", exc_info=True)

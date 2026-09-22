@@ -24,7 +24,7 @@ from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
 
-from app.db import get_pg_pool, memory_is_the_store
+from app.db import apply_schema, get_pg_pool, memory_is_the_store
 from app.signals import Signal, Subject, SubjectSkip
 
 logger = logging.getLogger(__name__)
@@ -78,8 +78,7 @@ async def _pool():
         return None
     if pool is not None and not _schema_ready:
         try:
-            async with pool.acquire() as conn:
-                await conn.execute(_TABLE_SQL)
+            await apply_schema(pool, _TABLE_SQL)
             _schema_ready = True
         except Exception:
             logger.warning("decision_records: schema not ready; using memory store", exc_info=True)

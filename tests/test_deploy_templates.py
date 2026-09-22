@@ -48,3 +48,39 @@ def test_the_preflight_refuses_an_unfilled_template():
     assert run.returncode == 1, run.stdout + run.stderr
     assert "REFUSES TO BOOT" in run.stdout and "model-key-missing" in run.stdout
     assert "<staging.yourdomain.com>" not in run.stdout                    # values are never printed, placeholders included
+
+
+# ---- the managed-stores compose file runs the same hardened API container as the local stack
+
+def _compose(*paths):
+    import yaml
+
+    class _Loader(yaml.SafeLoader):
+        pass
+    _Loader.add_constructor("!reset", lambda loader, node: loader.construct_sequence(node) if isinstance(node, yaml.SequenceNode) else None)
+    merged: dict = {}
+    for path in paths:
+        doc = yaml.load((ROOT / path).read_text(), Loader=_Loader)
+        for name, svc in (doc.get("services") or {}).items():
+            target = merged.setdefault(name, {})
+            for key, value in svc.items():
+                if isinstance(value, dict) and isinstance(target.get(key), dict):
+                    target[key].update(value)
+                else:
+                    target[key] = value
+    return merged
+
+
+def test_the_managed_stores_compose_runs_the_same_api_container_as_the_local_stack():
+    local = _compose("docker-compose.yml", "docker-compose.prod.yml")
+    managed = _compose("docker-compose.managed.yml")
+    assert set(managed) == {"api", "caddy"}, "managed mode runs the API and Caddy only; the stores live elsewhere"
+    a, b = local["api"], managed["api"]
+    for key in ("image", "read_only", "tmpfs", "security_opt", "deploy", "volumes", "restart", "env_file"):
+        assert a[key] == b[key], key
+    for key in ("ALLOW_MEMORY_FALLBACK", "FORWARDED_ALLOW_IPS", "TRUSTED_PROXY_HOSTS", "UVICORN_WORKERS"):
+        assert a["environment"][key] == b["environment"][key], key
+    assert "postgres" in a["environment"]["DATABASE_URL"] and "redis:" in a["environment"]["REDIS_URL"]          # the local stack's own services
+    assert "${DATABASE_URL:?" in b["environment"]["DATABASE_URL"] and "${REDIS_URL:?" in b["environment"]["REDIS_URL"]   # managed: required, from .env
+    assert "depends_on" not in b and local["caddy"] == managed["caddy"]
+    assert "DATABASE_URL" in _keys("deploy/staging.env.example") and "REDIS_URL" in _keys("deploy/staging.env.example")
