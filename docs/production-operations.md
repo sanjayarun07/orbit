@@ -1949,3 +1949,27 @@ cache bumped to v11.
    backfills new ones with the prefix. Deletion reads the person's owned
    conversation ids before the mappings are removed and deletes ratings by
    those ids as well as by principal.
+
+## Fifth review of 2026-09-22: fallback copies
+
+A turn logged while Postgres was down stayed in the worker's memory with
+its words, and the account scrub returned after the database path without
+touching it. One rule now covers every store with a memory fallback (turn
+log, decision receipts, feedback, remembered facts), through
+`db.memory_is_the_store()`:
+
+- Memory is the store only when no `DATABASE_URL` is configured (tests,
+  keyless dev). Then it keeps words, and the scrubs sweep it.
+- When Postgres is configured and a write fails, the fallback copy keeps
+  no private content and no owner: the turn log keeps the operational row
+  with `[not persisted]`, a receipt is kept unowned, a rating is kept
+  without its comment or principal, a fact is not kept.
+- Every scrub (`turn_log.scrub_user`, `feedback.scrub_principal`,
+  `user_memory.clear`, `decision_records.forget_user`) sweeps this
+  process's memory as well as the database, and the Redis feedback keys of
+  the conversations owned. Account deletion calls all four.
+
+Production refuses to boot without `DATABASE_URL` (deployment audit), so
+the multi-worker case is always the second bullet: no worker ever holds a
+private fallback copy a deletion cannot reach. The trade is that during an
+outage the admin log shows no messages for those turns.

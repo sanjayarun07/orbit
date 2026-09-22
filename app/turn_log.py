@@ -29,7 +29,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from app.db import get_pg_pool
+from app.db import get_pg_pool, memory_is_the_store
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +196,13 @@ async def record(**fields) -> dict | None:
             return row
     except Exception:
         logger.warning("turn_log: could not persist; keeping in memory", exc_info=True)
+    if not memory_is_the_store():
+        # Postgres is configured and this write failed: keep the operational
+        # row (status, latency, tools, timing) and none of the person's words
+        # or identity, since a later deletion scrubs the database, not this
+        # worker's memory (review, 2026-09-22).
+        row.update({"message": "[not persisted]", "answer": None, "trajectory": None, "wallet": None, "user_id": None, "account_id": None,
+                    "session_id": None, "api_key_id": None})
     with _lock:
         _memory.appendleft(row)
     return row
@@ -423,9 +430,12 @@ async def scrub_user(user_id: str) -> int:
     do it, so the deletion stops (review, 2026-09-22)."""
     forget_user(user_id)
     pool = await _pool()
-    if pool is not None:
-        return await asyncio.wait_for(_scrub(pool, user_id), timeout=STORE_TIMEOUT_SECONDS * 4)
     n = 0
+    if pool is not None:
+        n = await asyncio.wait_for(_scrub(pool, user_id), timeout=STORE_TIMEOUT_SECONDS * 4)
+    # This process's memory copies too, whatever the database said: rows
+    # kept here while it was down (memory-only mode keeps words; otherwise
+    # they were stored without any) go with the deletion as well.
     with _lock:
         for row in _memory:
             if row.get("user_id") == user_id:

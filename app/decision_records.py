@@ -24,7 +24,7 @@ from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
 
-from app.db import get_pg_pool
+from app.db import get_pg_pool, memory_is_the_store
 from app.signals import Signal, Subject, SubjectSkip
 
 logger = logging.getLogger(__name__)
@@ -135,6 +135,11 @@ async def record(**fields) -> dict | None:
             return row
     except Exception:
         logger.warning("decision_records: could not persist; keeping in memory", exc_info=True)
+    if not memory_is_the_store():
+        # The database is the store and this write failed: the receipt stays
+        # for "why did you say that about X" but belongs to nobody, so a
+        # deletion that scrubs the database misses nothing here.
+        row = {**row, "user_id": None, "session_id": None}
     with _lock:
         _records.append(row)
         del _records[:-_MEMORY_LIMIT]
@@ -185,6 +190,15 @@ async def for_subject(subject_key: str, limit: int = 5, user_id: str | None = No
     with _lock:
         rows = [dict(r) for r in _records if r["subject_key"] == subject_key and (user_id is None or r.get("user_id") == user_id)]
     return list(reversed(rows))[:limit]
+
+
+def forget_user(user_id: str) -> int:
+    """Account deletion: this process's memory copies of the person's
+    receipts go (the database rows cascade with the user)."""
+    with _lock:
+        before = len(_records)
+        _records[:] = [r for r in _records if r.get("user_id") != user_id]
+        return before - len(_records)
 
 
 def public(row: dict) -> dict:

@@ -55,6 +55,10 @@ def _reset_account_stores(monkeypatch):
     from app.settings import settings as _settings
 
     monkeypatch.setattr(_settings, "followups_enabled", False)
+    # Memory is the suite's store (get_pg_pool is patched to None above); the
+    # developer's DATABASE_URL must not make every store treat that as an
+    # outage and strip the words the tests assert on.
+    monkeypatch.setattr(_settings, "database_url", None)
     monkeypatch.setattr(_settings, "answer_gate_enabled", False)
     # Cross-chat memory extracts with the model and embeds; tests opt in.
     monkeypatch.setattr(_settings, "user_memory_enabled", False)

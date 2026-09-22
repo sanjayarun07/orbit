@@ -198,6 +198,7 @@ class _Pool:
         return _Acq()
     async def execute(self, sql, *args):
         self.log.append("UNLOCKED " + sql.split("(")[0].strip()[:30])
+        return "UPDATE 1"
 
 
 def test_the_log_insert_for_a_user_runs_locked_in_a_transaction():
@@ -215,3 +216,89 @@ def test_the_scrub_takes_the_same_lock_then_marks_then_scrubs():
     pool = _Pool()
     assert asyncio.run(turn_log._scrub(pool, "u-1")) == 1
     assert pool.log == ["BEGIN", "SELECT pg_advisory_xact_lock", "INSERT INTO deleted_users", "UPDATE chat_turns SET message = '[deleted]'"[:40], "COMMIT"]
+
+
+# 5 (fifth review). a failed write keeps no private content in memory when Postgres is the store,
+# and every scrub sweeps this process's memory as well as the database
+class _FailingPool:
+    async def execute(self, *a, **k):
+        raise RuntimeError("db down")
+    async def fetch(self, *a, **k):
+        return []
+    def acquire(self):
+        pool = self
+        class _Acq:
+            async def __aenter__(self):
+                return pool
+            async def __aexit__(self, *a):
+                return False
+        return _Acq()
+    def transaction(self):
+        class _Tx:
+            async def __aenter__(self):
+                pass
+            async def __aexit__(self, *a):
+                return False
+        return _Tx()
+
+
+def _configured(monkeypatch, module, pool):
+    monkeypatch.setattr(settings, "database_url", "postgresql://db/orbit")
+    async def get():
+        return pool
+    monkeypatch.setattr(module, "_pool" if hasattr(module, "_pool") else "get_pg_pool", get)
+
+
+def test_a_turn_that_could_not_be_persisted_keeps_no_words_in_memory(monkeypatch):
+    _configured(monkeypatch, turn_log, _FailingPool())
+    identity = SimpleNamespace(kind="user", account_id="a", user={"id": "u-out"}, api_key=None, signed_in=True)
+    row = asyncio.run(turn_log.record(message="my private question", status="ok", latency_ms=7, identity=identity, session_id="s"))
+    assert row["message"] == "[not persisted]" and row["user_id"] is None and row["session_id"] is None and row["latency_ms"] == 7
+    assert turn_log._memory[0]["message"] == "[not persisted]"
+
+
+def test_the_scrub_sweeps_memory_copies_even_when_the_database_answers(monkeypatch):
+    identity = SimpleNamespace(kind="user", account_id="a", user={"id": "u-mem"}, api_key=None, signed_in=True)
+    asyncio.run(turn_log.record(message="kept while memory was the store", status="ok", latency_ms=1, identity=identity))   # memory-only mode
+    assert turn_log._memory[0]["message"].startswith("kept")
+    _configured(monkeypatch, turn_log, _Pool())                                              # the database is back
+    assert asyncio.run(turn_log.scrub_user("u-mem")) == 2                                    # one database row (fake) + one memory row
+    assert turn_log._memory[0]["message"] == "[deleted]" and turn_log._memory[0]["user_id"] is None
+
+
+def test_a_receipt_that_could_not_be_persisted_belongs_to_nobody(monkeypatch):
+    from app import decision_records
+    from app.signals import Subject
+    _configured(monkeypatch, decision_records, _FailingPool())
+    row = asyncio.run(decision_records.record(kind="deep_dive", subject=Subject(kind="token", id="Y" * 32, chain="solana"), signals=[], verdict="v", user_id="u-r", session_id="s"))
+    assert row["user_id"] is None and row["session_id"] is None
+    monkeypatch.setattr(settings, "database_url", None)
+    asyncio.run(decision_records.record(kind="deep_dive", subject=Subject(kind="token", id="Y" * 32, chain="solana"), signals=[], verdict="v", user_id="u-r"))
+    assert decision_records.forget_user("u-r") == 1 and asyncio.run(decision_records.list_for("u-r")) == []
+
+
+def test_a_rating_saved_while_the_database_was_down_carries_no_comment_or_owner(monkeypatch):
+    async def turn(session_id, revision):
+        return {"trajectory": {}}
+    monkeypatch.setattr(feedback, "_turn", turn)
+    async def nothing(*a, **k):
+        return None
+    monkeypatch.setattr(feedback, "_load", nothing)
+    monkeypatch.setattr(settings, "database_url", "postgresql://db/orbit")               # configured, pool None = down
+    asyncio.run(feedback.rate("s-down", 1, "down", "my private comment", "acct", principal_id="user:me"))
+    saved = feedback._memory[("s-down", 1)]
+    assert saved["rating"] == "down" and saved["comment"] is None and saved["principal_id"] is None
+    _configured(monkeypatch, feedback, _Pool())                                          # the database is back at deletion time
+    assert asyncio.run(feedback.scrub_principal("user:me", ["s-down"])) == 2 and ("s-down", 1) not in feedback._memory
+
+
+def test_a_fact_is_not_remembered_in_memory_while_the_store_is_down(monkeypatch):
+    from app import user_memory
+    monkeypatch.setattr(settings, "database_url", "postgresql://db/orbit")
+    asyncio.run(user_memory._insert("u-f", {"id": "f1", "fact": "holds 3 SOL", "kind": "holding", "confidence": 0.9, "embedding": [0.0]}))
+    assert asyncio.run(user_memory.list_facts("u-f")) == []
+    monkeypatch.setattr(settings, "database_url", None)
+    asyncio.run(user_memory._insert("u-f", {"id": "f2", "fact": "holds 3 SOL", "kind": "holding", "confidence": 0.9, "embedding": [0.0]}))
+    _configured(monkeypatch, user_memory, _Pool())                                       # the database is back at deletion time
+    assert asyncio.run(user_memory.clear("u-f")) == 2                                    # one database row (fake) + the memory copy
+    assert all(f.get("deleted_at") for f in user_memory._facts["u-f"])

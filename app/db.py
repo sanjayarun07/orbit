@@ -276,6 +276,16 @@ UPDATE chat_feedback f SET principal_id = 'user:' || s.user_id::text FROM user_c
 """
 
 
+def memory_is_the_store() -> bool:
+    """Is process memory the configured store (no DATABASE_URL: tests and
+    keyless dev), rather than a fallback for a database that is down? A
+    store may keep a person's words in memory only in the first case. When
+    Postgres is configured and a write fails, the memory copy keeps no
+    private content and no owner -- a deletion later scrubs the database,
+    and cannot reach a fallback copy on another worker (review, 2026-09-22)."""
+    return not settings.database_url
+
+
 async def get_pg_pool() -> asyncpg.Pool | None:
     # Startup reconcilers and requests may all arrive together. DDL/pool
     # initialization must occur once, not race across those tasks.

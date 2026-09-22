@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 
 import dspy
 
-from app.db import get_pg_pool
+from app.db import get_pg_pool, memory_is_the_store
 from app.knowledge.embeddings import get_embedder
 from app.settings import settings
 
@@ -169,6 +169,12 @@ async def _insert(user_id: str, fact: dict) -> None:
         await pool.execute("INSERT INTO user_memories (id, user_id, fact, kind, confidence, embedding, source_session) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)",
                            fact["id"], user_id, fact["fact"], fact["kind"], fact["confidence"], json.dumps(fact["embedding"]), fact.get("source_session"))
         return
+    if not memory_is_the_store():
+        # Postgres is configured and unavailable: a fact about the person is
+        # not kept in a worker's memory, where a later deletion cannot reach
+        # it (review, 2026-09-22). Losing one fact is harmless.
+        logger.info("user_memory: store unavailable; fact not kept")
+        return
     with _lock:
         _facts.setdefault(user_id, []).append(fact)
 
@@ -204,18 +210,19 @@ async def forget(user_id: str, fact_id: str) -> bool:
 
 
 async def clear(user_id: str) -> int:
+    n = 0
     pool = await _pool()
     if pool is not None:
         status = await pool.execute("UPDATE user_memories SET deleted_at = NOW() WHERE user_id = $1 AND deleted_at IS NULL", user_id)
         try:
-            return int(status.rsplit(" ", 1)[-1])
+            n = int(status.rsplit(" ", 1)[-1])
         except ValueError:
-            return 0
-    with _lock:
+            n = 0
+    with _lock:      # and this process's copies, whatever the database said
         live = [f for f in _facts.get(user_id, []) if not f.get("deleted_at")]
         for fact in live:
             fact["deleted_at"] = datetime.now(timezone.utc).isoformat()
-        return len(live)
+        return n + len(live)
 
 
 def reset_for_test() -> None:

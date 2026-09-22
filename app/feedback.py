@@ -15,7 +15,7 @@ import json
 import logging
 
 from app import tool_outcomes
-from app.db import get_pg_pool, get_redis
+from app.db import get_pg_pool, get_redis, memory_is_the_store
 from app.sessions import get_messages
 
 logger = logging.getLogger(__name__)
@@ -61,6 +61,11 @@ async def _save(session_id: str, revision: int, record: dict, account_id: str | 
             session_id, revision, record["rating"], record.get("comment"), account_id, record["tools"], record.get("principal_id"),
         )
         return
+    if not memory_is_the_store():
+        # Postgres is configured and unavailable: the rating and the tools it
+        # rated are kept for the operator, the comment and the owner are not
+        # (a deletion scrubs the database, not a fallback copy; review, 2026-09-22).
+        record = {**record, "comment": None, "principal_id": None}
     redis = await get_redis()
     if redis is not None:
         await redis.set(f"chat_feedback:{session_id}:{revision}", json.dumps(record), ex=_TTL)
@@ -118,14 +123,24 @@ async def scrub_principal(principal_id: str, session_ids: list[str] | tuple[str,
     from before principal_id existed may carry no owner). Raises when the
     store cannot do it, so the deletion stops rather than pretends."""
     owned = list(session_ids or [])
+    n = 0
     pool = await get_pg_pool()
     if pool is not None:
         status = await pool.execute("DELETE FROM chat_feedback WHERE principal_id = $1 OR session_id = ANY($2::text[])", principal_id, owned)
-        return int(status.split()[-1]) if status and status.split()[-1].isdigit() else 0
+        n = int(status.split()[-1]) if status and status.split()[-1].isdigit() else 0
+    # The fallback copies as well, whatever the database said: this
+    # process's memory, and the Redis keys of the conversations owned.
     doomed = [k for k, v in _memory.items() if v.get("principal_id") == principal_id or k[0] in owned]
     for k in doomed:
         del _memory[k]
-    return len(doomed)
+    n += len(doomed)
+    redis = await get_redis()
+    if redis is not None and owned:
+        for session_id in owned:
+            keys = [k async for k in redis.scan_iter(match=f"chat_feedback:{session_id}:*")]
+            if keys:
+                n += int(await redis.delete(*keys) or 0)
+    return n
 
 
 async def rating_for(session_id: str, revision: int) -> str:
