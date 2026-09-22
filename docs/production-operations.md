@@ -2258,3 +2258,35 @@ evidence shape changes.
 Also this pass: a background delivery retry charges even when its message
 already exists (`delivered_by = job` on the messages it writes); only a
 message the attached turn committed skips the charge.
+
+## The structure benchmark (2026-09-22): the first numbers
+
+TradingAgents' evaluation runner, adapted to our own data. `scripts/
+structure_benchmark.py label` reads the holder ledger: each well-recorded
+subject becomes a case whose evidence is its FIRST snapshot and whose
+outcome is decided by the snapshots in the next 24 hours -- concentration
+up ten points, liquidity down to under 30%, price down to under 30% --
+each label present only when both ends recorded the field. Three arms
+run on the same saved evidence: deterministic rules (`app/structure_rules.py`),
+one grounded analyst, and the analyst plus an independent critic. The
+runner scores recall on bad outcomes, false alerts on clean ones, unknown
+fields, latency and model calls, and names the misses.
+
+First run, 279 cases (34 bad, 237 clean, 8 unknown) and a stratified 20:
+
+| Arm | Recall on bad | False alerts on clean | Model calls |
+|---|---|---|---|
+| rules, all 279 | 9% | 5% | 0 |
+| rules, 20 | 10% | 10% | 0 |
+| analyst, 20 | 100% | 100% | 20 |
+| analyst + critic, 20 | 80% | 90% | 40 |
+
+The reading is plain: on a decision-time structure snapshot alone, the
+analyst flags everything and the rules flag almost nothing; neither
+discriminates, and the critic buys a little precision at double the cost.
+So a structural verdict from the first snapshot is not a risk assessment
+and must not be presented as one. What the product needs before an
+analyst can be trusted here is the evidence the proposition names: the
+launch's transactions and relationships, and the position's exit quote.
+The benchmark is the gate those additions have to pass. Re-label as the
+ledger grows; the runs under `evals/structure/runs/` are the record.
