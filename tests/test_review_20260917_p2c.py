@@ -112,7 +112,9 @@ def _redis_server(policy: str):
         pytest.skip("redis-server not installed; lock behaviour under memory pressure is UNVERIFIED in this run")
     port = _free_port()
     proc = subprocess.Popen([binary, "--port", str(port), "--bind", "127.0.0.1", "--save", "", "--appendonly", "no",
-                             "--maxmemory", "1mb", "--maxmemory-policy", policy],
+                             # 4 MB, not 1: redis-server 7 on Ubuntu idles near 1 MB, so a 1 MB
+                             # cap left allkeys-lru nothing to evict and it refused the first write (CI, 2026-09-22).
+                             "--maxmemory", "4mb", "--maxmemory-policy", policy],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     deadline = time.time() + 5
     while time.time() < deadline:

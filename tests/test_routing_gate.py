@@ -41,6 +41,17 @@ def _snapshot():
         result = warm_knowledge_snapshot()
         if asyncio.iscoroutine(result):
             asyncio.run(result)
+        if kb_tool.snapshot() is None or len(kb_tool.snapshot()) == 0:
+            # No knowledge base in this run (CI has no database): the anchor
+            # is built from a fixture of the ingested entities -- names,
+            # aliases, types -- so the gate judges the same vocabulary the
+            # app resolves against. Refresh with scripts/kb_fixture.py.
+            import json as _json
+            import time as _time
+            from app.knowledge.entities import EntityResolver
+            from app.knowledge.models import Entity
+            rows = _json.loads((ROOT / "tests" / "fixtures" / "kb_entities.json").read_text())
+            kb_tool._resolver_cache = (_time.monotonic() + 3600, EntityResolver([Entity(**r) for r in rows]))
         assert kb_tool.snapshot() is not None and len(kb_tool.snapshot()) > 0, "the knowledge snapshot must be warm for the gate to mean anything"
         yield
     finally:

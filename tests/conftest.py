@@ -2,9 +2,23 @@
 API-key stores (the anonymous trial is keyed on the test client's IP, so
 without this one test could exhaust the next one's credits), plus a helper
 that signs a TestClient in through the magic-link flow."""
-import pytest
+import os
 
-from app import accounts, api_keys, billing, credits, tasks
+# The suite describes a deployment with its providers configured: which tools
+# register, how they rank, that admin routes answer 401 not 503. On a
+# developer machine the .env supplies the keys; CI has no .env, and every
+# push from 2026-09-17 to 2026-09-22 failed on exactly those tests. A
+# placeholder makes each provider "configured" and nothing more -- the
+# fixtures below block the network, and a test that reached it would fail
+# on the placeholder rather than pass. Real values in the environment win.
+for _key in ("OPENAI_API_KEY", "ADMIN_API_KEY", "MOBULA_API_KEY", "GOLDRUSH_API_KEY", "BITQUERY_API_KEY", "PERPLEXITY_API_KEY", "COINGECKO_API_KEY",
+             "BIRDEYE_API_KEY", "HELIUS_API_KEY", "GOPLUS_ACCESS_TOKEN", "NANSEN_API_KEY", "ROOTDATA_API_KEY", "JUPITER_API_KEY", "RELAY_API_KEY",
+             "COINMARKETCAP_API_KEY", "DUNE_API_KEY"):
+    os.environ.setdefault(_key, "test-placeholder")
+
+import pytest  # noqa: E402
+
+from app import accounts, api_keys, billing, credits, tasks  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

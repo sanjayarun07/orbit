@@ -1973,3 +1973,31 @@ Production refuses to boot without `DATABASE_URL` (deployment audit), so
 the multi-worker case is always the second bullet: no worker ever holds a
 private fallback copy a deletion cannot reach. The trade is that during an
 outage the admin log shows no messages for those turns.
+
+## Staging, and a CI that had never passed (2026-09-22)
+
+**CI.** Every push from 2026-09-17 to 2026-09-22 failed, first at the
+editable install (setuptools saw `deploy/`, `docker/`, `reports/` and
+refused to guess the package; `pyproject.toml` now names `app`), then on the
+tests that describe a configured deployment: which tools register, how
+they rank, that admin routes answer 401. The developer's `.env` supplied
+those keys; CI had none. `tests/conftest.py` now sets a placeholder for
+each provider key that is absent, the network stays blocked by the same
+fixtures as before, and the routing gate builds its knowledge anchor from
+`tests/fixtures/kb_entities.json` (2,664 entities from the ingested KB,
+refreshed with `scripts/kb_fixture.py`) when no database exists. The
+throwaway redis of the memory-pressure test runs at 4 MB, because Ubuntu's
+redis-server idles near the 1 MB it was capped at. Until this, no image had
+ever been published to `ghcr.io/sanjayarun07/orbit`, the image
+`docker-compose.prod.yml` pulls.
+
+**Staging is production with a different name.** `ENVIRONMENT=staging` is
+audited exactly like `production` (`deployment.STRICT_ENVIRONMENTS`): every
+fatal finding above is fatal on staging. `deploy/staging.env.example` is
+the beta template with its own hostname, a pinned image tag, swaps off
+(`research`), and a $5 rehearsal cap for when they are switched on;
+`tests/test_deploy_templates.py` keeps the two templates' keys identical
+and both passing the audit. `scripts/preflight.py <env-file>` runs the
+audit on the host before `compose up`, names every provider that is and is
+not configured, and exits 1 on a fatal finding. The runbook is in
+`docs/product/operations.md` under "Staging".

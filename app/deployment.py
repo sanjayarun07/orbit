@@ -150,8 +150,14 @@ def require_custodial_signing(config: Settings | None = None) -> None:
 _LOCAL_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "::1")
 
 
+STRICT_ENVIRONMENTS = ("production", "staging")
+
+
 def _is_production(config: Settings) -> bool:
-    return (getattr(config, "environment", "development") or "").strip().lower() == "production"
+    """Production and staging are held to the same gates: staging exists to
+    rehearse production, so a convenience that would be fatal there is fatal
+    here too. Only the name differs, in logs and /readyz."""
+    return (getattr(config, "environment", "development") or "").strip().lower() in STRICT_ENVIRONMENTS
 
 
 def audit(config: Settings | None = None) -> list[ConfigProblem]:

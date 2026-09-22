@@ -81,6 +81,12 @@ def _warm_knowledge_snapshot() -> None:
         import asyncio
         from app.knowledge import tool as kb_tool
 
+        held = kb_tool.snapshot()
+        if held is not None and len(held) > 0:
+            # Already warm (the suite seeds it from a fixture when there is
+            # no database); rebuilding from an absent store would empty it.
+            print(f"knowledge snapshot: {len(held)} entities (already warm)")
+            return
         resolver = asyncio.run(kb_tool.resolver(force=True))
         print(f"knowledge snapshot: {len(resolver)} entities")
     except Exception as exc:  # no database, empty registry: kb-* cases will abstain
