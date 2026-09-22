@@ -332,7 +332,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         if task_reply is not None:
             from app.graph import AgentRun
             # No trajectory: a task control is a plain (1-credit) turn, not a tool turn.
-            run = AgentRun(answer=task_reply, trajectory=None, trade_plan=None, intent="general", capabilities=[])
+            run = AgentRun(answer=task_reply, trajectory=None, trade_plan=None, intent="general", capabilities=[], control=True)
             turn_evidence = []
         else:
             # The user's TradingView token is bound to this turn (None when
@@ -436,7 +436,13 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
                 logger.debug("chart card skipped", exc_info=True)
                 return None
 
-        chart, suggestions = await asyncio.gather(_chart(), followups.generate(body.message, answer, run.intent, plan))
+        async def _related():
+            # A command about the user's own tasks or positions is not a
+            # research subject: "who operates this wallet" was offered under
+            # the user's own exit card (live, 2026-09-22).
+            return [] if getattr(run, "control", False) else await followups.generate(body.message, answer, run.intent, plan)
+
+        chart, suggestions = await asyncio.gather(_chart(), _related())
         if memory_user and user_memory.enabled() and plan is None:
             # Off the turn's critical path: the answer is already written.
             background(user_memory.extract(memory_user, session_id, body.message, answer, run.intent))

@@ -432,3 +432,39 @@ def test_a_failed_background_charge_is_retried_even_though_the_message_exists(mo
         store["t"][0]["job_id"] = turn_job["id"]
     asyncio.run(jobs.deliver(asyncio.run(jobs.get(turn_job["id"]))))
     assert charges["n"] == 2 and asyncio.run(jobs.get(turn_job["id"]))["delivered"] is True
+
+
+# ---- from the first user run (2026-09-22): the card's wording and the related questions ----
+
+def test_the_card_never_reports_a_negative_cost_and_never_compares_the_entry_with_itself(chain, monkeypatch):
+    pos = asyncio.run(exit_monitor.position_of(WALLET, MINT))
+    monkeypatch.setattr(exit_monitor, "simulate_swap", _sim(0.00002, 0.0))
+    rows = asyncio.run(exit_monitor.quote_exit(MINT, pos["quantity_raw"]))
+    for r in rows:
+        r["quoted_usdc"] = r["marked_value_usd"] * 1.004                                # the route pays slightly above the mark
+    watched = asyncio.run(exit_monitor.watch("u1", WALLET, MINT, "BONK", pos, rows))
+    card = exit_monitor.render_card({**watched, **pos}, rows, watched["entry"])          # what "watch" renders: no history yet
+    assert "no measurable cost of getting out at this size" in card and "is the cost" not in card
+    assert "Since you started watching" not in card
+    hist = [{"taken_at": "2026-09-22T18:00:00+00:00", "quantity_raw": pos["quantity_raw"], "quotes": rows}, {"taken_at": "2026-09-22T17:00:00+00:00", "quantity_raw": pos["quantity_raw"], "quotes": rows}]
+    later = exit_monitor.render_card({**watched, **pos}, rows, watched["entry"], hist)      # a later quote exists: the comparison shows
+    assert "Since you started watching" in later
+
+
+def test_a_control_reply_gets_no_related_questions(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import execution_policy, followups, main
+    from tests.conftest import sign_in
+
+    monkeypatch.setattr(settings, "followups_enabled", True)
+    calls = []
+
+    async def generate(*a, **k):
+        calls.append(a)
+        return ["a question"]
+    monkeypatch.setattr(followups, "generate", generate)
+    client = TestClient(main.app)
+    sign_in(client)
+    r = client.post("/chat", json={"message": "show my exits"})
+    assert r.status_code == 200 and r.json()["answer"].startswith("You are not watching any exits") and r.json()["suggestions"] == []
+    assert calls == []

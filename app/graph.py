@@ -85,6 +85,7 @@ class AgentRun:
     answer_gate: dict | None = None
     job_id: str | None = None
     job_attached: bool = False
+    control: bool = False       # a reply to a command about the user's own things (tasks, watched exits): no related questions
 
     def __iter__(self):
         """Retain compatibility with callers unpacking the original three values."""
