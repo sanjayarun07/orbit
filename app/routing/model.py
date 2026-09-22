@@ -13,7 +13,9 @@ class SpeechResolution(dspy.Signature):
     SOL?', 'is X a good buy', 'compare BONK and WIF for me'.
     research: a factual lookup about markets, tokens, protocols, wallets, news
     or prices -- 'why is PEPE dumping', 'best exchange for SOL', 'what would it
-    cost to bridge 1 ETH to Base'.
+    cost to bridge 1 ETH to Base'. Launch forensics on a token ('is BONK
+    bundled', 'who sniped WIF', 'coordinated buys on X') are token research,
+    never a general web question.
     explain: a request to understand a concept or how something works, with no
     specific asset to look up -- 'explain what TVL means', 'how do perpetual
     futures work?', 'How do I trade meme coins?'.

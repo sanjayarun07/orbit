@@ -1390,5 +1390,19 @@
     "expected_intent": "research",
     "router": false,
     "notes": "market-wide advice with no asset: composed from movers, volume, sentiment and news, read together; never a quote (2026-09-17)"
+  },
+  {
+    "id": "bundle-ticker-ask",
+    "query": "is BONK bundled? run a bundle check",
+    "expected_tools": [
+      "mobula_token_bundle"
+    ],
+    "forbidden_tools": [
+      "perplexity_web_search",
+      "jupiter"
+    ],
+    "expected_intent": "research",
+    "router": false,
+    "notes": "symbol -> verified-Solana canonical -> bitquery (needs research_node resolution)"
   }
 ]

@@ -1478,9 +1478,17 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
     # repeats a paid call. The turn stays attached for job_attach_seconds.
     user_id, account_id, session_id = jobs.current_owner.get()
     charter = (state.get("session_context") or {}).get("risk_charter")
-    job = await jobs.create("deep_dive", {"request": request, "address": address, "chain": chain, "symbol": symbol, "charter": charter},
-                            user_id=user_id, account_id=account_id, session_id=session_id)
+    spec = {"request": request, "address": address, "chain": chain, "symbol": symbol, "charter": charter}
     streaming.emit("status", text=f"Composing the evidence bundle for {symbol or address}")
+    try:
+        job = await jobs.create("deep_dive", spec, user_id=user_id, account_id=account_id, session_id=session_id)
+    except jobs.StoreUnavailable:
+        # The durable store is down: answer now, in memory, and say so.
+        # Nothing is kept and nothing resumes (review, 2026-09-22).
+        logger.warning("jobs store unavailable; running the deep dive ephemerally", exc_info=True)
+        result = await jobs.run_ephemeral("deep_dive", spec, user_id=user_id)
+        result["answer"] = (result.get("answer") or "") + "\n\n_The research store was unavailable, so this run was not recorded and cannot be resumed._"
+        return result
     row = await jobs.attach(job["id"], on_event=lambda e: streaming.emit("status", text=e["title"]))
     status = row.get("status")
     if status == "succeeded" and isinstance(row.get("result"), dict):
@@ -1989,7 +1997,10 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     # A security ask that names no token at all ("honeypot check", "is it a
     # rug") cannot be answered by guessing a token; the tools need a contract
     # and a chain. Asked, not guessed.
-    if "token_security" in set(state.get("capabilities", [])) and not _TOKEN_ADDRESS.search(request) and not _named_tickers(request):
+    # A bare symbol beside a data word ("is BONK bundled") names a token the
+    # same way the resolver reads it (answer eval, 2026-09-22).
+    names_a_token = bool(_named_tickers(request) or (_bare_symbols(request) if _DATA_ASK.search(request) else []))
+    if "token_security" in set(state.get("capabilities", [])) and not _TOKEN_ADDRESS.search(request) and not names_a_token:
         # "is it audited?" / "audit report?" right after a token turn: the
         # token in the conversation's focus is the subject (2026-09-18: the
         # question was asked back although ANSEM had just been resolved).

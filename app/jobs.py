@@ -106,6 +106,13 @@ class LostLease(RuntimeError):
     """The lease is gone: paused, cancelled, taken over, or the account deleted."""
 
 
+class StoreUnavailable(RuntimeError):
+    """Postgres is configured and cannot be reached: a durable job cannot be
+    created (review, 2026-09-22: memory silently stood in and the job
+    vanished on restart, or became unfindable once the database returned).
+    Callers that must still answer run an ephemeral job (`run_ephemeral`)."""
+
+
 def bind_turn(user_id: str | None, account_id: str | None, session_id: str | None):
     return current_owner.set((user_id, account_id, session_id))
 
@@ -134,18 +141,25 @@ def _iso(value: datetime | None) -> str | None:
 
 
 async def _pool():
+    """The pool, None when memory is the configured store, and StoreUnavailable
+    when Postgres is configured but down: durable jobs never fall back."""
     global _ready
     try:
         pool = await get_pg_pool()
-    except Exception:
-        return None
-    if pool is not None and not _ready:
+    except Exception as exc:
+        if memory_is_the_store():
+            return None
+        raise StoreUnavailable(f"jobs store unavailable: {type(exc).__name__}") from exc
+    if pool is None:
+        if memory_is_the_store():
+            return None
+        raise StoreUnavailable("jobs store unavailable: no database connection")
+    if not _ready:
         try:
             await apply_schema(pool, _TABLE_SQL)
             _ready = True
-        except Exception:
-            logger.warning("jobs: schema not ready; using memory store", exc_info=True)
-            return None
+        except Exception as exc:
+            raise StoreUnavailable(f"jobs schema not ready: {type(exc).__name__}") from exc
     return pool
 
 
@@ -239,10 +253,18 @@ async def _event(job_id: str, kind: str, title: str, detail: str | None = None) 
         _events.setdefault(job_id, []).append(entry)
 
 
-async def cas(job_id: str, expected: dict, patch: dict) -> dict | None:
+_MERGE = ("operations",)                 # dict columns merged key by key
+_APPEND = ("evidence", "signals")          # list columns appended to
+
+
+async def cas(job_id: str, expected: dict, patch: dict, merge: dict | None = None, append: dict | None = None) -> dict | None:
     """Apply `patch` only if every `expected` column still holds; the fresh row,
-    or None when someone else got there first."""
+    or None when someone else got there first. `merge` adds keys into a dict
+    column and `append` adds items to a list column atomically in the
+    database (jsonb ||), so concurrent checkpoints never overwrite each
+    other's entries (review, 2026-09-22: two concurrent operations kept one)."""
     patch = {**patch, "updated_at": _now()}
+    merge, append = dict(merge or {}), dict(append or {})
     pool = await _pool()
     if pool is not None:
         sets, args, n = [], [], 1
@@ -252,17 +274,29 @@ async def cas(job_id: str, expected: dict, patch: dict) -> dict | None:
             else:
                 sets.append(f"{key} = ${n}"); args.append(value)
             n += 1
+        for key, value in merge.items():
+            sets.append(f"{key} = COALESCE({key}, '{{}}'::jsonb) || ${n}::jsonb"); args.append(json.dumps(value)); n += 1
+        for key, value in append.items():
+            sets.append(f"{key} = COALESCE({key}, '[]'::jsonb) || ${n}::jsonb"); args.append(json.dumps(list(value))); n += 1
         wheres = [f"id = ${n}"]; args.append(uuid.UUID(job_id)); n += 1
         for key, value in expected.items():
             wheres.append(f"{key} IS NOT DISTINCT FROM ${n}"); args.append(value); n += 1
         r = await pool.fetchrow(f"UPDATE jobs SET {', '.join(sets)} WHERE {' AND '.join(wheres)} RETURNING *", *args)
         return _from_db(r) if r else None
+    return _memory_cas(job_id, expected, patch, merge, append)
+
+
+def _memory_cas(job_id: str, expected: dict, patch: dict, merge: dict, append: dict) -> dict | None:
     with _lock:
         row = _memory.get(job_id)
         if row is None or any(row.get(k) != v for k, v in expected.items()):
             return None
         for key, value in patch.items():
             row[key] = value.isoformat() if isinstance(value, datetime) else (json.loads(json.dumps(value)) if key in _JSON and value is not None else value)
+        for key, value in merge.items():
+            row[key] = {**(row.get(key) or {}), **json.loads(json.dumps(value))}
+        for key, value in append.items():
+            row[key] = [*(row.get(key) or []), *json.loads(json.dumps(list(value)))]
         return json.loads(json.dumps(row))
 
 
@@ -285,11 +319,15 @@ class JobContext:
     def id(self) -> str:
         return self.job["id"]
 
+    _ephemeral = False
+
     async def guard(self) -> None:
         """Raise LostLease unless this lease still owns a running job whose
         owner still exists."""
         if self.signal.is_set():
             raise LostLease("cancelled")
+        if self._ephemeral:
+            return
         latest = await get(self.id)
         if latest is None or latest.get("lease_id") != self.lease_id or latest.get("status") != "running":
             self.signal.set()
@@ -301,10 +339,14 @@ class JobContext:
                 raise LostLease("account deleted")
         self.job = latest
 
-    async def checkpoint(self, **patch) -> dict:
+    async def checkpoint(self, merge: dict | None = None, append: dict | None = None, **patch) -> dict:
         if self.signal.is_set():
             raise LostLease("cancelled")
-        fresh = await cas(self.id, {"lease_id": self.lease_id, "status": "running"}, patch)
+        if self._ephemeral:
+            fresh = _memory_cas(self.id, {}, {**patch, "updated_at": _now()}, merge or {}, append or {})
+            self.job = fresh or self.job
+            return self.job
+        fresh = await cas(self.id, {"lease_id": self.lease_id, "status": "running"}, patch, merge=merge, append=append)
         if fresh is None:
             self.signal.set()
             raise LostLease("lease lost at checkpoint")
@@ -313,6 +355,8 @@ class JobContext:
 
     async def event(self, kind: str, title: str, detail: str | None = None) -> None:
         await self.guard()
+        if self._ephemeral:
+            return
         await _event(self.id, kind, title, detail)
 
     async def plan(self, steps: list[str]) -> list[dict]:
@@ -333,7 +377,8 @@ class JobContext:
             if s["id"] == step_id and s["status"] != "done":
                 s["status"], s["started_at"] = "running", _now().isoformat()
         await self.checkpoint(plan=plan)
-        await _event(self.id, "step", title or next((s["title"] for s in plan if s["id"] == step_id), step_id))
+        if not self._ephemeral:
+            await _event(self.id, "step", title or next((s["title"] for s in plan if s["id"] == step_id), step_id))
 
     async def finish_step(self, step_id: str, note: str | None = None) -> None:
         plan = [dict(s) for s in self.job.get("plan") or []]
@@ -358,17 +403,16 @@ class JobContext:
         result = factory()
         if asyncio.iscoroutine(result) or isinstance(result, asyncio.Future):
             result = await result
-        operations = {**(self.job.get("operations") or {}), key: {"name": name, "result": _jsonable(result), "at": _now().isoformat(),
-                                                                  "cost_usd": cost_usd, "volatile": volatile}}
-        await self.checkpoint(operations=operations)
-        return operations[key]["result"]
+        entry = {"name": name, "result": _jsonable(result), "at": _now().isoformat(), "cost_usd": cost_usd, "volatile": volatile}
+        await self.checkpoint(merge={"operations": {key: entry}})       # one key, merged; concurrent calls keep each other's
+        return entry["result"]
 
     async def add_evidence(self, item: dict) -> None:
-        await self.checkpoint(evidence=[*(self.job.get("evidence") or []), item])
+        await self.checkpoint(append={"evidence": [item]})
 
     async def add_signal(self, signal: Any) -> None:
         dumped = signal.model_dump(mode="json") if hasattr(signal, "model_dump") else signal
-        await self.checkpoint(signals=[*(self.job.get("signals") or []), dumped])
+        await self.checkpoint(append={"signals": [_jsonable(dumped)]})
 
     async def ask(self, question: str) -> None:
         """Pause for the user: the question goes to the conversation, the
@@ -457,14 +501,22 @@ async def run(row: dict) -> dict | None:
         return await _settle(ctx, "failed", error=f"no handler for kind {job['kind']!r}")
     await _event(job["id"], "resumed" if job["attempts"] > 1 else "started", f"attempt {job['attempts']}")
     heartbeat = asyncio.create_task(_heartbeat(ctx))
-    from app import evidence as _evidence
+    from app import decision_records, evidence as _evidence
+    from app.integrations import tradingview
 
     envelopes = _evidence.start_turn()          # every tool the handler calls records beside its card
+    # The job runs as its owner: their TradingView connection and their
+    # receipts, exactly as the request that started it (review, 2026-09-22).
+    # An owned job binds its owner; an anonymous job keeps whatever the
+    # caller bound (an inline run inside a request keeps that request's).
+    owner = job.get("user_id")
+    tv_bound = await tradingview.bind_turn(owner) if owner else None
+    receipts_bound = decision_records.bind_turn(owner) if owner else None
     try:
         result = await handler(job, ctx)
         recorded = [e.public() for e in _evidence.collected()]
         if recorded:
-            await ctx.checkpoint(evidence=[*(ctx.job.get("evidence") or []), *recorded])
+            await ctx.checkpoint(append={"evidence": recorded})
         return await _settle(ctx, "succeeded", result=result)
     except _Paused:
         return await get(job["id"])
@@ -490,6 +542,10 @@ async def run(row: dict) -> dict | None:
                                                                           "error": f"{type(exc).__name__}: {exc}"[:2000]})
         return await get(job["id"])
     finally:
+        if tv_bound is not None:
+            tradingview.current_token.reset(tv_bound)
+        if receipts_bound is not None:
+            decision_records.current_user.reset(receipts_bound)
         _evidence.end_turn(envelopes)
         heartbeat.cancel()
         _active.pop(job["id"], None)
@@ -534,26 +590,41 @@ async def deliver(job: dict) -> None:
     """A settled job that outlived its request: the answer goes to the
     conversation and the credits are charged once, keyed by the job id.
     Idempotent through `delivered`."""
-    if job.get("status") not in TERMINAL or job.get("delivered") or job.get("attached", True):
+    if job.get("status") not in TERMINAL or job.get("delivered") or (job.get("attached", True) and not _attachment_expired(job)):
         return
     from app import credits, sessions
 
+    # Claim the delivery first (CAS on delivered = false), so two replicas or
+    # a maintenance pass racing a settle never both append; on any failure the
+    # claim is released and the next pass retries (review, 2026-09-22).
+    claimed = await cas(job["id"], {"delivered": False, "status": job["status"]}, {"delivered": True})
+    if claimed is None:
+        return
     answer = ((job.get("result") or {}).get("answer") if isinstance(job.get("result"), dict) else None) or (
         f"The {job['kind'].replace('_', ' ')} could not be completed: {job.get('error') or job['status']}.")
-    if job.get("session_id"):
-        try:
-            await sessions.append_turn(job["session_id"], "assistant", answer, {"job_id": job["id"], "kind": job["kind"]})
-        except Exception:
-            logger.warning("job %s: could not append its answer to session", job["id"], exc_info=True)
-            return
-    if job.get("account_id") and job.get("status") == "succeeded":
-        cost = _cost_of(job["kind"])
-        if cost:
-            try:
+    try:
+        if job.get("session_id"):
+            already = any(m.get("job_id") == job["id"] for m in await sessions.get_messages(job["session_id"]))
+            if not already:
+                await sessions.append_turn(job["session_id"], "assistant", answer, {"job_id": job["id"], "kind": job["kind"]})
+        if job.get("account_id") and job.get("status") == "succeeded":
+            cost = _cost_of(job["kind"])
+            if cost:
                 await credits.charge_once(job["account_id"], cost, f"job:{job['kind']}", "job", job["id"], {"kind": job["kind"]})
-            except Exception:
-                logger.warning("job %s: credit charge failed", job["id"], exc_info=True)
-    await _set(job["id"], delivered=True)
+    except Exception:
+        logger.warning("job %s: delivery failed; will retry", job["id"], exc_info=True)
+        await cas(job["id"], {"delivered": True}, {"delivered": False})
+
+
+def _attachment_expired(job: dict) -> bool:
+    """A request cannot still be attached past the attach window plus a
+    grace: a cancelled request or a restarted process left `attached` true
+    (review, 2026-09-22), and the answer must still be delivered."""
+    try:
+        started = datetime.fromisoformat(job["created_at"])
+    except (KeyError, TypeError, ValueError):
+        return True
+    return (_now() - started).total_seconds() > settings.job_attach_seconds + 30
 
 
 def _cost_of(kind: str) -> int:
@@ -603,6 +674,14 @@ async def attach(job_id: str, timeout: float | None = None, on_event: Callable[[
         row = await _set(job_id, attached=False)
         await _event(job_id, "detached", "The request moved on; the answer will be appended to the conversation")
         return row or {}
+    except asyncio.CancelledError:
+        # The request was cancelled (client gone, shutdown): the job keeps
+        # running and its answer is delivered to the conversation.
+        try:
+            await asyncio.shield(_set(job_id, attached=False))
+        except Exception:
+            logger.warning("job %s: could not detach on cancellation", job_id, exc_info=True)
+        raise
     finally:
         _settled.pop(job_id, None)
 
@@ -658,6 +737,26 @@ async def cancel(job_id: str, user_id: str) -> dict | None:
     return fresh
 
 
+async def run_ephemeral(kind: str, spec: dict, *, user_id: str | None = None) -> dict:
+    """Run a handler once, in memory, when the durable store is unavailable:
+    no lease, no resumption, no delivery, nothing kept. The caller says so in
+    its answer. Never used when the store is up."""
+    handler = _handlers[kind]
+    row = _new_row(kind, spec, user_id=user_id, account_id=None, session_id=None)
+    row["status"], row["lease_id"], row["attempts"] = "running", "ephemeral", 1
+    with _lock:
+        _memory[row["id"]] = row
+    try:
+        ctx = JobContext(row, "ephemeral")
+        ctx._ephemeral = True
+        result = await handler(row, ctx)
+        return {**_jsonable(result), "ephemeral": True}
+    finally:
+        with _lock:
+            _memory.pop(row["id"], None)
+            _events.pop(row["id"], None)
+
+
 # ----------------------------------------------------------------------------
 # the worker
 # ----------------------------------------------------------------------------
@@ -679,13 +778,15 @@ async def maintain() -> None:
     """Outcomes that settled without their delivery (a crash between the two
     writes) are delivered now."""
     pool = await _pool()
+    cutoff = _now() - timedelta(seconds=settings.job_attach_seconds + 30)
     if pool is not None:
         rows = [_from_db(r) for r in await pool.fetch(
-            "SELECT * FROM jobs WHERE status IN ('succeeded', 'failed') AND attached = FALSE AND delivered = FALSE LIMIT 20")]
+            "SELECT * FROM jobs WHERE status IN ('succeeded', 'failed') AND delivered = FALSE AND (attached = FALSE OR created_at < $1) LIMIT 20", cutoff)]
     else:
         with _lock:
             rows = [json.loads(json.dumps(r)) for r in _memory.values()
-                    if r["status"] in ("succeeded", "failed") and not r.get("attached", True) and not r.get("delivered")]
+                    if r["status"] in ("succeeded", "failed") and not r.get("delivered")
+                    and (not r.get("attached", True) or datetime.fromisoformat(r["created_at"]) < cutoff)]
     for row in rows:
         await deliver(row)
 
@@ -732,10 +833,15 @@ async def scrub_user(user_id: str) -> int:
     n = 0
     pool = await _pool()
     if pool is not None:
-        status = await pool.execute(
-            "UPDATE jobs SET spec = '{}'::jsonb, plan = '[]'::jsonb, state = '{}'::jsonb, evidence = '[]'::jsonb, operations = '{}'::jsonb, "
-            "signals = '[]'::jsonb, result = NULL, question = NULL, error = NULL, user_id = NULL, account_id = NULL, session_id = NULL, "
-            "status = CASE WHEN status IN ('succeeded', 'failed', 'cancelled') THEN status ELSE 'cancelled' END WHERE user_id = $1::uuid", user_id)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                # Events carry answers and error text: gone before the rows
+                # lose their owner (review, 2026-09-22), in one transaction.
+                await conn.execute("DELETE FROM job_events WHERE job_id IN (SELECT id FROM jobs WHERE user_id = $1::uuid)", user_id)
+                status = await conn.execute(
+                    "UPDATE jobs SET spec = '{}'::jsonb, plan = '[]'::jsonb, state = '{}'::jsonb, evidence = '[]'::jsonb, operations = '{}'::jsonb, "
+                    "signals = '[]'::jsonb, result = NULL, question = NULL, error = NULL, user_id = NULL, account_id = NULL, session_id = NULL, "
+                    "status = CASE WHEN status IN ('succeeded', 'failed', 'cancelled') THEN status ELSE 'cancelled' END WHERE user_id = $1::uuid", user_id)
         n = int(status.split()[-1]) if status and status.split()[-1].isdigit() else 0
     with _lock:
         for row in _memory.values():

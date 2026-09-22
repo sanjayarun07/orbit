@@ -1146,7 +1146,13 @@ function renderExperience(data){const fragment=document.createDocumentFragment()
 // Routing intent, tool activity and evidence strips are diagnostics: hidden from users,
 // shown when localStorage orbit_debug is "1" (admin/dev). Sources and cards always show.
 const SHOW_TRACES=(()=>{try{return localStorage.getItem("orbit_debug")==="1";}catch{return false;}})();
+/* A turn that detached from a durable job (deep dives past the attach window) promised
+   the answer here: poll the job and refresh the conversation when it settles, instead of
+   leaving it to a reload (review, 2026-09-22). */
+const watchedJobs=new Set();
+function watchJob(jobId){if(!jobId||watchedJobs.has(jobId))return;watchedJobs.add(jobId);const session=sessionId;const tick=async()=>{try{const res=await fetch(`/jobs/${jobId}`);if(!res.ok){watchedJobs.delete(jobId);return;}const job=await res.json();if(["succeeded","failed","cancelled"].includes(job.status)){watchedJobs.delete(jobId);if(sessionId===session&&!busy)await hydrateHistory();return;}}catch{}if(watchedJobs.has(jobId))setTimeout(tick,3000);};setTimeout(tick,3000);}
 function finishAgentMessage(el, data) {
+  if(data.job_id)watchJob(data.job_id);
   const body=$(".message-body",el); body.innerHTML='<div class="answer"></div>';
   if(data.error){el.classList.add("error");$(".answer",body).textContent=data.error;}
   else { const answerNode=$(".answer",body);answerNode.replaceWith(renderAnswerResult(data.answer || ""));if(SHOW_TRACES&&data.intent)body.appendChild(renderRouteBadge(data.intent,data.capabilities));body.appendChild(renderExperience(data));const chartCard=renderChartCard(data.chart);if(chartCard)body.appendChild(chartCard);if(data.cross_chain_swap)body.appendChild(renderRelayPlanCard(data.cross_chain_swap,Number(data.session_revision??-1))); const portfolio=renderMcpPortfolioCard(data.trajectory);if(portfolio)body.appendChild(portfolio);const activity=SHOW_TRACES?renderToolActivity(data.trajectory):null; if(activity)body.appendChild(activity); if(data.trade_plan)body.appendChild(renderPlanCard(data.trade_plan));const actions=data.quick_actions?.length?data.quick_actions:[];if(actions.length)body.appendChild(renderSuggestions(actions,data.trade_plan));const related=renderRelated(data.suggestions);if(related)body.appendChild(related); }

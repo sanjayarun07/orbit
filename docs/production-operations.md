@@ -2106,3 +2106,37 @@ before through its trajectory; one that outlives the turn costs the turn
 (one credit) plus the deep-dive charge at settle. Next waves: the desk and
 the tape; then reminders, price alerts and the brief as scheduled jobs;
 then the paper-desk cycles.
+
+## Review of the job engine (2026-09-22): seven findings closed
+
+1. **A cancelled or restarted request stranded its job's answer.** `attach`
+   now detaches on cancellation, and delivery treats an attachment older
+   than the attach window plus thirty seconds as expired; maintenance
+   delivers those too.
+2. **Concurrent checkpoints overwrote each other's cache entries.** The
+   operation cache is merged key by key and the evidence and signal lists
+   appended, as jsonb `||` in Postgres and a merge under the lock in
+   memory; six concurrent calls keep six entries.
+3. **Delivery was not idempotent.** It is claimed first by compare-and-swap
+   on `delivered`, the session write is skipped when a message with the
+   job id already exists, and a failed delivery releases the claim for the
+   next pass.
+4. **Account deletion left job events.** The scrub deletes the events and
+   clears the rows' ownership in one transaction; a test pins the order.
+5. **A down database silently fell back to memory.** With Postgres
+   configured, the store raises `StoreUnavailable` instead; the deep dive
+   then runs ephemerally, in memory, and its answer says the run was not
+   recorded and cannot resume.
+6. **The detached answer did not reach the open page.** The response
+   carries the job id; the browser polls the job and refreshes the
+   conversation when it settles (a harness case proves it).
+7. **A background job lost its owner's TradingView connection.** An owned
+   job binds its owner's integration token and receipt owner for the run
+   and resets both after; an anonymous or inline run keeps the caller's.
+
+Also in this pass: the evidence envelope (`app/evidence.py`) recorded
+beside the holders, bundle and wallet cards and read by the validator's
+coverage check, the receipt and the job row; answer requirements
+(`evals/answers/cases.json`, `scripts/answer_eval.py`, replayed on pinned
+snapshots by `tests/test_answer_eval.py`); and the holders job pilot
+(`app/jobs_holders.py`, measured by `scripts/holders_pilot.py`).

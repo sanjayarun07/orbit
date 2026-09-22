@@ -1,0 +1,90 @@
+{
+  "id": "bundle-bonk",
+  "prompt": "is BONK bundled? run a bundle check",
+  "captured_at": "2026-09-22T15:55:54.227573+00:00",
+  "http_status": 200,
+  "latency_ms": 11330,
+  "answer": "**Taken together**\n\nThe Mobula bundle check for BONK under the Solana contract DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 is inconclusive, showing no definitive same-second buyer group among the first 100 buyers and a majority of failed funding source lookups, meaning shared funding cannot be definitively ruled out. The timing data is at one-second resolution, which is less precise than slot-level data needed for conclusive block bundling evidence. Meanwhile, BONK exhibits active market activity with a price of $0.00000357, $8.1 million in 24-hour volume, and a market cap of $313.9 million per Birdeye data, but there is no direct confirmation of bundling from this information. Thus, no conclusive evidence confirms that BONK is bundled on the specified contract, only that the possibility remains unresolved.\n\n---\n\n**Taken together**\n\nThe analysis on whether BONK is bundled under the Solana contract DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 is inconclusive, as per the Mobula bundle check. Specifically, no definitive timing group among the earliest buyers was found to confirm bundling, and many funding source lookups failed, leaving the possibility of shared funding unresolved. The data used has one-second timing resolution rather than slot-level data, so it is not comprehensive proof of bundling. Meanwhile, the Bonk token on Solana shows active market metrics with a recent price of $0.00000357, $8.1M 24-hour volume, and a market cap of $313.9M per the Birdeye data. There is no direct confirmation that BONK is bundled on the specified contract, only inconclusive timing and funding source evidence that does not rule it out.\n\n---\n\n# Bundle check\n**Provider**: Mobula \u00b7 **Contract**: `DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263` \u00b7 **Chain**: solana \u00b7 **Checked**: 2026-09-22 15:55 UTC\n\nBundle evidence: **Inconclusive**: no same-second group among the first 100 buyers, but the funding source of only 11 of the first 25 could be looked up (14 lookups failed), so a shared funder cannot be ruled out. Ask again in a minute.\n\nSample: the first **100** buyers Mobula indexed; **0** of them first held in a second shared by at least 3 wallets; the funding source of the first **25** was looked up (**14** lookups failed) and **0** share a personal funder with another early buyer. Buyers after the first 100, and funders of buyers after the first 25, were not checked.\n\nSource: [Mobula first buyers](https://docs.mobula.io/rest-api-reference/endpoint/wallet-first-buyers) and [wallet funding](https://docs.mobula.io/rest-api-reference/endpoint/wallet-funding)\nA shared second is timing evidence, not a shared block: Mobula's first-holding times have one-second resolution and Solana produces two to three slots a second, so block-level bundling needs slot and transaction data this check does not have. Indexed data only; evidence, not proof of intent.\n\n---\n\n# Bonk (Bonk)\n**Provider**: Birdeye \u00b7 **Data freshness**: 2026-09-22 15:55 UTC\n\n- **Price**: $0.00000357\n- **24h volume**: $8.1M\n- **Liquidity**: $7.8M\n- **Market cap**: $313.9M\n- **24h change**: +4.41%\n\nSource: [Birdeye](https://docs.birdeye.so/reference/get-defi-token_overview)\n\nVerify the chain and exact contract. Provider metrics can differ because of pool coverage and pricing methodology.\n\n---\n\nWhich token should I check? Paste its contract address (or mint) and the chain it is on, or name the token with a $ticker, and I'll run the security checks.",
+  "intent": "research",
+  "trajectory": {
+    "tool_name_0": "mobula_token_bundle",
+    "observation_0": "Tool call completed. See the answer for results.",
+    "tool_name_1": "birdeye_token_overview",
+    "observation_1": "Tool call completed. See the answer for results."
+  },
+  "envelopes": [
+    {
+      "tool": "mobula_token_bundle",
+      "status": "partial",
+      "subject": {
+        "kind": "token",
+        "id": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+        "chain": "solana"
+      },
+      "sources": [
+        {
+          "provider": "mobula",
+          "endpoint": "token/first-buyers",
+          "as_of": "2026-09-22T15:55:48.956552+00:00"
+        },
+        {
+          "provider": "mobula",
+          "endpoint": "wallet/funding",
+          "as_of": "2026-09-22T15:55:48.956569+00:00"
+        }
+      ],
+      "coverage": {
+        "attempted": 26,
+        "successful": 12,
+        "missing": [
+          "funding source of 14 of 25 early buyers"
+        ]
+      },
+      "errors": [
+        {
+          "operation": "wallet/funding",
+          "reason": "lookup failed (rate limit or outage)",
+          "count": 14
+        }
+      ],
+      "as_of": "2026-09-22T15:55:48.956635+00:00"
+    }
+  ],
+  "validation": {
+    "status": "ok",
+    "checks": [
+      {
+        "name": "provenance",
+        "status": "ok",
+        "detail": "Attributed to: mobula, birdeye, Mobula first buyers"
+      },
+      {
+        "name": "freshness",
+        "status": "ok",
+        "detail": "Fresh as of 2026-09-22 15:55 UTC."
+      },
+      {
+        "name": "grounding",
+        "status": "ok",
+        "detail": "5/5 figures trace to tool data."
+      },
+      {
+        "name": "consistency",
+        "status": "not_applicable",
+        "detail": "Fewer than two sources with comparable metrics."
+      },
+      {
+        "name": "coverage",
+        "status": "ok",
+        "detail": "1 gap(s) disclosed"
+      }
+    ],
+    "sources": [
+      "mobula",
+      "birdeye",
+      "Mobula first buyers"
+    ],
+    "as_of": "2026-09-22 15:55 UTC",
+    "age_minutes": 0.9035807166666667
+  }
+}

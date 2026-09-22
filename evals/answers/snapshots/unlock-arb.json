@@ -1,0 +1,49 @@
+{
+  "id": "unlock-arb",
+  "prompt": "when is the next ARB unlock?",
+  "captured_at": "2026-09-22T15:48:48.716686+00:00",
+  "http_status": 200,
+  "latency_ms": 6895,
+  "answer": "# Unlock schedule \u2014 ARB\n**Provider**: DefiLlama emissions (`arbitrum-foundation`) \u00b7 **As of**: 2026-09-22 15:48 UTC \u00b7 **Token**: `arbitrum:0x912ce59144191c1204e64559fe8253a0e49e6548`\n\n## Upcoming unlocks\n| Date | Amount | Type | To |\n|---|---:|---|---|\n| 2026-10-15 | 56,125,000 tokens | cliff | insiders |\n| 2026-10-15 | 36,520,833 tokens | cliff | privateSale |\n| 2026-11-15 | 56,125,000 tokens | cliff | insiders |\n| 2026-11-15 | 36,520,833 tokens | cliff | privateSale |\n| 2026-12-15 | 56,125,000 tokens | cliff | insiders |\n| 2026-12-15 | 36,520,833 tokens | cliff | privateSale |\n| 2027-01-14 | 56,125,000 tokens | cliff | insiders |\n| 2027-01-14 | 36,520,833 tokens | cliff | privateSale |\n| 2027-02-14 | 56,125,000 tokens | cliff | insiders |\n| 2027-02-14 | 36,520,833 tokens | cliff | privateSale |\n\n## Recent unlocks (3 of 101 past events)\n| Date | Amount | Type | To |\n|---|---:|---|---|\n| 2026-08-15 | 36,520,833 tokens | cliff | privateSale |\n| 2026-09-15 | 56,125,000 tokens | cliff | insiders |\n| 2026-09-15 | 36,520,833 tokens | cliff | privateSale |\n\nSource: DefiLlama emissions \u00b7 https://defillama.com/unlocks/arbitrum-foundation\nSchedules come from projects' published vesting terms; amounts are as documented, not observed on-chain.",
+  "intent": "research",
+  "trajectory": {
+    "tool_name_0": "defillama_token_unlocks",
+    "observation_0": "Tool call completed. See the answer for results."
+  },
+  "envelopes": [],
+  "validation": {
+    "status": "ok",
+    "checks": [
+      {
+        "name": "provenance",
+        "status": "ok",
+        "detail": "Attributed to: defillama"
+      },
+      {
+        "name": "freshness",
+        "status": "ok",
+        "detail": "Fresh as of 2026-09-22 15:48 UTC."
+      },
+      {
+        "name": "grounding",
+        "status": "ok",
+        "detail": "2/2 figures trace to tool data."
+      },
+      {
+        "name": "consistency",
+        "status": "not_applicable",
+        "detail": "Fewer than two sources with comparable metrics."
+      },
+      {
+        "name": "coverage",
+        "status": "not_applicable",
+        "detail": "no evidence envelopes this turn"
+      }
+    ],
+    "sources": [
+      "defillama"
+    ],
+    "as_of": "2026-09-22 15:48 UTC",
+    "age_minutes": 0.77209545
+  }
+}

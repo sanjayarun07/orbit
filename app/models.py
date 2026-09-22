@@ -342,6 +342,9 @@ class AgentResponse(BaseModel):
     # The evidence envelopes the turn's tools recorded (app/evidence.py):
     # status, sources, coverage and errors per tool, never the bulk data.
     envelopes: list[dict] = Field(default_factory=list)
+    # A durable job this turn started and detached from: the browser polls
+    # it and refreshes the conversation when it settles.
+    job_id: str | None = None
     trade_readiness: TradeReadiness | None = None
     gas_advisory: GasAdvisory | None = None
     risk_assessment: RiskAssessment | None = None

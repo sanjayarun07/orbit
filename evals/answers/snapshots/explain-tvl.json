@@ -1,0 +1,12 @@
+{
+  "id": "explain-tvl",
+  "prompt": "explain TVL",
+  "captured_at": "2026-09-22T15:48:55.456177+00:00",
+  "http_status": 200,
+  "latency_ms": 6738,
+  "answer": "TVL stands for Total Value Locked. It\u2019s a key metric used primarily in the decentralized finance (DeFi) space to measure the total value of assets\u2014usually cryptocurrencies\u2014that are currently being staked, lent, or otherwise locked into a particular protocol or smart contract. TVL gives an indication of the amount of capital users have committed to that protocol, which can help gauge its popularity, trustworthiness, and liquidity. For example, a DeFi lending platform with a high TVL means a lot of users have deposited assets there, making it potentially more robust and liquid.\n\nTVL is typically expressed in terms of a fiat currency equivalent (like USD) to provide an easy-to-understand valuation. It\u2019s commonly used when comparing different protocols across blockchains such as Ethereum, Solana, Arbitrum, or others, to see which ones have more value locked and are potentially more influential in the ecosystem.\n\nIf you\u2019d like, I can help you track TVL figures for specific protocols or chains as well.",
+  "intent": "general",
+  "trajectory": null,
+  "envelopes": [],
+  "validation": null
+}

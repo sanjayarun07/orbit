@@ -96,6 +96,10 @@ SECURITY_STRONG = re.compile(
     # and came back with French public-sector audit reports).
     r"|\baudit(?:s|ed|ing)?(?:\s+reports?)?\s+(?:on|of|for)\b"
     r"|\bsecurity\s+(?:check|report|audit|review)\b"
+    # Launch forensics: "is BONK bundled", "bundle check", "who sniped X",
+    # "coordinated buys". Crypto-only jargon; a ticker-phrased ask went to web
+    # search and came back about Ruby's Bundler (answer eval, 2026-09-22).
+    r"|\bbundl(?:ed|e\s+check|ing)\b|\bsnip(?:ed|ers?|ing)\b|\bcoordinated\s+(?:buys?|wallets?|launch)\b|\bsame[- ]block\s+buys?\b|\blinked\s+wallets\b"
     r"|\b(?:is|was|been)\s+\S+\s+audited\b"
     r"|\$[A-Za-z][A-Za-z0-9]{1,9}\b[^.\n?!]{0,24}\baudit",
     re.I,
