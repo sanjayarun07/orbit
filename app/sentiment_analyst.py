@@ -29,7 +29,7 @@ from typing import Any
 
 import httpx
 
-from app import x_tweets
+from app import reddit_crowd, x_tweets
 from app.metrics import increment
 from app.routing.jev_backend import JEV_URL, DEFAULT_MODEL, JevError, _api_key
 from app.settings import settings
@@ -60,7 +60,7 @@ def reset_for_test() -> None:
 def questions(symbol: str) -> dict:
     return {
         "stance": {"type": "choice",
-                   "instructions": (f"From `representative_tweets` and `social_stats`, which way is crypto X leaning on ${symbol} right now? "
+                   "instructions": (f"From `representative_tweets` and `social_stats` (and `reddit_threads` with `reddit_stats` when present), which way is the crypto crowd leaning on ${symbol} right now? "
                                     "Judge the crowd's stance from what the tweets say, not your own view of the asset. Sarcasm and mockery of "
                                     "the token count as bearish; mockery of doubters counts as bullish."),
                    "criteria": {"bullish": "Most weight of the sample expects the price to rise or is accumulating.",
@@ -84,10 +84,15 @@ def _post(body: dict, timeout: float) -> dict:
     return response.json()
 
 
-def judge(symbol: str, social_stats: dict, *, timeout: float = 25.0) -> dict:
-    """One Jev call. Returns the typed answers folded into plain numbers."""
+def judge(symbol: str, social_stats: dict, *, timeout: float = 25.0, reddit: dict | None = None) -> dict:
+    """One Jev call. Returns the typed answers folded into plain numbers.
+    `reddit` (threads with scores and top comments) is a second crowd the
+    judge reads beside the tweets when Reddit is configured."""
     state = {"asset": symbol, "social_stats": {k: v for k, v in social_stats.items() if k != "sample"},
              "representative_tweets": social_stats.get("sample") or []}
+    if reddit and reddit.get("threads"):
+        state["reddit_stats"] = {k: v for k, v in reddit.items() if k != "sample"}
+        state["reddit_threads"] = reddit.get("sample") or []
     t0 = time.perf_counter()
     data = _post({"state": state, "model": DEFAULT_MODEL, "questions": questions(symbol)}, timeout)
     answers = data.get("answers") or {}
@@ -135,7 +140,15 @@ def to_signal(subject: Subject, as_of: str, social_stats: dict, judgement: dict 
     )
 
 
-def render_card(symbol: str, fetched: dict, social_stats: dict, judgement: dict | None, note: str | None = None) -> str:
+def _reddit_stats(symbol: str, name: str | None) -> dict | None:
+    try:
+        return reddit_crowd.gather(symbol, name)["stats"]
+    except Exception:
+        logger.info("sentiment_analyst: Reddit unavailable for %s", symbol, exc_info=True)
+        return None
+
+
+def render_card(symbol: str, fetched: dict, social_stats: dict, judgement: dict | None, note: str | None = None, reddit: dict | None = None) -> str:
     """The X sentiment card: numbers first, the judge's read, then the tweets
     that carried the most weight. Evidence, never a trade."""
     n = social_stats.get("sample_size", 0)
@@ -154,6 +167,18 @@ def render_card(symbol: str, fetched: dict, social_stats: dict, judgement: dict 
               f"busiest author {social_stats.get('top_author_share_pct', 0)}% of posts · verified {social_stats.get('verified_share_pct', 0)}% · "
               f"{social_stats.get('total_likes', 0):,} likes, {social_stats.get('total_retweets', 0):,} reposts · "
               f"{fetched.get('new', 0)} new since last check" + (" (stopped at a known tweet)" if fetched.get("early_stop") else ""), ""]
+    dropped = social_stats.get("dropped_ungrounded", 0)
+    capped = social_stats.get("capped_by_author", 0)
+    if dropped or capped:
+        lines += [f"Left out: {dropped} tweet(s) that did not name the token, {capped} beyond {x_tweets.AUTHOR_CAP} per account.", ""]
+    if reddit is not None:
+        if reddit.get("threads"):
+            top = reddit["sample"][0] if reddit.get("sample") else None
+            lines += [f"**Reddit**: {reddit['threads']} threads by {reddit['unique_authors']} authors in r/{', r/'.join(reddit['subreddits'][:3])} · "
+                      f"{reddit['total_upvotes']:,} upvotes, {reddit['total_comments']:,} comments"
+                      + (f" · most discussed: “{top['title'][:70]}” ({top['score']:,} upvotes, {top['comments']} comments)" if top else ""), ""]
+        else:
+            lines += ["**Reddit**: no threads naming the token in the crypto subreddits this month.", ""]
     sample = [s for s in (social_stats.get("sample") or []) if s.get("kind") == "high_engagement"][:6]
     if sample:
         lines += ["| Author | Likes | Says |", "|---|---:|---|"]
@@ -179,19 +204,26 @@ async def analyze(symbol: str, *, subject: Subject | None = None, sample: int | 
             return out
     subject = subject or Subject(kind="token", id=sym, chain=None, symbol=sym)
     as_of = datetime.now(timezone.utc).isoformat()
+    # X and Reddit in parallel; Reddit is optional and never a reason to fail.
+    reddit_task = asyncio.to_thread(_reddit_stats, sym, name) if reddit_crowd.enabled() else None
     fetched = await x_tweets.fetch(sym, sample, name=name)
-    social_stats = x_tweets.stats(fetched["tweets"])
+    reddit = await reddit_task if reddit_task is not None else None
+    social_stats = x_tweets.stats(fetched["tweets"], symbol=sym, name=name)
+    if reddit:
+        social_stats = {**social_stats, "reddit_threads": reddit.get("threads", 0), "reddit_upvotes": reddit.get("total_upvotes", 0)}
     judgement, reason = None, None
-    if social_stats["sample_size"] < MIN_SAMPLE:
-        reason = f"only {social_stats['sample_size']} tweets matched ${sym} (need {MIN_SAMPLE})"
+    evidence = social_stats["sample_size"] + (reddit or {}).get("threads", 0)
+    if evidence < MIN_SAMPLE:
+        reason = f"only {social_stats['sample_size']} tweets" + (f" and {reddit['threads']} Reddit threads" if reddit else "") + f" matched ${sym} (need {MIN_SAMPLE})"
     else:
         try:
-            judgement = await asyncio.to_thread(judge, sym, social_stats)
+            judgement = await asyncio.to_thread(judge, sym, social_stats, reddit=reddit)
         except Exception as exc:
             reason = f"judge failed: {type(exc).__name__}"
             logger.warning("sentiment_analyst: Jev failed for %s", sym, exc_info=True)
-    out = {"symbol": sym, "fetched": {k: v for k, v in fetched.items() if k != "tweets"}, "stats": social_stats, "judgement": judgement, "abstain_reason": reason,
-           "card": render_card(sym, fetched, social_stats, judgement, reason), "signal": to_signal(subject, as_of, social_stats, judgement, reason)}
+    weighted = {**social_stats, "sample_size": evidence}
+    out = {"symbol": sym, "fetched": {k: v for k, v in fetched.items() if k != "tweets"}, "stats": social_stats, "reddit": reddit, "judgement": judgement, "abstain_reason": reason,
+           "card": render_card(sym, fetched, social_stats, judgement, reason, reddit=reddit), "signal": to_signal(subject, as_of, weighted, judgement, reason)}
     with _lock:
         _cache[sym] = (now + max(60, settings.social_sentiment_ttl_seconds), out)
     return out

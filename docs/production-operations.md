@@ -1785,3 +1785,45 @@ asks, as before.
 
 Verified live: ZEC (rank 9, 16.94M of 21M), BONK (rank 151, 88T) and BTC
 (rank 1) each answered in about seven seconds from the new tool alone.
+
+## Crowd sources from the last30days review (2026-09-22)
+
+Four additions the user chose after reviewing mvanhorn/last30days-skill;
+one turned out impossible.
+
+**StockTwits: not possible.** Its public API sits behind a Cloudflare
+browser challenge; every server-side call (browser user agent, curl)
+answered the challenge page. Not built. If it matters, it needs a browser
+session or a licensed feed.
+
+**Tweet sample: entity grounding and an author cap** (`app/x_tweets.py`).
+A tweet counts only if it names the token (cashtag, hashtag, or the coin
+name as a word); "gonna bonk my head" is the verb and is dropped however
+viral it is. One account contributes at most three tweets (its most
+engaged) to the judged sample. Both counts are shown on the card ("Left
+out: N that did not name the token, M beyond 3 per account").
+
+**Reddit with real numbers** (`app/reddit_crowd.py`). The keyless JSON and
+RSS endpoints returned HTML block pages live, so this uses Reddit's official
+API with a free script app: `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`
+(create at reddit.com/prefs/apps, type "script"), client-credentials grant,
+read-only. One search across the crypto subreddits (`reddit_subreddits`)
+for the cashtag, the ticker in capitals, or the name, last month; the six
+most-discussed threads get their top comments (one call each). Statistics:
+threads, distinct authors, subreddits, upvotes, comments, average upvote
+ratio, span. Surfaces: "what is reddit saying about X" (`reddit_crowd`
+tool), and a second crowd the sentiment judge reads beside the tweets --
+the state gains `reddit_stats` and `reddit_threads`, the card a Reddit
+line, and the Signal's sample weight counts threads too. Not verified live:
+no Reddit app key in the env yet.
+
+**Polymarket odds** (`app/polymarket_odds.py`). Gamma's public search, no
+key: open markets whose question names the asset (symbol or name), dust
+under $1,000 dropped, sorted by volume, with the Yes price, volume and
+resolution date. A `polymarket_odds` tool for "odds / prediction market /
+polymarket" asks, a `prediction_markets` deep-dive dimension, and desk
+evidence, all silent when nothing matches (memes rarely have markets). Not
+verified live: the developer network's resolver returned no address for the
+Gamma host and reset the connection when the IP was pinned, which reads as
+a regional block; `polymarket_gamma_url` exists so a deployment can point at
+a reachable host, and `polymarket_enabled` turns it off.

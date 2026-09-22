@@ -35,7 +35,7 @@ import httpx
 from app.provider_registry import get_provider_router
 from app.provider_router import NoData
 from app.integrations import tradingview
-from app import holder_snapshots, mobula_meme, mobula_security, sentiment_analyst
+from app import holder_snapshots, mobula_meme, mobula_security, polymarket_odds, sentiment_analyst
 from app.signals import Signal, Subject, SubjectSkip
 
 # DefiLlama emissions (free): a protocol-slug list + per-slug unlock schedule whose
@@ -296,6 +296,16 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
             else:
                 dims.append(DimensionEvidence("x_sentiment", "X sentiment (crowd lean)", "unavailable", out.get("abstain_reason") or "no judgement"))
             signals.append(out["signal"])
+
+    # Money-backed odds, when a market exists (majors and events; rarely memes).
+    if symbol and polymarket_odds.enabled():
+        try:
+            markets = await asyncio.to_thread(polymarket_odds.markets_for, symbol)
+            card = polymarket_odds.render_card(symbol, markets)
+        except Exception:
+            card = None
+        if card:
+            dims.append(DimensionEvidence("prediction_markets", "Prediction markets (Polymarket)", "available", card, "polymarket_odds", _now()))
 
     # How the structure has moved since Orbit first recorded this token (the
     # snapshot ledger). Only when there is history: a single row is the

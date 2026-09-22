@@ -17,7 +17,7 @@ from app import streaming
 from app.nodes.state import AgentState, effective_request as _effective_request
 from app.nodes import runtime
 from app.nodes.research import research_node, _TOKEN_ADDRESS, _is_mirror, _chain_key, _resolve_named_token, _mentions_asset, _named_tickers, _SYMBOL_LIKE, _SYMBOL_STOP
-from app import answer_gate, sentiment_analyst
+from app import answer_gate, polymarket_odds, sentiment_analyst
 from app.token_resolve import clear_winner, token_candidates
 from app.nodes.trading import (
     charter_precheck,
@@ -241,6 +241,17 @@ async def _market_research(state: AgentState, request: str) -> tuple[str, int | 
                 trajectory[f"observation_{index}"] = out["card"]
         except Exception:
             logger.warning("team: X sentiment unavailable for %s", symbol, exc_info=True)
+    if symbol and polymarket_odds.enabled():
+        try:
+            card = polymarket_odds.render_card(symbol, await asyncio.to_thread(polymarket_odds.markets_for, symbol))
+            if card:
+                market_data = f"{market_data}\n\n{card}"
+                trajectory = dict(trajectory or {})
+                index = sum(1 for k in trajectory if k.startswith("tool_name_"))
+                trajectory[f"tool_name_{index}"] = "polymarket_odds"
+                trajectory[f"observation_{index}"] = card
+        except Exception:
+            logger.info("team: Polymarket unavailable for %s", symbol, exc_info=True)
     try:
         streaming.emit("status", text="Market Research is writing the thesis")
         result = await runtime._call_lm(runtime.market_research_agent, asset=request, market_data=market_data)

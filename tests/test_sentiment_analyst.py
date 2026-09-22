@@ -13,7 +13,7 @@ from app.signals import Subject
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)
 
 
-def _tweet(i, author="alice", likes=5, text="BONK looks strong, accumulating", minutes_ago=0, verified=False):
+def _tweet(i, author="alice", likes=5, text="$BONK looks strong, accumulating", minutes_ago=0, verified=False):
     return {"id": str(1000 + i), "text": text, "author": {"userName": author, "followers": 1200, "isBlueVerified": verified},
             "likeCount": likes, "retweetCount": 1, "replyCount": 0, "createdAt": (NOW - timedelta(minutes=minutes_ago)).strftime("%a %b %d %H:%M:%S +0000 %Y")}
 
@@ -121,7 +121,7 @@ def test_signal_is_the_stance_lean_halved_when_the_sample_is_a_push():
 
 
 def test_analyze_abstains_on_a_thin_sample_and_caches_the_judgement(keys, monkeypatch):
-    monkeypatch.setattr(x_tweets.httpx, "Client", _http([{"tweets": [_tweet(i) for i in range(4)], "has_next_page": False}]))
+    monkeypatch.setattr(x_tweets.httpx, "Client", _http([{"tweets": [_tweet(i, author=f"a{i}", text="$WIF hat stays on") for i in range(4)], "has_next_page": False}]))
     out = asyncio.run(sa.analyze("WIF"))
     assert out["judgement"] is None and out["signal"].abstained and "only 4 tweets" in out["signal"].metadata["abstain_reason"]
     assert "_only 4 tweets" in out["card"]

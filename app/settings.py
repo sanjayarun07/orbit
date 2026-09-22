@@ -126,6 +126,17 @@ class Settings(BaseSettings):
     x_tweets_default_sample: int = 40
     x_tweets_cache_hours: float = 24.0
     twitterapi_io_timeout_seconds: float = 12.0
+    # Reddit's official API (free script app at reddit.com/prefs/apps): the
+    # keyless JSON and RSS paths answered HTML block pages live (2026-09-22).
+    reddit_client_id: str | None = None
+    reddit_client_secret: str | None = None
+    reddit_user_agent: str = "Orbit/1.0 (crypto research; by u/orbit-copilot)"
+    reddit_subreddits: str = "CryptoCurrency,solana,memecoins,SatoshiStreetBets,CryptoMoonShots,altcoin,ethtrader,Bitcoin,CryptoMarkets"
+    # Polymarket's Gamma API (free, no key). The developer network's resolver
+    # returned no address for it (2026-09-22); the host can be pinned by IP
+    # when a deployment's DNS blocks it.
+    polymarket_gamma_url: str = "https://gamma-api.polymarket.com"
+    polymarket_enabled: bool = True
     # --- Knowledge service (app/knowledge) ---
     knowledge_embedding_provider: str = "openai"      # openai | hashing
     knowledge_embedding_model: str = "text-embedding-3-small"

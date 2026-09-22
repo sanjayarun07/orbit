@@ -108,6 +108,13 @@ def _reset_account_stores(monkeypatch):
     # The X sentiment analyst needs TwitterAPI.io and TypeSafe; the suite
     # never reaches either. Tests of the analyst set the keys and stub HTTP.
     monkeypatch.setattr(_settings, "twitterapi_io_key", None)
+    monkeypatch.setattr(_settings, "reddit_client_id", None)
+    monkeypatch.setattr(_settings, "reddit_client_secret", None)
+    monkeypatch.setattr(_settings, "polymarket_enabled", False)
+    from app import polymarket_odds as _polymarket, reddit_crowd as _reddit
+
+    _reddit.reset_for_test()
+    _polymarket.reset_for_test()
     from app import holder_snapshots as _snapshots
 
     _snapshots.reset_for_test()

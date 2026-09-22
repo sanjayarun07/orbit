@@ -250,12 +250,54 @@ async def fetch(symbol: str, target: int | None = None, *, name: str | None = No
 # deterministic statistics
 # ---------------------------------------------------------------------------
 
-def stats(tweets: list[dict]) -> dict:
-    """Numbers computed in code before any model reads a tweet."""
+AUTHOR_CAP = 3            # tweets one account may contribute to the judged sample
+
+
+def grounded(tweet: dict, symbol: str, name: str | None = None) -> bool:
+    """Does the tweet actually talk about the token? The cashtag, the hashtag,
+    or the name as a word. A post that merely contains the letters (BONK the
+    verb, "open" the adjective) is not evidence about the token, and a viral
+    one must not hijack the sample (last30days' entity grounding)."""
+    text = (tweet.get("text") or "")
+    sym = re.escape(symbol.strip().lstrip("$"))
+    if re.search(rf"(?i)(?:\$|#){sym}\b", text):
+        return True
+    if name and re.search(rf"(?i)\b{re.escape(name.strip())}\b", text):
+        return True
+    return False
+
+
+def stats(tweets: list[dict], symbol: str | None = None, name: str | None = None) -> dict:
+    """Numbers computed in code before any model reads a tweet. With a symbol,
+    ungrounded tweets are dropped first and one author is capped at
+    AUTHOR_CAP tweets (the drops are counted, never hidden)."""
+    dropped_ungrounded = 0
+    capped = 0
+    if symbol:
+        kept = []
+        for t in tweets:
+            if grounded(t, symbol, name):
+                kept.append(t)
+            else:
+                dropped_ungrounded += 1
+        tweets = kept
+        # The judged sample: one account contributes at most AUTHOR_CAP tweets
+        # (its most engaged), so a loud account cannot be the crowd.
+        per_author: dict[str, int] = {}
+        limited = []
+        for t in sorted(tweets, key=lambda t: int(t.get("likes") or 0) + 2 * int(t.get("retweets") or 0), reverse=True):
+            a = (t.get("author") or "unknown").lower()
+            if per_author.get(a, 0) >= AUTHOR_CAP:
+                capped += 1
+                continue
+            per_author[a] = per_author.get(a, 0) + 1
+            limited.append(t)
+        tweets = limited
     n = len(tweets)
     if not n:
         return {"sample_size": 0, "unique_authors": 0, "author_diversity_pct": 0.0, "total_likes": 0, "total_retweets": 0, "avg_engagement": 0.0,
-                "verified_share_pct": 0.0, "top_author_share_pct": 0.0, "span_hours": None, "sample": []}
+                "verified_share_pct": 0.0, "top_author_share_pct": 0.0, "span_hours": None, "sample": [],
+                "dropped_ungrounded": dropped_ungrounded, "capped_by_author": capped}
     authors: dict[str, int] = {}
     likes = retweets = 0
     verified = 0
@@ -283,4 +325,5 @@ def stats(tweets: list[dict]) -> dict:
         "total_likes": likes, "total_retweets": retweets, "avg_engagement": round((likes + 2 * retweets) / n, 1),
         "verified_share_pct": round(verified / n * 100.0, 1), "top_author_share_pct": round(max(authors.values()) / n * 100.0, 1),
         "span_hours": round(span, 1) if span is not None else None, "sample": sample,
+        "dropped_ungrounded": dropped_ungrounded, "capped_by_author": capped,
     }
