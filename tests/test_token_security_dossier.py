@@ -50,7 +50,7 @@ def test_dossier_reports_renounced_authorities_and_no_flags(monkeypatch):
                         lambda m: _identity(mintAuthority=None, freezeAuthority=None))
     monkeypatch.setattr(provider_registry, "token_safety_warnings", lambda m: {"warnings": {}})
     out = provider_registry._solana_token_security(f"is {_MINT} safe")
-    assert "None (supply is fixed)" in out
+    assert "None (no authority can mint more)" in out and "supply is fixed" not in out
     assert "None (accounts cannot be frozen)" in out
     assert "No known-malicious/scam flag returned" in out
 
@@ -88,3 +88,13 @@ def test_dossier_web_context_failure_is_safe(monkeypatch):
     out = provider_registry._solana_token_security(f"safety of USDC mint {_MINT}")
     assert "## Latest context (web)" not in out   # failure -> silently omitted
     assert "## Identity" in out                    # rest of the dossier intact
+
+
+def test_wrapped_sol_is_not_called_fixed_supply(monkeypatch):
+    """Live probe (review, 2026-09-22): the native wrapper has no mint
+    authority, and its supply is whatever SOL is wrapped -- not fixed."""
+    monkeypatch.setattr(provider_registry, "token_identity",
+                        lambda m: _identity(mintAuthority=None, freezeAuthority=None))
+    monkeypatch.setattr(provider_registry, "token_safety_warnings", lambda m: {"warnings": {}})
+    out = provider_registry._solana_token_security("is So11111111111111111111111111111111111111112 safe")
+    assert "wrapped SOL is minted by wrapping SOL 1:1" in out and "supply is fixed" not in out and "can mint more" not in out

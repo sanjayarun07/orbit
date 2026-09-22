@@ -147,7 +147,8 @@ def token_holders(request: str) -> str:
         "# Token holders",
         f"**Provider**: Mobula · **Contract**: `{address}` · **Chain**: {chain} · **Checked**: {_stamp()}",
         "",
-        f"**Top 10 wallets hold {top10:.2f}% of supply** (of the {len(rows)} largest positions indexed). "
+        f"**Top 10 wallets hold {top10:.2f}% of supply** (of the {len(rows)} largest positions indexed, pools, exchanges and burn addresses included; "
+        "the security profile's top-10 figure applies Mobula's own exclusions and can differ). "
         "Wallets are not necessarily distinct owners: one person can hold through many.",
         "",
         "| # | Wallet | Share | Value | Buys/Sells | Unrealized PnL | First trade | Labels |",
@@ -387,11 +388,18 @@ def _impersonal(funder: str, tag: str | None) -> bool:
     return bool(_NOT_A_FUNDER.search(funder or "")) or bool(tag and _IMPERSONAL_TAG.search(tag))
 
 
-def _funding_of(wallet: str, chain: str) -> dict | None:
+_LOOKUP_FAILED = object()      # the call itself failed (rate limit, outage): not "no funder"
+
+
+def _funding_of(wallet: str, chain: str):
+    """The wallet's funding record, None when Mobula has none for it, and
+    _LOOKUP_FAILED when the call did not succeed. The two were one value
+    until a live BONK check under HTTP 429 reported "None found" with all 25
+    lookups failed (review, 2026-09-22): missing evidence is not evidence."""
     try:
         data = _get("/wallet/funding", {"wallet": wallet, "blockchain": chain})
     except Exception:
-        return None
+        return _LOOKUP_FAILED
     return data if isinstance(data, dict) and data.get("from") else None
 
 
@@ -402,10 +410,10 @@ class BundleAnalysis:
 
     address: str
     chain: str
-    level: str                      # "strong" | "some" | "none"
+    level: str                      # "strong" | "some" | "none" | "inconclusive"
     verdict: str                    # the one-line evidence statement
     buyers: int                     # first buyers in the sample
-    traced: int                     # of which funding was traced
+    traced: int                     # of which a funding lookup was attempted
     grouped: int                    # buyers in a same-second group of >= _SAME_SECOND_MIN
     personal_funded: int            # buyers sharing a personal (non-exchange) funder
     strongest_group: int
@@ -415,6 +423,7 @@ class BundleAnalysis:
     personal: list = field(default_factory=list)
     tags: dict = field(default_factory=dict)
     second_of: dict = field(default_factory=dict)
+    lookups_failed: int = 0         # attempted lookups whose call failed (rate limit, outage)
 
 
 def _bundle_analysis(address: str, chain: str) -> BundleAnalysis:
@@ -444,8 +453,9 @@ def _bundle_analysis(address: str, chain: str) -> BundleAnalysis:
         funding = list(pool.map(lambda r: _funding_of(str(r.get("address") or ""), chain), traced))
     by_funder: dict[str, list[dict]] = {}
     tags: dict[str, str] = {}
+    lookups_failed = sum(1 for info in funding if info is _LOOKUP_FAILED)
     for row, info in zip(traced, funding):
-        if info:
+        if info and info is not _LOOKUP_FAILED:
             funder = str(info["from"])
             by_funder.setdefault(funder, []).append(row)
             if info.get("fromWalletTag"):
@@ -461,14 +471,21 @@ def _bundle_analysis(address: str, chain: str) -> BundleAnalysis:
         overlap = max(overlap, max((seconds.count(sec) for sec in set(seconds)), default=0))
 
     strongest = max((len(g) for g in groups), default=0)
+    failed_note = f" ({lookups_failed} of {len(traced)} funding lookups failed, so the shared-funder count is a floor.)" if lookups_failed else ""
     if overlap >= 3:
-        level, verdict = "strong", "**Strong** in the sample: wallets funded by the same address first held in the same second."
+        level, verdict = "strong", "**Strong** in the sample: wallets funded by the same address first held in the same second." + failed_note
     elif strongest >= 5 or (personal and len(personal[0][1]) >= 3):
-        level, verdict = "some", "**Some** in the sample: a same-second group or a shared funder, but not both together."
+        level, verdict = "some", "**Some** in the sample: a same-second group or a shared funder, but not both together." + failed_note
+    elif lookups_failed:
+        # No evidence, but not all the evidence was seen: a lookup that failed
+        # says nothing about the wallet. This is not "none found".
+        level, verdict = "inconclusive", (f"**Inconclusive**: no same-second group among the first {len(buyers)} buyers, but the funding source of only "
+                                          f"{len(traced) - lookups_failed} of the first {len(traced)} could be looked up ({lookups_failed} lookups failed), "
+                                          "so a shared funder cannot be ruled out. Ask again in a minute.")
     else:
         level, verdict = "none", f"**None found in the sample**: the first {len(buyers)} buyers by time, with funding traced for the first {len(traced)}."
     return BundleAnalysis(
-        address=address, chain=chain, level=level, verdict=verdict, buyers=len(buyers), traced=len(traced),
+        address=address, chain=chain, level=level, verdict=verdict, buyers=len(buyers), traced=len(traced), lookups_failed=lookups_failed,
         grouped=sum(len(g) for g in groups), personal_funded=sum(len(r) for _, r in personal),
         strongest_group=strongest, overlap=overlap, groups=groups, clusters=clusters, personal=personal, tags=tags, second_of=second_of,
     )
@@ -487,8 +504,10 @@ def _render_bundle(a: BundleAnalysis) -> str:
         f"Bundle evidence: {a.verdict}",
         "",
         f"Sample: the first **{a.buyers}** buyers Mobula indexed; **{a.grouped}** of them first held in a second shared by at least "
-        f"{_SAME_SECOND_MIN} wallets; the funding source of the first **{a.traced}** was traced and **{a.personal_funded}** "
-        f"share a personal funder with another early buyer. Buyers after the first {a.buyers}, and funders of buyers after the first {a.traced}, were not checked.",
+        f"{_SAME_SECOND_MIN} wallets; the funding source of the first **{a.traced}** was looked up"
+        + (f" (**{a.lookups_failed}** lookups failed)" if a.lookups_failed else "")
+        + f" and **{a.personal_funded}** share a personal funder with another early buyer. Buyers after the first {a.buyers}, "
+        f"and funders of buyers after the first {a.traced}, were not checked.",
     ]
     if a.groups:
         lines += ["", "## Same-second groups", "| Second (UTC) | Wallets | Still holding | Retained | Tagged |", "|---|---:|---:|---:|---:|"]
@@ -525,7 +544,7 @@ def token_bundle_check(request: str) -> str:
 # Conviction a bundle read carries on its own. Bundling is a bearish fact
 # about the launch, never a bullish one: a clean sample is a real neutral vote
 # (it dilutes the blend), not evidence for the token.
-_BUNDLE_CONVICTION = {"strong": -0.8, "some": -0.4, "none": 0.0}
+_BUNDLE_CONVICTION = {"strong": -0.8, "some": -0.4, "none": 0.0, "inconclusive": 0.0}
 BUNDLE_MODEL = "bundle_check"
 
 
@@ -542,12 +561,15 @@ def bundle_signal(subject: "Subject", as_of: str, analysis: BundleAnalysis | Non
             return Signal.abstain(BUNDLE_MODEL, subject, as_of, str(exc))
         except Exception as exc:  # noqa: BLE001 - a broken call is not a view either
             return Signal.abstain(BUNDLE_MODEL, subject, as_of, f"bundle check failed: {type(exc).__name__}")
+    if analysis.level == "inconclusive":
+        # Not a neutral vote: the evidence was not seen (review, 2026-09-22).
+        return Signal.abstain(BUNDLE_MODEL, subject, as_of, re.sub(r"\*\*", "", analysis.verdict))
     return Signal(
         model_name=BUNDLE_MODEL, subject=subject, as_of=as_of, value=_BUNDLE_CONVICTION[analysis.level],
         reasoning=re.sub(r"\*\*", "", analysis.verdict),
         components={"same_second_grouped": float(analysis.grouped), "personal_funded": float(analysis.personal_funded),
                     "strongest_group": float(analysis.strongest_group), "funder_and_second_overlap": float(analysis.overlap),
-                    "sample_buyers": float(analysis.buyers), "sample_traced": float(analysis.traced)},
+                    "sample_buyers": float(analysis.buyers), "sample_traced": float(analysis.traced), "funding_lookups_failed": float(analysis.lookups_failed)},
         metadata={"abstained": False, "level": analysis.level, "source": "mobula_token_bundle"},
     )
 

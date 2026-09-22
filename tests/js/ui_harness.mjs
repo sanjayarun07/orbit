@@ -173,6 +173,21 @@ const SOLANA = { id: 792703809, name: "Solana", nativeSymbol: "SOL", vmType: "sv
 const BASE = { id: 8453, name: "Base", nativeSymbol: "ETH", vmType: "evm" };
 
 const CASES = {
+  /** Signing out clears the conversation on screen, not just the account chip
+   *  (live, 2026-09-22: the transcript stayed visible on a shared screen until
+   *  a reload). */
+  async signout_clears_the_transcript() {
+    const { dom, sandbox } = load();
+    const messages = dom.query("#messages");
+    messages.innerHTML = "<div class=\"message\">what does my wallet hold</div>";
+    await sandbox.signOut();
+    return {
+      loadError: sandbox.__loadError ?? null,
+      transcript: messages.innerHTML,
+      signedOut: sandbox.recorded.fetches.some(u => u.includes("/auth/signout")),
+    };
+  },
+
   /** A standalone dialog quote with valid inputs must reach Relay. */
   async quote_reaches_relay() {
     const { dom, sandbox, setScriptVar } = load();

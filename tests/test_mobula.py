@@ -74,6 +74,37 @@ PORTFOLIO = {"total_wallet_balance": 12345.6, "assets": [
 ]}
 
 
+def test_an_unlisted_or_implausible_price_never_enters_the_total(monkeypatch):
+    """vitalik.eth live (review, 2026-09-22): an airdropped, unlisted token at
+    $4.5 trillion each made the wallet "worth" $136 quadrillion, shown as the
+    total with no warning. Unlisted assets are never priced, an implausible
+    value is quarantined, and the total is of what was priced, and says so."""
+    payload = {"total_wallet_balance": 136598599507326000000.0, "assets": [
+        {"asset": {"id": 0, "name": "Southern Poverty Law Center", "symbol": "SPLC", "blockchains": ["Ethereum"]},
+         "estimated_balance": 136598599480132320000.0, "price": 4553286649337.744, "token_balance": 30000000, "allocation": 99.99},
+        {"asset": {"id": 100, "name": "Ethereum", "symbol": "ETH", "blockchains": ["Ethereum"]},
+         "estimated_balance": 12000.0, "price": 4000.0, "token_balance": 3, "allocation": 0.0, "price_change_24h": 1.5},
+        {"asset": {"id": 101, "name": "Listed but absurd", "symbol": "ABSURD", "blockchains": ["Base"]},
+         "estimated_balance": 5e12, "price": 5e6, "token_balance": 1000000, "allocation": 0.0},
+        {"asset": {"id": 102, "name": "USD Coin", "symbol": "USDC", "blockchains": ["Base"]},
+         "estimated_balance": 8000.0, "price": 1.0, "token_balance": 8000, "allocation": 0.0},
+        # Listed, plausible-looking, and wrong: $63K a token against a $2M market cap (SDL, live)
+        {"asset": {"id": 8695, "name": "Saddle Finance", "symbol": "SDL", "blockchains": ["Arbitrum"], "contracts": ["0xsdl"]},
+         "estimated_balance": 136890000.0, "price": 63710.0, "token_balance": 2148.62, "allocation": 0.0, "cross_chain_balances": {"Arbitrum": {}}},
+    ]}
+    markets = {"0xsdl": {"data": {"market_cap": 2_000_000, "liquidity": 40_000}}}
+
+    def get(path, params):
+        return markets[params["asset"]] if "market/data" in path else payload
+    monkeypatch.setattr(mobula_wallet, "_get", get)
+    card = mobula_wallet.portfolio("portfolio of 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045")
+    assert "**Total (priced holdings)**: $20.00K" in card and "quadrillion" not in card and "$136" not in card
+    assert "| ETH | Ethereum | 3 | $4.00K | $12.00K | +1.5% | 60.0% |" in card          # shares recomputed over what was priced
+    assert "| SPLC" not in card and "| ABSURD" not in card and "| SDL" not in card
+    assert ("*Not valued: 3 holding(s) whose price Mobula cannot verify, left out of the total: SPLC (30,000,000 tokens, unlisted), "
+            "ABSURD (1,000,000 tokens, implausible price), SDL (2,148.62 tokens, exceeds the token's market cap).") in card
+
+
 def test_the_portfolio_card_prices_holdings_and_hides_spam_and_dust(monkeypatch):
     monkeypatch.setattr(mobula_wallet, "_get", lambda url, params: PORTFOLIO)
     card = mobula_wallet.portfolio(f"{WALLET} wallet portfolio")
@@ -440,6 +471,39 @@ def test_an_organic_launch_reports_none_found(monkeypatch):
     monkeypatch.setattr(mobula_meme, "_get", lambda path, params: None)
     card = _REAL_BUNDLE(f"bundle check {FARTCOIN} on solana")
     assert "Bundle evidence: **None found in the sample**" in card and "## Same-second groups" not in card and "## Shared funding" not in card
+
+
+def test_failed_funding_lookups_make_the_bundle_check_inconclusive_not_clean(monkeypatch):
+    """Live BONK under HTTP 429 (review, 2026-09-22): all 25 lookups failed and
+    the card said None found, with funding "traced" for 25. Missing evidence
+    is not a negative finding: the card says inconclusive and the analyst
+    abstains rather than voting neutral."""
+    from app.signals import Subject
+    buyers = [_buyer(f"O{i:02d}" + "A" * 30, i * 3) for i in range(8)]
+    monkeypatch.setattr(mobula_meme, "_get_v1", lambda path, params: buyers)
+
+    def rate_limited(path, params):
+        raise RuntimeError("Mobula HTTP 429")
+    monkeypatch.setattr(mobula_meme, "_get", rate_limited)
+    card = _REAL_BUNDLE(f"bundle check {FARTCOIN} on solana")
+    assert "Bundle evidence: **Inconclusive**" in card and "0 of the first 8 could be looked up (8 lookups failed)" in card
+    assert "(**8** lookups failed)" in card and "None found" not in card
+    analysis = mobula_meme._bundle_analysis(FARTCOIN, "solana")
+    assert analysis.level == "inconclusive" and analysis.lookups_failed == 8 and analysis.traced == 8
+    vote = mobula_meme.bundle_signal(Subject(kind="token", id=FARTCOIN, chain="solana"), "2026-09-22T00:00:00Z", analysis)
+    assert vote.abstained and "lookups failed" in vote.metadata["abstain_reason"]
+
+    # Some lookups failed but real evidence was seen: the level stands, the floor is stated.
+    funding = {b["address"]: {"from": "FUNDER" + "F" * 30} for b in buyers[:3]}
+
+    def flaky(path, params):
+        if params["wallet"] in funding:
+            return funding[params["wallet"]]
+        raise RuntimeError("Mobula HTTP 429")
+    monkeypatch.setattr(mobula_meme, "_get", flaky)
+    analysis = mobula_meme._bundle_analysis(FARTCOIN, "solana")
+    assert analysis.level == "some" and analysis.lookups_failed == 5 and "5 of 8 funding lookups failed" in analysis.verdict
+    assert not mobula_meme.bundle_signal(Subject(kind="token", id=FARTCOIN, chain="solana"), "2026-09-22T00:00:00Z", analysis).abstained
 
 
 def test_bundle_questions_reach_the_check():

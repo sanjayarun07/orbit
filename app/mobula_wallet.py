@@ -134,6 +134,57 @@ def _is_spam(asset: dict) -> bool:
     return bool(_SPAM.search(name))
 
 
+# No single wallet holds a trillion dollars; a "value" above this is a price
+# Mobula could not have verified (live, 2026-09-22: an airdropped token on
+# vitalik.eth "worth" $136 quadrillion at $4.5 trillion a token).
+_IMPLAUSIBLE_VALUE_USD = 1e12
+
+
+_VERIFY_ABOVE_USD = 1_000_000.0   # positions worth this much are checked against the token's own market
+_VERIFY_LOOKUPS = 5
+
+
+def _market_of(asset: dict, chains: dict | None) -> dict:
+    """The token's market cap and liquidity from Mobula's market data, for the
+    contract the wallet holds it under; {} when unknown or the call fails."""
+    contracts, blockchains = list(asset.get("contracts") or []), list(asset.get("blockchains") or [])
+    pairs = list(zip(contracts, blockchains))
+    if chains:
+        pairs = [pair for pair in pairs if pair[1] in chains] or pairs
+    if not pairs:
+        return {}
+    try:
+        data = _get("/api/1/market/data", {"asset": pairs[0][0], "blockchain": pairs[0][1]})
+    except Exception:
+        return {}
+    market = data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
+    return market if isinstance(market, dict) else {}
+
+
+def _unverified(value: float, market: dict) -> str | None:
+    """A position worth more than the whole token, or more than ten times the
+    liquidity that prices it, carries a price nobody could realise (live,
+    2026-09-22: a listed token at $63K each, market cap $2M, "worth" $137M)."""
+    cap = float(market.get("market_cap") or 0)
+    liquidity = float(market.get("liquidity") or 0)
+    if cap > 0 and value > cap:
+        return "exceeds the token's market cap"
+    if liquidity > 0 and value > 10 * liquidity:
+        return "over ten times the token's liquidity"
+    return None
+
+
+def _unpriceable(asset: dict, value: float) -> str | None:
+    """Why a holding's USD value must not be shown or summed: an asset Mobula
+    has not listed (id 0) carries a price nobody verified, and any value past
+    the plausible bound is wrong whatever its source. None when it may be priced."""
+    if asset.get("id") == 0:            # Mobula's explicit "not listed"; an absent key says nothing
+        return "unlisted"
+    if value >= _IMPLAUSIBLE_VALUE_USD:
+        return "implausible"
+    return None
+
+
 def portfolio(request: str) -> str:
     """What the wallet holds now, across every chain Mobula indexes, priced."""
     wallet = address_in(request)
@@ -142,7 +193,8 @@ def portfolio(request: str) -> str:
     data = _get("/api/1/wallet/portfolio", {"wallet": wallet, "unlistedAssets": "true"})
     if not isinstance(data, dict):
         raise RuntimeError("Mobula returned no portfolio")
-    rows, spam, dust = [], 0, 0
+    rows, spam, dust, unpriced = [], 0, 0, []
+    priced_total = 0.0
     for holding in data.get("assets") or []:
         asset = holding.get("asset") or {}
         if _is_spam(asset):
@@ -151,17 +203,41 @@ def portfolio(request: str) -> str:
         value = holding.get("estimated_balance")
         if not value and not holding.get("token_balance"):
             continue
+        why = _unpriceable(asset, float(value or 0))
+        if why:
+            unpriced.append((asset.get("symbol") or asset.get("name") or "?", holding.get("token_balance"), why))
+            continue
         if value is not None and 0 < float(value or 0) < 1:
+            priced_total += float(value or 0)
             dust += 1
             continue
         chains = ", ".join((holding.get("cross_chain_balances") or {}).keys()) or ", ".join(asset.get("blockchains") or [])
         rows.append((float(value or 0), asset.get("symbol") or "—", chains, holding.get("token_balance"),
-                     holding.get("price"), value, holding.get("price_change_24h"), holding.get("allocation")))
+                     holding.get("price"), value, holding.get("price_change_24h"), holding.get("allocation"), asset, holding))
     rows.sort(key=lambda r: r[0], reverse=True)
-    total = data.get("total_wallet_balance")
+    # The largest positions are checked against the token's own market: a
+    # listed token can still carry a price its pools could never pay.
+    checked = 0
+    kept = []
+    for row in rows:
+        value, symbol, chains, balance, price, raw, change, allocation, asset, holding = row
+        if value >= _VERIFY_ABOVE_USD and checked < _VERIFY_LOOKUPS:
+            checked += 1
+            why = _unverified(value, _market_of(asset, holding.get("cross_chain_balances") or {}))
+            if why:
+                unpriced.append((symbol, balance, why))
+                continue
+        priced_total += value
+        kept.append(row[:8])
+    rows = kept
+    # Mobula's total includes what was quarantined; when anything was, the
+    # total is of the priced holdings and says so, and shares are recomputed.
+    total = data.get("total_wallet_balance") if not unpriced else priced_total
+    if unpriced and priced_total > 0:
+        rows = [(v, sym, ch, bal, price, value, change, v / priced_total * 100) for v, sym, ch, bal, price, value, change, _ in rows]
     lines = [
         f"# Wallet portfolio — {_short(wallet)}",
-        f"**Provider**: Mobula (40+ chains) · **Checked**: {_stamp()} · **Total**: {_usd(total)}",
+        f"**Provider**: Mobula (40+ chains) · **Checked**: {_stamp()} · **Total{' (priced holdings)' if unpriced else ''}**: {_usd(total)}",
         "",
     ]
     if rows:
@@ -177,6 +253,11 @@ def portfolio(request: str) -> str:
     skipped = [text for text, count in ((f"{dust} holding(s) under $1", dust), (f"{spam} spam/airdrop token(s)", spam)) if count]
     if skipped:
         lines += ["", f"*Not shown: {', '.join(skipped)}.*"]
+    if unpriced:
+        shown = ", ".join(f"{sym} ({_amount(bal)} tokens, {'unlisted' if why == 'unlisted' else 'implausible price' if why == 'implausible' else why})" for sym, bal, why in unpriced[:6])
+        more = f" and {len(unpriced) - 6} more" if len(unpriced) > 6 else ""
+        lines += ["", f"*Not valued: {len(unpriced)} holding(s) whose price Mobula cannot verify, left out of the total: {shown}{more}. "
+                      "Unlisted tokens are usually airdrops priced by their own thin pools.*"]
     lines += ["", "Source: [Mobula wallet portfolio](https://docs.mobula.io/rest-api-reference/endpoint/wallet-portfolio)"]
     return "\n".join(lines)
 

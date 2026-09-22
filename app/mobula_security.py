@@ -152,7 +152,7 @@ def token_security(request: str) -> str:
     else:
         lines.append("No liquidity-pool analysis was returned for this token.")
 
-    lines += ["", "## Holders", f"- **Top 10**: {_pct(data.get('top10HoldingsPercentage'))} of supply · "
+    lines += ["", "## Holders", f"- **Top 10**: {_pct(data.get('top10HoldingsPercentage'))} of supply (Mobula's security profile, with its own exclusions; the holders table counts every position) · "
               f"**Top 50**: {_pct(data.get('top50HoldingsPercentage'))} · **Top 100**: {_pct(data.get('top100HoldingsPercentage'))}"]
     if data.get("burnedHoldingsPercentage") is not None:
         lines.append(f"- **Burned supply**: {_pct(data.get('burnedHoldingsPercentage'))} · "

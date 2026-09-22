@@ -2001,3 +2001,52 @@ and both passing the audit. `scripts/preflight.py <env-file>` runs the
 audit on the host before `compose up`, names every provider that is and is
 not configured, and exits 1 on a fatal finding. The runbook is in
 `docs/product/operations.md` under "Staging".
+
+## Live testing report of 2026-09-22: five findings, one caused by the operator
+
+The tester's report is under `reports/live-2026-09-22/` (untracked). What
+was done with each finding:
+
+1. **Bundle check said "None found" with every funding lookup failed
+   (P1).** `_funding_of` returned the same None for "no funding record" and
+   "the call failed"; under Mobula HTTP 429 all 25 lookups failed and the
+   card counted them as traced. A failed lookup is now its own outcome:
+   with no positive evidence the level is `inconclusive`, the card says how
+   many lookups failed and asks for a retry, and the bundle analyst
+   **abstains** rather than casting the neutral vote a clean sample earns.
+   With positive evidence and some failures the level stands and the
+   shared-funder count is stated as a floor.
+2. **Wallet totals trusted absurd prices (P1).** vitalik.eth showed a total
+   of $136 quadrillion from an unlisted airdrop priced at $4.5 trillion a
+   token. A holding Mobula marks unlisted (`asset.id == 0`) is never priced;
+   any holding valued past $1 trillion is quarantined as implausible; the
+   total becomes the sum of what was priced, labelled "(priced holdings)",
+   shares are recomputed, and the quarantined holdings are listed under
+   "Not valued" with their balances. A listed token can still carry a price
+   its pools could never pay (SDL at $63K each, market cap $2M, "worth"
+   $137M in the same wallet), so the largest positions -- those over $1M,
+   at most five -- are checked against the token's own market data and
+   quarantined when the position exceeds the market cap or ten times the
+   liquidity. Live after both: the same wallet reads $1.14M of priced
+   holdings with 8,785 quarantined; positions under $1M are not verified.
+3. **"Top holders of BONK" answered with liquidity venues (P2).** This ran
+   while the local server had no provider or model keys: the operator (the
+   assistant) had set `.env` aside for a CI simulation and both local
+   servers, which reload on file changes, restarted without it. With Mobula
+   registered the same question routes to the holders tool and answers the
+   top-ten share. No routing change; the readiness 503 in the report has the
+   same cause. The lesson is recorded: never remove `.env` while a reloading
+   server runs from the checkout.
+4. **Sign-out left the conversation on screen (P2).** `signOut()` now
+   abandons any turn in flight and starts a new chat, which clears the
+   transcript and the session id; a browser-harness case proves it.
+5. **Wrapped SOL called "supply is fixed" (P2).** No mint authority now
+   reads "no authority can mint more"; the native wrapper's row says its
+   supply follows what SOL is wrapped, 1:1.
+
+Also from the report: the two top-10 concentration figures (security
+profile 11.04%, holders table 38.30%) are now labelled with their
+definitions. Provider entitlements the report found missing are the
+operator's to decide: Bitquery answers 402 (credits), RootData wants a
+higher tier, most Nansen tools need `NANSEN-API-KEY` on the MCP side,
+Reddit and CoinMarketCap are unset.

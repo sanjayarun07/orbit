@@ -236,7 +236,7 @@ below is staging-only except the values in `deploy/staging.env.example`.
 ```bash
 git clone https://github.com/sanjayarun07/orbit && cd orbit      # the compose files, Caddyfile and scripts
 cp deploy/staging.env.example .env && $EDITOR .env                # fill every <...>; generate secrets with: openssl rand -hex 32
-export ORBIT_IMAGE_TAG=sha-<commit>                               # or set it in .env; the commit CI built
+export ORBIT_IMAGE_TAG=sha-<short commit>                         # or set it in .env; the 7-char sha CI tags, e.g. sha-59e52a8
 python3 -m venv .venv && .venv/bin/pip install -q -e . && .venv/bin/python scripts/preflight.py .env
 docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d

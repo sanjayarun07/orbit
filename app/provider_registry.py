@@ -138,6 +138,9 @@ def _solana_rpc_top_holders(request: str) -> str:
     return "\n".join(lines)
 
 
+_WRAPPED_SOL = "So11111111111111111111111111111111111111112"
+
+
 def _solana_token_security(request: str) -> str:
     """Jupiter identity + Shield safety dossier for a Solana mint -- the
     token_security answer for Solana, where GoPlus/Honeypot (EVM-only) do not
@@ -197,10 +200,15 @@ def _solana_token_security(request: str) -> str:
     mint_authority = record.get("mintAuthority")
     freeze_authority = record.get("freezeAuthority")
     if record:
-        lines.append(
-            f"| Mint authority | Active — `{mint_authority}` (supply can be increased) |"
-            if mint_authority else "| Mint authority | None (supply is fixed) |"
-        )
+        if mint == _WRAPPED_SOL:
+            # No authority mints wSOL, and its supply is not fixed either: it
+            # is whatever SOL users have wrapped, 1:1 (review, 2026-09-22).
+            lines.append("| Mint authority | None — wrapped SOL is minted by wrapping SOL 1:1, so its supply follows what is wrapped, not a cap |")
+        else:
+            lines.append(
+                f"| Mint authority | Active — `{mint_authority}` (supply can be increased) |"
+                if mint_authority else "| Mint authority | None (no authority can mint more) |"
+            )
         lines.append(
             f"| Freeze authority | Active — `{freeze_authority}` (token accounts can be frozen) |"
             if freeze_authority else "| Freeze authority | None (accounts cannot be frozen) |"

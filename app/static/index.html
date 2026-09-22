@@ -1760,7 +1760,12 @@ async function signinWithCode(){const email=$("#signinEmail").value.trim();const
   try{const res=await fetch("/auth/email/code",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,code})});const data=await res.json();if(!res.ok)throw new Error(normalizeError(data,res.status));account=data;renderAccount();closeDialog("signinDialog");$("#signinCode").value="";$("#signinCodeRow").hidden=true;$("#signinCodeBtn").hidden=true;$("#signinSendBtn").textContent="Send sign-in link";hydrateHistory();}
   catch(error){status.textContent=error.message;}finally{button.disabled=false;}}
 async function verifySignin(token){const res=await fetch("/auth/email/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})});const data=await res.json();if(!res.ok)throw new Error(normalizeError(data,res.status));account=data;renderAccount();closeDialog("signinDialog");hydrateHistory();}
-async function signOut(){clearApiKeySecret();try{await fetch("/auth/signout",{method:"POST"});}catch{}setWalletDisconnected();await loadAccount();closeDialog("profileDialog");}
+async function signOut(){clearApiKeySecret();try{await fetch("/auth/signout",{method:"POST"});}catch{}setWalletDisconnected();await loadAccount();closeDialog("profileDialog");
+  /* The transcript belongs to the account that just left: clear it now, not
+     at the next reload (live, 2026-09-22: the conversation stayed on a shared
+     screen after sign-out). A turn still in flight is abandoned with it. */
+  if(busy){chatTurnEpoch++;busy=false;sendBtn.disabled=false;}
+  startNewChat();}
 function attachAccountNotice(el,detail,status){const body=$(".message-body",el);if(!body)return;const box=document.createElement("div");box.className="notice-actions";
   if(!detail||typeof detail!=="object"||detail.signed_in===false||detail.error==="sign_in_required"){const b=document.createElement("button");b.className="primary";b.type="button";b.textContent="Sign in with email";b.addEventListener("click",()=>openSignin(status===402?"You've used your trial credits. Sign in to get 100 free credits every month.":"Sign in to continue."));box.appendChild(b);}
   else{const b=document.createElement("button");b.className="primary";b.type="button";b.textContent="Plans & credits";b.addEventListener("click",openPlans);box.appendChild(b);}
