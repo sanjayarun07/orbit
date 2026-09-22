@@ -19,7 +19,7 @@ from app.experience import (advance_session_context, build_context_capsules, bui
     with_resolved_token, build_gas_advisory, build_intent_lock, build_trade_readiness)
 from app.graph import run_agent
 from app.identity import Identity, current_identity, service_identity
-from app import charts, decision_records, followups, streaming, turn_log, user_memory
+from app import charts, decision_records, followups, jobs, streaming, turn_log, user_memory
 
 # Fire-and-forget work that must still finish: kept here so a shutdown can
 # wait for it instead of dropping it (asyncio keeps only weak references to
@@ -339,6 +339,9 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             # Decision receipts made during this turn belong to this user
             # (None: an anonymous decision, kept without an owner).
             receipts_bound = decision_records.bind_turn(signed_in_user)
+            # A job started in this turn: owned by this user, billed to this
+            # account, its answer delivered to this conversation.
+            jobs_bound = jobs.bind_turn(signed_in_user, identity.account_id if signed_in_user else None, session_id)
             try:
                 run = await asyncio.wait_for(
                     run_agent(
@@ -353,6 +356,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             finally:
                 tradingview.current_token.reset(tv_bound)
                 decision_records.current_user.reset(receipts_bound)
+                jobs.current_owner.reset(jobs_bound)
         increment(f"intent_{run.intent}")
         answer, trajectory, plan = run
         client_trajectory = trajectory if settings.expose_tool_trajectory else public_activity(trajectory)

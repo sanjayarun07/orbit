@@ -277,6 +277,14 @@ class Settings(BaseSettings):
     holder_snapshot_max_per_tick: int = 5           # three calls each: a quarter of the minute rate
     holder_snapshot_pulse_chains: str = "solana,base,bsc"
     holder_snapshot_min_holders: int = 10          # a launch with fewer holders is not tracked yet
+    # Durable jobs (app/jobs.py, docs/durable-jobs-spec.md): work that outlives
+    # a request. A chat turn stays attached to its job this long; past it the
+    # answer is appended to the conversation when the job settles.
+    jobs_enabled: bool = True
+    job_attach_seconds: float = 90.0
+    job_lease_seconds: float = 60.0
+    job_max_attempts: int = 3
+    job_volatile_max_age_seconds: float = 60.0     # cached price-class results older than this are refetched on resume
     bitquery_api_key: str | None = None
     bitquery_graphql_url: str = "https://streaming.bitquery.io/eap"
     bitquery_requests_per_minute: int = 30

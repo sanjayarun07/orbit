@@ -2076,3 +2076,33 @@ as a session lock where the sequence tries pgvector and falls back. Forty
 concurrent schema runs against a real Postgres, three rounds, produced no
 error. `tests/test_schema_lock.py` refuses any store that runs its
 `_TABLE_SQL` on a bare connection again.
+
+## Durable jobs, wave 1 (2026-09-22)
+
+`app/jobs.py` implements `docs/durable-jobs-spec.md`: tables `jobs` and
+`job_events`; a claim by compare-and-swap on (id, status, lease_id); a
+heartbeat that extends the lease and a guard every paid call passes; CAS
+checkpoints of plan, state, evidence, signals and the operation cache; the
+pause states; a per-replica worker started in the lifespan (`jobs` in
+`/readyz`); `attach()` for the chat turn (inline when no worker runs in
+the process, which is what the suite and a bare dev server use); delivery
+of a detached job's answer to its conversation with one credit charge
+keyed by the job id; scrub on account deletion; jobs and events in the
+export; `GET /jobs`, `GET /jobs/{id}`, `POST /jobs/{id}/cancel`.
+
+The deep dive is the first handler (`_deep_dive_job` in
+`app/nodes/research.py`): five plan steps, every evidence source through
+the operation cache (`build_token_evidence` takes `call` and `step`
+hooks), the synthesis cached too, the receipt written at the end and
+linked by id. Verified: the acceptance list in `tests/test_jobs.py`
+(resume after a crash with zero repeated calls, two claimers, a lost
+lease, an expired approval, a deletion mid-run, detached delivery once);
+a live deep dive on the test server through the worker in 36 s with all
+five steps done and the receipt linked; on real Postgres, a job whose
+worker died with an expired lease is claimed again and finished.
+
+Costs: a deep dive that settles while the turn is attached is charged as
+before through its trajectory; one that outlives the turn costs the turn
+(one credit) plus the deep-dive charge at settle. Next waves: the desk and
+the tape; then reminders, price alerts and the brief as scheduled jobs;
+then the paper-desk cycles.

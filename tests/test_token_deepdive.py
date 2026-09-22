@@ -81,7 +81,7 @@ def test_build_evidence_degrades_when_a_source_dies(monkeypatch):
 def _mock_deepdive_pieces(monkeypatch, resolution):
     monkeypatch.setattr(research, "_resolve_named_token", lambda *a, **k: _coro(resolution))
     monkeypatch.setattr(research, "build_token_evidence",
-                        lambda addr, chain, symbol=None: _coro(SimpleNamespace(dimensions=[], address=addr, chain=chain)))
+                        lambda addr, chain, symbol=None, **hooks: _coro(SimpleNamespace(dimensions=[], signals=[], address=addr, chain=chain)))
     monkeypatch.setattr(research, "format_evidence_bundle", lambda b: "EVIDENCE")
 
     async def fake_call_lm(program, **kw):

@@ -81,6 +81,10 @@ EXPECTED: dict[tuple[str, str], str] = {
     ("GET", "/chat/history/{session_id}"): "key:chat",
     ("DELETE", "/chat/history/{session_id}"): "browser",
     ("DELETE", "/chat/wallet/{session_id}"): "browser",
+    # Durable jobs: a person's own jobs, from a signed-in browser session.
+    ("GET", "/jobs"): "browser",
+    ("GET", "/jobs/{job_id}"): "browser",
+    ("POST", "/jobs/{job_id}/cancel"): "browser",
     ("GET", "/me/credits"): "key:data",
     ("GET", "/trade-plans/{plan_id}"): "owner_scoped",
     ("POST", "/trade-plans/{plan_id}/confirm"): "owner_scoped",

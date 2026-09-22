@@ -29,7 +29,7 @@ from app.token_resolve import bitquery_evm_lookup, clear_winner, token_candidate
 from app.token_deepdive import (
     ANALYSIS_RULES, build_token_evidence, bundle_signals, coverage_rows, evidence_skips, extract_market_price, format_evidence_bundle,
 )
-from app import decision_records, handles, holder_snapshots, listed_asset, role_memory
+from app import decision_records, handles, holder_snapshots, jobs, listed_asset, role_memory
 from app.signals import Signal, Subject
 from app.source_cards import extract_source_cards
 from app.web_search import append_web_sources, is_crypto_trends_query, web_search
@@ -1473,15 +1473,55 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
         address = resolved.group(1) or resolved.group(2)
         chain = resolution.chain
 
+    # The deep dive is a durable job (docs/durable-jobs-spec.md): it outlives
+    # this request, resumes after a restart or a lost worker, and never
+    # repeats a paid call. The turn stays attached for job_attach_seconds.
+    user_id, account_id, session_id = jobs.current_owner.get()
+    charter = (state.get("session_context") or {}).get("risk_charter")
+    job = await jobs.create("deep_dive", {"request": request, "address": address, "chain": chain, "symbol": symbol, "charter": charter},
+                            user_id=user_id, account_id=account_id, session_id=session_id)
     streaming.emit("status", text=f"Composing the evidence bundle for {symbol or address}")
-    bundle = await build_token_evidence(address, chain, symbol)
+    row = await jobs.attach(job["id"], on_event=lambda e: streaming.emit("status", text=e["title"]))
+    status = row.get("status")
+    if status == "succeeded" and isinstance(row.get("result"), dict):
+        return dict(row["result"])
+    if status in jobs.TERMINAL:
+        return {"answer": f"The deep dive of {symbol or address} could not be completed: {row.get('error') or status}.", "trajectory": None}
+    # Still running: the answer is appended to this conversation when it settles.
+    return {"answer": f"Still working on the deep dive of {symbol or address}; the answer will appear here.", "trajectory": None,
+            "job_id": job["id"], "resolved_token": {"symbol": symbol, "address": address, "chain": chain}}
+
+
+async def _deep_dive_job(job: dict, ctx: "jobs.JobContext") -> dict:
+    """The deep dive as a durable job handler: five plan steps, every source
+    through the operation cache, the verdict and the receipt at the end.
+    Restartable from any checkpoint: a resumed run re-walks the bundle and
+    finds every finished source cached."""
+    spec = job["spec"]
+    request, address, chain, symbol, charter = spec["request"], spec["address"], spec["chain"], spec.get("symbol"), spec.get("charter")
+    await ctx.plan(["Evidence: router dimensions", "Evidence: Mobula forensics", "Evidence: crowd and markets",
+                    "Evidence: ledger, unlocks, technicals", "Verdict and receipt"])
+    phases = {"dimensions": "0", "forensics": "1", "crowd": "2", "ledger": "3"}
+    current: list[str] = []
+
+    async def step(phase: str, title: str | None = None) -> None:
+        if current:
+            await ctx.finish_step(current[-1])
+        current.append(phases[phase])
+        await ctx.step(phases[phase])
+
+    bundle = await build_token_evidence(address, chain, symbol, call=ctx.call, step=step)
+    if current:
+        await ctx.finish_step(current[-1])
+    await ctx.step("4")
     bundle_has_history = any(d.name == "history" and d.status == "available" for d in getattr(bundle, "dimensions", []) or [])
     evidence = format_evidence_bundle(bundle)
-    charter = (state.get("session_context") or {}).get("risk_charter")
+    for signal in bundle.signals:
+        await ctx.add_signal(signal)
 
-    # Reflection loop (role memory). Fetching this asset's price is the trigger to
-    # reflect on any earlier decisions now old enough to have an outcome; then
-    # RECALL prior lessons and feed them into synthesis so the analyst improves.
+    # Reflection loop (role memory): this asset's price is the trigger to
+    # reflect on decisions old enough to have an outcome; then RECALL prior
+    # lessons and feed them into synthesis so the analyst improves.
     price_now = extract_market_price(bundle)
     await _reflect_due_decisions(chain, address, price_now)
     lessons = role_memory.recall_lessons(chain, address)
@@ -1489,34 +1529,38 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
 
     subject = Subject(kind="token", id=address, chain=chain, symbol=symbol)
     as_of = datetime.now(timezone.utc).isoformat()
-    try:
-        streaming.emit("status", text="Writing the due-diligence verdict")
+
+    async def synthesize() -> dict:
         result = await runtime.answer(
             runtime.token_deepdive_agent, tier="synthesis",
-            request=request, evidence=evidence,
-            analysis_rules=ANALYSIS_RULES,
-            user_context=charter or "no profile set",
-            learned_lessons=learned,
+            request=request, evidence=evidence, analysis_rules=ANALYSIS_RULES,
+            user_context=charter or "no profile set", learned_lessons=learned,
         )
-        answer = (getattr(result, "answer", "") or "").strip() or evidence
+        return {"answer": (getattr(result, "answer", "") or "").strip(), "stance": str(getattr(result, "stance", "") or ""),
+                "confidence": str(getattr(result, "confidence", "") or "")}
+
+    try:
+        verdict = await ctx.call("synthesis", synthesize, args={"evidence": evidence[:200], "charter": charter, "learned": learned})
+        answer = verdict.get("answer") or evidence
         # The lens's typed view. An answer whose stance or confidence did not
         # come back as one word abstains: an unparsed opinion is not a vote.
-        analyst = Signal.from_stance(
-            "token_deep_dive", subject, as_of,
-            str(getattr(result, "stance", "") or ""), str(getattr(result, "confidence", "") or ""),
-            reasoning=answer.strip().split("\n", 1)[0][:400],
-        )
+        analyst = Signal.from_stance("token_deep_dive", subject, as_of, verdict.get("stance", ""), verdict.get("confidence", ""),
+                                     reasoning=answer.strip().split("\n", 1)[0][:400])
+    except jobs.LostLease:
+        raise
     except Exception:
         logger.warning("token deep-dive synthesis failed; returning raw bundle", exc_info=True)
         answer = evidence
         analyst = Signal.abstain("token_deep_dive", subject, as_of, "synthesis failed")
+    await ctx.add_signal(analyst)
 
     # The receipt: every analyst's vote or abstention, what was not seen, the
     # price then and the verdict as given. Answering "why did you say that"
     # later reads this alone.
-    await decision_records.record(
+    receipt = await decision_records.record(
         kind="deep_dive", subject=subject, signals=[analyst, *bundle_signals(bundle)], verdict=answer,
-        coverage=coverage_rows(bundle), skipped=evidence_skips(bundle), price=price_now,
+        coverage=coverage_rows(bundle), skipped=evidence_skips(bundle), price=price_now, user_id=job.get("user_id"),
+        session_id=job.get("session_id"),
     )
     # A token someone looked at is worth recording: the ledger keeps its
     # structure from now on, so the next deep-dive can say what moved.
@@ -1546,11 +1590,16 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
             trajectory[f"tool_name_{index}"] = dimension.source
             trajectory[f"observation_{index}"] = dimension.detail
             index += 1
+    await ctx.finish_step("4")
     return {
         "answer": answer,
         "trajectory": trajectory,
         "resolved_token": {"symbol": symbol, "address": address, "chain": chain},
+        "receipt_id": (receipt or {}).get("id") if isinstance(receipt, dict) else None,
     }
+
+
+jobs.register("deep_dive", _deep_dive_job)
 
 
 # The knowledge synthesis saying the passages do not answer the question --

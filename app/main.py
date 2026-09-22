@@ -87,7 +87,7 @@ from app.db import get_pg_pool, get_redis
 from app.settings import settings
 from pydantic import BaseModel, Field
 
-from app import decision_records, execution_policy, holder_snapshots, polymarket_odds, sentiment_analyst, token_unlocks, turn_log, user_memory
+from app import decision_records, execution_policy, holder_snapshots, jobs, polymarket_odds, sentiment_analyst, token_unlocks, turn_log, user_memory
 from app.portfolio import build_portfolio_snapshot
 from app.wallet_insights import portfolio_scenario, wallet_health
 from app.wallet_auth import (
@@ -147,7 +147,10 @@ async def lifespan(_app: FastAPI):
     # The holder snapshot ledger records tracked meme tokens in the
     # background; history only exists from the day recording starts.
     snapshot_worker = asyncio.create_task(holder_snapshots.worker())
+    # Durable jobs: work that outlives a request (docs/durable-jobs-spec.md).
+    jobs_worker = asyncio.create_task(jobs.worker())
     _workers.update({
+        "jobs": jobs_worker,
         "reconciliation": reconciliation, "relay_reconciliation": relay_reconciliation,
         "tool_outcomes": outcomes_refresh, "tasks": task_worker, "knowledge_ingest": kb_worker,
         "holder_snapshots": snapshot_worker,
@@ -1387,6 +1390,7 @@ async def export_my_data(identity: Identity = Depends(require_browser_session)):
         "feedback": await feedback.list_for_principal(identity.principal_id),
         "tasks": await tasks.list_tasks(user["id"]),
         "decisions": [decision_records.public(r) for r in await decision_records.list_for(user["id"], limit=None)],
+        "jobs": [{**jobs.public(j), "events": await jobs.events(j["id"])} for j in await jobs.list_for(user["id"], limit=None)],
     }
 
 
@@ -1428,6 +1432,30 @@ async def my_decisions(limit: int = 20, identity: Identity = Depends(require_bro
     as given. Answers "why did Orbit say that" from the record alone."""
     rows = await decision_records.list_for(identity.user["id"], limit=max(1, min(int(limit), 100)))
     return {"decisions": [{**decision_records.public(r), "receipt": decision_records.why(r)} for r in rows]}
+
+
+@app.get("/jobs")
+async def my_jobs(limit: int = 50, identity: Identity = Depends(require_browser_session)):
+    """The signed-in user's durable jobs, newest first: what is running,
+    waiting, or settled, with its plan."""
+    rows = await jobs.list_for(identity.user["id"], limit=max(1, min(int(limit), 200)))
+    return {"jobs": [jobs.public(r) for r in rows]}
+
+
+@app.get("/jobs/{job_id}")
+async def my_job(job_id: str, identity: Identity = Depends(require_browser_session)):
+    row = await jobs.get(job_id)
+    if row is None or row.get("user_id") != identity.user["id"]:
+        raise HTTPException(404, "Job not found")
+    return {**jobs.public(row), "events": await jobs.events(job_id)}
+
+
+@app.post("/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str, identity: Identity = Depends(require_browser_session)):
+    row = await jobs.cancel(job_id, identity.user["id"])
+    if row is None:
+        raise HTTPException(404, "No running job with that id")
+    return jobs.public(row)
 
 
 @app.get("/me/conversations")
@@ -1529,6 +1557,7 @@ async def delete_my_account(body: DeleteAccountRequest, request: Request, respon
         await feedback.scrub_principal(identity.principal_id, owned_sessions)
         await user_memory.clear(user["id"])
         decision_records.forget_user(user["id"])
+        await jobs.scrub_user(user["id"])
     except Exception as exc:
         logger.warning("account deletion stopped: the log could not be scrubbed", exc_info=True)
         raise HTTPException(503, "Your records could not be cleared right now, so the account was not deleted. Try again shortly.") from exc
