@@ -816,7 +816,7 @@ async function switchSession(id) {
   chatTurnEpoch++;sessionId = id; sessionRevision=null;sessionStorage.setItem("orbit_session_id", id); renderChatList(); await hydrateHistory();
   closeSidebar();
 }
-function syncSidebarAccessibility(){const mobile=matchMedia("(max-width:720px)").matches;const open=$("#sidebar").classList.contains("open");$("#sidebar").inert=mobile&&!open;$(".main").inert=mobile&&open;}
+function syncSidebarAccessibility(){const mobile=matchMedia("(max-width:720px)").matches;const open=$("#sidebar").classList.contains("open");$("#sidebar").inert=mobile&&!open;$(".main").inert=mobile&&open;const backdrop=$("#sidebarBackdrop");backdrop.setAttribute("aria-hidden",String(!(mobile&&open)));backdrop.inert=!(mobile&&open);}
 function setSidebar(open){const wasOpen=$("#sidebar").classList.contains("open");$("#sidebar").classList.toggle("open",open);$("#sidebarBackdrop").classList.toggle("open",open);$("#mobileMenu").setAttribute("aria-expanded",String(open));syncSidebarAccessibility();if(matchMedia("(max-width:720px)").matches){if(open)$("#newChatBtn").focus();else if(wasOpen)$("#mobileMenu").focus();}}
 matchMedia("(max-width:720px)").addEventListener("change",syncSidebarAccessibility);
 syncSidebarAccessibility();

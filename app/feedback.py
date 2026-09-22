@@ -93,6 +93,20 @@ async def rate(session_id: str, revision: int, rating: str, comment: str | None 
     return {"rating": rating, "tools": tools, "changed": True}
 
 
+async def list_for_account(account_id: str) -> list[dict]:
+    """Every rating an account gave, for its data export. Postgres only:
+    the Redis and memory stores are keyed by turn, not by account."""
+    try:
+        pool = await get_pg_pool()
+    except Exception:
+        pool = None
+    if pool is None:
+        return []
+    rows = await pool.fetch("SELECT session_id, revision, rating, comment, tools, updated_at FROM chat_feedback WHERE account_id = $1 ORDER BY updated_at DESC LIMIT 1000", account_id)
+    return [{"session_id": r["session_id"], "revision": r["revision"], "rating": r["rating"], "comment": r["comment"], "tools": list(r["tools"] or []),
+             "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None} for r in rows]
+
+
 async def rating_for(session_id: str, revision: int) -> str:
     record = await _load(session_id, revision)
     return record["rating"] if record else "none"

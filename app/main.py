@@ -87,7 +87,7 @@ from app.db import get_pg_pool, get_redis
 from app.settings import settings
 from pydantic import BaseModel, Field
 
-from app import decision_records, execution_policy, holder_snapshots, sentiment_analyst, token_unlocks, turn_log, user_memory
+from app import decision_records, execution_policy, holder_snapshots, polymarket_odds, sentiment_analyst, token_unlocks, turn_log, user_memory
 from app.portfolio import build_portfolio_snapshot
 from app.wallet_insights import portfolio_scenario, wallet_health
 from app.wallet_auth import (
@@ -167,6 +167,7 @@ async def lifespan(_app: FastAPI):
         sentiment_analyst.set_loop(None)
         await asyncio.gather(reconciliation, relay_reconciliation, outcomes_refresh, task_worker, kb_worker, kb_warm, snapshot_worker, discovery, return_exceptions=True)
         drained = await execution_policy.drain_background()
+        drained += await holder_snapshots.drain_background()
         if drained:
             logger.info("drained %d background task(s) on shutdown", drained)
         await asyncio.to_thread(close_mcp_gateway)
@@ -281,6 +282,15 @@ async def _check(name: str, coro, required: bool) -> dict:
             "latency_ms": round((time.monotonic() - started) * 1000)}
 
 
+async def _check_polymarket() -> str:
+    """Optional: Polymarket's Gamma host answers from this network. Degraded,
+    not failed, when it does not -- odds are then omitted, not invented."""
+    state = await asyncio.to_thread(polymarket_odds.status)
+    if not state["ok"]:
+        raise RuntimeError(state["detail"])
+    return state["detail"]
+
+
 async def _check_knowledge_snapshot() -> str:
     """The router's knowledge-base anchor reads an in-memory resolver snapshot
     warmed at startup and every two minutes. When it is empty -- before the
@@ -370,6 +380,7 @@ async def readyz(response: Response):
         _check("redis", _check_redis(), required=bool(settings.redis_url)),
         _check("model_credentials", _check_model(), required=True),
         _check("knowledge_snapshot", _check_knowledge_snapshot(), required=False),
+        _check("polymarket", _check_polymarket(), required=False),
     ))
     checks.extend(_worker_health())
     failed = [c["name"] for c in checks if c["required"] and not c["ok"]]
@@ -1369,6 +1380,13 @@ async def export_my_data(identity: Identity = Depends(require_browser_session)):
         "credits": {"balance": await credits.balance(identity.account_id), "ledger": await credits.history(identity.account_id, limit=1000)},
         "conversations": conversations,
         "memory": await user_memory.list_facts(user["id"]),
+        # The operator's records about the account too (review, 2026-09-22):
+        # every logged turn, the ratings given, scheduled tasks, and the
+        # decision receipts behind deep-dives.
+        "turns": [turn_log.public(t, full=True) for t in await turn_log.list_turns(days=3650, user_id=user["id"], limit=1000)],
+        "feedback": await feedback.list_for_account(identity.account_id),
+        "tasks": await tasks.list_tasks(user["id"]),
+        "decisions": [decision_records.public(r) for r in await decision_records.list_for(user["id"], limit=1000)],
     }
 
 
@@ -1498,6 +1516,9 @@ async def delete_my_account(body: DeleteAccountRequest, request: Request, respon
     for key in await api_keys.list_for_user(user["id"]):
         await api_keys.revoke(user["id"], key["id"])
     await accounts.revoke_user_sessions(user["id"])
+    # The turn log keeps its rows for operations but not the person's words:
+    # message and answer are scrubbed and the owner detached (review, 2026-09-22).
+    await turn_log.scrub_user(user["id"])
     await accounts.delete_user(user["id"])
     await delete_auth_session(request.cookies.get(COOKIE_NAME))
     response.delete_cookie(accounts.USER_COOKIE, path="/")

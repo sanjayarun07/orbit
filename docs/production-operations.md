@@ -1850,3 +1850,47 @@ worth a fix.
   says why, and the card carries a warning line.
 - **"Is BTC going up in next 5-10 hours?"** answered 402 for an anonymous
   visitor out of trial credits. By design.
+
+## Review of 2026-09-22: ten findings
+
+An outside review of the latest commit, all closed here with a pinned test
+each (tests/test_review_20260922.py) except the one that restates a scope
+decision.
+
+1. **Holder history froze after 200 rows.** `history()` cut from the oldest
+   end. It now takes the newest `limit` rows and returns them oldest first;
+   the dark-token check reads current rows again.
+2. **Compound clauses shared one sink.** Each clause now writes its own; the
+   first clause that resolved a token names the turn's subject, and every
+   distinct resolution note is kept in clause order.
+3. **The first snapshot blocked a finished deep-dive.** Tracking and the
+   first row are scheduled as a tracked background task
+   (`holder_snapshots.schedule`), drained at shutdown.
+4. **The turn log was on the critical path.** The write runs as a tracked
+   background task (`execution_policy.background`), and the store bounds
+   its own wait (`STORE_TIMEOUT_SECONDS`, 5 s) before keeping the row in
+   memory. The earlier claim in these notes was wrong until now.
+5. **Two workers doubled the Mobula allowance.** The bucket is per process;
+   `uvicorn_workers` (from `UVICORN_WORKERS`) divides the rate and the burst
+   so the container as a whole stays inside the limit.
+6. **Robinhood scope.** The review says the app's listings were chosen. The
+   recorded decision (2026-09-20, "Yes it's Robinhood chain") is Robinhood
+   Chain; the docs stand unless the user says otherwise.
+7. **Lowercase Binance questions.** "is bonk listed on binance" now names
+   BONK: cashtag, upper-case word, or the word after is / does / list /
+   listed / trade in any case.
+8. **Polymarket unreachable but reported healthy.** A transport failure
+   takes the tool out of routing for ten minutes and `/readyz` carries a
+   `polymarket` check (optional, degraded when unreachable) that probes
+   once per window.
+9. **Export and deletion.** `/me/export` now includes every logged turn, the
+   ratings given, tasks and decision receipts. Account deletion scrubs the
+   person's message, answer, tool activity, wallet and owner from their
+   turn rows; the operational row (status, latency, tools, timing) stays.
+10. **Admin summary over 1,000 rows.** With Postgres the summary is SQL
+    aggregates over the whole period (percentiles included); the memory
+    store counts all its rows.
+
+UI: the closed mobile sidebar backdrop is `aria-hidden` and inert, so it is
+no longer announced as "Close navigation" while the menu is closed. Shell
+cache bumped to v11.

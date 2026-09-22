@@ -17,6 +17,14 @@ def _identity(kind="user", user_id="11111111-1111-1111-1111-111111111111"):
     return SimpleNamespace(kind=kind, account_id="acct-1", user={"id": user_id} if kind == "user" else None, api_key=None, signed_in=kind == "user")
 
 
+async def _turn(body, identity):
+    """A chat turn, then the background log write drained so the row is readable."""
+    try:
+        return await execution_policy.execute_chat_turn(body, identity)
+    finally:
+        await execution_policy.drain_background()
+
+
 def _response(**over):
     base = dict(answer="BONK trades at $0.000021.", session_id="s1", session_revision=3, intent="research", capabilities=["market_data"],
                 trajectory={"tool_name_0": "birdeye_token_overview", "observation_0": "...", "tool_name_1": "semantic_cache"},
@@ -31,7 +39,7 @@ def test_an_answered_turn_is_logged_with_its_tools_and_gate(monkeypatch):
     async def admitted(body, identity):
         return _response(answer_gate={"subject": "ok", "coverage": "partial", "resolved_by": "web"})
     monkeypatch.setattr(execution_policy, "_admitted_chat_turn", admitted)
-    out = asyncio.run(execution_policy.execute_chat_turn(ChatRequest(message="BONK price"), _identity()))
+    out = asyncio.run(_turn(ChatRequest(message="BONK price"), _identity()))
     assert out.answer.startswith("BONK")
     rows = asyncio.run(turn_log.list_turns(days=1))
     assert len(rows) == 1
@@ -49,7 +57,7 @@ def test_a_refused_turn_is_logged_with_its_status_and_detail(monkeypatch):
         raise ServiceError(402, {"error": "insufficient_credits", "balance": 0})
     monkeypatch.setattr(execution_policy, "_admitted_chat_turn", admitted)
     with pytest.raises(ServiceError):
-        asyncio.run(execution_policy.execute_chat_turn(ChatRequest(message="deep dive on WIF", session_id="s9"), _identity()))
+        asyncio.run(_turn(ChatRequest(message="deep dive on WIF", session_id="s9"), _identity()))
     row = asyncio.run(turn_log.list_turns(days=1))[0]
     assert row["status"] == "error" and row["http_status"] == 402 and "insufficient_credits" in row["error"]
     assert row["session_id"] == "s9" and row["answer"] is None
@@ -60,7 +68,7 @@ def test_a_crash_is_logged_as_a_500_and_still_raised(monkeypatch):
         raise RuntimeError("boom")
     monkeypatch.setattr(execution_policy, "_admitted_chat_turn", admitted)
     with pytest.raises(RuntimeError):
-        asyncio.run(execution_policy.execute_chat_turn(ChatRequest(message="x"), _identity()))
+        asyncio.run(_turn(ChatRequest(message="x"), _identity()))
     row = asyncio.run(turn_log.list_turns(days=1))[0]
     assert row["status"] == "error" and row["http_status"] == 500 and row["error"] == "RuntimeError: boom"
 
@@ -73,7 +81,7 @@ def test_logging_failure_never_breaks_the_answer(monkeypatch):
         raise RuntimeError("log store down")
     monkeypatch.setattr(execution_policy, "_admitted_chat_turn", admitted)
     monkeypatch.setattr(turn_log, "record", broken)
-    out = asyncio.run(execution_policy.execute_chat_turn(ChatRequest(message="BONK price"), _identity()))
+    out = asyncio.run(_turn(ChatRequest(message="BONK price"), _identity()))
     assert out.answer.startswith("BONK")                      # the answer still went out
 
 

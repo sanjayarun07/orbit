@@ -362,6 +362,35 @@ async def store(subject_key: str, row: dict) -> None:
     await _mark_taken(subject_key, row["taken_at"])
 
 
+_background: set[asyncio.Task] = set()
+
+
+def schedule(subject: Subject, source: str, days: float, *, take_now: bool) -> None:
+    """Track `subject` and, when asked, take its first row -- off the turn's
+    critical path (review, 2026-09-22: a deep-dive waited on three Mobula
+    calls after its answer was already written). Never raises."""
+    async def run():
+        try:
+            await track(subject, source, days=days)
+            if take_now:
+                await snapshot(subject)
+        except Exception:
+            logger.warning("holder_snapshots: background tracking failed for %s", subject.key, exc_info=True)
+    try:
+        task = asyncio.get_running_loop().create_task(run())
+    except RuntimeError:
+        return
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+
+
+async def drain_background(timeout: float = 15.0) -> int:
+    pending = [t for t in _background if not t.done()]
+    if pending:
+        await asyncio.wait(pending, timeout=timeout)
+    return len(pending)
+
+
 async def snapshot(subject: Subject) -> dict | None:
     """Take and store one row for `subject` now. None when disabled."""
     if not enabled() or subject.kind != "token" or not subject.chain:
@@ -385,19 +414,22 @@ def _from_db(r) -> dict:
 
 
 async def history(subject_key: str, limit: int = 200, since: datetime | None = None) -> list[dict]:
-    """Rows for one subject, oldest first."""
+    """The newest `limit` rows for one subject, returned oldest first. The cut
+    is taken from the newest end: an ascending LIMIT returned the oldest 200
+    forever, so the history card froze after about three days of rows and
+    the dark-token check compared against stale state (review, 2026-09-22)."""
     pool = await _pool()
     if pool is not None:
         if since is not None:
             rows = await pool.fetch("SELECT *, top_holders::text AS top_holders, flags::text AS flags FROM holder_snapshots WHERE subject_key = $1 AND taken_at >= $2 "
-                                    "ORDER BY taken_at ASC LIMIT $3", subject_key, since, limit)
+                                    "ORDER BY taken_at DESC LIMIT $3", subject_key, since, limit)
         else:
             rows = await pool.fetch("SELECT *, top_holders::text AS top_holders, flags::text AS flags FROM holder_snapshots WHERE subject_key = $1 "
-                                    "ORDER BY taken_at ASC LIMIT $2", subject_key, limit)
-        return [_from_db(r) for r in rows]
+                                    "ORDER BY taken_at DESC LIMIT $2", subject_key, limit)
+        return [_from_db(r) for r in reversed(rows)]
     with _lock:
         rows = [dict(r) for r in _rows.get(subject_key, []) if since is None or r["taken_at"] >= since]
-    return rows[:limit]
+    return rows[-limit:] if limit else rows
 
 
 async def as_of(subject_key: str, moment: datetime) -> dict | None:

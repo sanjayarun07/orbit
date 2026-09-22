@@ -1521,12 +1521,7 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
     # A token someone looked at is worth recording: the ledger keeps its
     # structure from now on, so the next deep-dive can say what moved.
     if holder_snapshots.enabled():
-        try:
-            await holder_snapshots.track(subject, "deep_dive", days=holder_snapshots.DEEP_DIVE_DAYS)
-            if not bundle_has_history:
-                await holder_snapshots.snapshot(subject)
-        except Exception:
-            logger.warning("holder_snapshots: could not track %s", subject.key, exc_info=True)
+        holder_snapshots.schedule(subject, "deep_dive", holder_snapshots.DEEP_DIVE_DAYS, take_now=not bundle_has_history)
 
     # STORE this decision for a future bias-free reflection (advisory memory only;
     # never a trade or a safety override).
@@ -1780,17 +1775,30 @@ async def research_node(state: AgentState) -> dict:
         parts, extras = [], {}
         streaming.emit("status", text="Working on: " + " · ".join(c[:40] for c in clauses))
 
-        async def one(clause: str) -> dict:
+        sinks = [dict() for _ in clauses]
+
+        async def one(clause: str, own: dict) -> dict:
             # Each clause on its own path, all at once: a four-ask tape ran
             # past the turn timeout when the asks were answered one by one
-            # (live, 2026-09-22). Order is kept when the results are read.
+            # (live, 2026-09-22). Order is kept when the results are read,
+            # and each clause writes its own sink: a shared one let the last
+            # clause to finish set the whole answer's resolved token and
+            # note (review, 2026-09-22).
             try:
-                return await _research_node({**state, "request": clause, "contextual_request": None}, sink)
+                return await _research_node({**state, "request": clause, "contextual_request": None}, own)
             except Exception:
                 logger.warning("compound ask clause failed: %r", clause[:60], exc_info=True)
                 return {"answer": "", "trajectory": None}
 
-        results = await asyncio.gather(*(one(clause) for clause in clauses))
+        results = await asyncio.gather(*(one(clause, own) for clause, own in zip(clauses, sinks)))
+        # The first clause that resolved a token names the turn's subject;
+        # every distinct resolution note is kept, in clause order.
+        for own in sinks:
+            if own.get("resolved_token") and not sink.get("resolved_token"):
+                sink["resolved_token"] = own["resolved_token"]
+        notes = [own["resolution_note"] for own in sinks if own.get("resolution_note")]
+        if notes:
+            sink["resolution_note"] = "\n".join(dict.fromkeys(notes))
         for clause, part in zip(clauses, results):
             if part.get("answer") and not (part.get("trajectory") or {}).get("tool_name_0", "").startswith("_"):
                 streaming.emit("card", markdown=part["answer"], tool=(part.get("trajectory") or {}).get("tool_name_0"))

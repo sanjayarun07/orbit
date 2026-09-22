@@ -238,6 +238,10 @@ class Settings(BaseSettings):
     mobula_api_key: str | None = None
     mobula_base_url: str = "https://api.mobula.io/api/2"   # every Mobula call derives its host from this (app/mobula_client.py)
     mobula_requests_per_minute: int = 60
+    # The Mobula bucket is per process. With several uvicorn workers each one
+    # takes its share of the minute, so the container as a whole never
+    # exceeds the allowance (review, 2026-09-22: two workers doubled it).
+    uvicorn_workers: int = 1
     # The bucket never holds more than this many tokens: the per-minute rate
     # is a sustained rate, not a burst (a 60-request burst drew 429s live).
     # The full minute fits one deep-dive (about forty calls: security, trades,

@@ -20,6 +20,7 @@ critical path: recording is best-effort and never raises into a response.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import threading
@@ -74,6 +75,7 @@ _memory: deque[dict] = deque(maxlen=2000)
 _lock = threading.Lock()
 
 ANSWER_LIMIT = 20_000
+STORE_TIMEOUT_SECONDS = 5.0     # a slow database keeps the row in memory, never the turn waiting
 MESSAGE_LIMIT = 4_000
 TRAJECTORY_LIMIT = 60_000
 _IGNORED_TOOLS = {"semantic_cache", "finish"}
@@ -178,9 +180,9 @@ async def record(**fields) -> dict | None:
         logger.warning("turn_log: could not build the row", exc_info=True)
         return None
     try:
-        pool = await _pool()
+        pool = await asyncio.wait_for(_pool(), timeout=STORE_TIMEOUT_SECONDS)
         if pool is not None:
-            await pool.execute(
+            await asyncio.wait_for(pool.execute(
                 "INSERT INTO chat_turns (id, created_at, latency_ms, status, http_status, error, transport, identity_kind, user_id, account_id, api_key_id, "
                 "session_id, revision, wallet, message, intent, capabilities, tools, answer, trajectory, validation, gate, risk, credits, plan_id) "
                 "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20::jsonb, $21::jsonb, $22::jsonb, $23::jsonb, $24::jsonb, $25)",
@@ -193,7 +195,7 @@ async def record(**fields) -> dict | None:
                 json.dumps(row["risk"]) if row["risk"] is not None else None,
                 json.dumps(row["credits"]) if row["credits"] is not None else None,
                 row["plan_id"],
-            )
+            ), timeout=STORE_TIMEOUT_SECONDS)
             return row
     except Exception:
         logger.warning("turn_log: could not persist; keeping in memory", exc_info=True)
@@ -338,6 +340,27 @@ async def flag(turn_id: str, note: str | None = None, *, resolved: bool | None =
         return dict(row)
 
 
+async def scrub_user(user_id: str) -> int:
+    """Account deletion: the person's words go, the operational row stays
+    (status, latency, tools, timing) with no owner. Returns rows scrubbed."""
+    pool = await _pool()
+    if pool is not None:
+        try:
+            status = await pool.execute("UPDATE chat_turns SET message = '[deleted]', answer = NULL, trajectory = NULL, wallet = NULL, user_id = NULL, "
+                                        "account_id = NULL, session_id = NULL WHERE user_id = $1::uuid", user_id)
+            return int(status.split()[-1]) if status and status.split()[-1].isdigit() else 0
+        except Exception:
+            logger.warning("turn_log: scrub failed for %s", user_id[:8], exc_info=True)
+            return 0
+    n = 0
+    with _lock:
+        for row in _memory:
+            if row.get("user_id") == user_id:
+                row.update({"message": "[deleted]", "answer": None, "trajectory": None, "wallet": None, "user_id": None, "account_id": None, "session_id": None})
+                n += 1
+    return n
+
+
 async def flag_by_revision(session_id: str, revision: int, note: str) -> None:
     """A thumbs-down from the user flags the turn it rated."""
     pool = await _pool()
@@ -355,8 +378,17 @@ async def flag_by_revision(session_id: str, revision: int, note: str) -> None:
 
 async def summary(days: float = 1.0) -> dict:
     """The numbers for a review: turns, errors by status, latency, the tools
-    that ran most, open flags, thumbs down."""
-    rows = await list_turns(days=days, limit=1000)
+    that ran most, open flags, thumbs down. Over the whole period from SQL
+    when Postgres holds the rows (review, 2026-09-22: a 1,000-row sample was
+    presented as period-wide); the memory store counts its rows."""
+    pool = await _pool()
+    if pool is not None:
+        return await _summary_sql(pool, days)
+    since = _now() - timedelta(days=max(0.01, days))
+    with _lock:
+        rows = [dict(r) for r in _memory if r["created_at"] >= since]
+    for row in rows:
+        row.setdefault("rating", None)
     latencies = sorted(r["latency_ms"] for r in rows if r.get("latency_ms") is not None)
 
     def pct(p: float) -> int | None:
@@ -386,6 +418,30 @@ async def summary(days: float = 1.0) -> dict:
         "gate_interventions": sum(1 for r in rows if r.get("gate")),
         "by_intent": intents, "tools": sorted(tools.items(), key=lambda kv: -kv[1])[:15],
         "users": len({r.get("user_id") for r in rows if r.get("user_id")}),
+    }
+
+
+async def _summary_sql(pool, days: float) -> dict:
+    since = _now() - timedelta(days=max(0.01, days))
+    totals = await pool.fetchrow(
+        "SELECT count(*) AS turns, count(*) FILTER (WHERE status = 'ok') AS ok, count(*) FILTER (WHERE status = 'error') AS errors, "
+        "count(DISTINCT user_id) AS users, count(*) FILTER (WHERE flagged AND resolved_at IS NULL) AS open_flags, "
+        "count(*) FILTER (WHERE validation->>'status' = 'warn') AS validation_warnings, count(*) FILTER (WHERE gate IS NOT NULL) AS gate_interventions, "
+        "percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms) AS p50, percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95, max(latency_ms) AS max "
+        "FROM chat_turns WHERE created_at >= $1", since)
+    errors = await pool.fetch("SELECT COALESCE(http_status::text, '?') AS code, count(*) AS n FROM chat_turns WHERE created_at >= $1 AND status = 'error' GROUP BY 1", since)
+    intents = await pool.fetch("SELECT COALESCE(intent, 'none') AS intent, count(*) AS n FROM chat_turns WHERE created_at >= $1 GROUP BY 1", since)
+    tools = await pool.fetch("SELECT t.tool, count(*) AS n FROM chat_turns c, unnest(c.tools) AS t(tool) WHERE c.created_at >= $1 GROUP BY 1 ORDER BY 2 DESC LIMIT 15", since)
+    thumbs = await pool.fetchval("SELECT count(*) FROM chat_turns c JOIN chat_feedback f ON f.session_id = c.session_id AND f.revision = c.revision "
+                                 "WHERE c.created_at >= $1 AND f.rating = 'down'", since)
+    return {
+        "days": days, "turns": int(totals["turns"]), "ok": int(totals["ok"]), "errors": int(totals["errors"]),
+        "errors_by_status": {r["code"]: int(r["n"]) for r in errors},
+        "latency_ms": {"p50": int(totals["p50"]) if totals["p50"] is not None else None, "p95": int(totals["p95"]) if totals["p95"] is not None else None,
+                       "max": int(totals["max"]) if totals["max"] is not None else None},
+        "open_flags": int(totals["open_flags"]), "thumbs_down": int(thumbs or 0), "validation_warnings": int(totals["validation_warnings"]),
+        "gate_interventions": int(totals["gate_interventions"]), "by_intent": {r["intent"]: int(r["n"]) for r in intents},
+        "tools": [(r["tool"], int(r["n"])) for r in tools], "users": int(totals["users"]),
     }
 
 

@@ -49,13 +49,32 @@ def binance_pairs(symbol: str) -> list[dict]:
     return [s for s in _symbols() if s.get("baseAsset") == base or s.get("baseAsset") == f"1000{base}"]
 
 
+_LISTING_STOP = {"BINANCE", "USDT", "USDC", "SPOT", "CEX", "IS", "ON", "LISTED", "LIST", "LISTING", "THE", "TOKEN", "COIN", "DOES", "DO", "TRADE",
+                 "TRADES", "PAIRS", "PAIR", "WHICH", "WHAT", "ANY", "AND", "OR", "OF", "FOR", "A", "AN", "TO", "IN", "HAVE", "HAS", "GET", "IT", "BE"}
+
+
+def listing_symbol(request: str) -> str | None:
+    """The ticker a listing question names: a cashtag, an upper-case word, or
+    -- "is bonk listed on binance" (review, 2026-09-22) -- the word next to
+    "is" / "listed" / "list" in any case."""
+    text = request or ""
+    cashtag = re.search(r"\$([A-Za-z][A-Za-z0-9]{1,10})\b", text)
+    if cashtag:
+        return cashtag.group(1).upper()
+    upper = [w for w in re.findall(r"\b([A-Z][A-Z0-9]{1,10})\b", text) if w not in _LISTING_STOP]
+    if upper:
+        return upper[-1]
+    for near in re.finditer(r"\b(?:is|does|list|listed|listing\s+of|about|trade)\s+([A-Za-z][A-Za-z0-9]{1,10})\b", text, re.I):
+        if near.group(1).upper() not in _LISTING_STOP:
+            return near.group(1).upper()
+    return None
+
+
 def binance_listing(request: str) -> str:
     """The router tool: every Binance spot pair for the ticker named."""
-    match = re.search(r"\$?\b([A-Z][A-Z0-9]{1,10})\b", request or "")
-    words = [w for w in re.findall(r"\$?\b([A-Z][A-Z0-9]{1,10})\b", request or "") if w not in ("BINANCE", "USDT", "USDC", "SPOT", "CEX")]
-    if not words:
+    symbol = listing_symbol(request)
+    if not symbol:
         raise ValueError("Name the token, e.g. 'is BONK listed on Binance'")
-    symbol = words[-1]
     pairs = binance_pairs(symbol)
     lines = ["# Binance listing", f"**Provider**: Binance public API · **Checked**: {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())} · **Token**: {symbol}", ""]
     if not pairs:

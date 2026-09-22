@@ -65,10 +65,12 @@ async def execute_chat_turn(body: ChatRequest, identity: Identity | str) -> Agen
     started = time.monotonic()
 
     async def log(status: str, http_status: int, **fields) -> None:
-        # The log is never a reason for a turn to fail or a refusal to change.
+        # The log is never a reason for a turn to fail or to wait: the write
+        # runs as a tracked background task (drained at shutdown), and the
+        # store itself bounds its own wait (review, 2026-09-22).
         try:
-            await turn_log.record(message=body.message, status=status, latency_ms=int((time.monotonic() - started) * 1000), http_status=http_status,
-                                  transport=transport, identity=resolved, wallet=body.wallet_address, **fields)
+            background(turn_log.record(message=body.message, status=status, latency_ms=int((time.monotonic() - started) * 1000), http_status=http_status,
+                                       transport=transport, identity=resolved, wallet=body.wallet_address, **fields))
         except Exception:
             logger.warning("turn log failed", exc_info=True)
 

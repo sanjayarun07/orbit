@@ -42,13 +42,43 @@ _NAMES = {"BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "XRP": "XRP", "D
           "LINK": "Chainlink", "DOT": "Polkadot", "TRX": "Tron", "TON": "Toncoin", "SUI": "Sui", "HYPE": "Hyperliquid", "LTC": "Litecoin", "ZEC": "Zcash"}
 
 
+_down_until = 0.0
+DOWN_SECONDS = 600.0
+
+
 def enabled() -> bool:
-    return bool(settings.polymarket_enabled)
+    return bool(settings.polymarket_enabled) and time.monotonic() >= _down_until
+
+
+def _mark_down(exc: BaseException) -> None:
+    """A network failure (no address, reset, timeout) takes the tool out of
+    routing for DOWN_SECONDS so a blocked host is an honest gap in readiness
+    rather than a silent omission on every turn (review, 2026-09-22)."""
+    global _down_until
+    _down_until = time.monotonic() + DOWN_SECONDS
+    increment("polymarket_unreachable")
+    logger.warning("Polymarket unreachable (%s); off for %.0fs", type(exc).__name__, DOWN_SECONDS)
+
+
+def status() -> dict:
+    """For /readyz: configured, reachable now (probed once per DOWN_SECONDS)."""
+    if not settings.polymarket_enabled:
+        return {"ok": True, "detail": "disabled"}
+    if time.monotonic() < _down_until:
+        return {"ok": False, "detail": "unreachable from this network; odds omitted until it answers"}
+    try:
+        _search("Bitcoin")
+        return {"ok": True, "detail": "reachable"}
+    except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+        _mark_down(exc)
+        return {"ok": False, "detail": f"unreachable ({type(exc).__name__}); odds omitted until it answers"}
 
 
 def reset_for_test() -> None:
+    global _down_until
     with _lock:
         _cache.clear()
+    _down_until = 0.0
 
 
 def matches(request: str) -> bool:
@@ -135,10 +165,14 @@ def markets_for(symbol: str, name: str | None = None) -> list[dict]:
         hit = _cache.get(key)
         if hit and hit[0] > now:
             return hit[1]
-    payload = _search(name or sym)
-    markets = parse_events(payload, sym, name)
-    if name and not markets:
-        markets = parse_events(_search(sym), sym, name)
+    try:
+        payload = _search(name or sym)
+        markets = parse_events(payload, sym, name)
+        if name and not markets:
+            markets = parse_events(_search(sym), sym, name)
+    except httpx.TransportError as exc:
+        _mark_down(exc)
+        raise
     with _lock:
         _cache[key] = (now + _TTL, markets)
     return markets

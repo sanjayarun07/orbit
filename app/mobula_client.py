@@ -59,8 +59,17 @@ def url(version: int, path: str) -> str:
     return f"{origin()}/api/{version}{path}"
 
 
+def _workers() -> int:
+    return max(1, int(getattr(settings, "uvicorn_workers", 1) or 1))
+
+
+def _rate() -> float:
+    """This process's share of the per-minute allowance."""
+    return max(1.0, float(settings.mobula_requests_per_minute) / _workers())
+
+
 def _capacity() -> float:
-    return float(max(1, min(int(settings.mobula_burst), int(settings.mobula_requests_per_minute))))
+    return float(max(1, min(int(settings.mobula_burst) // _workers() or 1, int(_rate()))))
 
 
 class _Bucket:
@@ -76,7 +85,7 @@ class _Bucket:
 
     def _refill(self) -> None:
         now = time.monotonic()
-        rate = float(settings.mobula_requests_per_minute)
+        rate = _rate()
         self._tokens = min(_capacity(), self._tokens + (now - self._stamp) * rate / 60.0)
         self._stamp = now
 
@@ -97,7 +106,7 @@ class _Bucket:
                         return True
                     if background:
                         return False  # a background caller never waits for a user's tokens
-                    wait = (1.0 - self._tokens) * 60.0 / max(float(settings.mobula_requests_per_minute), 1.0)
+                    wait = (1.0 - self._tokens) * 60.0 / _rate()
             if time.monotonic() + wait > deadline:
                 return False
             time.sleep(min(wait, 0.25))

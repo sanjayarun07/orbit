@@ -14,10 +14,10 @@ def _reset_account_stores(monkeypatch):
     async def no_pool():
         return None
 
-    from app import decision_records as _decision_records, holder_snapshots as _holder_snapshots, turn_log as _turn_log, user_memory as _user_memory
+    from app import decision_records as _decision_records, feedback as _feedback, holder_snapshots as _holder_snapshots, turn_log as _turn_log, user_memory as _user_memory
     from app import sentiment_analyst as _sentiment, x_tweets as _x_tweets
 
-    for module in (accounts, credits, api_keys, billing, tasks, _user_memory, _decision_records, _holder_snapshots, _turn_log, _x_tweets):
+    for module in (accounts, credits, api_keys, billing, tasks, _user_memory, _decision_records, _holder_snapshots, _turn_log, _x_tweets, _feedback):
         monkeypatch.setattr(module, "get_pg_pool", no_pool)
     _x_tweets.reset_for_test()
     _sentiment.reset_for_test()
