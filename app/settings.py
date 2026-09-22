@@ -242,6 +242,11 @@ class Settings(BaseSettings):
     # takes its share of the minute, so the container as a whole never
     # exceeds the allowance (review, 2026-09-22: two workers doubled it).
     uvicorn_workers: int = 1
+    # Across replicas the bucket cannot see its siblings, so when Redis is
+    # configured every Mobula call also counts against one shared per-minute
+    # counter (the provider's real limit); Redis down means the local bucket
+    # alone, never a blocked turn (review, 2026-09-22).
+    mobula_shared_limit: bool = True
     # The bucket never holds more than this many tokens: the per-minute rate
     # is a sustained rate, not a burst (a 60-request burst drew 429s live).
     # The full minute fits one deep-dive (about forty calls: security, trades,

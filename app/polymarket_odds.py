@@ -60,25 +60,39 @@ def _mark_down(exc: BaseException) -> None:
     logger.warning("Polymarket unreachable (%s); off for %.0fs", type(exc).__name__, DOWN_SECONDS)
 
 
+_probe: tuple[float, dict] | None = None
+PROBE_SECONDS = 600.0
+PROBE_TIMEOUT = 2.5     # under the readiness wrapper's own timeout, so a probe never outlives it
+
+
 def status() -> dict:
-    """For /readyz: configured, reachable now (probed once per DOWN_SECONDS)."""
+    """For /readyz: configured, reachable now. Both outcomes are cached for
+    PROBE_SECONDS (review, 2026-09-22: a healthy probe was a live call on
+    every readiness request)."""
+    global _probe
     if not settings.polymarket_enabled:
         return {"ok": True, "detail": "disabled"}
-    if time.monotonic() < _down_until:
+    now = time.monotonic()
+    if now < _down_until:
         return {"ok": False, "detail": "unreachable from this network; odds omitted until it answers"}
+    if _probe and _probe[0] > now:
+        return _probe[1]
     try:
-        _search("Bitcoin")
-        return {"ok": True, "detail": "reachable"}
+        _search("Bitcoin", timeout=PROBE_TIMEOUT)
+        result = {"ok": True, "detail": "reachable"}
     except (httpx.TransportError, httpx.HTTPStatusError) as exc:
         _mark_down(exc)
-        return {"ok": False, "detail": f"unreachable ({type(exc).__name__}); odds omitted until it answers"}
+        result = {"ok": False, "detail": f"unreachable ({type(exc).__name__}); odds omitted until it answers"}
+    _probe = (now + PROBE_SECONDS, result)
+    return result
 
 
 def reset_for_test() -> None:
-    global _down_until
+    global _down_until, _probe
     with _lock:
         _cache.clear()
     _down_until = 0.0
+    _probe = None
 
 
 def matches(request: str) -> bool:
@@ -118,9 +132,9 @@ def _about(text: str, symbol: str, name: str | None) -> bool:
     return bool(name and re.search(rf"(?<![a-z]){re.escape(name.lower())}(?![a-z])", t))
 
 
-def _search(query: str) -> dict:
+def _search(query: str, timeout: float = 12.0) -> dict:
     increment("polymarket_requests")
-    with httpx.Client(timeout=12.0, headers={"User-Agent": "Orbit/1.0 (crypto research)"}) as client:
+    with httpx.Client(timeout=timeout, headers={"User-Agent": "Orbit/1.0 (crypto research)"}) as client:
         response = client.get(f"{settings.polymarket_gamma_url.rstrip('/')}/public-search", params={"q": query, "limit_per_type": 20, "events_status": "active"})
         response.raise_for_status()
         return response.json()

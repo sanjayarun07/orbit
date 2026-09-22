@@ -85,6 +85,7 @@ def reset_for_test() -> None:
     global _ready
     with _lock:
         _memory.clear()
+    _forgotten.clear()
     _ready = False
 
 
@@ -179,6 +180,8 @@ async def record(**fields) -> dict | None:
     except Exception:
         logger.warning("turn_log: could not build the row", exc_info=True)
         return None
+    if row.get("user_id") and row["user_id"] in _forgotten:
+        row.update({"message": "[deleted]", "answer": None, "trajectory": None, "wallet": None, "user_id": None, "account_id": None, "session_id": None})
     try:
         pool = await asyncio.wait_for(_pool(), timeout=STORE_TIMEOUT_SECONDS)
         if pool is not None:
@@ -260,10 +263,11 @@ def _matches(row: dict, *, status: str | None, user_id: str | None, account_id: 
 
 async def list_turns(*, days: float = 1.0, status: str | None = None, user_id: str | None = None, account_id: str | None = None,
                      session_id: str | None = None, q: str | None = None, flagged: bool | None = None, intent: str | None = None,
-                     limit: int = 100) -> list[dict]:
-    """Turns newest first, with the user's rating attached when one exists."""
+                     limit: int | None = 100) -> list[dict]:
+    """Turns newest first, with the user's rating attached when one exists.
+    `limit=None` returns every row (the account export's promise)."""
     since = _now() - timedelta(days=max(0.01, days))
-    limit = max(1, min(int(limit), 1000))
+    limit = None if limit is None else max(1, min(int(limit), 1000))
     pool = await _pool()
     if pool is not None:
         clauses, params = ["t.created_at >= $1"], [since]
@@ -277,11 +281,14 @@ async def list_turns(*, days: float = 1.0, status: str | None = None, user_id: s
         if q:
             params.append(f"%{q}%")
             clauses.append(f"(t.message ILIKE ${len(params)} OR t.answer ILIKE ${len(params)} OR t.error ILIKE ${len(params)})")
-        params.append(limit)
+        tail = ""
+        if limit is not None:
+            params.append(limit)
+            tail = f" LIMIT ${len(params)}"
         rows = await pool.fetch(
             f"SELECT {_columns('t.')}, f.rating AS rating, f.comment AS rating_comment "
             f"FROM chat_turns t LEFT JOIN chat_feedback f ON f.session_id = t.session_id AND f.revision = t.revision "
-            f"WHERE {' AND '.join(clauses)} ORDER BY t.created_at DESC LIMIT ${len(params)}", *params)
+            f"WHERE {' AND '.join(clauses)} ORDER BY t.created_at DESC{tail}", *params)
         out = []
         for r in rows:
             row = _from_db({k: v for k, v in dict(r).items() if k not in ("rating", "rating_comment")})
@@ -294,7 +301,7 @@ async def list_turns(*, days: float = 1.0, status: str | None = None, user_id: s
     for row in rows:
         row.setdefault("rating", None)
         row.setdefault("rating_comment", None)
-    return rows[:limit]
+    return rows if limit is None else rows[:limit]
 
 
 async def get_turn(turn_id: str) -> dict | None:
@@ -340,18 +347,27 @@ async def flag(turn_id: str, note: str | None = None, *, resolved: bool | None =
         return dict(row)
 
 
+_forgotten: set[str] = set()
+
+
+def forget_user(user_id: str) -> None:
+    """A tombstone: any turn logged for this user after deletion (a write
+    that was still in flight) is stored scrubbed, never with their words."""
+    _forgotten.add(user_id)
+
+
 async def scrub_user(user_id: str) -> int:
     """Account deletion: the person's words go, the operational row stays
-    (status, latency, tools, timing) with no owner. Returns rows scrubbed."""
+    (status, latency, tools, timing) with no owner. Returns rows scrubbed;
+    RAISES when the store cannot do it, so the deletion stops instead of
+    continuing past a failed scrub (review, 2026-09-22)."""
+    forget_user(user_id)
     pool = await _pool()
     if pool is not None:
-        try:
-            status = await pool.execute("UPDATE chat_turns SET message = '[deleted]', answer = NULL, trajectory = NULL, wallet = NULL, user_id = NULL, "
-                                        "account_id = NULL, session_id = NULL WHERE user_id = $1::uuid", user_id)
-            return int(status.split()[-1]) if status and status.split()[-1].isdigit() else 0
-        except Exception:
-            logger.warning("turn_log: scrub failed for %s", user_id[:8], exc_info=True)
-            return 0
+        status = await asyncio.wait_for(pool.execute(
+            "UPDATE chat_turns SET message = '[deleted]', answer = NULL, trajectory = NULL, wallet = NULL, user_id = NULL, "
+            "account_id = NULL, session_id = NULL WHERE user_id = $1::uuid", user_id), timeout=STORE_TIMEOUT_SECONDS * 4)
+        return int(status.split()[-1]) if status and status.split()[-1].isdigit() else 0
     n = 0
     with _lock:
         for row in _memory:

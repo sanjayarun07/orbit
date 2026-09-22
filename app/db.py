@@ -260,6 +260,8 @@ CREATE TABLE IF NOT EXISTS chat_feedback (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (session_id, revision)
 );
+ALTER TABLE chat_feedback ADD COLUMN IF NOT EXISTS principal_id TEXT;   -- who rated: a team member, not the owner's billing account
+CREATE INDEX IF NOT EXISTS chat_feedback_principal ON chat_feedback (principal_id);
 """
 
 

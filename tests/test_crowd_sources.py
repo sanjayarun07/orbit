@@ -10,7 +10,7 @@ from app import polymarket_odds, reddit_crowd, x_tweets
 from app.provider_router import NoData
 from app.settings import settings
 
-NOW = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc).replace(microsecond=0)
 
 
 def _tweet(i, author="alice", likes=5, text="$BONK looks strong", minutes_ago=0):

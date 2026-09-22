@@ -146,18 +146,18 @@ def _from_db(r) -> dict:
     }
 
 
-async def list_for(user_id: str, limit: int = 20) -> list[dict]:
-    """A user's own receipts, newest first."""
+async def list_for(user_id: str, limit: int | None = 20) -> list[dict]:
+    """A user's own receipts, newest first; `limit=None` is all of them."""
     pool = await _pool()
     if pool is not None:
-        rows = await pool.fetch(
-            "SELECT id, user_id, kind, subject_key, subject::text AS subject, as_of, signals::text AS signals, skipped::text AS skipped, "
-            "coverage::text AS coverage, verdict, price, session_id FROM decision_records WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2",
-            user_id, limit)
+        sql = ("SELECT id, user_id, kind, subject_key, subject::text AS subject, as_of, signals::text AS signals, skipped::text AS skipped, "
+               "coverage::text AS coverage, verdict, price, session_id FROM decision_records WHERE user_id = $1 ORDER BY created_at DESC")
+        rows = await (pool.fetch(sql, user_id) if limit is None else pool.fetch(sql + " LIMIT $2", user_id, limit))
         return [_from_db(r) for r in rows]
     with _lock:
         mine = [dict(r) for r in _records if r.get("user_id") == user_id]
-    return list(reversed(mine))[:limit]
+    mine = list(reversed(mine))
+    return mine if limit is None else mine[:limit]
 
 
 async def for_subject(subject_key: str, limit: int = 5, user_id: str | None = None) -> list[dict]:

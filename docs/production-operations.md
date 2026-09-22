@@ -1894,3 +1894,25 @@ decision.
 UI: the closed mobile sidebar backdrop is `aria-hidden` and inert, so it is
 no longer announced as "Close navigation" while the menu is closed. Shell
 cache bumped to v11.
+
+## Second review of 2026-09-22: six findings
+
+1. **Robinhood app listings.** Unchanged. The recorded decision (2026-09-20,
+   "Yes it's Robinhood chain") is Robinhood Chain; the reviewer reads the
+   scope differently. Only the user changes this.
+2. **Feedback keyed by the shared billing account.** `chat_feedback` gained
+   `principal_id` (the person who rated). Ratings are saved with it, the
+   export lists a person's own ratings only, and deletion removes them.
+3. **Deletion versus in-flight log writes.** Deletion first drains the
+   background tasks, then scrubs; a scrub the store cannot do raises and
+   stops the deletion with a 503; a tombstone makes any write that still
+   lands later store "[deleted]" with no owner; ratings are deleted too.
+4. **Mobula across replicas.** When Redis is configured every Mobula call
+   also counts against one shared per-minute key (`mobula:rpm:<minute>`);
+   a user call is refused past the allowance, a background call past half.
+   Redis down means the local bucket alone. `mobula_shared_limit` turns it
+   off.
+5. **Polymarket probe on every readiness call.** Both outcomes are cached
+   ten minutes; the probe's HTTP timeout is 2.5 s, under the wrapper's.
+6. **"Everything Orbit holds".** The export is uncapped: every turn, rating,
+   receipt and credit entry.

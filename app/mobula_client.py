@@ -139,6 +139,57 @@ _bucket = _Bucket()
 _inflight = threading.BoundedSemaphore(MAX_CONCURRENT)
 
 
+class _Shared:
+    """The deployment-wide minute counter in Redis: INCR on a key per minute,
+    expiring after two. A user call is refused past the full allowance, a
+    background call past half of it. Redis unreachable -> allowed (the local
+    bucket still shapes this process), and not retried for a minute."""
+
+    def __init__(self) -> None:
+        self._client = None
+        self._retry_at = 0.0
+        self._lock = threading.Lock()
+
+    def _redis(self):
+        if not settings.mobula_shared_limit or not settings.redis_url:
+            return None
+        with self._lock:
+            if self._client is None and time.monotonic() >= self._retry_at:
+                try:
+                    import redis as _redis  # the synchronous client: this path runs in worker threads
+
+                    self._client = _redis.Redis.from_url(settings.redis_url, socket_timeout=0.5, socket_connect_timeout=0.5, decode_responses=True)
+                except Exception:
+                    self._retry_at = time.monotonic() + 60.0
+            return self._client
+
+    def take(self, *, background: bool) -> bool:
+        client = self._redis()
+        if client is None:
+            return True
+        key = f"mobula:rpm:{int(time.time() // 60)}"
+        try:
+            count = int(client.incr(key))
+            if count == 1:
+                client.expire(key, 120)
+        except Exception:
+            with self._lock:
+                self._client = None
+                self._retry_at = time.monotonic() + 60.0
+            return True
+        allowance = float(settings.mobula_requests_per_minute)
+        limit = allowance / 2.0 if background else allowance
+        return count <= limit
+
+    def reset(self) -> None:
+        with self._lock:
+            self._client = None
+            self._retry_at = 0.0
+
+
+_shared = _Shared()
+
+
 def background_ok() -> bool:
     """For a background loop to check before starting a unit of work."""
     return bool(settings.mobula_api_key) and _bucket.background_ok()
@@ -169,6 +220,9 @@ def get(version: int, path: str, params: dict, timeout: float | None = None, *, 
         raise MobulaBudgetExceeded(
             "Mobula asked us to slow down; try again in a moment" if _bucket.cooling()
             else f"Mobula budget of {settings.mobula_requests_per_minute}/min is spent; try again in a moment")
+    if not _shared.take(background=background):
+        increment("mobula_shared_limit_exceeded")
+        raise MobulaBudgetExceeded(f"Mobula budget of {settings.mobula_requests_per_minute}/min is spent across the deployment; try again in a moment")
     increment("mobula_requests")
     with _inflight:
         with httpx.Client(timeout=timeout or settings.provider_request_timeout_seconds) as client:
@@ -186,3 +240,4 @@ def get(version: int, path: str, params: dict, timeout: float | None = None, *, 
 
 def reset_for_test() -> None:
     _bucket.reset()
+    _shared.reset()

@@ -1377,16 +1377,16 @@ async def export_my_data(identity: Identity = Depends(require_browser_session)):
         "user": {k: user.get(k) for k in ("id", "email", "display_name", "plan_id", "created_at", "preferences")},
         "wallets": await accounts.list_wallets(user["id"]),
         "api_keys": await api_keys.list_for_user(user["id"]),
-        "credits": {"balance": await credits.balance(identity.account_id), "ledger": await credits.history(identity.account_id, limit=1000)},
+        "credits": {"balance": await credits.balance(identity.account_id), "ledger": await credits.history(identity.account_id, limit=1_000_000)},
         "conversations": conversations,
         "memory": await user_memory.list_facts(user["id"]),
         # The operator's records about the account too (review, 2026-09-22):
         # every logged turn, the ratings given, scheduled tasks, and the
         # decision receipts behind deep-dives.
-        "turns": [turn_log.public(t, full=True) for t in await turn_log.list_turns(days=3650, user_id=user["id"], limit=1000)],
-        "feedback": await feedback.list_for_account(identity.account_id),
+        "turns": [turn_log.public(t, full=True) for t in await turn_log.list_turns(days=36500, user_id=user["id"], limit=None)],
+        "feedback": await feedback.list_for_principal(identity.principal_id),
         "tasks": await tasks.list_tasks(user["id"]),
-        "decisions": [decision_records.public(r) for r in await decision_records.list_for(user["id"], limit=1000)],
+        "decisions": [decision_records.public(r) for r in await decision_records.list_for(user["id"], limit=None)],
     }
 
 
@@ -1516,9 +1516,17 @@ async def delete_my_account(body: DeleteAccountRequest, request: Request, respon
     for key in await api_keys.list_for_user(user["id"]):
         await api_keys.revoke(user["id"], key["id"])
     await accounts.revoke_user_sessions(user["id"])
-    # The turn log keeps its rows for operations but not the person's words:
-    # message and answer are scrubbed and the owner detached (review, 2026-09-22).
-    await turn_log.scrub_user(user["id"])
+    # The turn log keeps its rows for operations but not the person's words.
+    # Pending log writes are drained first, a write that still lands later
+    # is scrubbed by the tombstone, the ratings go, and a store that cannot
+    # scrub stops the deletion (review, 2026-09-22).
+    await execution_policy.drain_background()
+    try:
+        await turn_log.scrub_user(user["id"])
+        await feedback.scrub_principal(identity.principal_id)
+    except Exception as exc:
+        logger.warning("account deletion stopped: the log could not be scrubbed", exc_info=True)
+        raise HTTPException(503, "Your records could not be cleared right now, so the account was not deleted. Try again shortly.") from exc
     await accounts.delete_user(user["id"])
     await delete_auth_session(request.cookies.get(COOKIE_NAME))
     response.delete_cookie(accounts.USER_COOKIE, path="/")
@@ -1988,7 +1996,7 @@ async def chat_feedback(body: FeedbackRequest, request: Request):
     identity = await resolve_identity(request)
     try:
         await _require_session_access(body.session_id, identity)
-        result = await feedback.rate(body.session_id, body.session_revision, body.rating, body.comment, identity.account_id)
+        result = await feedback.rate(body.session_id, body.session_revision, body.rating, body.comment, identity.account_id, principal_id=identity.principal_id)
     except feedback.TurnNotFound as exc:
         raise HTTPException(404, str(exc)) from exc
     except ValueError as exc:

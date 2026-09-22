@@ -44,6 +44,12 @@ def _reset_account_stores(monkeypatch):
         return None
 
     monkeypatch.setattr(limits, "get_redis", no_redis)
+    # Ratings likewise: the suite's feedback lives in the memory store, never
+    # in a real Redis the developer's .env points at.
+    from app import feedback as _feedback_mod
+
+    monkeypatch.setattr(_feedback_mod, "get_redis", no_redis)
+    _feedback_mod.reset()
     # Related questions call the model after every eligible turn; the suite
     # opts in per test (tests/test_followups.py) rather than paying for it.
     from app.settings import settings as _settings
@@ -96,6 +102,9 @@ def _reset_account_stores(monkeypatch):
 
     monkeypatch.setattr(_mclient, "get", _offline)
     monkeypatch.setattr(_listings, "_symbols", _offline)
+    # The deployment-wide Mobula counter lives in Redis; the suite counts
+    # nothing against the developer's live instance.
+    monkeypatch.setattr(_settings, "mobula_shared_limit", False)
     _mclient.reset_for_test()
     monkeypatch.setattr(_mmeme, "token_trades", _offline)
     monkeypatch.setattr(_mmeme, "token_first_buyers", _offline)

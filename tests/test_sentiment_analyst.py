@@ -10,7 +10,7 @@ from app import sentiment_analyst as sa, social_sentiment, token_deepdive, x_twe
 from app.settings import settings
 from app.signals import Subject
 
-NOW = datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc).replace(microsecond=0)   # the tweet store keeps a 24-hour window; a fixed date fell out of it the next day
 
 
 def _tweet(i, author="alice", likes=5, text="$BONK looks strong, accumulating", minutes_ago=0, verified=False):

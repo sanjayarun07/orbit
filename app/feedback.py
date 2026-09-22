@@ -53,12 +53,12 @@ async def _save(session_id: str, revision: int, record: dict, account_id: str | 
     if pool is not None:
         await pool.execute(
             """
-            INSERT INTO chat_feedback (session_id, revision, rating, comment, account_id, tools)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO chat_feedback (session_id, revision, rating, comment, account_id, tools, principal_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (session_id, revision) DO UPDATE
-            SET rating = EXCLUDED.rating, comment = EXCLUDED.comment, account_id = EXCLUDED.account_id, updated_at = NOW()
+            SET rating = EXCLUDED.rating, comment = EXCLUDED.comment, account_id = EXCLUDED.account_id, principal_id = EXCLUDED.principal_id, updated_at = NOW()
             """,
-            session_id, revision, record["rating"], record.get("comment"), account_id, record["tools"],
+            session_id, revision, record["rating"], record.get("comment"), account_id, record["tools"], record.get("principal_id"),
         )
         return
     redis = await get_redis()
@@ -68,7 +68,7 @@ async def _save(session_id: str, revision: int, record: dict, account_id: str | 
     _memory[(session_id, revision)] = record
 
 
-async def rate(session_id: str, revision: int, rating: str, comment: str | None = None, account_id: str | None = None) -> dict:
+async def rate(session_id: str, revision: int, rating: str, comment: str | None = None, account_id: str | None = None, principal_id: str | None = None) -> dict:
     """Apply a rating to a turn and return {rating, tools, changed}."""
     if rating == "down":
         # The operator's log sees every thumbs-down as an open issue (app/turn_log.py).
@@ -87,24 +87,41 @@ async def rate(session_id: str, revision: int, rating: str, comment: str | None 
         return {"rating": rating, "tools": tools, "changed": False}
     up = int(rating == "up") - int(before == "up")
     down = int(rating == "down") - int(before == "down")
-    record = {"rating": rating, "comment": (comment or "")[:500] or None, "tools": tools}
+    # principal_id is the person who rated; account_id only says who is
+    # billed, and a team shares it (review, 2026-09-22: one member's export
+    # carried teammates' comments).
+    record = {"rating": rating, "comment": (comment or "")[:500] or None, "tools": tools, "principal_id": principal_id}
     await _save(session_id, revision, record, account_id)
     await tool_outcomes.record_feedback(tools, up, down)
     return {"rating": rating, "tools": tools, "changed": True}
 
 
-async def list_for_account(account_id: str) -> list[dict]:
-    """Every rating an account gave, for its data export. Postgres only:
-    the Redis and memory stores are keyed by turn, not by account."""
+async def list_for_principal(principal_id: str) -> list[dict]:
+    """Every rating one person gave, for their data export -- never a
+    teammate's, whatever billing account they share."""
     try:
         pool = await get_pg_pool()
     except Exception:
         pool = None
-    if pool is None:
-        return []
-    rows = await pool.fetch("SELECT session_id, revision, rating, comment, tools, updated_at FROM chat_feedback WHERE account_id = $1 ORDER BY updated_at DESC LIMIT 1000", account_id)
-    return [{"session_id": r["session_id"], "revision": r["revision"], "rating": r["rating"], "comment": r["comment"], "tools": list(r["tools"] or []),
-             "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None} for r in rows]
+    if pool is not None:
+        rows = await pool.fetch("SELECT session_id, revision, rating, comment, tools, updated_at FROM chat_feedback WHERE principal_id = $1 ORDER BY updated_at DESC", principal_id)
+        return [{"session_id": r["session_id"], "revision": r["revision"], "rating": r["rating"], "comment": r["comment"], "tools": list(r["tools"] or []),
+                 "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None} for r in rows]
+    return [{"session_id": k[0], "revision": k[1], "rating": v["rating"], "comment": v.get("comment"), "tools": list(v.get("tools") or []), "updated_at": None}
+            for k, v in _memory.items() if v.get("principal_id") == principal_id]
+
+
+async def scrub_principal(principal_id: str) -> int:
+    """Account deletion: the person's ratings and comments go. Raises when
+    the store cannot do it, so the deletion stops rather than pretends."""
+    pool = await get_pg_pool()
+    if pool is not None:
+        status = await pool.execute("DELETE FROM chat_feedback WHERE principal_id = $1", principal_id)
+        return int(status.split()[-1]) if status and status.split()[-1].isdigit() else 0
+    doomed = [k for k, v in _memory.items() if v.get("principal_id") == principal_id]
+    for k in doomed:
+        del _memory[k]
+    return len(doomed)
 
 
 async def rating_for(session_id: str, revision: int) -> str:
