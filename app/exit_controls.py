@@ -27,16 +27,72 @@ _THRESHOLD = re.compile(
     rf"(?:(?P<before>{_TOKEN})\s+)?exit(?:\s+quote)?(?:\s+(?:on|for|in)\s+(?P<after>{_TOKEN}))?\s+(?:exceeds|is\s+(?:more|higher|greater)\s+than|goes\s+(?:above|over|past)|widens\s+(?:past|beyond)|drops|falls|declines|deteriorates)(?:\s+by|\s+more\s+than|\s+over)?\s+(?P<pct>\d+(?:\.\d+)?)\s*%\s*[.!?]?\s*$", re.I)
 _CHANNEL = re.compile(r"^\s*(?:(?:email|send)\s+me\s+my\s+exit\s+alerts(?:\s+by\s+email)?|(?:send\s+)?(?:my\s+)?exit\s+alerts\s+(?:by|via|to)\s+(?P<channel>email|inbox|app))\s*[.!?]?\s*$", re.I)
 # "compare buying $500, $2,000 and $5,000 of BONK", "size check BONK at $1000", "what would $250 of WIF cost to enter and exit"
+# The command may carry the chain and trailing instructions: "compare buying
+# $500, $2,000 and $5,000 of ANSEM on Solana. Show entry quotes and immediate
+# reverse-exit estimates. Do not prepare or execute any trade." (2026-09-23).
 _SIZES = re.compile(
     rf"^\s*(?:compare\s+buying\s+(?P<amounts>[\$\d,.\s]+(?:and|or)?[\$\d,.\s]*)\s+(?:of|worth\s+of|in)\s+{_TOKEN}"
     rf"|size\s+check\s+{_TOKEN}\s+(?:at|for|with)\s+(?P<amounts2>[\$\d,.\s]+(?:and|or)?[\$\d,.\s]*)"
-    rf"|what\s+would\s+(?P<amounts3>\$[\d,.]+)\s+(?:of|in)\s+{_TOKEN}\s+cost\s+to\s+(?:enter\s+and\s+exit|buy\s+and\s+sell|get\s+in\s+and\s+out(?:\s+of)?))\s*[?.!]?\s*$", re.I)
+    rf"|what\s+would\s+(?P<amounts3>\$[\d,.]+)\s+(?:of|in)\s+{_TOKEN}\s+cost\s+to\s+(?:enter\s+and\s+exit|buy\s+and\s+sell|get\s+in\s+and\s+out(?:\s+of)?))"
+    rf"(?:\s+on\s+solana)?\s*[?.!]?(?:\s.*)?$", re.I | re.S)
+# "What changed since I entered ANSEM? Separate token price movement, changes
+# in my holdings, and worsening exit liquidity." -- the decomposition against
+# the saved entry baseline, or the honest absence of one.
+_CHANGED = re.compile(
+    rf"^\s*what(?:'s|\s+has|\s+is)?\s+changed\s+since\s+(?:i\s+)?(?:entered|bought|got\s+into|entry\s+(?:on|in|into)|my\s+entry\s+(?:on|in|into))\s+{_TOKEN}\s*\??(?:\s.*)?$", re.I | re.S)
 _AMOUNT = re.compile(r"\$?\s*(\d[\d,]*(?:\.\d+)?)")
 _ADDRESS = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
 
+def is_public_control(message: str) -> bool:
+    """A control that needs no account: the sizing diagnostic."""
+    return bool(_SIZES.match(message or ""))
+
+
 def is_exit_control(message: str) -> bool:
-    return any(p.match(message or "") for p in (_WATCH, _STOP, _ASK, _LIST, _THRESHOLD, _CHANNEL, _SIZES))
+    return any(p.match(message or "") for p in (_WATCH, _STOP, _ASK, _LIST, _THRESHOLD, _CHANNEL, _SIZES, _CHANGED))
+
+
+async def _since_entry(p: dict) -> str:
+    """Price move, holding change, discount widening and missing data, each
+    on its own line, against the saved entry baseline."""
+    symbol = p.get("symbol") or p["mint"][:6]
+    entry = p.get("entry") or {}
+    baseline = exit_monitor.full_exit(entry.get("rows") or [])
+    if baseline is None:
+        return f"Your {symbol} watch has no valid entry quote yet (the first quote failed), so there is no baseline to compare against."
+    try:
+        position = await exit_monitor.position_of(p["wallet"], p["mint"])
+    except exit_monitor.BalanceUnavailable as exc:
+        return f"# Since entry — {symbol}\n\nYour current balance could not be read ({exc}), so neither the holding nor the exit can be compared right now. Nothing here is a price alert."
+    rows = await exit_monitor.quote_exit(p["mint"], position["quantity_raw"])
+    now_full = exit_monitor.full_exit(rows)
+    q0, q1 = int(p.get("quantity_raw") or 0), int(position["quantity_raw"])
+    scale = 10 ** int(p.get("decimals") or 0)
+    lines = [f"# Since entry — {symbol}", f"**Entry recorded**: {(entry.get('at') or p.get('created_at') or '')[:16].replace('T', ' ')} UTC · **Wallet**: `{p['wallet'][:6]}…{p['wallet'][-4:]}`", ""]
+    if q0 and q1 != q0:
+        lines.append(f"- **Holding**: {exit_monitor._qty(q0 / scale)} → {exit_monitor._qty(q1 / scale)} {symbol} ({(q1 - q0) / q0 * 100:+.1f}%).")
+    else:
+        lines.append(f"- **Holding**: unchanged at {exit_monitor._qty(q1 / scale)} {symbol}.")
+    if now_full is None:
+        failed = next((r for r in rows if r.get("fraction") == 1.0), {})
+        lines.append(f"- **Exit liquidity**: the full-exit quote is unavailable right now ({failed.get('error', 'no quote')}); nothing can be said about the route until it answers.")
+        lines.append(f"- **Reference price**: {exit_monitor._price(baseline.get('reference_price_usd'))} at entry; no current reading came back with the quote.")
+    else:
+        change = exit_monitor.explain_change(baseline, now_full)
+        pc = change.get("price_change_pct")
+        lines.append(f"- **Reference price**: {exit_monitor._price(baseline.get('reference_price_usd'))} → {exit_monitor._price(now_full.get('reference_price_usd'))}"
+                     + (f" ({pc:+.1f}%)." if pc is not None else "."))
+        lines.append(f"- **Full-exit quote**: {exit_monitor._usd(baseline['quoted_usdc'])} → {exit_monitor._usd(now_full['quoted_usdc'])} ({-change['drop_pct']:+.1f}%).")
+        if change.get("discount_then_pct") is not None and change.get("discount_now_pct") is not None:
+            w = change["discount_widening_pts"]
+            lines.append(f"- **Route discount to the reference**: {change['discount_then_pct']:.1f}% → {change['discount_now_pct']:.1f}% "
+                         + ("(wider: the book got thinner for your size)." if w > 0.05 else "(not wider)."))
+        lines.append(f"- **Route**: {' → '.join(change['route_then']) or 'unknown'} → {' → '.join(change['route_now']) or 'unknown'}; price impact {change.get('impact_then_pct') or 0:.2f}% → {change.get('impact_now_pct') or 0:.2f}%.")
+        if now_full.get("slot"):
+            lines.append(f"- Quotes computed at slot {now_full['slot']} (Jupiter contextSlot).")
+    lines += ["", "Two Jupiter quotes for your exact size, read apart: a price move, a holding change and a thinner book are different things. Not a sell instruction."]
+    return "\n".join(lines)
 
 
 def _rules_text(rules: dict) -> str:
@@ -109,9 +165,11 @@ async def _resolve_token(token: str) -> tuple[str | None, str | None, str | None
     return None, None, f"I couldn't find a token with the symbol {token.upper()} in Jupiter's registry. Paste its mint address."
 
 
-async def handle(message: str, user: dict, wallet: str | None) -> str | None:
+async def handle(message: str, user: dict | None, wallet: str | None) -> str | None:
     """The reply to an exit control, or None when the message is not one."""
     text = (message or "").strip()
+    if user is None and not _SIZES.match(text):
+        return "Sign in to use exit monitors and alerts; the sizing comparison works without an account."
     if _LIST.match(text):
         rows = [p for p in await exit_monitor.list_for(user["id"]) if p["status"] == "active"]
         if not rows:
@@ -157,6 +215,18 @@ async def handle(message: str, user: dict, wallet: str | None) -> str | None:
         for p in rows:
             await exit_monitor.set_rules(p["id"], channel=channel)
         return f"Exit alerts for {len(rows)} position(s) will {'also go to your email' if channel == 'email' else 'stay in the app'}."
+    m = _CHANGED.match(text)
+    if m:
+        token = next(g for g in m.groups() if g)
+        mint, symbol, question = await resolve_token(token.lstrip("$"))
+        if question:
+            return question
+        rows = [p for p in await exit_monitor.list_for(user["id"]) if p["status"] == "active" and p["mint"] == mint]
+        if not rows:
+            return (f"I have no entry snapshot for {symbol or token}: you are not watching an exit on it, so there is nothing to compare against. "
+                    f"Say `watch my exit on {symbol or token}` with your wallet connected; from then on I can separate the price move, "
+                    "your holding and the route's discount.")
+        return await _since_entry(rows[0])
     m = _SIZES.match(text)
     if m:
         token = next((g for g in m.groups() if g and not any(ch.isdigit() for ch in g) and g.lower() not in ("and", "or")), None)

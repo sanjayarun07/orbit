@@ -223,20 +223,70 @@ def token_trades(request: str) -> str:
     return "\n".join(lines)
 
 
+# An address the request itself calls a token: "token <mint>", "contract
+# <mint>", "CA: <mint>", or the launch of <mint>. That address is never a
+# wallet: on 2026-09-23 "Investigate the launch of Solana token 9cRC…pump.
+# Show deployer funding…" ran the deployer track record ON THE MINT.
+_TOKEN_DECLARED = re.compile(
+    r"\b(?:token|mint|contract|ca|coin|memecoin)\b(?:\s+address)?\s*[:`*]*\s*(?:is\s+)?(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})\b", re.I)
+_LAUNCH_OF = re.compile(r"\blaunch(?:ed|es|ing)?\s+of\b|\bwho\s+(?:launched|deployed|created|made)\b", re.I)
+
+
+def declared_token(request: str) -> str | None:
+    """The address the request names as a token, or None."""
+    text = request or ""
+    m = _TOKEN_DECLARED.search(text)
+    if m:
+        return m.group(1)
+    if _LAUNCH_OF.search(text) and not re.search(r"\bwallet\b", text, re.I):
+        w = _WALLET.search(text)
+        return w.group(1) if w else None
+    return None
+
+
+def token_deployer(mint: str, chain: str) -> str | None:
+    """The wallet Mobula's metadata names as the token's deployer, or None."""
+    try:
+        payload = mobula_client.get(1, "/metadata", {"asset": mint, "blockchain": chain})
+    except Exception:  # noqa: BLE001
+        logger.warning("mobula metadata failed for %s", mint[:8], exc_info=True)
+        return None
+    data = payload.get("data", payload) if isinstance(payload, dict) else None       # the client unwraps `data`; tolerate both
+    deployer = (data or {}).get("deployer") if isinstance(data, dict) else None
+    return str(deployer) if deployer else None
+
+
 def wallet_deployer(request: str) -> str:
-    """A developer's track record: the other tokens this wallet deployed."""
+    """A developer's track record: the other tokens this wallet deployed.
+    When the request names a TOKEN, the deployer is resolved from the token's
+    metadata first; the mint is never substituted for the wallet."""
     match = _WALLET.search(request or "")
     if not match:
         raise ValueError("No wallet address found in the request")
     wallet = match.group(1)
     named = re.search(r"\bon\s+([A-Za-z][A-Za-z ]{2,20}?)\b(?:\s|$|,|\.)", request or "", re.I)
     chain = _CHAIN_NAMES.get((named.group(1) if named else "").strip().lower(), "solana" if not wallet.startswith("0x") else "ethereum")
+    token_line = ""
+    mint = declared_token(request)
+    if mint:
+        deployer = token_deployer(mint, chain)
+        if not deployer:
+            return "\n".join([
+                "# Deployer track record",
+                f"**Provider**: Mobula · **Token**: `{mint}` · **Chain**: {chain} · **Checked**: {_stamp()}",
+                "",
+                "Mobula's metadata names no deployer for this token, so there is no deployer wallet to check. "
+                "The mint address is the token, not a wallet; it was not used in its place.",
+                "", "Source: [Mobula metadata](https://docs.mobula.io/rest-api-reference/endpoint/metadata)",
+            ])
+        wallet = deployer
+        token_line = f" · **Token**: `{mint}` (deployer per Mobula metadata)"
     payload = _get("/wallet/deployer", {"wallet": wallet, "blockchain": chain})
     rows = payload if isinstance(payload, list) else (payload.get("data") or [])
     rows = [r for r in rows if isinstance(r, dict)]
     lines = [
         "# Deployer track record",
-        f"**Provider**: Mobula · **Wallet**: `{wallet}` · **Chain**: {chain} · **Checked**: {_stamp()}",
+        f"**Provider**: Mobula · **Wallet**: `{wallet}`{token_line} · **Chain**: {chain} · **Checked**: {_stamp()}",
         "",
     ]
     if rows:

@@ -29,7 +29,7 @@ from app.token_resolve import bitquery_evm_lookup, clear_winner, token_candidate
 from app.token_deepdive import (
     ANALYSIS_RULES, build_token_evidence, bundle_signals, coverage_rows, evidence_skips, extract_market_price, format_evidence_bundle,
 )
-from app import decision_records, handles, holder_snapshots, jobs, listed_asset, role_memory
+from app import decision_records, handles, holder_snapshots, jobs, listed_asset, role_memory, snapshot_compare
 from app.signals import Signal, Subject
 from app.source_cards import extract_source_cards
 from app.web_search import append_web_sources, is_crypto_trends_query, web_search
@@ -1827,7 +1827,7 @@ async def research_node(state: AgentState) -> dict:
     web_part = _web_context_part(state)
     if web_part:
         streaming.emit("card", markdown=web_part[0], tool=WEB_CONTEXT_TOOL)
-    clauses = composition.split_asks(request)
+    clauses = composition.carry_subject(composition.split_asks(request), request)
     if len(clauses) >= 2:
         # A compound message: every ask answered, each through the same
         # path, the cards combined and read together. One card and silence
@@ -1845,7 +1845,8 @@ async def research_node(state: AgentState) -> dict:
             # clause to finish set the whole answer's resolved token and
             # note (review, 2026-09-22).
             try:
-                return await _research_node({**state, "request": clause, "contextual_request": None}, own)
+                with streaming.muted("delta"):
+                    return await _research_node({**state, "request": clause, "contextual_request": None}, own)
             except Exception:
                 logger.warning("compound ask clause failed: %r", clause[:60], exc_info=True)
                 return {"answer": "", "trajectory": None}
@@ -1859,6 +1860,11 @@ async def research_node(state: AgentState) -> dict:
         notes = [own["resolution_note"] for own in sinks if own.get("resolution_note")]
         if notes:
             sink["resolution_note"] = "\n".join(dict.fromkeys(notes))
+        # Every ask is kept, a clause's question to the user included; but an
+        # answer that carries one clause's "which token?" is not itself a
+        # clarification when another clause answered (it read as one and
+        # dropped the comparison lead, 2026-09-23).
+        extras["compound_answered"] = any(part.get("answer") and not is_clarification(part.get("answer")) for part in results)
         for clause, part in zip(clauses, results):
             if part.get("answer") and not (part.get("trajectory") or {}).get("tool_name_0", "").startswith("_"):
                 streaming.emit("card", markdown=part["answer"], tool=(part.get("trajectory") or {}).get("tool_name_0"))
@@ -1877,9 +1883,20 @@ async def research_node(state: AgentState) -> dict:
         # clarifying question from the tools' path stays a question.
         trajectory = result.get("trajectory") or {}
         if trajectory.get("tool_name_0") != WEB_CONTEXT_TOOL:
-            cards, combined = composition.combine([web_part, (result["answer"], trajectory)])
+            # One summary over all the cards: the compound path's own
+            # "Taken together" is dropped before this one is written.
+            cards, combined = composition.combine([web_part, (composition.strip_synthesis(result["answer"]), trajectory)])
             answer = await composition.synthesize(request, cards, combined)
             result = {**result, "answer": answer, "trajectory": combined or None}
+    window = snapshot_compare.dated_ask(state["request"])
+    if window and result.get("answer") and (result.get("compound_answered") or not is_clarification(result.get("answer"))):
+        # A dated comparison is answered from the snapshot ledger or it says
+        # it cannot be; current data is never presented as "between" dates.
+        token = result.get("resolved_token") or sink.get("resolved_token")
+        if token and not token.get("symbol"):
+            token = {**token, "symbol": composition._symbol_in(state["request"])}       # the ledger card names the ticker the user typed
+        lead = await snapshot_compare.lead(token, window)
+        result = {**result, "answer": f"{lead}\n\n---\n\n{result['answer']}"}
     # The way out: the answer is checked against the question as the user
     # asked it (app/answer_gate.py) -- a wrong subject or a missing answer
     # never ships. The link note goes on after, so the check reads the answer

@@ -26,6 +26,14 @@ class SpeechResolution(dspy.Signature):
     or risk settings for the user -- 'my wallet policy?', 'max spend policy?',
     'what are my trading limits', 'what is my risk charter', 'how much can I
     spend per trade here'. It asks about configured rules, not about holdings.
+    app: a request to operate THIS product itself rather than look anything
+    up -- save, bookmark or export this investigation or a report, a
+    watchlist or ranked list of saved tokens, alert or notification settings,
+    account or data actions -- 'save this investigation so I can revisit it',
+    'export an evidence-linked report', 'show my token watchlist ranked by
+    changes'. "my watchlist" is an app feature, not the user's holdings; a
+    verb like Save, Export or Separate that opens the sentence is never an
+    asset name.
     'Buy NVDA' is equity research; this application does not execute stock
     orders. Negated, conditional, mixed, or unclear actions are abstain. Only
     explicit crypto quote requests may set explicit_action=true. Context can

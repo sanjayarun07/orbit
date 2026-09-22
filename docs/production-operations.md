@@ -2315,3 +2315,42 @@ in the public form, on the job row and beside the answer. A claim without
 an anchor is still a claim, marked as unanchored by `Evidence.anchored()`,
 never silently dropped. This is what the launch dossier will show as
 "the transactions supporting each inference".
+
+## Position-aware workspace, first slice (2026-09-23)
+
+**What changed since entry, said apart.** The exit monitor's deterioration alert now opens with a decomposition
+(`exit_monitor.explain_change` / `explain_sentence`): the reference price's move, the quote's discount to that
+reference then and now (discount = 1 − quoted ⁄ marked), the route then and now, and missing data as its own
+state. `what changed since I entered X` renders the same reading on demand, with the holding change, or says
+plainly that there is no entry snapshot when X is not watched.
+
+**Rules per position.** `exit_positions.rules` (jsonb): `drop_pct` (proceeds fall vs baseline; default
+`EXIT_ALERT_DROP_PCT`), `discount_pct` (absolute discount to the reference; fires on its own), `channel`
+(`inapp` | `email`). Set by chat: `tell me when the discount on my full-position exit quote exceeds 5%`,
+`email me when my BONK exit drops 10%`, `exit alerts to inbox`; `show my exits` lists them. An email goes out
+only when the inbox row was new (the inbox is the delivery record) through `emailer.send_email`.
+
+**Sizing before entry.** `compare buying $500, $2,000 and $5,000 of X` (chain and trailing sentences
+tolerated; works for guests) quotes USDC→X and the immediate reverse exit of exactly what that entry receives,
+with slots; labelled a liquidity diagnostic, never a forecast. Jupiter quotes are paced (0.5 s) and retried
+with backoff (1.5 s, 3 s) on 429: six in a row hit the public limit live.
+
+## UI flow report fixes (2026-09-23)
+
+- **Instruction words are not assets.** `subject_probe.subject_of` skips a capitalised sentence starter
+  followed by a determiner, pronoun or "token" (Save this…, Separate token…, Show my…); the context capsule
+  binds "X token" only when X is a $ticker, all-caps, or a capitalised non-starter.
+- **`app` speech act.** Save/export/watchlist/alert-settings requests classify as `app` (docstring,
+  Jev options, examples v4, three routing cases) and route to `product_actions.answer`, which says what exists
+  (Recents, account export, exit monitors, Settings › Tasks) and what does not (report export, ranked
+  watchlist). 118/118 intent accuracy in resolve mode.
+- **A declared token is never a deployer wallet.** `mobula_meme.declared_token` (token/mint/contract/CA
+  before the address, or "launch of" without "wallet"); `wallet_deployer` resolves the deployer from Mobula
+  `/metadata` (`deployer`) and says so when there is none. Compound clauses without a subject of their own
+  carry the message's address (`composition.carry_subject`).
+- **One synthesis per answer.** `composition.combine` strips each part's earlier "Taken together"; the web
+  branch strips the compound one. Clause deltas are muted (`streaming.muted("delta")`) so concurrent clauses
+  no longer interleave sentences in the transcript.
+- **Dated comparisons.** `snapshot_compare.dated_ask` recognises "between/since <date>" asks; the answer opens
+  with the ledger's two-row comparison (`holder_snapshots.as_of` + `diff`) or the limitation ("No saved
+  snapshot of X for <date>… everything below is current data").

@@ -74,7 +74,7 @@ def _speech_route(understanding: SpeechUnderstanding, method: str, chains: list[
         return {"intent": "research", "capabilities": ["equity_research"], "chains": [], "route_source": method}
     if understanding.speech_act == "portfolio":
         return {"intent": "portfolio", "capabilities": ["portfolio", "wallet_intelligence"], "chains": chains, "route_source": method}
-    if understanding.speech_act in {"explain", "policy"}:
+    if understanding.speech_act in {"explain", "policy", "app"}:
         return {"intent": "general", "capabilities": [], "chains": [], "route_source": method}
     if understanding.speech_act == "advice":
         # Advice is answered as research, never as a quote path, and is tagged

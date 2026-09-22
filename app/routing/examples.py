@@ -3,13 +3,16 @@
 Labels describe speech acts. A quote request is never an execution permission.
 """
 
-EXAMPLE_VERSION = "3"
+EXAMPLE_VERSION = "4"
 
 # (speech act, domain, example)
 EXAMPLES = (
     ("policy", "wallet", "What is my wallet policy?"),
     ("policy", "wallet", "What's the max I can spend per trade here?"),
     ("policy", "wallet", "Show my trading limits and risk rules"),
+    ("app", "general", "Save this investigation so I can revisit it later"),
+    ("app", "general", "Export an evidence-linked report of this analysis"),
+    ("app", "general", "Show my token watchlist ranked by what changed"),
     ("advice", "crypto", "Should I buy BONK?"),
     ("advice", "crypto", "Would selling SOL now be a good idea?"),
     ("advice", "crypto", "Is it worth buying this meme coin?"),

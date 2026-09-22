@@ -65,6 +65,9 @@ async def general_node(state: AgentState) -> dict:
     request = state["request"]
     if (state.get("routing_decision") or {}).get("speech_act") == "policy":
         return {"answer": policy_summary(state), "trajectory": None}
+    if (state.get("routing_decision") or {}).get("speech_act") == "app":
+        from app import product_actions
+        return {"answer": product_actions.answer(request), "trajectory": None}
     current_charter = (state.get("session_context") or {}).get("risk_charter")
     if is_charter_set(request):
         rules = extract_charter(request)

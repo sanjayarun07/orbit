@@ -53,10 +53,27 @@ _INSTRUCTIONS = (
 )
 
 
+# A capitalised word that opens a sentence and is followed by a determiner,
+# a pronoun or "token" is the sentence's verb, not a name: "Save this
+# investigation", "Separate token price movement", "Show my watchlist" all
+# reached the web as SAVE / SEPARATE / MY (UI run, 2026-09-23). A ticker
+# opening a sentence ("Bonk price?", "ANSEM holders") is still a subject.
+_SENTENCE_START = re.compile(r"(?:^|[.!?]\s+)([A-Z][a-z][A-Za-z0-9]{1,20})\s+([a-z]+)\b")
+_INSTRUCTION_NEXT = {"this", "that", "these", "those", "the", "a", "an", "my", "me", "our", "your", "all", "each", "every", "it", "them",
+                     "token", "tokens", "coin", "coins", "investigation", "report", "everything", "anything"}
+
+
+def sentence_starters(request: str) -> set[str]:
+    return {m.group(1) for m in _SENTENCE_START.finditer(request or "") if m.group(2) in _INSTRUCTION_NEXT}
+
+
 def subject_of(request: str) -> str | None:
     """The name worth looking up in this message, or None."""
+    starters = sentence_starters(request)
     for dollar, upper, capital in _SUBJECT.findall(request or ""):
         name = dollar or upper or capital
+        if capital and capital in starters:
+            continue
         if name and name.upper() not in _STOP:
             return name
     return None

@@ -24,7 +24,7 @@ from .examples import EXAMPLES, EXAMPLE_VERSION
 
 class SpeechUnderstanding(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    speech_act: Literal["quote", "advice", "research", "explain", "portfolio", "policy", "abstain"]
+    speech_act: Literal["quote", "advice", "research", "explain", "portfolio", "policy", "app", "abstain"]
     domain: Literal["crypto", "equity", "wallet", "general"]
     explicit_action: bool = Field(strict=True)
     confidence: float = Field(ge=0, le=1, allow_inf_nan=False)

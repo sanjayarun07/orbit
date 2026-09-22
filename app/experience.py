@@ -46,6 +46,19 @@ _NAMED_TOKEN = re.compile(
     re.IGNORECASE,
 )
 _CONTEXTUAL_TOKEN = re.compile(r"\b(?:this|that|the)\s+(?:token|coin)\b", re.IGNORECASE)
+
+
+def _names_a_token(matched: str, name: str, request: str) -> bool:
+    """Whether the word before "token" is a name: a $ticker, an all-caps
+    symbol, or a capitalised word that does not open a sentence as its verb.
+    A lowercase word ("my token") never is."""
+    from app.routing.subject_probe import sentence_starters
+
+    if matched.startswith("$") or name.isupper():
+        return True
+    if not name[0].isupper():
+        return False
+    return name not in sentence_starters(request)
 _OWN_WALLET = re.compile(r"\b(?:my|connected)\b.{0,40}\b(?:wallet|portfolio|balances?|transactions?|activity|holdings?)\b", re.IGNORECASE)
 
 
@@ -114,6 +127,8 @@ def build_context_capsules(
         ) else None
         if token is None and not named:
             token = answer_token
+        if named and not _names_a_token(named.group(0), named.group(1), request):
+            named = None                      # "my token watchlist", "Separate token price movement" (UI run, 2026-09-23)
         if token is None and _CONTEXTUAL_TOKEN.search(request):
             token = extract_token_reference(history)
         # Historical addresses are considered only for explicit wallet

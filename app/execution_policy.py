@@ -327,8 +327,9 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         remembered_wallet = ((session_context or {}).get("connected_wallet") or {}).get("address")
         effective_wallet = body.wallet_address or remembered_wallet or ""
         task_reply = await task_scheduling.handle_chat_control(body, identity, action)
-        if task_reply is None and action is None and identity.signed_in and exit_controls.is_exit_control(body.message):
-            task_reply = await exit_controls.handle(body.message, identity.user, effective_wallet or None)
+        if task_reply is None and action is None and (identity.signed_in or exit_controls.is_public_control(body.message)) and exit_controls.is_exit_control(body.message):
+            # Sizing before entry needs no account (a guest asked it, 2026-09-23); the position controls need one.
+            task_reply = await exit_controls.handle(body.message, identity.user if identity.signed_in else None, effective_wallet or None)
         if task_reply is not None:
             from app.graph import AgentRun
             # No trajectory: a task control is a plain (1-credit) turn, not a tool turn.
