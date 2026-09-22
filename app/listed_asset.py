@@ -61,10 +61,20 @@ def ticker_in(request: str) -> str | None:
     return None
 
 
+_PRICE_ASK = re.compile(r"\b(?:price|quote|worth|trading\s+at|how\s+much|24h|change|market|chart|performance)\b", re.I)
+_DERIVATIVES = re.compile(r"\b(?:funding|open\s+interest|\boi\b|perps?|perpetuals?|liquidations?|hyperliquid|leverage)\b", re.I)
+
+
 def matches(request: str) -> bool:
+    """A listed fact (supply, market cap, rank, ATH...) about a ticker with no
+    address; or a price/market ask carrying the resolver's coin-id marker.
+    Never a derivatives ask -- funding and open interest belong to the perps
+    tools even when the marker is present."""
     text = request or ""
+    if _DERIVATIVES.search(text):
+        return False
     if coin_id_in(text):
-        return True
+        return bool(LISTED_ASK.search(text) or _PRICE_ASK.search(text))
     return bool(LISTED_ASK.search(text)) and ticker_in(text) is not None and not _ADDRESS.search(text)
 
 

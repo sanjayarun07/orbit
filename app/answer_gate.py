@@ -196,4 +196,12 @@ async def gate(question: str, result: dict) -> dict:
             trajectory = {"thought_0": f"The first answer failed the check ({verdict['verdict']}); the web answered the question as asked.",
                           "tool_name_0": "perplexity_context_search", "tool_args_0": {"query": question}, "observation_0": from_web}
             return {**result, "answer": f"{from_web.strip()}\n\n{note}{kept}", "trajectory": trajectory, "answer_gate": {**verdict, "resolved_by": "web"}}
+    if verdict["verdict"] == "missing" and answer.strip():
+        # The subject was right and part of the question was answered: keep
+        # what the tools found and say what they did not cover, rather than
+        # replace real data with a refusal (live: a BTC tape that had price
+        # and 24h change lost them because funding was missing, 2026-09-22).
+        gap = _missing_phrase(verdict.get("missing") or "")
+        return {**result, "answer": f"{answer.strip()}\n\n_Not covered by the sources this turn: {gap}._",
+                "answer_gate": {**verdict, "resolved_by": "partial"}}
     return {**result, "answer": _could_not_find(question, verdict), "trajectory": None, "answer_gate": {**verdict, "resolved_by": "ask"}}

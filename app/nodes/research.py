@@ -1730,7 +1730,11 @@ async def research_node(state: AgentState) -> dict:
             when = (f"the {horizon.group(0)}" if horizon and not horizon.group(0).lower().startswith("the ") else horizon.group(0)) if horizon else "the short term"
             tape_frame = (f"Nobody's data says where {asset} goes in {when}, and I won't guess. Here is the tape right now, "
                           "which is what a short-term view has to be built on.")
-            request = f"{asset} price, 24h change, funding rate, open interest, liquidations and key support and resistance levels right now"
+            # Four asks in sentences, so the compound path routes each to its
+            # tool: the listed snapshot, Hyperliquid's funding and open
+            # interest, and the web for liquidations and levels.
+            request = (f"{asset} price and 24h change. {asset} funding rate and open interest on Hyperliquid. "
+                       f"{asset} liquidations in the last 24 hours. {asset} key support and resistance levels right now")
             state = {**state, "request": request, "contextual_request": None,
                      "capabilities": sorted(set(state.get("capabilities") or []) | {"market_data", "derivatives"})}
             streaming.emit("status", text=f"Reading the tape for {asset}")

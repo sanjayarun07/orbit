@@ -92,15 +92,21 @@ def test_the_gate_never_asks_to_name_a_token_the_question_already_names():
 
 
 def test_a_forecast_ask_is_answered_as_the_tape_not_refused(monkeypatch):
-    seen = {}
+    seen = []
 
     async def inner(state, sink):
-        seen["request"] = state["request"]
-        return {"answer": "# BTC market\nprice $85,821 · 24h +5.8% · funding +0.01%", "trajectory": {"tool_name_0": "birdeye_token_overview"}}
+        seen.append(state["request"])
+        return {"answer": f"# {state['request'][:24]}\nprice $85,821 · 24h +5.8%", "trajectory": {"tool_name_0": "coingecko_coin_snapshot"}}
+
+    async def synth(request, cards, trajectory, advice=False):
+        return f"Taken together.\n\n{cards}"
     monkeypatch.setattr(research, "_research_node", inner)
     monkeypatch.setattr(research, "_web_context_part", lambda state: None)
+    monkeypatch.setattr(research.composition, "synthesize", synth)
     out = asyncio.run(research.research_node({"request": "What will happen for BTC in next 5-10 hours ?", "capabilities": ["web_research"], "chains": [], "session_context": {}}))
-    assert "funding" in seen["request"] and "BTC" in seen["request"] and "next 5-10 hours" not in seen["request"]
+    joined = " | ".join(seen)
+    assert len(seen) == 4 and all("BTC" in r for r in seen) and "next 5-10 hours" not in joined      # one clause per tool
+    assert "funding rate and open interest on Hyperliquid" in joined and "liquidations" in joined and "support and resistance" in joined
     assert out["answer"].startswith("Nobody's data says where BTC goes in the next 5-10 hours") and "price $85,821" in out["answer"]
 
 
@@ -116,3 +122,18 @@ def test_a_promotional_sample_is_flagged_and_its_vote_halved():
     assert vote.metadata["damped"] and vote.value == pytest.approx(0.92 * 0.5) and "promotion" in vote.reasoning
     card = sa.render_card("ZEC", {"query": "$ZEC", "new": 12}, s, j)
     assert "67% of the sample is promotion" in card
+
+
+def test_the_gate_keeps_a_partial_answer_and_names_the_gap(monkeypatch):
+    """Subject right, coverage partial, web adds nothing: the data stays."""
+    async def check(question, answer):
+        return {"verdict": "missing", "subject": "Bitcoin market data", "missing": "funding rate and open interest"}
+
+    async def no_web(question):
+        return None
+    monkeypatch.setattr(answer_gate, "check", check)
+    monkeypatch.setattr(answer_gate, "_web_answer", no_web)
+    monkeypatch.setattr(answer_gate, "eligible", lambda answer, result: True)
+    out = asyncio.run(answer_gate.gate("BTC price, funding rate and open interest", {"answer": "# Bitcoin\n- **Price**: $85,349", "trajectory": {"tool_name_0": "coingecko_coin_snapshot"}}))
+    assert out["answer"].startswith("# Bitcoin") and "Not covered by the sources this turn: funding rate and open interest" in out["answer"]
+    assert out["answer_gate"]["resolved_by"] == "partial" and out["trajectory"]["tool_name_0"] == "coingecko_coin_snapshot"

@@ -22,6 +22,8 @@ def test_listed_asks_match_by_ticker_never_by_address():
     assert listed_asset.matches("What is the current total supply and circulating supply of the $ZEC token?")
     assert listed_asset.matches("BONK market cap and rank") and listed_asset.matches("what is the ATH of WIF")
     assert listed_asset.matches("price of ZEC (CoinGecko id zcash)")                     # the resolver's marker
+    assert not listed_asset.matches("BTC funding rate and open interest on Hyperliquid (CoinGecko id bitcoin)")   # a perps ask keeps its tool
+    assert not listed_asset.matches("BTC liquidations in the last 24 hours (CoinGecko id bitcoin)")
     assert not listed_asset.matches("top holders of ZEC")                                 # a chain question, not a listed fact
     assert not listed_asset.matches("circulating supply of DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 on solana")
     assert listed_asset.ticker_in("total supply of the $ZEC token") == "ZEC"
