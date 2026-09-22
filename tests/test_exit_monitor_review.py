@@ -79,7 +79,8 @@ def test_an_answer_returned_to_the_attached_request_is_not_delivered_again(monke
     jobs.register("t", handler)
     job = asyncio.run(jobs.create("t", {}, user_id="u1", account_id="acct", session_id="s"))
     row = asyncio.run(jobs.attach(job["id"]))                       # inline: the request gets the answer
-    assert row["status"] == "succeeded" and row["delivered"] is True
+    assert row["status"] == "succeeded" and row["delivered"] is False
+    asyncio.run(jobs.acknowledge(job["id"]))                        # what the chat commit does
     with jobs._lock:
         jobs._memory[job["id"]]["created_at"] = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
     asyncio.run(jobs.maintain())
@@ -232,3 +233,80 @@ def test_a_full_exit_that_can_no_longer_be_quoted_raises_the_no_route_alert(monk
     monkeypatch.setattr(exit_monitor, "simulate_swap", _failing("HTTP 429 rate limited"))     # a provider gap is not a market fact
     asyncio.run(jobs.run(asyncio.run(jobs.get(watched["job_id"]))))
     assert len(asyncio.run(tasks.inbox("u1"))) == 1
+
+
+# ---- the third review (2026-09-22) ----
+
+def test_attach_does_not_acknowledge_and_the_chat_commit_does(monkeypatch):
+    """The turn may still fail between attach and its commit; only a
+    committed conversation acknowledges the job."""
+    from fastapi.testclient import TestClient
+    from app import execution_policy, main
+    from app.graph import AgentRun
+    from tests.conftest import sign_in
+
+    async def handler(job, ctx):
+        return {"answer": "the verdict"}
+    jobs.register("t", handler)
+    job = asyncio.run(jobs.create("t", {}, user_id="u1", session_id="s"))
+    row = asyncio.run(jobs.attach(job["id"]))
+    assert row["status"] == "succeeded" and row["delivered"] is False              # attach never acknowledges
+
+    client = TestClient(main.app)
+    sign_in(client)
+
+    async def fake_run_agent(*a, **k):
+        return AgentRun(answer="the verdict", trajectory={"tool_name_0": "token_deep_dive"}, trade_plan=None, intent="research",
+                        capabilities=["token_discovery"], job_id=job["id"], job_attached=True)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run_agent)
+
+    async def failing_commit(*a, **k):
+        raise RuntimeError("history store down")
+    monkeypatch.setattr(execution_policy, "commit_turn", failing_commit)
+    r = client.post("/chat", json={"message": "deep dive on BONK"})
+    assert r.status_code >= 500 and asyncio.run(jobs.get(job["id"]))["delivered"] is False   # not acknowledged: maintenance will deliver
+
+    async def ok_commit(*a, **k):
+        return None
+    monkeypatch.setattr(execution_policy, "commit_turn", ok_commit)
+    r = client.post("/chat", json={"message": "deep dive on BONK"})
+    assert r.status_code == 200 and r.json().get("job_id") is None                  # attached: the browser has nothing to poll
+    assert asyncio.run(jobs.get(job["id"]))["delivered"] is True
+
+
+def test_a_failed_history_write_leaves_no_position_and_no_live_job(monkeypatch, chain):
+    async def boom(position_id, quantity_raw, rows):
+        raise RuntimeError("quotes table unavailable")
+    monkeypatch.setattr(exit_monitor, "record", boom)
+    with pytest.raises(RuntimeError):
+        _watch()
+    assert asyncio.run(exit_monitor.list_for("u1")) == []
+    assert all(j["status"] == "cancelled" for j in asyncio.run(jobs.list_for("u1")))
+
+
+def test_a_stale_active_position_is_repaired_by_the_next_watch(monkeypatch, chain):
+    watched = _watch()
+    asyncio.run(jobs.cancel(watched["job_id"], "u1"))                               # the monitor is gone, the row says active
+
+    async def search(query):
+        return [{"id": MINT, "symbol": "BONK", "name": "Bonk", "tags": ["verified"]}]
+    monkeypatch.setattr(exit_controls.jupiter, "search_tokens", search)
+    reply = asyncio.run(exit_controls.handle("watch my exit on BONK", {"id": "u1"}, WALLET))
+    assert reply.startswith("Watching your BONK exit") and "Already watching" not in reply
+    rows = asyncio.run(exit_monitor.list_for("u1"))
+    assert [r["status"] for r in rows] == ["active", "closed"] and asyncio.run(exit_monitor.is_live(rows[0]))
+
+
+def test_a_timeout_is_unavailable_data_not_a_missing_route(monkeypatch, chain):
+    import httpx
+    watched = _watch()
+
+    async def timeout(input_mint, output_mint, amount):
+        raise httpx.ReadTimeout("read timed out")
+    monkeypatch.setattr(exit_monitor, "simulate_swap", timeout)
+    asyncio.run(jobs.run(asyncio.run(jobs.get(watched["job_id"]))))
+    assert asyncio.run(tasks.inbox("u1")) == []
+    assert asyncio.run(exit_monitor.history(watched["id"]))[0]["quotes"][2]["error"] == "quote unavailable (timeout)"
+    assert exit_monitor._route_error(RuntimeError("Jupiter: COULD_NOT_FIND_ANY_ROUTE")) == "no route"
+    assert exit_monitor._route_error(ConnectionError("reset")) == "quote unavailable (connection)"
+    assert exit_monitor._route_error(RuntimeError("HTTP 401 unauthorized")) == "quote unavailable (auth)"

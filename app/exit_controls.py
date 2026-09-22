@@ -113,6 +113,11 @@ async def handle(message: str, user: dict, wallet: str | None) -> str | None:
         return f"`{wallet[:6]}…{wallet[-4:]}` holds no {symbol or mint[:6]} on Solana, so there is no position to quote."
     rows = await exit_monitor.quote_exit(mint, position["quantity_raw"])
     existing = next((p for p in await exit_monitor.list_for(user["id"]) if p["status"] == "active" and p["mint"] == mint and p["wallet"] == wallet), None)
+    if existing and not await exit_monitor.is_live(existing):
+        # An active row whose monitor is gone (a registration that failed
+        # halfway, a cancelled job): closed and registered afresh.
+        await exit_monitor._update(existing["id"], status="closed")
+        existing = None
     if _WATCH.match(text):
         if existing:
             card = exit_monitor.render_card({**existing, **position}, rows, existing.get("entry"), await exit_monitor.history(existing["id"]))

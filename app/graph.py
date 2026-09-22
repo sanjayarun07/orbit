@@ -84,6 +84,7 @@ class AgentRun:
     resolved_token: dict | None = None
     answer_gate: dict | None = None
     job_id: str | None = None
+    job_attached: bool = False
 
     def __iter__(self):
         """Retain compatibility with callers unpacking the original three values."""
@@ -175,4 +176,5 @@ async def _run_agent_traced(
         resolved_token=final_state.get("resolved_token"),
         answer_gate=final_state.get("answer_gate"),
         job_id=final_state.get("job_id"),
+        job_attached=bool(final_state.get("job_attached")),
     )

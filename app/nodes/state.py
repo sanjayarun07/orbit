@@ -39,6 +39,7 @@ class AgentState(TypedDict, total=False):
     resolved_token: dict | None
     # A durable job this turn started and detached from (app/jobs.py).
     job_id: str | None
+    job_attached: bool          # True: the turn returns the job's answer itself and acknowledges it at commit
     # What the answer gate did to this turn (app/answer_gate.py): None when it let
     # the answer through; the verdict and how it resolved otherwise.
     answer_gate: dict | None

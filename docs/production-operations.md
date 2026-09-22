@@ -2208,3 +2208,19 @@ Also: **the no-route alert.** A full exit that was quoted and cannot be
 quoted now raises an inbox alert naming the reason and the sizes that
 still quote; a provider gap (rate limit, outage, unreadable balance) is
 not a market fact and raises nothing.
+
+## Third review of the exit monitor and delivery (2026-09-22): three findings closed
+
+1. **Acknowledgement moved from attach to the chat commit.** `attach`
+   returns the settled row without marking it delivered; the research node
+   carries the job id with `job_attached`, and the turn acknowledges the job
+   only after `commit_turn` has written the answer to the conversation. A
+   turn that fails or is cancelled in between leaves the job for maintenance.
+   The browser receives a job id only for a detached job.
+2. **Registration is all or nothing.** A failure after the position insert
+   (the history write, for one) removes the position and cancels the job.
+   A stale active row whose monitor is gone is closed and registered afresh
+   by the next watch, never reported as "already watching".
+3. **No-route only when the provider said so.** Timeouts, dropped
+   connections, auth errors and unknown failures are "quote unavailable"
+   rows, never the no-route alert; only an explicit no-route answer raises it.

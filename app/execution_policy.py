@@ -467,6 +467,10 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             assistant_metadata,
             next_context,
         )
+        if getattr(run, "job_id", None) and getattr(run, "job_attached", False):
+            # The job's answer is now in the conversation and charged as this
+            # turn: acknowledge it so it is never delivered again.
+            await jobs.acknowledge(run.job_id)
         if identity.signed_in:
             # Still under the lease, so this refresh of last_used (and the
             # longer retention a signed-in account's history gets) can never
@@ -479,7 +483,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
                 logger.warning("chat session ownership update failed", exc_info=True)
         return AgentResponse(
             envelopes=[e.public() for e in turn_evidence],
-            job_id=getattr(run, "job_id", None),
+            job_id=getattr(run, "job_id", None) if not getattr(run, "job_attached", False) else None,
             answer=answer,
             trade_plan=plan,
             trajectory=client_trajectory,

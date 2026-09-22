@@ -1492,7 +1492,8 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
     row = await jobs.attach(job["id"], on_event=lambda e: streaming.emit("status", text=e["title"]))
     status = row.get("status")
     if status == "succeeded" and isinstance(row.get("result"), dict):
-        return dict(row["result"])
+        # The turn commits this answer; the commit acknowledges the job.
+        return {**row["result"], "job_id": job["id"], "job_attached": True}
     if status in jobs.TERMINAL:
         return {"answer": f"The deep dive of {symbol or address} could not be completed: {row.get('error') or status}.", "trajectory": None}
     # Still running: the answer is appended to this conversation when it settles.

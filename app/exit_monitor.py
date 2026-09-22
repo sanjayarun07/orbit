@@ -173,17 +173,29 @@ async def quote_exit(mint: str, quantity_raw: int, fractions: tuple[float, ...] 
 
 
 def _route_error(exc: Exception) -> str:
+    """"no route" only when the quote provider SAID so; a timeout, a dropped
+    connection, an auth error or an unknown failure is unavailable data
+    (review, 2026-09-22: a read timeout raised the no-route alert)."""
+    import httpx
+
     text = str(exc)
+    name = type(exc).__name__
+    if isinstance(exc, httpx.TimeoutException) or "timeout" in name.lower() or "timed out" in text.lower():
+        return "quote unavailable (timeout)"
+    if isinstance(exc, (httpx.ConnectError, httpx.NetworkError, ConnectionError)) or "connect" in name.lower():
+        return "quote unavailable (connection)"
     if "not found uniquely" in text:
         return "token not in Jupiter's registry"
-    if "ROUTE" in text.upper() or "no route" in text.lower():
-        return "no route"
     status = re.search(r"\b(4\d\d|5\d\d)\b", text)
     if status and status.group(1) == "429":
         return "quote provider rate-limited"
+    if status and status.group(1) in ("401", "403"):
+        return "quote unavailable (auth)"
     if status and status.group(1).startswith("5"):
         return "quote provider outage"
-    return f"quote failed: {type(exc).__name__}"
+    if re.search(r"\b(?:no|could not find (?:any )?|couldn't find (?:any )?)routes?\b|\bNO_ROUTES?_FOUND\b|\bCOULD_NOT_FIND_ANY_ROUTE\b", text, re.I):
+        return "no route"
+    return f"quote failed: {name}"
 
 
 def full_exit(rows: list[dict]) -> dict | None:
@@ -303,9 +315,34 @@ async def watch(user_id: str, wallet: str, mint: str, symbol: str | None, positi
                 _positions[row["id"]] = row
         await record(row["id"], position["quantity_raw"], entry_rows)
     except Exception:
+        # All or nothing: whatever landed is removed, the job cancelled
+        # (review, 2026-09-22: a failed history write left an active
+        # position pointing at a cancelled job).
+        try:
+            await _delete(row["id"])
+        except Exception:
+            logger.warning("exit_monitor: could not remove the half-registered position %s", row["id"], exc_info=True)
         await jobs.cancel(job["id"], user_id)
         raise
     return row
+
+
+async def _delete(position_id: str) -> None:
+    pool = await _pool()
+    if pool is not None:
+        await pool.execute("DELETE FROM exit_positions WHERE id = $1", uuid.UUID(position_id))     # exit_quotes cascade
+        return
+    with _lock:
+        _positions.pop(position_id, None)
+        _history.pop(position_id, None)
+
+
+async def is_live(row: dict) -> bool:
+    """An active position whose monitor job exists and will run again."""
+    if row.get("status") != "active" or not row.get("job_id"):
+        return False
+    job = await jobs.get(row["job_id"])
+    return bool(job) and job["status"] in ("scheduled", "queued", "running", "waiting_input", "waiting_approval")
 
 
 async def _update(position_id: str, **fields) -> None:
@@ -473,8 +510,8 @@ async def _maybe_alert(row: dict, rows: list[dict]) -> dict | None:
         # The route is gone: a full exit that was quoted cannot be quoted now.
         # That is the exit-risk alert in its plainest form.
         reason = (full_row or {}).get("error") or "no quote"
-        if reason.startswith("balance unavailable") or "rate-limited" in reason or "outage" in reason:
-            return None                                                # a provider gap, not a market fact
+        if reason != "no route":
+            return None                                                # unavailable data is not a market fact
         title = f"Exit for {symbol}: no route"
         body = (f"A full exit of your {symbol} position was quoted at {_usd(baseline['quoted_usdc'])} ({baseline_at[:16].replace('T', ' ')} UTC) and "
                 f"cannot be quoted now: {reason}. Smaller sizes: " +

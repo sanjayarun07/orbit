@@ -687,13 +687,13 @@ async def attach(job_id: str, timeout: float | None = None, on_event: Callable[[
             if row and row["status"] in ("queued", "scheduled"):
                 await run(row)
             await report()
-            return await _acknowledged(job_id)
+            return await get(job_id) or {}
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             await report()
             row = await get(job_id)
             if row is None or row["status"] in TERMINAL or row["status"] in PAUSED:
-                return await _acknowledged(job_id)
+                return row or {}
             try:
                 await asyncio.wait_for(ev.wait(), timeout=min(1.0, max(0.05, deadline - time.monotonic())))
             except asyncio.TimeoutError:
@@ -715,16 +715,18 @@ async def attach(job_id: str, timeout: float | None = None, on_event: Callable[[
         _settled.pop(job_id, None)
 
 
-async def _acknowledged(job_id: str) -> dict:
-    """The request is about to return this answer and charge it as its own
-    turn: mark it delivered, so the attachment's expiry never delivers and
-    charges it again (review, 2026-09-22). A job that settled but whose
-    request died before this point keeps delivered = false and is delivered
-    by maintenance once the attachment has expired."""
+async def acknowledge(job_id: str) -> dict | None:
+    """The chat turn has COMMITTED this job's answer to the conversation and
+    charged it as its own turn: mark it delivered, so the attachment's expiry
+    never delivers and charges it again. Called after the commit, never
+    before (review, 2026-09-22: acknowledging at attach lost the answer when
+    the turn failed between attach and commit). A job whose turn never
+    commits keeps delivered = false and maintenance delivers it once the
+    attachment has expired."""
     row = await get(job_id)
     if row and row["status"] in TERMINAL and not row.get("delivered"):
-        row = await cas(job_id, {"delivered": False}, {"delivered": True}) or row
-    return row or {}
+        return await cas(job_id, {"delivered": False}, {"delivered": True}) or row
+    return row
 
 
 async def _detach_unacknowledged(job_id: str) -> None:
