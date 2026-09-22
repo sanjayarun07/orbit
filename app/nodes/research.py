@@ -1148,11 +1148,19 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
     # supply of $ZEC", live 2026-09-21) is about the coin CoinGecko ranks, not
     # about whichever wrapped copy sits on which chain: no chain question,
     # the coin id goes into the request and the listed-asset tool answers.
-    if listed_asset.LISTED_ASK.search(request):
-        lead = await _listed_leader(ticker)
-        if lead:
-            return _TokenResolution(f"{request} (CoinGecko id {lead['id']})",
-                                    note=f"_Read **{ticker}** as {lead['name']}, CoinGecko rank {lead['rank']}._")
+    lead = await _listed_leader(ticker)
+    if lead and listed_asset.LISTED_ASK.search(request):
+        return _TokenResolution(f"{request} (CoinGecko id {lead['id']})",
+                                note=f"_Read **{ticker}** as {lead['name']}, CoinGecko rank {lead['rank']}._")
+    # A native coin (BTC, ETH, ZEC) has no contract on any chain the tools
+    # cover: the chain machinery below can only find its wrapped copies, and
+    # live it picked a BTC on Tron for "BTC price and funding" and sent that
+    # address to Birdeye (2026-09-22). Whatever the question, the listed
+    # asset answers, and the request keeps the ticker for the derivatives
+    # and news tools.
+    if lead and (lead.get("rank") or 10**6) <= 200 and await asyncio.to_thread(symbol_registry.contract, lead["id"]) is None:
+        return _TokenResolution(f"{request} (CoinGecko id {lead['id']})",
+                                note=f"_Read **{ticker}** as {lead['name']}, a native coin (CoinGecko rank {lead['rank']}); wrapped copies on other chains are separate tokens._")
 
     def _resolved(candidate: dict) -> _TokenResolution:
         return _TokenResolution(f"{request} {candidate['address']} on {candidate['chain']}", chain=candidate["chain"])

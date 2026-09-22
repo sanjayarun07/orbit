@@ -62,10 +62,26 @@ def leader(rows: list[dict]) -> dict | None:
     return first if second["rank"] >= first["rank"] * LEAD_RATIO else None
 
 
+_contracts: dict[str, tuple[float, tuple[str, str] | None]] = {}
+
+
 def contract(coin_id: str) -> tuple[str, str] | None:
     """(chain, address) for a listed coin on a chain the tools cover, the
     chain being where the contract trades most; None for a native coin or
-    an unsupported chain."""
+    an unsupported chain. Cached an hour: the resolver now asks this for
+    every ticker with a clear leader."""
+    now = time.monotonic()
+    with _lock:
+        hit = _contracts.get(coin_id)
+        if hit and hit[0] > now:
+            return hit[1]
+    result = _contract(coin_id)
+    with _lock:
+        _contracts[coin_id] = (now + _TTL, result)
+    return result
+
+
+def _contract(coin_id: str) -> tuple[str, str] | None:
     try:
         coin = _cg(f"/coins/{coin_id}", {"localization": "false", "tickers": "false", "community_data": "false", "developer_data": "false", "sparkline": "false"})
     except Exception:
@@ -81,3 +97,4 @@ def contract(coin_id: str) -> tuple[str, str] | None:
 def reset() -> None:
     with _lock:
         _cache.clear()
+        _contracts.clear()

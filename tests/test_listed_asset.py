@@ -83,9 +83,9 @@ def test_a_native_coin_with_no_contract_never_gets_a_chain_question(monkeypatch)
 
 
 def test_a_holders_question_about_a_multi_chain_ticker_still_asks(monkeypatch):
-    """The listed short-cut is for listed facts only; "top holders of ZEC" is a
-    chain question and keeps the existing behaviour."""
-    monkeypatch.setattr(research, "_listed_leader", lambda ticker: (_ for _ in ()).throw(AssertionError("not a listed fact")))
+    """The listed short-cut is for listed facts and native coins; "top holders
+    of ZEC" with no clear leader is a chain question and keeps the existing behaviour."""
+    monkeypatch.setattr(research, "_listed_leader", lambda ticker: _coro(None))
     monkeypatch.setattr(research, "_jupiter_solana_mint", lambda ticker: "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS")
     monkeypatch.setattr(research, "token_candidates", lambda ticker: [{"chain": "bsc", "address": "0x1Ba42e5193dfA8B03D15dd1B86a3113bbBEF8Eeb", "symbol": "ZEC",
                                                                         "name": "Zcash Token", "liquidity_usd": 1_800_000.0, "volume_24h_usd": 900_000.0}])
@@ -93,3 +93,22 @@ def test_a_holders_question_about_a_multi_chain_ticker_still_asks(monkeypatch):
     monkeypatch.setattr(research, "_probe_chain", lambda request: _coro(None))
     out = asyncio.run(research._resolve_named_token("top holders of ZEC", {"token_discovery"}))
     assert out.clarification and "several chains" in out.clarification
+
+
+def test_a_native_major_never_enters_the_chain_machinery_for_any_question(monkeypatch):
+    """Live 2026-09-22: "BTC price and funding" resolved to a wrapped BTC on
+    Tron by DEX liquidity and Birdeye was asked about a TRON address."""
+    monkeypatch.setattr(research, "_listed_leader", lambda ticker: _coro({"id": "bitcoin", "name": "Bitcoin", "rank": 1}))
+    monkeypatch.setattr(symbol_registry, "contract", lambda coin_id: None)
+    monkeypatch.setattr(research, "_jupiter_solana_mint", lambda ticker: (_ for _ in ()).throw(AssertionError("a native coin is not resolved on a chain")))
+    out = asyncio.run(research._resolve_named_token("BTC price, 24h change, funding rate, open interest right now", {"market_data"}))
+    assert out.clarification is None and out.request.endswith("(CoinGecko id bitcoin)") and "native coin" in out.note
+
+
+def test_a_contract_backed_leader_still_resolves_on_its_chain_for_a_chain_question(monkeypatch):
+    monkeypatch.setattr(research, "_listed_leader", lambda ticker: _coro({"id": "bonk", "name": "Bonk", "rank": 151}))
+    monkeypatch.setattr(symbol_registry, "contract", lambda coin_id: ("solana", "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"))
+    monkeypatch.setattr(research, "_jupiter_solana_mint", lambda ticker: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263")
+    monkeypatch.setattr(research, "token_candidates", lambda ticker: [])
+    out = asyncio.run(research._resolve_named_token("top holders of BONK", {"token_discovery"}))
+    assert out.chain == "solana" and "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 on solana" in out.request
