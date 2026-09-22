@@ -1916,3 +1916,22 @@ cache bumped to v11.
    ten minutes; the probe's HTTP timeout is 2.5 s, under the wrapper's.
 6. **"Everything Orbit holds".** The export is uncapped: every turn, rating,
    receipt and credit entry.
+
+## Third review of 2026-09-22: four gaps in the deletion and quota fixes
+
+1. **Deletion raced across workers.** The tombstone was process-local. A
+   `deleted_users` table now holds the marker; `scrub_user` writes it
+   FIRST, then scrubs; and the turn-log insert is one statement that reads
+   the marker (`INSERT ... SELECT ... LEFT JOIN deleted_users`), so a write
+   in flight on any worker lands as "[deleted]" with no owner. Decision
+   receipts consult the same marker and are dropped for a deleted account.
+   Verified live: a marker for a ghost account, then a record call with
+   private words, stored as "[deleted]" with null owner and session.
+2. **Flag notes kept the private comment.** A thumbs-down copies the
+   comment into `flag_note`; the scrub now clears it.
+3. **Existing feedback had no owner.** The schema backfills `principal_id`
+   from `user_chat_sessions` (the verified conversation owner) on every
+   start, idempotently, and deletion also removes rows by the conversations
+   the person owns.
+4. **Refused calls spent the shared quota.** The Redis counter is one
+   script: read, refuse without counting past the limit, else increment.

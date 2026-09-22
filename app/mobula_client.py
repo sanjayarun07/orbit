@@ -163,23 +163,29 @@ class _Shared:
                     self._retry_at = time.monotonic() + 60.0
             return self._client
 
+    # Count only what is admitted: a refused call must not spend the minute
+    # for everyone else (review, 2026-09-22). One script, one round trip.
+    _TAKE = ("local n = tonumber(redis.call('GET', KEYS[1]) or '0') "
+             "if n >= tonumber(ARGV[1]) then return -1 end "
+             "n = redis.call('INCR', KEYS[1]) "
+             "if n == 1 then redis.call('EXPIRE', KEYS[1], 120) end "
+             "return n")
+
     def take(self, *, background: bool) -> bool:
         client = self._redis()
         if client is None:
             return True
         key = f"mobula:rpm:{int(time.time() // 60)}"
+        allowance = float(settings.mobula_requests_per_minute)
+        limit = int(allowance / 2.0) if background else int(allowance)
         try:
-            count = int(client.incr(key))
-            if count == 1:
-                client.expire(key, 120)
+            result = int(client.eval(self._TAKE, 1, key, limit))
         except Exception:
             with self._lock:
                 self._client = None
                 self._retry_at = time.monotonic() + 60.0
             return True
-        allowance = float(settings.mobula_requests_per_minute)
-        limit = allowance / 2.0 if background else allowance
-        return count <= limit
+        return result != -1
 
     def reset(self) -> None:
         with self._lock:

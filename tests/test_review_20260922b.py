@@ -63,27 +63,30 @@ def test_deletion_drains_the_background_log_before_scrubbing(monkeypatch):
 # 4. the Mobula allowance is shared across replicas through Redis
 def test_shared_counter_refuses_past_the_deployment_allowance(monkeypatch):
     class FakeRedis:
+        """The script's semantics: refuse without counting past the limit."""
         def __init__(self):
             self.counts = {}
-        def incr(self, key):
-            self.counts[key] = self.counts.get(key, 0) + 1
-            return self.counts[key]
-        def expire(self, key, ttl):
-            return True
+        def eval(self, script, numkeys, key, limit):
+            n = self.counts.get(key, 0)
+            if n >= int(limit):
+                return -1
+            self.counts[key] = n + 1
+            return n + 1
     fake = FakeRedis()
     monkeypatch.setattr(settings, "mobula_shared_limit", True)
     monkeypatch.setattr(settings, "redis_url", "redis://fake")
     monkeypatch.setattr(settings, "mobula_requests_per_minute", 4)
     mobula_client._shared.reset()
     monkeypatch.setattr(mobula_client._shared, "_redis", lambda: fake)
-    assert [mobula_client._shared.take(background=False) for _ in range(5)] == [True, True, True, True, False]
-    fake.counts.clear()
-    assert [mobula_client._shared.take(background=True) for _ in range(3)] == [True, True, False]   # half for background
+    assert [mobula_client._shared.take(background=True) for _ in range(4)] == [True, True, False, False]   # half for background
+    assert list(fake.counts.values()) == [2]                                                               # refusals did not count
+    assert [mobula_client._shared.take(background=False) for _ in range(3)] == [True, True, False]        # users still get the rest
+    assert list(fake.counts.values()) == [4]
 
 
 def test_shared_counter_allows_when_redis_is_down(monkeypatch):
     class Dead:
-        def incr(self, key):
+        def eval(self, *a):
             raise ConnectionError("no redis")
     monkeypatch.setattr(settings, "mobula_shared_limit", True)
     monkeypatch.setattr(settings, "redis_url", "redis://fake")
@@ -107,3 +110,31 @@ def test_turn_listing_is_uncapped_for_the_export():
         asyncio.run(turn_log.record(message=f"m{i}", status="ok", latency_ms=1, identity=SimpleNamespace(kind="user", account_id="a", user={"id": "u-x"}, api_key=None, signed_in=True)))
     assert len(asyncio.run(turn_log.list_turns(days=1, user_id="u-x", limit=None))) == 1100
     assert len(asyncio.run(turn_log.list_turns(days=1, user_id="u-x"))) == 100
+
+
+# 2 (third review). a thumbs-down comment copied into the flag note goes with the deletion
+def test_scrub_clears_the_flag_note_too():
+    identity = SimpleNamespace(kind="user", account_id="a", user={"id": "u-fn"}, api_key=None, signed_in=True)
+    asyncio.run(turn_log.record(message="q", status="ok", latency_ms=1, identity=identity, session_id="s-fn", revision=2))
+    asyncio.run(turn_log.flag_by_revision("s-fn", 2, "user rated down: my private comment"))
+    assert "private" in asyncio.run(turn_log.list_turns(days=1))[0]["flag_note"]
+    asyncio.run(turn_log.scrub_user("u-fn"))
+    row = asyncio.run(turn_log.list_turns(days=1))[0]
+    assert row["flag_note"] is None and row["message"] == "[deleted]"
+
+
+# 1 (third review). the marker is consulted by other stores too
+def test_a_receipt_for_a_deleted_account_is_not_kept():
+    from app import decision_records
+    from app.signals import Subject
+    turn_log.forget_user("u-gone")
+    out = asyncio.run(decision_records.record(kind="deep_dive", subject=Subject(kind="token", id="X" * 32, chain="solana"), signals=[], verdict="v", user_id="u-gone"))
+    assert out is None and asyncio.run(decision_records.list_for("u-gone")) == []
+
+
+# 3 (third review). the backfill and the ownership-based delete exist in the schema and the scrub
+def test_existing_feedback_is_backfilled_from_conversation_ownership():
+    from app import db
+    assert "UPDATE chat_feedback f SET principal_id = s.user_id::text FROM user_chat_sessions s WHERE f.principal_id IS NULL" in db._PLANS_TABLE_SQL
+    import inspect
+    assert "session_id IN" in inspect.getsource(feedback.scrub_principal)

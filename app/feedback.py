@@ -116,7 +116,10 @@ async def scrub_principal(principal_id: str) -> int:
     the store cannot do it, so the deletion stops rather than pretends."""
     pool = await get_pg_pool()
     if pool is not None:
-        status = await pool.execute("DELETE FROM chat_feedback WHERE principal_id = $1", principal_id)
+        # By the person, and by the conversations they own (rows from before
+        # principal_id existed that the backfill could not attribute).
+        status = await pool.execute("DELETE FROM chat_feedback WHERE principal_id = $1 OR session_id IN "
+                                    "(SELECT session_id FROM user_chat_sessions WHERE user_id::text = $1)", principal_id)
         return int(status.split()[-1]) if status and status.split()[-1].isdigit() else 0
     doomed = [k for k, v in _memory.items() if v.get("principal_id") == principal_id]
     for k in doomed:

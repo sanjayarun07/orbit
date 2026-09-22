@@ -112,10 +112,16 @@ def build(*, kind: str, subject: Subject, signals: list[Signal], verdict: str, c
     }
 
 
-async def record(**fields) -> dict:
+async def record(**fields) -> dict | None:
     """Store one decision. Never raises into the chat path: a receipt that
-    could not be written is logged, and the answer still goes out."""
+    could not be written is logged, and the answer still goes out. A receipt
+    for an account deleted meanwhile (on any worker) is not kept."""
     row = build(**fields)
+    if row.get("user_id"):
+        from app import turn_log
+
+        if await turn_log.is_deleted(str(row["user_id"])):
+            return None
     try:
         pool = await _pool()
         if pool is not None:

@@ -262,6 +262,15 @@ CREATE TABLE IF NOT EXISTS chat_feedback (
 );
 ALTER TABLE chat_feedback ADD COLUMN IF NOT EXISTS principal_id TEXT;   -- who rated: a team member, not the owner's billing account
 CREATE INDEX IF NOT EXISTS chat_feedback_principal ON chat_feedback (principal_id);
+-- Deleted accounts (also declared by app/turn_log.py): created here as well so
+-- the marker exists from the first pool, whichever module touches it first.
+CREATE TABLE IF NOT EXISTS deleted_users (
+    user_id TEXT PRIMARY KEY,
+    deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- Rows from before the column existed: owned by whoever owns the conversation
+-- they rate (user_chat_sessions is the verified ownership). Idempotent.
+UPDATE chat_feedback f SET principal_id = s.user_id::text FROM user_chat_sessions s WHERE f.principal_id IS NULL AND s.session_id = f.session_id;
 """
 
 
