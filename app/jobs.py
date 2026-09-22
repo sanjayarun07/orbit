@@ -457,8 +457,14 @@ async def run(row: dict) -> dict | None:
         return await _settle(ctx, "failed", error=f"no handler for kind {job['kind']!r}")
     await _event(job["id"], "resumed" if job["attempts"] > 1 else "started", f"attempt {job['attempts']}")
     heartbeat = asyncio.create_task(_heartbeat(ctx))
+    from app import evidence as _evidence
+
+    envelopes = _evidence.start_turn()          # every tool the handler calls records beside its card
     try:
         result = await handler(job, ctx)
+        recorded = [e.public() for e in _evidence.collected()]
+        if recorded:
+            await ctx.checkpoint(evidence=[*(ctx.job.get("evidence") or []), *recorded])
         return await _settle(ctx, "succeeded", result=result)
     except _Paused:
         return await get(job["id"])
@@ -484,6 +490,7 @@ async def run(row: dict) -> dict | None:
                                                                           "error": f"{type(exc).__name__}: {exc}"[:2000]})
         return await get(job["id"])
     finally:
+        _evidence.end_turn(envelopes)
         heartbeat.cancel()
         _active.pop(job["id"], None)
 

@@ -87,6 +87,7 @@ class DimensionEvidence:
     detail: str        # the tool output, or a short reason when unavailable
     source: str | None = None   # the tool/provider that produced it
     as_of: str | None = None
+    envelope: dict | None = None  # the tool's evidence envelope (app/evidence.py), when it recorded one
 
 
 @dataclass
@@ -105,8 +106,31 @@ class TokenEvidenceBundle:
 
 
 def coverage_rows(bundle: TokenEvidenceBundle) -> list[dict]:
-    """The coverage envelope as plain rows for a receipt."""
-    return [{"name": d.name, "status": d.status, "source": d.source} for d in bundle.dimensions]
+    """The coverage envelope as plain rows for a receipt: a dimension's
+    availability, and when its tool recorded an envelope, that tool's own
+    coverage and failed operations (a bundle check with 18 of 25 funding
+    lookups failed is "available" and "partial" at once)."""
+    rows = []
+    for d in bundle.dimensions:
+        row = {"name": d.name, "status": d.status, "source": d.source}
+        if d.envelope:
+            row["evidence"] = d.envelope.get("status")
+            row["coverage"] = d.envelope.get("coverage")
+            if d.envelope.get("errors"):
+                row["errors"] = d.envelope["errors"]
+        rows.append(row)
+    return rows
+
+
+def attach_envelopes(dims: list[DimensionEvidence]) -> None:
+    """Pair each dimension with the envelope its tool recorded this turn."""
+    from app import evidence as _evidence
+
+    by_tool = {e.tool: e for e in _evidence.collected()}
+    for d in dims:
+        env = by_tool.get(d.source or "")
+        if env is not None:
+            d.envelope = env.public()
 
 
 def evidence_skips(bundle: TokenEvidenceBundle) -> list[SubjectSkip]:
@@ -305,6 +329,7 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
         except Exception as exc:  # noqa: BLE001 - a dead source degrades one dimension
             analysis, reason = None, f"Bundle check did not complete ({type(exc).__name__})."
         if analysis is not None:
+            mobula_meme.bundle_evidence(analysis)
             dims.append(DimensionEvidence("bundle", "Bundle check (launch coordination)", "available",
                                           mobula_meme._render_bundle(analysis), "mobula_token_bundle", _now()))
             signals.append(mobula_meme.bundle_signal(subject, _now_iso(), analysis))
@@ -379,6 +404,7 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
     ):
         dims.append(DimensionEvidence(name, label, "unavailable", reason))
 
+    attach_envelopes(dims)
     return TokenEvidenceBundle(address=address, chain=chain, dimensions=dims, signals=signals)
 
 

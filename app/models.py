@@ -297,7 +297,7 @@ class RiskAssessment(BaseModel):
 
 
 class ValidationCheck(BaseModel):
-    name: Literal["provenance", "freshness", "grounding", "consistency"]
+    name: Literal["provenance", "freshness", "grounding", "consistency", "coverage"]
     status: Literal["ok", "warn", "not_applicable"]
     detail: str
 
@@ -339,6 +339,9 @@ class AgentResponse(BaseModel):
     context_capsules: list[ContextCapsule] = Field(default_factory=list)
     intent_lock: IntentLock | None = None
     evidence: EvidenceSummary | None = None
+    # The evidence envelopes the turn's tools recorded (app/evidence.py):
+    # status, sources, coverage and errors per tool, never the bulk data.
+    envelopes: list[dict] = Field(default_factory=list)
     trade_readiness: TradeReadiness | None = None
     gas_advisory: GasAdvisory | None = None
     risk_assessment: RiskAssessment | None = None

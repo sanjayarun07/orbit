@@ -108,7 +108,9 @@ def test_an_unlisted_or_implausible_price_never_enters_the_total(monkeypatch):
 def test_the_portfolio_card_prices_holdings_and_hides_spam_and_dust(monkeypatch):
     monkeypatch.setattr(mobula_wallet, "_get", lambda url, params: PORTFOLIO)
     card = mobula_wallet.portfolio(f"{WALLET} wallet portfolio")
-    assert card.startswith("# Wallet portfolio — 0x6DbA…1460") and "**Total**: $12.35K" in card
+    # The total is the sum of what is shown ($10,172 + $2,062.40 + $0.10 of dust), not Mobula's
+    # own $12,345.60, which counts holdings it did not itemise (2026-09-22).
+    assert card.startswith("# Wallet portfolio — 0x6DbA…1460") and "**Total**: $12.23K" in card
     assert "| HETF | Base | 2,034,400 | $0.005 | $10.17K | +3.5% | 82.4% |" in card
     assert "www.base1.cfd" not in card and "| DUST |" not in card
     assert "1 holding(s) under $1" in card and "1 spam/airdrop token(s)" in card

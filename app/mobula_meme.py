@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from app import evidence
 from app.mobula_security import _CHAIN_NAMES, _subject
 from app.provider_router import NoData, ProviderRouter, ProviderTool
 from app.settings import settings
@@ -131,12 +132,19 @@ def token_holders(request: str) -> str:
     if subject is None:
         raise ValueError("No token address found in the request")
     address, chain = subject
+    subject_env = {"kind": "token", "id": address, "chain": chain}
     rows = _get("/token/holder-positions", {"address": address, "blockchain": chain, "limit": 50})
     rows = [r for r in (rows or []) if isinstance(r, dict)]
     if not rows:
+        evidence.unavailable("mobula_token_holders", subject_env, "no holder positions indexed", [evidence.source("mobula", "token/holder-positions")])
         raise NoData("Mobula has no holder positions for this token")
     rows.sort(key=lambda r: _num(r.get("percentageOfTotalSupply")), reverse=True)
     top10 = sum(_num(r.get("percentageOfTotalSupply")) for r in rows[:10])
+    evidence.complete("mobula_token_holders", subject_env,
+                      {"positions_indexed": len(rows), "top10_pct_of_supply": round(top10, 2),
+                       "top10_definition": "sum of the ten largest indexed positions; pools, exchanges and burn addresses included",
+                       "largest": [{"wallet": r.get("walletAddress"), "pct": round(_num(r.get("percentageOfTotalSupply")), 4), "labels": _labels_of(r)[:3]} for r in rows[:10]]},
+                      [evidence.source("mobula", "token/holder-positions")])
     flagged: dict[str, int] = {}
     for row in rows:
         for label in _labels_of(row):
@@ -538,7 +546,29 @@ def token_bundle_check(request: str) -> str:
     if subject is None:
         raise ValueError("No token address found in the request")
     address, chain = subject
-    return _render_bundle(_bundle_analysis(address, chain))
+    subject_env = {"kind": "token", "id": address, "chain": chain}
+    try:
+        analysis = _bundle_analysis(address, chain)
+    except NoData as exc:
+        evidence.unavailable("mobula_token_bundle", subject_env, str(exc), [evidence.source("mobula", "token/first-buyers")])
+        raise
+    bundle_evidence(analysis)
+    return _render_bundle(analysis)
+
+
+def bundle_evidence(a: BundleAnalysis) -> "evidence.Evidence":
+    """The bundle read as an envelope: 25 attempted, 7 successful, 18
+    unavailable is the record -- never 25 traced."""
+    subject_env = {"kind": "token", "id": a.address, "chain": a.chain}
+    data = {"level": a.level, "buyers_sampled": a.buyers, "funding_lookups": a.traced, "funding_lookups_failed": a.lookups_failed,
+            "same_second_grouped": a.grouped, "personal_funded": a.personal_funded, "strongest_group": a.strongest_group, "overlap": a.overlap}
+    sources = [evidence.source("mobula", "token/first-buyers"), evidence.source("mobula", "wallet/funding")]
+    attempted = 1 + a.traced
+    if a.lookups_failed:
+        return evidence.partial("mobula_token_bundle", subject_env, data, sources, attempted=attempted, successful=attempted - a.lookups_failed,
+                                missing=[f"funding source of {a.lookups_failed} of {a.traced} early buyers"],
+                                errors=[{"operation": "wallet/funding", "reason": "lookup failed (rate limit or outage)", "count": a.lookups_failed}])
+    return evidence.complete("mobula_token_bundle", subject_env, data, sources, attempted=attempted)
 
 
 # Conviction a bundle read carries on its own. Bundling is a bearish fact

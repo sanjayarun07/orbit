@@ -20,6 +20,7 @@ from app.experience import (advance_session_context, build_context_capsules, bui
 from app.graph import run_agent
 from app.identity import Identity, current_identity, service_identity
 from app import charts, decision_records, followups, jobs, streaming, turn_log, user_memory
+from app import evidence as evidence_envelopes
 
 # Fire-and-forget work that must still finish: kept here so a shutdown can
 # wait for it instead of dropping it (asyncio keeps only weak references to
@@ -330,6 +331,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             from app.graph import AgentRun
             # No trajectory: a task control is a plain (1-credit) turn, not a tool turn.
             run = AgentRun(answer=task_reply, trajectory=None, trade_plan=None, intent="general", capabilities=[])
+            turn_evidence = []
         else:
             # The user's TradingView token is bound to this turn (None when
             # they have no connection), so the TradingView tools can match
@@ -342,6 +344,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             # A job started in this turn: owned by this user, billed to this
             # account, its answer delivered to this conversation.
             jobs_bound = jobs.bind_turn(signed_in_user, identity.account_id if signed_in_user else None, session_id)
+            evidence_bound = evidence_envelopes.start_turn()
             try:
                 run = await asyncio.wait_for(
                     run_agent(
@@ -353,7 +356,9 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
                     ),
                     timeout=settings.chat_execution_timeout_seconds,
                 )
+                turn_evidence = evidence_envelopes.collected()
             finally:
+                evidence_envelopes.end_turn(evidence_bound)
                 tradingview.current_token.reset(tv_bound)
                 decision_records.current_user.reset(receipts_bound)
                 jobs.current_owner.reset(jobs_bound)
@@ -375,7 +380,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         # Step-7 answer validation: provenance / freshness / grounding of the
         # surfaced answer against the tool evidence. Advisory only -- attached for
         # the client and monitoring, never blocks or rewrites the answer.
-        validation = validate_answer(body.message, answer, trajectory, run.intent)
+        validation = validate_answer(body.message, answer, trajectory, run.intent, evidence=turn_evidence)
         if validation is not None and validation.status == "warn":
             increment("answer_validation_warn")
         # Close the loop: credit or debit every tool that ran, so the router's
@@ -471,6 +476,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             except Exception:
                 logger.warning("chat session ownership update failed", exc_info=True)
         return AgentResponse(
+            envelopes=[e.public() for e in turn_evidence],
             answer=answer,
             trade_plan=plan,
             trajectory=client_trajectory,
