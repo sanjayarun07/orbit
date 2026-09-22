@@ -132,6 +132,11 @@ def _missing_phrase(missing: str) -> str:
     return text or "what you asked for"
 
 
+_TICKER = re.compile(r"\$([A-Za-z][A-Za-z0-9]{1,9})\b|\b([A-Z]{2,10})\b")
+_FORECAST = re.compile(r"\b(?:will\s+\S+\s+(?:go|be)\s+up|going\s+(?:up|down)|what\s+will\s+happen|next\s+\d+\s*(?:-\s*\d+\s*)?(?:hours?|hrs?|days?|weeks?)|"
+                       r"predict(?:ion)?|forecast|price\s+target|where\s+(?:is|will)\s+\S+\s+(?:be|go))\b", re.I)
+
+
 def _could_not_find(question: str, verdict: dict) -> str:
     """The honest close when neither the tools nor the web answered: what is
     missing, what we did find, and the one next step that fits the question.
@@ -146,10 +151,19 @@ def _could_not_find(question: str, verdict: dict) -> str:
     restates = bool(s_words) and len(s_words - q_words) / len(s_words) < 0.34
     found = f" What I could pull is about {subject}." if subject and not restates else ""
     address = _ADDRESS.search(question or "")
+    ticker = _TICKER.search(question or "")
     if address:
         short = f"{address.group(1)[:6]}…{address.group(1)[-4:]}"
         step = (f" My sources for `{short}` return its current state -- balances, open positions, recent transfers -- not its history, "
                 "so ask about what it holds now, or paste a transaction hash and I'll read that.")
+    elif _FORECAST.search(question or ""):
+        # "What will BTC do in the next 5 hours" names the asset; asking the
+        # user to name it is wrong (live, 2026-09-21). Say what exists instead.
+        step = (" Nobody's data says where a price goes in the next few hours, and I won't guess. What I can pull is the tape right now: "
+                "price and 24h move, funding and open interest, liquidations, key levels, and what X is saying -- ask for those.")
+    elif ticker:
+        step = (f" For {ticker.group(1) or ticker.group(2)} I can pull price and market structure, holders, security, unlocks, news, "
+                "or X sentiment -- ask for one of those and I'll look again.")
     else:
         step = (" Name the token, protocol or company precisely (a $ticker, the full name, or a contract address) and say what you "
                 "want to know, and I'll look again.")

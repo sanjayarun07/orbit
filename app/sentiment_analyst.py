@@ -42,6 +42,7 @@ MOOD_LEVELS = ["Extreme fear / capitulation", "Cautious / bearish", "Mixed / neu
 CATALYST_LEVELS = ["No news, retail noise", "Rumour or minor update", "Moderate milestone or listing", "Major market-moving event"]
 MIN_SAMPLE = 10
 ORGANIC_DAMPING_BELOW = 0.4    # a sample that reads as a push carries half the weight
+PROMO_DAMPING_ABOVE = 50.0     # a sample that is mostly promotion carries half the weight too
 FULL_WEIGHT_SAMPLE = 50        # conviction grows with the sample; 19 tweets do not earn 1.0 (live, 2026-09-21)
 
 _cache: dict[str, tuple[float, dict]] = {}
@@ -69,9 +70,9 @@ def questions(symbol: str) -> dict:
         "mood": {"type": "score", "instructions": "Rate the prevailing emotional temperature of the sample.", "criteria": list(MOOD_LEVELS)},
         "catalyst": {"type": "score", "instructions": "Rate the significance of any concrete event, news or announcement the tweets describe (not price action itself).",
                      "criteria": list(CATALYST_LEVELS)},
-        "organic": {"type": "noul", "instructions": ("Does the sample read as organic discussion by distinct people, rather than a coordinated push "
-                                                     "(near-identical wording, the same few accounts, engagement farming)? Use `social_stats.author_diversity_pct` "
-                                                     "and `top_author_share_pct` as evidence."),
+        "organic": {"type": "noul", "instructions": ("Does the sample read as organic discussion by distinct people, rather than a coordinated or promotional push "
+                                                     "(near-identical wording, the same few accounts, engagement farming, whitelist / presale / giveaway / referral "
+                                                     "posts)? Use `social_stats.author_diversity_pct`, `top_author_share_pct` and `promo_share_pct` as evidence."),
                     "criteria": {"true": "Organic, diverse discussion", "false": "Coordinated, repetitive or bot-driven"}},
     }
 
@@ -124,13 +125,16 @@ def to_signal(subject: Subject, as_of: str, social_stats: dict, judgement: dict 
     if not probs:
         lean = {"bullish": 1.0, "bearish": -1.0, "neutral": 0.0}[judgement["stance"]] * float(judgement.get("stance_confidence") or 0.5)
     organic = float(judgement.get("organic_probability", 0.5))
-    damped = organic < ORGANIC_DAMPING_BELOW
+    promo = float(social_stats.get("promo_share_pct", 0.0))
+    damped = organic < ORGANIC_DAMPING_BELOW or promo > PROMO_DAMPING_ABOVE
     weight = min(1.0, float(social_stats.get("sample_size", 0)) / FULL_WEIGHT_SAMPLE)
     value = max(-1.0, min(1.0, lean * weight * (0.5 if damped else 1.0)))
     return Signal(
         model_name=MODEL_NAME, subject=subject, as_of=as_of, value=value,
         reasoning=(f"X leans {judgement['stance']} on {social_stats.get('sample_size', 0)} tweets ({social_stats.get('author_diversity_pct', 0)}% distinct authors); "
-                   f"mood {judgement['mood'].lower()}; catalyst: {judgement['catalyst'].lower()}" + ("; sample reads as a coordinated push, weight halved" if damped else "")),
+                   f"mood {judgement['mood'].lower()}; catalyst: {judgement['catalyst'].lower()}"
+                   + (f"; {promo:.0f}% of the sample is promotion (whitelists, presales, giveaways), weight halved" if promo > PROMO_DAMPING_ABOVE
+                      else "; sample reads as a coordinated push, weight halved" if damped else "")),
         components={"p_bullish": float(probs.get("bullish", 0.0)), "p_bearish": float(probs.get("bearish", 0.0)), "p_neutral": float(probs.get("neutral", 0.0)),
                     "mood_score": float(judgement["mood_score"]), "catalyst_score": float(judgement["catalyst_score"]), "organic_probability": organic,
                     "sample_size": float(social_stats.get("sample_size", 0)), "author_diversity_pct": float(social_stats.get("author_diversity_pct", 0.0)),
@@ -160,6 +164,8 @@ def render_card(symbol: str, fetched: dict, social_stats: dict, judgement: dict 
                   f"**Mood**: {judgement['mood']} · **Catalyst**: {judgement['catalyst']} · **Organic**: {judgement['organic_probability'] * 100:.0f}%", ""]
         if judgement["organic_probability"] < ORGANIC_DAMPING_BELOW:
             lines += ["⚠ The sample reads as a coordinated push rather than organic discussion; weigh it accordingly.", ""]
+        if float(social_stats.get("promo_share_pct", 0.0)) > PROMO_DAMPING_ABOVE:
+            lines += [f"⚠ {social_stats['promo_share_pct']:.0f}% of the sample is promotion (whitelists, presales, giveaways, referrals): a marketing push, not a view of the token.", ""]
     elif note:
         lines += [f"_{note}_", ""]
     lines += [f"**Sample**: {n} tweets" + (f" over {social_stats['span_hours']} h" if social_stats.get("span_hours") is not None else "") +

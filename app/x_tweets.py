@@ -251,6 +251,16 @@ async def fetch(symbol: str, target: int | None = None, *, name: str | None = No
 # ---------------------------------------------------------------------------
 
 AUTHOR_CAP = 3            # tweets one account may contribute to the judged sample
+# Promotion is not sentiment: whitelist drops, presales, giveaways and referral
+# pushes around a ticker read as "bullish" to a judge and mean nothing about the
+# crowd's view of the token (live: $ZEC read 93% bullish from NFT whitelist spam).
+PROMO = re.compile(r"\b(?:whitelist|white\s*list|allowlist|allow\s*list|ghostlist|wl\s+spots?|wl\s+(?:is\s+)?open|airdrop|presale|pre-sale|public\s+(?:sale|auction|mint)|"
+                   r"auction|giveaway|claim\s+(?:your|now)|mint(?:ing)?\s+(?:is\s+)?(?:live|open|now|soon)|free\s+mint|referral|link\s+in\s+bio|dm\s+me|"
+                   r"join\s+(?:our|the)\s+(?:tg|telegram|discord)|launching\s+soon|early\s+access|spots?\s+(?:left|open|available))\b", re.I)
+
+
+def promotional(tweet: dict) -> bool:
+    return bool(PROMO.search(tweet.get("text") or ""))
 
 
 def grounded(tweet: dict, symbol: str, name: str | None = None) -> bool:
@@ -297,7 +307,7 @@ def stats(tweets: list[dict], symbol: str | None = None, name: str | None = None
     if not n:
         return {"sample_size": 0, "unique_authors": 0, "author_diversity_pct": 0.0, "total_likes": 0, "total_retweets": 0, "avg_engagement": 0.0,
                 "verified_share_pct": 0.0, "top_author_share_pct": 0.0, "span_hours": None, "sample": [],
-                "dropped_ungrounded": dropped_ungrounded, "capped_by_author": capped}
+                "dropped_ungrounded": dropped_ungrounded, "capped_by_author": capped, "promo_share_pct": 0.0}
     authors: dict[str, int] = {}
     likes = retweets = 0
     verified = 0
@@ -309,6 +319,7 @@ def stats(tweets: list[dict], symbol: str | None = None, name: str | None = None
         verified += 1 if t.get("verified") else 0
     times = [t["created_at"] for t in tweets if t.get("created_at")]
     span = (max(times) - min(times)).total_seconds() / 3600.0 if len(times) >= 2 else None
+    promo = sum(1 for t in tweets if promotional(t))
     by_engagement = sorted(tweets, key=lambda t: int(t.get("likes") or 0) + 2 * int(t.get("retweets") or 0), reverse=True)
     latest = sorted(tweets, key=lambda t: t.get("created_at") or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
     sample, seen = [], set()
@@ -325,5 +336,5 @@ def stats(tweets: list[dict], symbol: str | None = None, name: str | None = None
         "total_likes": likes, "total_retweets": retweets, "avg_engagement": round((likes + 2 * retweets) / n, 1),
         "verified_share_pct": round(verified / n * 100.0, 1), "top_author_share_pct": round(max(authors.values()) / n * 100.0, 1),
         "span_hours": round(span, 1) if span is not None else None, "sample": sample,
-        "dropped_ungrounded": dropped_ungrounded, "capped_by_author": capped,
+        "dropped_ungrounded": dropped_ungrounded, "capped_by_author": capped, "promo_share_pct": round(promo / n * 100.0, 1),
     }

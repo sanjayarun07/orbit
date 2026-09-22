@@ -1827,3 +1827,26 @@ verified live: the developer network's resolver returned no address for the
 Gamma host and reset the connection when the IP was pinned, which reads as
 a regional block; `polymarket_gamma_url` exists so a deployment can point at
 a reachable host, and `polymarket_enabled` turns it off.
+
+## Second beta review (2026-09-22): a forecast ask, and promotion read as sentiment
+
+Read from the turn log: 14 turns from outside users so far, three of them
+worth a fix.
+
+- **"What will happen for BTC in next 5-10 hours?"** got the gate's close,
+  "I couldn't find price prediction... Name the token precisely". Wrong
+  twice: the asset was named, and a forecast is not something to look for.
+  A forecast ask that names an asset is now rewritten into a tape question
+  (price, 24h change, funding, open interest, liquidations, key levels) and
+  answered under a line that says nobody's data calls the next few hours.
+  The gate's close no longer asks to name a token the question names: for a
+  forecast it lists what the tape offers; for a ticker it lists what the
+  sources carry.
+- **"what is CT saying about ZEC"** read 93% bullish, organic 84%, from a
+  sample that was almost entirely NFT whitelist promotion. The tweet
+  statistics now carry `promo_share_pct` (whitelist, presale, airdrop,
+  giveaway, referral, "mint is live" and the like); the judge's organic
+  question is told to use it; above 50% the vote is halved, the reasoning
+  says why, and the card carries a warning line.
+- **"Is BTC going up in next 5-10 hours?"** answered 402 for an anonymous
+  visitor out of trial credits. By design.

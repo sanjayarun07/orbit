@@ -2,6 +2,8 @@
 import asyncio
 from unittest.mock import AsyncMock
 
+import pytest
+
 from app import handles, jupiter as jupiter_mod, portfolio as portfolio_mod
 from app.nodes import portfolio as portfolio_node_mod, research
 
@@ -71,3 +73,46 @@ def test_sol_is_always_among_the_retried_prices(monkeypatch):
     mints = ["M" * 44 + str(i) for i in range(30)] + [WSOL]              # SOL last, past the retry window
     found = asyncio.run(portfolio_mod._price_mints(mints))
     assert retried[0] == WSOL and found[WSOL]["usdPrice"] == 118.0 and len(retried) == portfolio_mod._FALLBACK_LOOKUPS + 1
+
+
+# ---- second review (2026-09-22): a forecast ask, and promotion read as sentiment ----
+
+from app import answer_gate, sentiment_analyst as sa, x_tweets
+from app.signals import Subject
+
+
+def test_the_gate_never_asks_to_name_a_token_the_question_already_names():
+    verdict = {"missing": "price prediction for the next 5-10 hours", "subject": "Bitcoin price prediction"}
+    text = answer_gate._could_not_find("What will happen for BTC in next 5-10 hours ?", verdict)
+    assert "Name the token" not in text and "won't guess" in text and "funding and open interest" in text
+    plain = answer_gate._could_not_find("BONK treasury address", {"missing": "the treasury address", "subject": ""})
+    assert "For BONK I can pull" in plain and "Name the token" not in plain
+    generic = answer_gate._could_not_find("who is behind it", {"missing": "the team", "subject": ""})
+    assert "Name the token" in generic
+
+
+def test_a_forecast_ask_is_answered_as_the_tape_not_refused(monkeypatch):
+    seen = {}
+
+    async def inner(state, sink):
+        seen["request"] = state["request"]
+        return {"answer": "# BTC market\nprice $85,821 · 24h +5.8% · funding +0.01%", "trajectory": {"tool_name_0": "birdeye_token_overview"}}
+    monkeypatch.setattr(research, "_research_node", inner)
+    monkeypatch.setattr(research, "_web_context_part", lambda state: None)
+    out = asyncio.run(research.research_node({"request": "What will happen for BTC in next 5-10 hours ?", "capabilities": ["web_research"], "chains": [], "session_context": {}}))
+    assert "funding" in seen["request"] and "BTC" in seen["request"] and "next 5-10 hours" not in seen["request"]
+    assert out["answer"].startswith("Nobody's data says where BTC goes in the next 5-10 hours") and "price $85,821" in out["answer"]
+
+
+def test_a_promotional_sample_is_flagged_and_its_vote_halved():
+    promo = [x_tweets.normalize({"id": str(i), "text": f"$ZEC whitelist spots open, claim now #{i}", "author": {"userName": f"a{i}"}, "likeCount": 5}) for i in range(8)]
+    real = [x_tweets.normalize({"id": str(100 + i), "text": "$ZEC holding support nicely", "author": {"userName": f"b{i}"}, "likeCount": 5}) for i in range(4)]
+    s = x_tweets.stats(promo + real, symbol="ZEC")
+    assert s["promo_share_pct"] == pytest.approx(66.7, abs=0.1)
+    subject = Subject(kind="token", id="ZEC", symbol="ZEC")
+    j = {"stance": "bullish", "stance_probabilities": {"bullish": 0.93, "bearish": 0.01, "neutral": 0.06}, "stance_confidence": 0.9,
+         "mood": "Optimistic / bullish", "mood_score": 3.0, "catalyst": "Rumour or minor update", "catalyst_score": 1.0, "organic_probability": 0.84}
+    vote = sa.to_signal(subject, "2026-09-22T00:00:00+00:00", {**s, "sample_size": 50}, j)
+    assert vote.metadata["damped"] and vote.value == pytest.approx(0.92 * 0.5) and "promotion" in vote.reasoning
+    card = sa.render_card("ZEC", {"query": "$ZEC", "new": 12}, s, j)
+    assert "67% of the sample is promotion" in card

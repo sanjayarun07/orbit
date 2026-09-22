@@ -1347,6 +1347,12 @@ def _build_ask(request: str, ticker: str, candidates: list[dict], namesakes: boo
     return _TokenResolution(request, clarification=clarification, pending=pending)
 
 
+# A forecast ask: direction or price over a horizon nobody's data covers.
+_FORECAST_ASK = re.compile(r"\b(?:will\s+\S+\s+(?:go|be|move)\s+(?:up|down|higher|lower)|going\s+(?:up|down)|what\s+will\s+happen|what\s+happens\s+(?:to|with)|"
+                           r"next\s+\d+\s*(?:-\s*\d+\s*)?(?:hours?|hrs?|days?|weeks?)|predict(?:ion)?|forecast|price\s+target|where\s+(?:is|will)\s+\S+\s+(?:be|go|head))\b", re.I)
+_HORIZON = re.compile(r"\b(?:next|coming)\s+\d+\s*(?:-\s*\d+\s*)?(?:hours?|hrs?|days?|weeks?|months?)\b", re.I)
+
+
 _DEEPDIVE_STOP = _NAMED_STOP | {
     "MARKET", "MARKETS", "CRYPTO", "TOKEN", "COIN", "GOOD", "BUY", "INVEST",
     "PRICE", "CHART", "PROJECT", "THIS", "THAT", "SOL",
@@ -1702,6 +1708,24 @@ async def research_node(state: AgentState) -> dict:
     handle = handles.social_handle(request)
     if handle:
         return {"answer": handles.answer_for(handle), "trajectory": None}
+    # "What will happen for BTC in the next 5-10 hours" (live, 2026-09-21):
+    # nobody's data answers a forecast, and the gate then refused with "name
+    # the token". The honest answer is the tape: the asset's price and move,
+    # funding and open interest, key levels and news, under a line that says
+    # no one calls the next few hours. The question becomes a data question.
+    tape_frame = None
+    if _FORECAST_ASK.search(request):
+        named = _named_tickers(request) or _bare_symbols(request)
+        if named:
+            asset = named[-1]
+            horizon = _HORIZON.search(request)
+            when = (f"the {horizon.group(0)}" if horizon and not horizon.group(0).lower().startswith("the ") else horizon.group(0)) if horizon else "the short term"
+            tape_frame = (f"Nobody's data says where {asset} goes in {when}, and I won't guess. Here is the tape right now, "
+                          "which is what a short-term view has to be built on.")
+            request = f"{asset} price, 24h change, funding rate, open interest, liquidations and key support and resistance levels right now"
+            state = {**state, "request": request, "contextual_request": None,
+                     "capabilities": sorted(set(state.get("capabilities") or []) | {"market_data", "derivatives"})}
+            streaming.emit("status", text=f"Reading the tape for {asset}")
     if _PERSONAL_ASK.search(request) and not _mentions_asset(request):
         holdings = _remembered_holdings(state)
         if holdings:
@@ -1759,6 +1783,8 @@ async def research_node(state: AgentState) -> dict:
     # never ships. The link note goes on after, so the check reads the answer
     # the tools produced.
     result = await answer_gate.gate(state["request"], result)
+    if tape_frame and result.get("answer") and not is_clarification(result.get("answer")):
+        result = {**result, "answer": f"{tape_frame}\n\n{result['answer']}"}
     if page and result.get("answer"):
         result = {**result, "answer": f"{page.note()}\n\n{result['answer']}"}
     if sink.get("resolution_note") and result.get("answer") and not is_clarification(result.get("answer")):
