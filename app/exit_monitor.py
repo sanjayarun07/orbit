@@ -106,16 +106,23 @@ async def _pool():
 # the position and its quotes
 # ----------------------------------------------------------------------------
 
+class BalanceUnavailable(RuntimeError):
+    """The chain could not be read: not a zero, not a position (review,
+    2026-09-22: a failed RPC call was reported as "holds none")."""
+
+
 async def position_of(wallet: str, mint: str) -> dict | None:
     """The wallet's real balance of the mint from the chain, both token
-    programs, summed across accounts. None when it holds none."""
+    programs, summed across accounts. None when it holds none; raises
+    BalanceUnavailable when a lookup failed and nothing proved a holding."""
     mint = normalize_mint(mint)
-    total, decimals = 0, None
+    total, decimals, failed = 0, None, []
     for program in (None, TOKEN_2022_PROGRAM):
         try:
             payload = await get_token_accounts(wallet) if program is None else await _token_accounts_2022(wallet)
-        except Exception:
+        except Exception as exc:
             logger.info("exit_monitor: token accounts failed for %s", wallet[:8], exc_info=True)
+            failed.append(f"{'token' if program is None else 'token-2022'} program: {type(exc).__name__}")
             continue
         for account in (payload or {}).get("value") or []:            # rpc() already unwraps the JSON-RPC result
             info = (((account.get("account") or {}).get("data") or {}).get("parsed") or {}).get("info") or {}
@@ -124,9 +131,11 @@ async def position_of(wallet: str, mint: str) -> dict | None:
             amount = info.get("tokenAmount") or {}
             total += int(amount.get("amount") or 0)
             decimals = int(amount.get("decimals") or 0) if decimals is None else decimals
+    if failed and total <= 0:
+        raise BalanceUnavailable("; ".join(failed))
     if total <= 0:
         return None
-    return {"mint": mint, "quantity_raw": total, "decimals": decimals or 0, "quantity": total / (10 ** (decimals or 0))}
+    return {"mint": mint, "quantity_raw": total, "decimals": decimals or 0, "quantity": total / (10 ** (decimals or 0)), "partial_read": bool(failed)}
 
 
 async def _token_accounts_2022(wallet: str) -> dict:
@@ -269,22 +278,33 @@ async def watch(user_id: str, wallet: str, mint: str, symbol: str | None, positi
     schedule the monitor job."""
     if len([p for p in await list_for(user_id) if p["status"] == "active"]) >= settings.exit_positions_per_user:
         raise ValueError(f"You already watch {settings.exit_positions_per_user} positions; stop one first.")
-    row = {"id": uuid.uuid4().hex, "user_id": user_id, "wallet": wallet, "mint": position["mint"], "chain": "solana", "symbol": symbol,
-           "decimals": position["decimals"], "quantity_raw": position["quantity_raw"], "entry": {"at": _now().isoformat(), "rows": entry_rows},
-           "last_alert": None, "job_id": None, "status": "active", "created_at": _now().isoformat(), "updated_at": _now().isoformat()}
-    pool = await _pool()
-    if pool is not None:
-        await pool.execute(
-            "INSERT INTO exit_positions (id, user_id, wallet, mint, chain, symbol, decimals, quantity_raw, entry) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)",
-            uuid.UUID(row["id"]), user_id, wallet, row["mint"], "solana", symbol, row["decimals"], row["quantity_raw"], json.dumps(row["entry"]))
-    else:
-        with _lock:
-            _positions[row["id"]] = row
-    await record(row["id"], position["quantity_raw"], entry_rows)
-    job = await jobs.create(KIND, {"position_id": row["id"]}, user_id=user_id,
+    position_id = uuid.uuid4().hex
+    # The entry is a baseline only when the full-exit quote succeeded;
+    # otherwise the monitor is pending until its first valid quote (review,
+    # 2026-09-22: a failed entry quote disabled the alert for good).
+    baseline = full_exit(entry_rows) is not None
+    entry = {"at": _now().isoformat(), "rows": entry_rows, "baseline": baseline, "quantity_raw": position["quantity_raw"]}
+    # The job first: a position whose job could not be created is not
+    # created either (review, 2026-09-22: a registration that failed halfway
+    # said "already watching" and never ran).
+    job = await jobs.create(KIND, {"position_id": position_id}, user_id=user_id,
                             next_run_at=_now() + timedelta(minutes=settings.exit_monitor_interval_minutes))
-    await _update(row["id"], job_id=job["id"])
-    row["job_id"] = job["id"]
+    row = {"id": position_id, "user_id": user_id, "wallet": wallet, "mint": position["mint"], "chain": "solana", "symbol": symbol,
+           "decimals": position["decimals"], "quantity_raw": position["quantity_raw"], "entry": entry,
+           "last_alert": None, "job_id": job["id"], "status": "active", "created_at": _now().isoformat(), "updated_at": _now().isoformat()}
+    try:
+        pool = await _pool()
+        if pool is not None:
+            await pool.execute(
+                "INSERT INTO exit_positions (id, user_id, wallet, mint, chain, symbol, decimals, quantity_raw, entry, job_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)",
+                uuid.UUID(row["id"]), user_id, wallet, row["mint"], "solana", symbol, row["decimals"], row["quantity_raw"], json.dumps(row["entry"]), job["id"])
+        else:
+            with _lock:
+                _positions[row["id"]] = row
+        await record(row["id"], position["quantity_raw"], entry_rows)
+    except Exception:
+        await jobs.cancel(job["id"], user_id)
+        raise
     return row
 
 
@@ -380,13 +400,21 @@ async def monitor(job: dict, ctx: "jobs.JobContext") -> dict:
     if row is None or row["status"] != "active":
         return {"answer": "position no longer watched"}          # no next_run_at: the job settles
     await ctx.plan(["Balance", "Quotes", "Compare"])
-    await ctx.step("0")
-    current = await position_of(row["wallet"], row["mint"])
-    await ctx.finish_step("0")
     next_at = (_now() + timedelta(minutes=settings.exit_monitor_interval_minutes)).isoformat()
+    await ctx.step("0")
+    try:
+        current = await position_of(row["wallet"], row["mint"])
+    except BalanceUnavailable as exc:
+        # Not a zero: the last known quantity stands, the gap is recorded.
+        await ctx.event("error", "Balance unavailable", str(exc))
+        await record(position_id, row["quantity_raw"], [{"fraction": 1.0, "amount_raw": row["quantity_raw"], "ok": False, "error": f"balance unavailable: {exc}"}])
+        await ctx.finish_step("0")
+        return {"answer": "balance unavailable; last known quantity kept", "next_run_at": next_at}
+    await ctx.finish_step("0")
     if current is None:
         await ctx.step("1")
         await _update(position_id, quantity_raw=0)
+        await record(position_id, 0, [])
         await ctx.finish_step("1")
         return {"answer": "the wallet no longer holds the token", "next_run_at": next_at}
     await ctx.step("1")
@@ -395,34 +423,79 @@ async def monitor(job: dict, ctx: "jobs.JobContext") -> dict:
     await _update(position_id, quantity_raw=current["quantity_raw"], decimals=current["decimals"])
     await ctx.finish_step("1")
     await ctx.step("2")
+    row = await _rebaseline_if_needed(row, current, rows)
     alert = await _maybe_alert(row, rows)
     await ctx.finish_step("2")
     return {"answer": "recorded", "quotes": rows, "alerted": bool(alert), "next_run_at": next_at}
+
+
+QUANTITY_CHANGE_PCT = 1.0
+
+
+async def _rebaseline_if_needed(row: dict, current: dict, rows: list[dict]) -> dict:
+    """A baseline compares like with like. No baseline yet (the entry quote
+    failed): the first valid full-exit quote becomes it. The position size
+    changed by more than QUANTITY_CHANGE_PCT since the baseline: the quote
+    for the new size becomes the baseline and no alert fires for the size
+    change (review, 2026-09-22: halving the position read as a 50% fall)."""
+    entry = row.get("entry") or {}
+    full = full_exit(rows)
+    if full is None:
+        return row
+    base_qty = int(entry.get("quantity_raw") or row.get("quantity_raw") or 0)
+    changed = base_qty and abs(current["quantity_raw"] - base_qty) / base_qty * 100 > QUANTITY_CHANGE_PCT
+    if entry.get("baseline") and not changed:
+        return row
+    new_entry = {"at": _now().isoformat(), "rows": rows, "baseline": True, "quantity_raw": current["quantity_raw"],
+                 "reason": "first valid quote" if not entry.get("baseline") else f"position changed from {base_qty} to {current['quantity_raw']}"}
+    await _update(row["id"], entry=new_entry, last_alert=None)
+    return {**row, "entry": new_entry, "last_alert": None}
 
 
 async def _maybe_alert(row: dict, rows: list[dict]) -> dict | None:
     """The deterioration alert: the full-exit quote fell by more than the
     threshold against the entry quote or the last alert's quote, no more
     than once per cooldown. Both quotes travel with the alert."""
-    now_full = full_exit(rows)
-    if now_full is None:
-        return None
-    baseline = (row.get("last_alert") or {}).get("quote") or full_exit((row.get("entry") or {}).get("rows") or [])
-    drop = deterioration_pct(baseline, now_full)
-    if drop is None or drop < settings.exit_alert_drop_pct:
+    entry = row.get("entry") or {}
+    if not entry.get("baseline"):
+        return None                                                    # pending: nothing valid to compare against yet
+    baseline = (row.get("last_alert") or {}).get("quote") or full_exit(entry.get("rows") or [])
+    if baseline is None:
         return None
     last_at = (row.get("last_alert") or {}).get("at")
     if last_at and (_now() - datetime.fromisoformat(last_at)).total_seconds() < settings.exit_alert_cooldown_hours * 3600:
         return None
-    symbol = row.get("symbol") or now_full.get("symbol") or row["mint"][:6]
-    baseline_at = (row.get("last_alert") or {}).get("at") or (row.get("entry") or {}).get("at") or ""
-    body = (f"A full exit of your {symbol} position is now quoted at {_usd(now_full['quoted_usdc'])}, down {drop:.1f}% from {_usd(baseline['quoted_usdc'])} "
-            f"({baseline_at[:16].replace('T', ' ')} UTC). Price impact {now_full['price_impact_pct']:.2f}% now vs {baseline.get('price_impact_pct', 0):.2f}% then; "
-            f"route {' → '.join(x for x in now_full.get('route') or [] if x) or 'unknown'}. Marked value {_usd(now_full.get('marked_value_usd'))}. "
-            "This compares two Jupiter quotes for your exact size; it is not a price alert and not a sell instruction.")
-    alert = {"at": _now().isoformat(), "quote": now_full, "baseline": baseline, "drop_pct": round(drop, 2)}
+    symbol = row.get("symbol") or baseline.get("symbol") or row["mint"][:6]
+    baseline_at = last_at or entry.get("at") or ""
+    now_full = full_exit(rows)
+    full_row = next((r for r in rows if r.get("fraction") == 1.0), None)
+    if now_full is None:
+        # The route is gone: a full exit that was quoted cannot be quoted now.
+        # That is the exit-risk alert in its plainest form.
+        reason = (full_row or {}).get("error") or "no quote"
+        if reason.startswith("balance unavailable") or "rate-limited" in reason or "outage" in reason:
+            return None                                                # a provider gap, not a market fact
+        title = f"Exit for {symbol}: no route"
+        body = (f"A full exit of your {symbol} position was quoted at {_usd(baseline['quoted_usdc'])} ({baseline_at[:16].replace('T', ' ')} UTC) and "
+                f"cannot be quoted now: {reason}. Smaller sizes: " +
+                (", ".join(f"{int(r['fraction'] * 100)}% {_usd(r['quoted_usdc'])}" for r in rows if r.get('ok')) or "none quoted") +
+                ". This compares Jupiter quotes for your exact size; it is not a sell instruction.")
+        alert = {"at": _now().isoformat(), "quote": None, "baseline": baseline, "drop_pct": None, "kind": "no_route", "reason": reason}
+    else:
+        drop = deterioration_pct(baseline, now_full)
+        if drop is None or drop < settings.exit_alert_drop_pct:
+            return None
+        title = f"Exit for {symbol} deteriorated {drop:.0f}%"
+        body = (f"A full exit of your {symbol} position is now quoted at {_usd(now_full['quoted_usdc'])}, down {drop:.1f}% from {_usd(baseline['quoted_usdc'])} "
+                f"({baseline_at[:16].replace('T', ' ')} UTC). Price impact {now_full['price_impact_pct']:.2f}% now vs {baseline.get('price_impact_pct', 0):.2f}% then; "
+                f"route {' → '.join(x for x in now_full.get('route') or [] if x) or 'unknown'}. Marked value {_usd(now_full.get('marked_value_usd'))}. "
+                "This compares two Jupiter quotes for your exact size; it is not a price alert and not a sell instruction.")
+        alert = {"at": _now().isoformat(), "quote": now_full, "baseline": baseline, "drop_pct": round(drop, 2), "kind": "deterioration"}
+    # One occurrence per baseline: a retry after a failed checkpoint notifies
+    # with the same key and the inbox keeps one (review, 2026-09-22).
+    occurrence = f"{row['id']}:{baseline.get('quoted_at') or baseline_at}:{alert['kind']}"
     if row.get("user_id"):
-        await tasks.notify(row["user_id"], f"Exit for {symbol} deteriorated {drop:.0f}%", body, kind="exit_alert", task_id=row["id"], occurrence=alert["at"])
+        await tasks.notify(row["user_id"], title, body, kind="exit_alert", task_id=row["id"], occurrence=occurrence)
     await _update(row["id"], last_alert=alert)
     return alert
 

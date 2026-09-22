@@ -42,7 +42,7 @@ def chain(monkeypatch):
 
 def test_the_position_is_the_wallets_real_balance(chain):
     pos = asyncio.run(exit_monitor.position_of(WALLET, MINT))
-    assert pos == {"mint": MINT, "quantity_raw": 1_000_000_00000, "decimals": 5, "quantity": 1_000_000.0}
+    assert pos == {"mint": MINT, "quantity_raw": 1_000_000_00000, "decimals": 5, "quantity": 1_000_000.0, "partial_read": False}
 
 
 def test_quotes_keep_marked_value_quoted_proceeds_and_minimum_apart(chain):

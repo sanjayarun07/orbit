@@ -63,10 +63,12 @@ CREATE TABLE IF NOT EXISTS jobs (
     error TEXT,
     attached BOOLEAN NOT NULL DEFAULT TRUE,
     delivered BOOLEAN NOT NULL DEFAULT FALSE,
+    delivering_until TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     settled_at TIMESTAMPTZ
 );
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS delivering_until TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS jobs_user_idx ON jobs (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS jobs_due_idx ON jobs (status, next_run_at, lease_until);
 CREATE TABLE IF NOT EXISTS job_events (
@@ -86,7 +88,7 @@ MAX_PLAN_STEPS = 12
 MAX_ACTIVE = 3
 TICK_SECONDS = 1.0
 _JSON = ("spec", "plan", "state", "evidence", "operations", "signals", "result")
-_TS = ("lease_until", "next_run_at", "created_at", "updated_at", "settled_at")
+_TS = ("lease_until", "next_run_at", "created_at", "updated_at", "settled_at", "delivering_until")
 
 _ready = False
 _memory: dict[str, dict] = {}
@@ -184,7 +186,7 @@ def _new_row(kind: str, spec: dict, *, user_id: str | None, account_id: str | No
         "id": uuid.uuid4().hex, "user_id": user_id, "account_id": account_id, "session_id": session_id, "kind": kind,
         "status": "scheduled" if next_run_at else "queued", "spec": dict(spec or {}), "plan": [], "state": {}, "evidence": [],
         "operations": {}, "signals": [], "attempts": 0, "lease_id": None, "lease_until": None, "next_run_at": _iso(next_run_at),
-        "question": None, "action_id": None, "result": None, "receipt_id": None, "error": None, "attached": True, "delivered": False,
+        "question": None, "action_id": None, "result": None, "receipt_id": None, "error": None, "attached": True, "delivered": False, "delivering_until": None,
         "created_at": now.isoformat(), "updated_at": now.isoformat(), "settled_at": None,
     }
 
@@ -207,6 +209,7 @@ async def create(kind: str, spec: dict, *, user_id: str | None = None, account_i
     else:
         with _lock:
             _memory[row["id"]] = row
+            row = json.loads(json.dumps(row))          # a snapshot, never the store's own object
     await _event(row["id"], "created", f"{kind} queued")
     return row
 
@@ -287,6 +290,7 @@ async def cas(job_id: str, expected: dict, patch: dict, merge: dict | None = Non
 
 
 def _memory_cas(job_id: str, expected: dict, patch: dict, merge: dict, append: dict) -> dict | None:
+    expected = {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in expected.items()}   # rows keep ISO strings
     with _lock:
         row = _memory.get(job_id)
         if row is None or any(row.get(k) != v for k, v in expected.items()):
@@ -603,10 +607,15 @@ async def deliver(job: dict) -> None:
         return
     from app import credits, sessions
 
-    # Claim the delivery first (CAS on delivered = false), so two replicas or
-    # a maintenance pass racing a settle never both append; on any failure the
-    # claim is released and the next pass retries (review, 2026-09-22).
-    claimed = await cas(job["id"], {"delivered": False, "status": job["status"]}, {"delivered": True})
+    # Claim the delivery with an EXPIRING claim (delivering_until), so two
+    # deliverers never both append, and a crash after the claim is not a lost
+    # answer: the claim lapses and the next pass retries. `delivered` is set
+    # only after the write succeeded (review, 2026-09-22).
+    until = job.get("delivering_until")
+    if until and datetime.fromisoformat(until) > _now():
+        return
+    claimed = await cas(job["id"], {"delivered": False, "status": job["status"], "delivering_until": _parse_ts(until)},
+                        {"delivering_until": _now() + timedelta(seconds=DELIVERY_CLAIM_SECONDS)})
     if claimed is None:
         return
     answer = ((job.get("result") or {}).get("answer") if isinstance(job.get("result"), dict) else None) or (
@@ -622,7 +631,16 @@ async def deliver(job: dict) -> None:
                 await credits.charge_once(job["account_id"], cost, f"job:{job['kind']}", "job", job["id"], {"kind": job["kind"]})
     except Exception:
         logger.warning("job %s: delivery failed; will retry", job["id"], exc_info=True)
-        await cas(job["id"], {"delivered": True}, {"delivered": False})
+        await cas(job["id"], {"delivered": False}, {"delivering_until": None})
+        return
+    await cas(job["id"], {"delivered": False}, {"delivered": True, "delivering_until": None})
+
+
+DELIVERY_CLAIM_SECONDS = 120.0
+
+
+def _parse_ts(value):
+    return datetime.fromisoformat(value) if isinstance(value, str) else value
 
 
 def _attachment_expired(job: dict) -> bool:
@@ -669,13 +687,13 @@ async def attach(job_id: str, timeout: float | None = None, on_event: Callable[[
             if row and row["status"] in ("queued", "scheduled"):
                 await run(row)
             await report()
-            return await get(job_id) or {}
+            return await _acknowledged(job_id)
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             await report()
             row = await get(job_id)
             if row is None or row["status"] in TERMINAL or row["status"] in PAUSED:
-                return row or {}
+                return await _acknowledged(job_id)
             try:
                 await asyncio.wait_for(ev.wait(), timeout=min(1.0, max(0.05, deadline - time.monotonic())))
             except asyncio.TimeoutError:
@@ -685,14 +703,34 @@ async def attach(job_id: str, timeout: float | None = None, on_event: Callable[[
         return row or {}
     except asyncio.CancelledError:
         # The request was cancelled (client gone, shutdown): the job keeps
-        # running and its answer is delivered to the conversation.
+        # running and its answer is delivered to the conversation. A job
+        # that had already settled was acknowledged for this request, which
+        # never returned it: hand it back to delivery.
         try:
-            await asyncio.shield(_set(job_id, attached=False))
+            await asyncio.shield(_detach_unacknowledged(job_id))
         except Exception:
             logger.warning("job %s: could not detach on cancellation", job_id, exc_info=True)
         raise
     finally:
         _settled.pop(job_id, None)
+
+
+async def _acknowledged(job_id: str) -> dict:
+    """The request is about to return this answer and charge it as its own
+    turn: mark it delivered, so the attachment's expiry never delivers and
+    charges it again (review, 2026-09-22). A job that settled but whose
+    request died before this point keeps delivered = false and is delivered
+    by maintenance once the attachment has expired."""
+    row = await get(job_id)
+    if row and row["status"] in TERMINAL and not row.get("delivered"):
+        row = await cas(job_id, {"delivered": False}, {"delivered": True}) or row
+    return row or {}
+
+
+async def _detach_unacknowledged(job_id: str) -> None:
+    row = await _set(job_id, attached=False)
+    if row and row.get("status") in TERMINAL and row.get("delivered"):
+        await cas(job_id, {"delivered": True}, {"delivered": False})
 
 
 async def answer(job_id: str, user_id: str, text: str) -> dict | None:
@@ -790,7 +828,8 @@ async def maintain() -> None:
     cutoff = _now() - timedelta(seconds=settings.job_attach_seconds + 30)
     if pool is not None:
         rows = [_from_db(r) for r in await pool.fetch(
-            "SELECT * FROM jobs WHERE status IN ('succeeded', 'failed') AND delivered = FALSE AND (attached = FALSE OR created_at < $1) LIMIT 20", cutoff)]
+            "SELECT * FROM jobs WHERE status IN ('succeeded', 'failed') AND delivered = FALSE AND (attached = FALSE OR created_at < $1) "
+            "AND (delivering_until IS NULL OR delivering_until < NOW()) LIMIT 20", cutoff)]
     else:
         with _lock:
             rows = [json.loads(json.dumps(r)) for r in _memory.values()

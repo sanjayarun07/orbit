@@ -2179,3 +2179,32 @@ neither a price alert nor a sell instruction; at most once per
 with the user. Verified live against a real BONK holder on the test
 server; `tests/test_exit_monitor.py` covers the quotes, the card, the
 reschedule, the alert with its cooldown, stopping, and the controls.
+
+## Review of the exit monitor and delivery (2026-09-22): seven findings closed
+
+1. **An attached answer was delivered and charged again** once its
+   attachment expired. `attach` now acknowledges the job (delivered = true)
+   at the moment it returns the answer; a request that died before that
+   point leaves it unacknowledged for maintenance.
+2. **A crash after the delivery claim lost the answer.** The claim is an
+   expiring `delivering_until`; `delivered` is set only after the
+   conversation write and the charge; a lapsed claim is retried.
+3. **A failed RPC read was reported as "holds none".** `position_of` raises
+   `BalanceUnavailable`; the chat says the balance could not be read and
+   that it is not a zero; the monitor keeps the last known quantity and
+   records the gap.
+4. **A size change read as deterioration.** A position that changed by more
+   than 1% since the baseline is re-baselined at the new size, with no alert.
+5. **A failed entry quote disabled alerts for good.** The entry is a
+   baseline only when its full-exit quote succeeded; otherwise the monitor
+   is pending and the first valid quote becomes the baseline.
+6. **A registration could fail halfway.** The job is created first and the
+   position row linked to it; a failure cancels the job and creates nothing.
+7. **A retried alert duplicated the inbox item.** The occurrence key is
+   stable per baseline (`user_inbox` has a unique index on task and
+   occurrence), so a retry after a failed checkpoint notifies once.
+
+Also: **the no-route alert.** A full exit that was quoted and cannot be
+quoted now raises an inbox alert naming the reason and the sizes that
+still quote; a provider gap (rate limit, outage, unreadable balance) is
+not a market fact and raises nothing.

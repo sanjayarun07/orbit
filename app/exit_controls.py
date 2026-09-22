@@ -105,7 +105,10 @@ async def handle(message: str, user: dict, wallet: str | None) -> str | None:
     mint, symbol, question = await resolve_token(_token_of(m))
     if question:
         return question
-    position = await exit_monitor.position_of(wallet, mint)
+    try:
+        position = await exit_monitor.position_of(wallet, mint)
+    except exit_monitor.BalanceUnavailable as exc:
+        return f"I couldn't read `{wallet[:6]}…{wallet[-4:]}`'s balance from the chain just now ({exc}); that is not a zero. Try again in a moment."
     if position is None:
         return f"`{wallet[:6]}…{wallet[-4:]}` holds no {symbol or mint[:6]} on Solana, so there is no position to quote."
     rows = await exit_monitor.quote_exit(mint, position["quantity_raw"])
