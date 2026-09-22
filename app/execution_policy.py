@@ -459,6 +459,10 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             "risk_assessment": run.risk_assessment.model_dump() if run.risk_assessment else None,
             "team_report": run.team_report,
             "validation": validation.model_dump() if validation else None,
+            # The job whose answer this is: the durable record delivery and
+            # billing reconcile from, whatever happens to the acknowledgement
+            # (review, 2026-09-22).
+            "job_id": getattr(run, "job_id", None) if getattr(run, "job_attached", False) else None,
         }
         await commit_turn(
             session_id,
@@ -469,8 +473,14 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         )
         if getattr(run, "job_id", None) and getattr(run, "job_attached", False):
             # The job's answer is now in the conversation and charged as this
-            # turn: acknowledge it so it is never delivered again.
-            await jobs.acknowledge(run.job_id)
+            # turn: acknowledge it so it is never delivered again. The commit
+            # is the durable record; a failed acknowledgement is reconciled
+            # by maintenance from the message's job id, so it never fails
+            # the turn.
+            try:
+                await jobs.acknowledge(run.job_id)
+            except Exception:
+                logger.warning("job %s: acknowledgement failed after commit; maintenance reconciles", run.job_id, exc_info=True)
         if identity.signed_in:
             # Still under the lease, so this refresh of last_used (and the
             # longer retention a signed-in account's history gets) can never

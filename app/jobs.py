@@ -621,11 +621,15 @@ async def deliver(job: dict) -> None:
     answer = ((job.get("result") or {}).get("answer") if isinstance(job.get("result"), dict) else None) or (
         f"The {job['kind'].replace('_', ' ')} could not be completed: {job.get('error') or job['status']}.")
     try:
+        already = False
         if job.get("session_id"):
             already = any(m.get("job_id") == job["id"] for m in await sessions.get_messages(job["session_id"]))
             if not already:
                 await sessions.append_turn(job["session_id"], "assistant", answer, {"job_id": job["id"], "kind": job["kind"]})
-        if job.get("account_id") and job.get("status") == "succeeded":
+        # A message that already carries this job id was committed by the
+        # attached turn, which charged it as its own turn: nothing to append
+        # and nothing to charge, only the acknowledgement it missed.
+        if not already and job.get("account_id") and job.get("status") == "succeeded":
             cost = _cost_of(job["kind"])
             if cost:
                 await credits.charge_once(job["account_id"], cost, f"job:{job['kind']}", "job", job["id"], {"kind": job["kind"]})

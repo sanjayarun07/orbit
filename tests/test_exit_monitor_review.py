@@ -1,6 +1,7 @@
 """The review of 2026-09-22 on the exit monitor and delivery: seven findings
 and the no-route alert, each pinned."""
 import asyncio
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -310,3 +311,82 @@ def test_a_timeout_is_unavailable_data_not_a_missing_route(monkeypatch, chain):
     assert exit_monitor._route_error(RuntimeError("Jupiter: COULD_NOT_FIND_ANY_ROUTE")) == "no route"
     assert exit_monitor._route_error(ConnectionError("reset")) == "quote unavailable (connection)"
     assert exit_monitor._route_error(RuntimeError("HTTP 401 unauthorized")) == "quote unavailable (auth)"
+
+
+# ---- the fourth review (2026-09-22) ----
+
+def test_the_committed_message_carries_the_job_id_and_delivery_reconciles_from_it(monkeypatch):
+    """The commit and the acknowledgement are two writes; the message is the
+    durable record. Delivery finds it and neither appends nor charges."""
+    from fastapi.testclient import TestClient
+    from app import credits, execution_policy, main
+    from app.graph import AgentRun
+    from tests.conftest import sign_in
+
+    async def handler(job, ctx):
+        return {"answer": "the verdict"}
+    jobs.register("t", handler)
+    job = asyncio.run(jobs.create("t", {}, user_id="u1", account_id="acct", session_id="s"))
+    asyncio.run(jobs.attach(job["id"]))
+    client = TestClient(main.app)
+    sign_in(client)
+
+    async def fake_run_agent(*a, **k):
+        return AgentRun(answer="the verdict", trajectory={"tool_name_0": "token_deep_dive"}, trade_plan=None, intent="research",
+                        capabilities=["token_discovery"], job_id=job["id"], job_attached=True)
+    monkeypatch.setattr(execution_policy, "run_agent", fake_run_agent)
+    acknowledged = {"n": 0}
+
+    async def crash_before_ack(job_id):
+        acknowledged["n"] += 1
+        raise RuntimeError("process died after the commit")
+    monkeypatch.setattr(jobs, "acknowledge", crash_before_ack)
+    session_id = f"ack-test-{uuid.uuid4().hex}"                                      # sessions may live in a real Redis: own id, cleared after
+    try:
+        r = client.post("/chat", json={"message": "deep dive on BONK", "session_id": session_id})
+        assert r.status_code == 200, r.text[:200]                                   # a failed acknowledgement never fails the turn
+        assert acknowledged["n"] == 1 and asyncio.run(jobs.get(job["id"]))["delivered"] is False
+        messages = asyncio.run(sessions.get_messages(session_id))
+        committed = [m for m in messages if m.get("role") == "assistant"]
+        assert committed and committed[-1].get("job_id") == job["id"]                # the durable record
+
+        charged = []
+        async def charge_once(*a, **k):
+            charged.append(a)
+        monkeypatch.setattr(credits, "charge_once", charge_once)
+        with jobs._lock:
+            jobs._memory[job["id"]]["session_id"] = session_id
+            jobs._memory[job["id"]]["created_at"] = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        asyncio.run(jobs.maintain())                                                 # the attachment has expired
+        after = [m for m in asyncio.run(sessions.get_messages(session_id)) if m.get("role") == "assistant"]
+        assert len(after) == len(committed) and charged == [] and asyncio.run(jobs.get(job["id"]))["delivered"] is True
+    finally:
+        asyncio.run(sessions.clear_history(session_id))
+
+
+def test_a_failed_job_returned_through_chat_is_acknowledged_too(monkeypatch):
+    from app.nodes import research
+
+    async def fake_attach(job_id, timeout=None, on_event=None):
+        return {"id": job_id, "status": "failed", "error": "Mobula down"}
+    async def fake_create(kind, spec, **kw):
+        return {"id": "job-failed"}
+    monkeypatch.setattr(research.jobs, "attach", fake_attach)
+    monkeypatch.setattr(research.jobs, "create", fake_create)
+
+    async def resolved(*a, **k):
+        from app.nodes.research import _TokenResolution
+        return _TokenResolution(f"top holders of {MINT} on solana", chain="solana")
+    monkeypatch.setattr(research, "_resolve_named_token", resolved)
+    out = asyncio.run(research._run_token_deep_dive({"capabilities": ["token_discovery"], "chains": []}, "deep dive on BONK"))
+    assert out["job_id"] == "job-failed" and out["job_attached"] is True and "could not be completed" in out["answer"]
+
+
+def test_an_http_400_whose_body_says_no_route_is_a_no_route(monkeypatch):
+    import httpx
+    request = httpx.Request("GET", "https://quote.example/quote")
+    response = httpx.Response(400, json={"errorCode": "COULD_NOT_FIND_ANY_ROUTE", "error": "Could not find any route"}, request=request)
+    exc = httpx.HTTPStatusError("Client error '400 Bad Request'", request=request, response=response)
+    assert exit_monitor._route_error(exc) == "no route"
+    other = httpx.HTTPStatusError("Server error '502'", request=request, response=httpx.Response(502, text="bad gateway", request=request))
+    assert exit_monitor._route_error(other) == "quote provider outage"

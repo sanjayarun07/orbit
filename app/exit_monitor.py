@@ -180,6 +180,14 @@ def _route_error(exc: Exception) -> str:
 
     text = str(exc)
     name = type(exc).__name__
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+        # The provider's answer is in the body, not the message: Jupiter says
+        # {"errorCode": "COULD_NOT_FIND_ANY_ROUTE", ...} with HTTP 400.
+        try:
+            body = exc.response.json()
+            text += " " + " ".join(str(body.get(k) or "") for k in ("errorCode", "error", "message", "detail")) if isinstance(body, dict) else ""
+        except Exception:
+            text += " " + (exc.response.text or "")[:300]
     if isinstance(exc, httpx.TimeoutException) or "timeout" in name.lower() or "timed out" in text.lower():
         return "quote unavailable (timeout)"
     if isinstance(exc, (httpx.ConnectError, httpx.NetworkError, ConnectionError)) or "connect" in name.lower():

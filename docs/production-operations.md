@@ -2224,3 +2224,17 @@ not a market fact and raises nothing.
 3. **No-route only when the provider said so.** Timeouts, dropped
    connections, auth errors and unknown failures are "quote unavailable"
    rows, never the no-route alert; only an explicit no-route answer raises it.
+
+## Fourth review of delivery (2026-09-22): three findings closed
+
+1. **The committed message carries the job id.** The turn writes `job_id`
+   into the assistant message's metadata before acknowledging; delivery
+   treats a conversation that already holds a message with the job id as
+   delivered and charged by that turn, so it appends nothing, charges
+   nothing, and only sets the acknowledgement that was missed. A failed
+   acknowledgement after a successful commit never fails the turn.
+2. **A failed job returned through chat is acknowledged the same way**: the
+   terminal-error branch carries the job id and the attached flag.
+3. **No-route is read from the provider's body.** An HTTP 400 whose JSON
+   says `COULD_NOT_FIND_ANY_ROUTE` is a no-route; a 502 with a text body is
+   an outage.

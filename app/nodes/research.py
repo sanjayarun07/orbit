@@ -1495,7 +1495,8 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
         # The turn commits this answer; the commit acknowledges the job.
         return {**row["result"], "job_id": job["id"], "job_attached": True}
     if status in jobs.TERMINAL:
-        return {"answer": f"The deep dive of {symbol or address} could not be completed: {row.get('error') or status}.", "trajectory": None}
+        return {"answer": f"The deep dive of {symbol or address} could not be completed: {row.get('error') or status}.", "trajectory": None,
+                "job_id": job["id"], "job_attached": True}
     # Still running: the answer is appended to this conversation when it settles.
     return {"answer": f"Still working on the deep dive of {symbol or address}; the answer will appear here.", "trajectory": None,
             "job_id": job["id"], "resolved_token": {"symbol": symbol, "address": address, "chain": chain}}
