@@ -30,6 +30,13 @@ dependencies = [
   "sse-starlette>=1.6.1,<3",
 ]
 
+# The service is run in place (uvicorn app.main:app); `app` is the one
+# package. Without this, setuptools' automatic discovery saw every top-level
+# directory (deploy/, docker/, reports/, web/ ...) and refused to build, which
+# broke `pip install -e '.[dev]'` in CI from 2026-09-18 to 2026-09-22.
+[tool.setuptools.packages.find]
+include = ["app", "app.*"]
+
 [project.optional-dependencies]
 dev = ["pytest==8.4.1"]
 rerank = ["sentence-transformers>=3.0"]  # KNOWLEDGE_RERANKER=cross-encoder
