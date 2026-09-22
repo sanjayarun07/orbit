@@ -37,6 +37,21 @@ def test_a_scrub_the_store_cannot_do_raises_instead_of_returning_zero(monkeypatc
     class BrokenPool:
         async def execute(self, *a, **k):
             raise RuntimeError("db down")
+        def acquire(self):
+            pool = self
+            class _Acq:
+                async def __aenter__(self):
+                    return pool
+                async def __aexit__(self, *a):
+                    return False
+            return _Acq()
+        def transaction(self):
+            class _Tx:
+                async def __aenter__(self):
+                    pass
+                async def __aexit__(self, *a):
+                    return False
+            return _Tx()
 
     async def broken():
         return BrokenPool()
@@ -133,8 +148,70 @@ def test_a_receipt_for_a_deleted_account_is_not_kept():
 
 
 # 3 (third review). the backfill and the ownership-based delete exist in the schema and the scrub
-def test_existing_feedback_is_backfilled_from_conversation_ownership():
+def test_existing_feedback_is_backfilled_with_the_app_principal_id():
     from app import db
-    assert "UPDATE chat_feedback f SET principal_id = s.user_id::text FROM user_chat_sessions s WHERE f.principal_id IS NULL" in db._PLANS_TABLE_SQL
-    import inspect
-    assert "session_id IN" in inspect.getsource(feedback.scrub_principal)
+    assert "SET principal_id = 'user:' || s.user_id::text FROM user_chat_sessions s WHERE f.principal_id IS NULL" in db._PLANS_TABLE_SQL
+    assert "SET principal_id = 'user:' || principal_id WHERE principal_id ~" in db._PLANS_TABLE_SQL     # rows migrated bare are repaired
+
+
+def test_deletion_removes_ratings_on_the_conversations_the_person_owned(monkeypatch):
+    async def turn(session_id, revision):
+        return {"trajectory": {}}
+    monkeypatch.setattr(feedback, "_turn", turn)
+
+    async def nothing(*a, **k):
+        return None
+    monkeypatch.setattr(feedback, "_load", nothing)
+    asyncio.run(feedback.rate("old-session", 1, "down", "from before ownership existed", "acct", principal_id=None))
+    asyncio.run(feedback.rate("other", 1, "up", "someone else", "acct", principal_id="user:other"))
+    assert asyncio.run(feedback.scrub_principal("user:me", ["old-session"])) == 1
+    assert [v["comment"] for v in feedback._memory.values()] == ["someone else"]
+
+
+# 1 (fourth review). the insert and the scrub take the same per-user lock inside a transaction
+class _Conn:
+    def __init__(self, log):
+        self.log = log
+    async def execute(self, sql, *args):
+        self.log.append(sql.split("(")[0].strip()[:40])
+        return "UPDATE 1"
+    def transaction(self):
+        log = self.log
+        class _Tx:
+            async def __aenter__(self):
+                log.append("BEGIN")
+            async def __aexit__(self, *a):
+                log.append("COMMIT")
+        return _Tx()
+
+
+class _Pool:
+    def __init__(self):
+        self.log = []
+    def acquire(self):
+        conn = _Conn(self.log)
+        class _Acq:
+            async def __aenter__(self):
+                return conn
+            async def __aexit__(self, *a):
+                return False
+        return _Acq()
+    async def execute(self, sql, *args):
+        self.log.append("UNLOCKED " + sql.split("(")[0].strip()[:30])
+
+
+def test_the_log_insert_for_a_user_runs_locked_in_a_transaction():
+    pool = _Pool()
+    row = turn_log.build(message="m", status="ok", latency_ms=1, identity=SimpleNamespace(kind="user", account_id="a", user={"id": "u-1"}, api_key=None, signed_in=True))
+    asyncio.run(turn_log._insert(pool, row))
+    assert pool.log == ["BEGIN", "SELECT pg_advisory_xact_lock", "INSERT INTO chat_turns", "COMMIT"]
+    anon = turn_log.build(message="m", status="ok", latency_ms=1)
+    pool.log.clear()
+    asyncio.run(turn_log._insert(pool, anon))
+    assert pool.log == ["UNLOCKED INSERT INTO chat_turns"]                        # no owner, nothing to serialise with
+
+
+def test_the_scrub_takes_the_same_lock_then_marks_then_scrubs():
+    pool = _Pool()
+    assert asyncio.run(turn_log._scrub(pool, "u-1")) == 1
+    assert pool.log == ["BEGIN", "SELECT pg_advisory_xact_lock", "INSERT INTO deleted_users", "UPDATE chat_turns SET message = '[deleted]'"[:40], "COMMIT"]

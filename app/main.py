@@ -1510,6 +1510,9 @@ async def delete_my_account(body: DeleteAccountRequest, request: Request, respon
         await billing.expire_open_checkouts_for(user)
     except (billing.SubscriptionCancelFailed, billing.CheckoutCloseFailed) as exc:
         raise HTTPException(409, str(exc)) from exc
+    # The conversations this person owns, named now: the feedback rows they
+    # rated on are removed by these ids after the mappings are gone.
+    owned_sessions = list(await accounts.list_chat_sessions(user["id"]))
     _deleted, busy = await _delete_conversations_under_lease(user["id"])
     if busy:
         raise HTTPException(409, f"{len(busy)} conversation(s) are still processing a request. Wait for them to finish, then delete the account.")
@@ -1523,7 +1526,7 @@ async def delete_my_account(body: DeleteAccountRequest, request: Request, respon
     await execution_policy.drain_background()
     try:
         await turn_log.scrub_user(user["id"])
-        await feedback.scrub_principal(identity.principal_id)
+        await feedback.scrub_principal(identity.principal_id, owned_sessions)
     except Exception as exc:
         logger.warning("account deletion stopped: the log could not be scrubbed", exc_info=True)
         raise HTTPException(503, "Your records could not be cleared right now, so the account was not deleted. Try again shortly.") from exc

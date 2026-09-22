@@ -270,7 +270,9 @@ CREATE TABLE IF NOT EXISTS deleted_users (
 );
 -- Rows from before the column existed: owned by whoever owns the conversation
 -- they rate (user_chat_sessions is the verified ownership). Idempotent.
-UPDATE chat_feedback f SET principal_id = s.user_id::text FROM user_chat_sessions s WHERE f.principal_id IS NULL AND s.session_id = f.session_id;
+-- The app's principal id is "user:<uuid>" (app/identity.py); an earlier backfill wrote the bare uuid.
+UPDATE chat_feedback SET principal_id = 'user:' || principal_id WHERE principal_id ~ '^[0-9a-fA-F-]{36}$';
+UPDATE chat_feedback f SET principal_id = 'user:' || s.user_id::text FROM user_chat_sessions s WHERE f.principal_id IS NULL AND s.session_id = f.session_id;
 """
 
 

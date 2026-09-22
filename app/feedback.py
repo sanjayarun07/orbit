@@ -111,17 +111,18 @@ async def list_for_principal(principal_id: str) -> list[dict]:
             for k, v in _memory.items() if v.get("principal_id") == principal_id]
 
 
-async def scrub_principal(principal_id: str) -> int:
-    """Account deletion: the person's ratings and comments go. Raises when
-    the store cannot do it, so the deletion stops rather than pretends."""
+async def scrub_principal(principal_id: str, session_ids: list[str] | tuple[str, ...] = ()) -> int:
+    """Account deletion: the person's ratings and comments go -- by the
+    principal, and by the conversations they owned (`session_ids`, read by
+    the caller BEFORE the conversation mappings are removed, since a row
+    from before principal_id existed may carry no owner). Raises when the
+    store cannot do it, so the deletion stops rather than pretends."""
+    owned = list(session_ids or [])
     pool = await get_pg_pool()
     if pool is not None:
-        # By the person, and by the conversations they own (rows from before
-        # principal_id existed that the backfill could not attribute).
-        status = await pool.execute("DELETE FROM chat_feedback WHERE principal_id = $1 OR session_id IN "
-                                    "(SELECT session_id FROM user_chat_sessions WHERE user_id::text = $1)", principal_id)
+        status = await pool.execute("DELETE FROM chat_feedback WHERE principal_id = $1 OR session_id = ANY($2::text[])", principal_id, owned)
         return int(status.split()[-1]) if status and status.split()[-1].isdigit() else 0
-    doomed = [k for k, v in _memory.items() if v.get("principal_id") == principal_id]
+    doomed = [k for k, v in _memory.items() if v.get("principal_id") == principal_id or k[0] in owned]
     for k in doomed:
         del _memory[k]
     return len(doomed)

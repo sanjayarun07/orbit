@@ -192,34 +192,51 @@ async def record(**fields) -> dict | None:
     try:
         pool = await asyncio.wait_for(_pool(), timeout=STORE_TIMEOUT_SECONDS)
         if pool is not None:
-            # One statement: if the user was deleted (on any worker, at any
-            # time before this insert commits), the row lands with no words
-            # and no owner. $26 is the user id as text for the marker lookup.
-            await asyncio.wait_for(pool.execute(
-                "INSERT INTO chat_turns (id, created_at, latency_ms, status, http_status, error, transport, identity_kind, user_id, account_id, api_key_id, "
-                "session_id, revision, wallet, message, intent, capabilities, tools, answer, trajectory, validation, gate, risk, credits, plan_id) "
-                "SELECT $1, $2, $3, $4, $5, $6, $7, $8, "
-                "CASE WHEN d.user_id IS NULL THEN $9::uuid END, CASE WHEN d.user_id IS NULL THEN $10 END, $11, "
-                "CASE WHEN d.user_id IS NULL THEN $12 END, $13, CASE WHEN d.user_id IS NULL THEN $14 END, "
-                "CASE WHEN d.user_id IS NULL THEN $15 ELSE '[deleted]' END, $16, $17, $18, "
-                "CASE WHEN d.user_id IS NULL THEN $19 END, CASE WHEN d.user_id IS NULL THEN $20::jsonb END, $21::jsonb, $22::jsonb, $23::jsonb, $24::jsonb, $25 "
-                "FROM (SELECT 1) AS one LEFT JOIN deleted_users d ON d.user_id = $26",
-                uuid.UUID(row["id"]), row["created_at"], row["latency_ms"], row["status"], row["http_status"], row["error"], row["transport"],
-                row["identity_kind"], row["user_id"], row["account_id"], row["api_key_id"], row["session_id"], row["revision"], row["wallet"],
-                row["message"], row["intent"], row["capabilities"], row["tools"], row["answer"],
-                json.dumps(row["trajectory"]) if row["trajectory"] is not None else None,
-                json.dumps(row["validation"]) if row["validation"] is not None else None,
-                json.dumps(row["gate"]) if row["gate"] is not None else None,
-                json.dumps(row["risk"]) if row["risk"] is not None else None,
-                json.dumps(row["credits"]) if row["credits"] is not None else None,
-                row["plan_id"], str(row["user_id"]) if row["user_id"] else "",
-            ), timeout=STORE_TIMEOUT_SECONDS)
+            await asyncio.wait_for(_insert(pool, row), timeout=STORE_TIMEOUT_SECONDS)
             return row
     except Exception:
         logger.warning("turn_log: could not persist; keeping in memory", exc_info=True)
     with _lock:
         _memory.appendleft(row)
     return row
+
+
+_INSERT_SQL = ("INSERT INTO chat_turns (id, created_at, latency_ms, status, http_status, error, transport, identity_kind, user_id, account_id, api_key_id, "
+                "session_id, revision, wallet, message, intent, capabilities, tools, answer, trajectory, validation, gate, risk, credits, plan_id) "
+                "SELECT $1, $2, $3, $4, $5, $6, $7, $8, "
+                "CASE WHEN d.user_id IS NULL THEN $9::uuid END, CASE WHEN d.user_id IS NULL THEN $10 END, $11, "
+                "CASE WHEN d.user_id IS NULL THEN $12 END, $13, CASE WHEN d.user_id IS NULL THEN $14 END, "
+                "CASE WHEN d.user_id IS NULL THEN $15 ELSE '[deleted]' END, $16, $17, $18, "
+                "CASE WHEN d.user_id IS NULL THEN $19 END, CASE WHEN d.user_id IS NULL THEN $20::jsonb END, $21::jsonb, $22::jsonb, $23::jsonb, $24::jsonb, $25 "
+                "FROM (SELECT 1) AS one LEFT JOIN deleted_users d ON d.user_id = $26")
+
+
+def _insert_args(row: dict) -> list:
+    return [uuid.UUID(row["id"]), row["created_at"], row["latency_ms"], row["status"], row["http_status"], row["error"], row["transport"],
+            row["identity_kind"], row["user_id"], row["account_id"], row["api_key_id"], row["session_id"], row["revision"], row["wallet"],
+            row["message"], row["intent"], row["capabilities"], row["tools"], row["answer"],
+            json.dumps(row["trajectory"]) if row["trajectory"] is not None else None,
+            json.dumps(row["validation"]) if row["validation"] is not None else None,
+            json.dumps(row["gate"]) if row["gate"] is not None else None,
+            json.dumps(row["risk"]) if row["risk"] is not None else None,
+            json.dumps(row["credits"]) if row["credits"] is not None else None,
+            row["plan_id"], str(row["user_id"]) if row["user_id"] else ""]
+
+
+async def _insert(pool, row: dict) -> None:
+    """The marker-aware insert. For a signed-in user it runs in a transaction
+    holding the per-user advisory lock the scrub also takes, so the two
+    serialise: an insert that started before the deletion either commits
+    before the scrub's UPDATE (which then scrubs it) or reads the marker
+    after it (review, 2026-09-22: a statement snapshot taken before the
+    marker landed committed private words after the scrub)."""
+    if not row.get("user_id"):
+        await pool.execute(_INSERT_SQL, *_insert_args(row))
+        return
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", str(row["user_id"]))
+            await conn.execute(_INSERT_SQL, *_insert_args(row))
 
 
 _FIELDS = ("id", "created_at", "latency_ms", "status", "http_status", "error", "transport", "identity_kind", "user_id", "account_id", "api_key_id",
@@ -385,6 +402,18 @@ async def is_deleted(user_id: str) -> bool:
         return False
 
 
+async def _scrub(pool, user_id: str) -> int:
+    """Marker, then the scrub, under the same per-user lock the insert takes."""
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", str(user_id))
+            await conn.execute("INSERT INTO deleted_users (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING", str(user_id))
+            status = await conn.execute(
+                "UPDATE chat_turns SET message = '[deleted]', answer = NULL, trajectory = NULL, wallet = NULL, user_id = NULL, "
+                "account_id = NULL, session_id = NULL, flag_note = NULL WHERE user_id = $1::uuid", user_id)
+    return int(status.split()[-1]) if status and status.split()[-1].isdigit() else 0
+
+
 async def scrub_user(user_id: str) -> int:
     """Account deletion: the person's words go, the operational row stays
     (status, latency, tools, timing) with no owner. The marker is written
@@ -395,12 +424,7 @@ async def scrub_user(user_id: str) -> int:
     forget_user(user_id)
     pool = await _pool()
     if pool is not None:
-        await asyncio.wait_for(pool.execute("INSERT INTO deleted_users (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING", str(user_id)),
-                               timeout=STORE_TIMEOUT_SECONDS)
-        status = await asyncio.wait_for(pool.execute(
-            "UPDATE chat_turns SET message = '[deleted]', answer = NULL, trajectory = NULL, wallet = NULL, user_id = NULL, "
-            "account_id = NULL, session_id = NULL, flag_note = NULL WHERE user_id = $1::uuid", user_id), timeout=STORE_TIMEOUT_SECONDS * 4)
-        return int(status.split()[-1]) if status and status.split()[-1].isdigit() else 0
+        return await asyncio.wait_for(_scrub(pool, user_id), timeout=STORE_TIMEOUT_SECONDS * 4)
     n = 0
     with _lock:
         for row in _memory:

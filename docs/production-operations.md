@@ -1935,3 +1935,17 @@ cache bumped to v11.
    the person owns.
 4. **Refused calls spent the shared quota.** The Redis counter is one
    script: read, refuse without counting past the limit, else increment.
+
+## Fourth review of 2026-09-22: the two that remained
+
+1. **A log insert whose snapshot predated the marker could commit after
+   the scrub.** The insert for a signed-in user and the scrub now run in
+   transactions that both take `pg_advisory_xact_lock(hashtext(user_id))`.
+   An insert that started before the deletion either commits before the
+   scrub's UPDATE, which then scrubs it, or takes the lock after and reads
+   the marker. Anonymous inserts take no lock.
+2. **The feedback backfill wrote a bare UUID where the app's principal id
+   is "user:<uuid>".** The schema repairs already-migrated bare rows and
+   backfills new ones with the prefix. Deletion reads the person's owned
+   conversation ids before the mappings are removed and deletes ratings by
+   those ids as well as by principal.
