@@ -115,14 +115,42 @@ def opens_new_topic(request: str) -> bool:
     return bool(_NEW_TOPIC.search(request or ""))
 
 
+# A lowercase name in a data-ask position is still a name: "price of pepe",
+# "is bonk safe", "wif holders" (recheck of 2910d5e8: "what is the price of
+# pepe?" inherited the previous token).
+_LOWER_AFTER = re.compile(r"\b(?:price|prices|holders?|liquidity|volume|market\s*cap|mcap|fdv|chart|safety|security|supply|news|unlocks?|"
+                          r"deep\s+dive|research|analy[sz]e|about|into|buy|sell|check)\s+(?:of|for|on|into)?\s*(?:the\s+)?\$?([a-z][a-z0-9]{2,9})\b", re.I)
+_LOWER_BEFORE = re.compile(r"\b\$?([a-z][a-z0-9]{2,9})\s+(?:price|holders|token|coin|is\s+(?:safe|legit|a\s+rug))\b|\bis\s+\$?([a-z][a-z0-9]{2,9})\s+(?:safe|legit|a\s+rug|a\s+scam|bundled)\b", re.I)
+_LOWER_STOP = {"the", "this", "that", "these", "those", "my", "our", "your", "its", "it", "them", "solana", "ethereum", "base", "bsc", "bnb", "arbitrum",
+               "polygon", "avalanche", "crypto", "token", "tokens", "coin", "coins", "market", "markets", "chain", "wallet", "portfolio", "position",
+               "each", "every", "any", "all", "some", "new", "top", "best", "next", "last", "first", "current", "latest", "today", "week", "month",
+               "meme", "memes", "stable", "stables", "perps", "perp", "stock", "stocks", "usdc", "usdt", "sol", "eth", "btc", "you", "yourself",
+               "one", "wrong", "right", "same", "other", "another", "here", "there", "now", "then", "what", "which", "how", "why", "when", "where",
+               "risk", "risks", "data", "evidence", "exit", "exits", "entry", "supply", "holders", "price", "volume", "liquidity", "changes", "change",
+               "are", "was", "were", "been", "being", "and", "but", "not", "for", "with", "from", "onto", "than", "then", "also", "very", "more",
+               "most", "much", "many", "such", "like", "just", "only", "still", "again", "back", "over", "under", "about", "after", "before",
+               "because", "while", "where", "whether", "should", "would", "could", "will", "shall", "can", "may", "might", "must", "have", "has", "had",
+               "does", "did", "done", "doing", "get", "got", "give", "make", "made", "take", "show", "tell", "say", "said", "see", "know", "think",
+               "want", "need", "help", "use", "used", "using", "please", "thanks", "buying", "selling", "trading", "holding", "moving", "going"}
+
+
+def _lower_name(text: str) -> str | None:
+    for pattern in (_LOWER_AFTER, _LOWER_BEFORE):
+        for m in pattern.finditer(text or ""):
+            word = next((g for g in m.groups() if g), "")
+            if word and word.lower() not in _LOWER_STOP and word.islower():
+                return word
+    return None
+
+
 def has_own_subject(request: str) -> bool:
     """Whether the message names something of its own: an address, a $ticker,
-    or a word the probe would look up. A follow-up without one continues the
-    conversation's subject."""
+    a word the probe would look up, or a lowercase name in a data-ask
+    position. A follow-up without one continues the conversation's subject."""
     text = request or ""
     if re.search(r"(?<![A-Za-z0-9])(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])", text):
         return True
-    return subject_of(text) is not None
+    return subject_of(text) is not None or _lower_name(text) is not None
 
 
 def subject_of(request: str) -> str | None:

@@ -52,6 +52,7 @@ EXPECTED: dict[tuple[str, str], str] = {
     ("POST", "/me/telegram/link"): "browser",
     # Finishing a link started in Telegram: the token alone links nothing, so
     # the browser session is the other half of the proof.
+    ("GET", "/auth/telegram/claim/preview"): "browser",
     ("POST", "/auth/telegram/claim"): "browser",
     ("GET", "/me/telegram"): "browser",
     ("DELETE", "/me/telegram/{external_id}"): "browser",

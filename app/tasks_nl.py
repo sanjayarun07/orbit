@@ -57,7 +57,13 @@ def _clock(h: str | None, m: str | None, ap: str | None, default: tuple[int, int
 
 
 _NAME_IT = re.compile(r"\s*[.;,]?\s*(?:name|call|title)\s+it\s+[\"'“”‘’]?(?P<title>[^.;\"'“”‘’]+?)[\"'“”‘’]?(?=\s*[.;]|\s*$)", re.I)
-_CHANNEL_WORDS = re.compile(r"\s*[.;,]?\s*(?:use\s+(?:the\s+)?|via\s+|by\s+|through\s+)?(?:the\s+)?(?P<channel>in[- ]app\s+inbox|inbox|in[- ]app|email|e-mail)(?:\s+only)?\s*[.;]?", re.I)
+# An affirmative delivery clause only, at the end of the text: "use the in-app
+# inbox only", "by email", "inbox only". "Do not email me" and "to email
+# Alice" are not delivery instructions (recheck of 2910d5e8).
+_CHANNEL_WORDS = re.compile(
+    r"(?:^|[.;,]\s*|\s)(?:(?:please\s+)?(?:use|via|by|through|send\s+(?:it\s+)?(?:to|via|by))\s+(?:the\s+)?(?:my\s+)?(?P<channel>in[- ]app(?:\s+inbox)?|inbox|email|e-mail)(?:\s+only)?"
+    r"|(?P<channel2>in[- ]app(?:\s+inbox)?|inbox|email|e-mail)\s+only)\s*[.;!]?\s*$", re.I)
+_NO_EMAIL = re.compile(r"(?:^|[.;,]\s*|\s)(?:do\s+not|don'?t|never|no)\s+(?:email|e-mail)(?:\s+me)?\s*[.;!]?\s*$", re.I)
 
 
 def _reminder_fields(rest: str) -> tuple[str, str | None, str]:
@@ -69,9 +75,13 @@ def _reminder_fields(rest: str) -> tuple[str, str | None, str]:
     if m:
         title = m.group("title").strip()
         rest = rest[:m.start()] + rest[m.end():]
+    m = _NO_EMAIL.search(rest)
+    if m:
+        rest = rest[:m.start()] + rest[m.end():]                          # an explicit no: in-app, and the sentence is not the message
     m = _CHANNEL_WORDS.search(rest)
     if m:
-        channel = "email" if m.group("channel").lower().startswith("e") else "inapp"
+        word = (m.group("channel") or m.group("channel2") or "").lower()
+        channel = "email" if word.startswith("e") else "inapp"
         rest = rest[:m.start()] + rest[m.end():]
     return rest.strip(" .;,"), title, channel
 

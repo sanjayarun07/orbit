@@ -212,7 +212,7 @@
             <button class="secondary" id="signoutBtn" type="button" hidden>Sign out</button>
           </div>
           <div class="field-help" id="accountHelp">Sign in to access your history, connect wallets, and receive 300 monthly credits.</div>
-          <div class="field-help" id="tgLinkBanner" hidden><b>Finishing your Telegram connection.</b> Sign in above with a wallet or an email — whichever you prefer — and this chat joins that account automatically. Nothing else to click.</div>
+          <div class="field-help" id="tgLinkBanner" hidden><b>Finishing your Telegram connection.</b> Sign in above with a wallet or an email — whichever you prefer — then confirm the connection here.</div>
         </div>
         <div class="settings-section" id="connectionsSection" hidden>
           <h3>Connections</h3>
@@ -1758,18 +1758,32 @@ let pendingTgLink=(()=>{try{
   return saved.token;
 }catch{return null;}})();
 function clearTgLink(){pendingTgLink=null;try{localStorage.removeItem(TGLINK_KEY);}catch{}}
-async function claimTgLink(){if(!pendingTgLink||!account?.authenticated)return;const token=pendingTgLink;
-  try{const res=await fetch("/auth/telegram/claim",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})});
+// Nothing is attached on page load. Signed in, the pending link is previewed
+// (who it would connect) and shown with a Connect button; only that click
+// claims it, with a confirmation the server bound to this session.
+async function claimTgLink(){if(!pendingTgLink||!account?.authenticated)return;const token=pendingTgLink;const banner=$("#tgLinkBanner");
+  try{const pre=await fetch("/auth/telegram/claim/preview?token="+encodeURIComponent(token));const info=await pre.json().catch(()=>({}));
+    if(!pre.ok)throw new Error(normalizeError(info,pre.status));
+    if(!banner)return;banner.hidden=false;banner.replaceChildren();
+    const text=document.createElement("span");text.textContent=`Connect Telegram ${info.display||"account"} to ${info.account||"this account"}? It will share this account's credits, wallets and alerts. `;
+    const yes=document.createElement("button");yes.type="button";yes.className="primary";yes.id="tgLinkConfirm";yes.textContent="Connect";
+    const no=document.createElement("button");no.type="button";no.id="tgLinkDismiss";no.textContent="Not me";
+    banner.append(text,yes,no);
+    no.addEventListener("click",()=>{clearTgLink();banner.hidden=true;});
+    yes.addEventListener("click",()=>{yes.disabled=true;confirmTgLink(token,info.confirmation);});
+  }catch(error){clearTgLink();const notice=$("#tgNotice");if(notice){notice.hidden=false;notice.textContent=`Telegram could not be connected: ${error.message||error}`;}}}
+async function confirmTgLink(token,confirmation){
+  try{const res=await fetch("/auth/telegram/claim",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token,confirmation})});
     const data=await res.json().catch(()=>({}));
     if(!res.ok)throw new Error(normalizeError(data,res.status));
-    clearTgLink();await refreshTelegram();
+    clearTgLink();const banner=$("#tgLinkBanner");if(banner)banner.hidden=true;await refreshTelegram();
     const who=data.display?" · "+data.display:"";
     // Confirmed where the user already is: the wallet panel they just used,
     // and the Connections row in Settings.
     const provider=$("#connectedProvider");if(provider)provider.textContent=`${provider.textContent||"Connected"} · Telegram connected${who}`;
     const notice=$("#tgNotice");if(notice){notice.hidden=false;notice.textContent=`Telegram connected${who}. Same credits, plan, wallets and risk charter on both.`;}
   }catch(error){clearTgLink();const notice=$("#tgNotice");if(notice){notice.hidden=false;notice.textContent=`Telegram could not be connected: ${error.message||error}`;}}}
-function renderTgBanner(){const el=$("#tgLinkBanner");if(el)el.hidden=!(pendingTgLink&&!account?.authenticated);}
+function renderTgBanner(){const el=$("#tgLinkBanner");if(!el)return;if(pendingTgLink&&!account?.authenticated){el.hidden=false;el.innerHTML="<b>Finishing your Telegram connection.</b> Sign in above with a wallet or an email — whichever you prefer — then confirm the connection here.";}else if(!pendingTgLink){el.hidden=true;}}
 async function loadAccount(){try{const res=await fetch("/me",{headers:{"X-Orbit-Device":deviceId}});account=await res.json();}catch{account=null;}if(account?.authenticated){await refreshTelegram();await claimTgLink();}else{telegramConfigured=false;telegramLinked=[];}renderAccount();renderTgBanner();}
 function renderCredits(){const chip=$("#creditsChip");if(!account){chip.hidden=true;return;}const balance=Number(account.credits?.balance??0);chip.hidden=false;$("#creditsCount").textContent=balance.toLocaleString();$("#creditsPlan").textContent=account.plan?.name||"Trial";chip.classList.toggle("low",balance<10);$("#accountCredits").textContent=balance.toLocaleString();$("#profileRisk").textContent=account.authenticated?`${account.plan?.name} · ${balance.toLocaleString()} credits`:`Trial · ${balance} credits left`;}
 function renderAccount(){

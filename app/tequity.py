@@ -128,7 +128,24 @@ async def snapshot(channel: str) -> dict | None:
             await _listen((channel,), until=time.monotonic() + ONE_SHOT_TIMEOUT_S, stop_when={channel})
         except Exception as exc:  # noqa: BLE001
             logger.warning("tequity: one-shot %s failed: %s", channel, str(exc)[:120])
-        return _snapshots.get(channel)
+        hit = _snapshots.get(channel)
+        # Still stale after the refresh: the feed is down. Old prices are not
+        # current data (review of 330bc651: a day-old snapshot rendered as now).
+        return hit if hit and time.time() - hit["received_at"] <= STALE_SECONDS else None
+
+
+def last_seen(channel: str) -> float | None:
+    """Seconds since the last snapshot of a channel arrived, or None."""
+    hit = _snapshots.get(channel)
+    return (time.time() - hit["received_at"]) if hit else None
+
+
+def _unavailable(tool: str, channel: str, what: str) -> RuntimeError:
+    age = last_seen(channel)
+    since = f"; the last snapshot arrived {age / 60:.0f} min ago" if age is not None else ""
+    evidence.unavailable(tool, {"kind": "venue", "id": channel, "chain": None, "symbol": None}, f"feed unavailable{since}",
+                         [{"provider": "tequity", "endpoint": channel, "as_of": None}])
+    return RuntimeError(f"Tequity feed has no current {what} snapshot{since}")
 
 
 _loop: asyncio.AbstractEventLoop | None = None
@@ -439,7 +456,7 @@ def movers(request: str) -> str:
     channel = MOVERS[dex]
     snap = _sync(snapshot(channel))
     if not snap:
-        raise RuntimeError(f"Tequity feed has no {dex} movers snapshot right now")
+        raise _unavailable("tequity_movers", channel, f"{dex} movers")
     stocks_only = bool(_STOCK_WORDS.search(request or ""))
     losers = bool(_LOSERS.search(request or ""))
     rows = (snap["data"].get("data") or {}).get("tokens") or []
@@ -452,7 +469,7 @@ def movers(request: str) -> str:
 def trending(request: str) -> str:
     snap = _sync(snapshot(TRENDING))
     if not snap:
-        raise RuntimeError("Tequity feed has no trending snapshot right now")
+        raise _unavailable("tequity_trending", TRENDING, "trending")
     rows = snap["data"].get("trending") or []
     evidence.complete("tequity_trending", {"kind": "venue", "id": "aster+hyperliquid", "chain": None, "symbol": None},
                       {"pairs": len(rows), "stocks": sum(1 for r in rows if isinstance(r, dict) and r.get("is_stock"))},

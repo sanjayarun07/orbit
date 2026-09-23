@@ -274,6 +274,13 @@ def render_trade_plan(response: AgentResponse) -> str | None:
     return "\n".join(lines)
 
 
+def answer_key(answer: str) -> str:
+    """A short key for one answer, carried in its buttons and recomputed from
+    the persisted message when a button is pressed."""
+    import hashlib
+    return hashlib.sha256((answer or "").encode("utf-8")).hexdigest()[:10]
+
+
 def keyboard(response: AgentResponse, *, app_url: str | None = None) -> dict | None:
     """Quick actions as callback buttons, suggestions as a second rank.
 
@@ -295,13 +302,14 @@ def keyboard(response: AgentResponse, *, app_url: str | None = None) -> dict | N
         # wallets (MetaMask, Phantom) do not exist there at all. A plain link
         # opens the real browser, where the session and the wallet already are.
         rows.append([{"text": "🔐 Review and sign", "url": app_url}])
+    key = answer_key(response.answer or "")
     for index, action in enumerate(response.quick_actions[:6]):
         label = action.entity_label or action.prompt
-        rows.append([{"text": _button_label(label), "callback_data": f"qa:{index}"}])
+        rows.append([{"text": _button_label(label), "callback_data": f"qa:{key}:{index}"}])
     for index, suggestion in enumerate(response.suggestions[:3]):
         if len(response.quick_actions) + index >= 8:
             break
-        rows.append([{"text": _button_label(suggestion), "callback_data": f"sg:{index}"}])
+        rows.append([{"text": _button_label(suggestion), "callback_data": f"sg:{key}:{index}"}])
     # No "Open Orbit" on an ordinary answer. It was on every reply, where it
     # is noise: a research answer is finished in the chat, and the web is for
     # the few things the chat cannot do -- /app and /account offer it there.

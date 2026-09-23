@@ -180,7 +180,6 @@ async def _handle_command(message: dict, text: str, chat_id: int, thread_id: int
     head, _, argument = text.partition(" ")
     command = head.split("@", 1)[0].lower().lstrip("/")
     argument = argument.strip()
-    session_id = tg_identity.session_id(chat_id, thread_id, tg_user.get("id"))
 
     if command == "start":
         await _handle_start(chat_id, thread_id, tg_user, argument)
@@ -191,6 +190,9 @@ async def _handle_command(message: dict, text: str, chat_id: int, thread_id: int
     if command == "link":
         await _handle_link(chat_id, thread_id, tg_user)
         return
+    # Only now: resolving the conversation resolves the account, and /start
+    # with a link token must see the person as they are before that.
+    session_id = await _session_for(chat_id, thread_id, tg_user)
     if command == "new":
         await sessions.clear_history(session_id)
         await client.send_message(chat_id, "Started a fresh conversation. Earlier context is cleared.", thread_id=thread_id)
@@ -284,7 +286,7 @@ async def _handle_account(chat_id: int, thread_id: int | None, tg_user: dict) ->
     identity = await tg_identity.identity_for(tg_user)
     balance = await credits.balance(identity.account_id)
     wallets = await accounts.list_wallets(account["id"])
-    context = await sessions.get_session_context(tg_identity.session_id(chat_id, thread_id, tg_user.get("id")))
+    context = await sessions.get_session_context(await _session_for(chat_id, thread_id, tg_user, identity))
 
     lines = [
         "<b>Your Orbit account</b>",
@@ -395,21 +397,30 @@ async def _handle_callback(query: dict) -> None:
         return
     await client.answer_callback_query(query_id)
 
-    session_id = tg_identity.session_id(chat_id, thread_id, tg_user.get("id"))
-    kind, _, raw_index = data.partition(":")
+    session_id = await _session_for(chat_id, thread_id, tg_user)
+    # "qa:<answer key>:<index>": the key names the answer the button was drawn
+    # under, so a button on an old message never resolves against a newer
+    # answer's list (review of 330bc651).
+    parts = data.split(":")
+    if len(parts) != 3:
+        await client.send_message(chat_id, "That button belongs to an older answer — ask again.", thread_id=thread_id)
+        return
+    kind, key, raw_index = parts
     try:
         index = int(raw_index)
     except ValueError:
         return
 
     if kind == "sg":
-        suggestion = await _stored_list(session_id, "suggestions", index)
+        suggestion = await _stored_list(session_id, "suggestions", index, key)
         if suggestion:
             await _run_turn(chat_id, thread_id, tg_user, str(suggestion))
+        else:
+            await client.send_message(chat_id, "That button belongs to an older answer — ask again.", thread_id=thread_id)
         return
     if kind != "qa":
         return
-    stored = await _stored_list(session_id, "quick_actions", index)
+    stored = await _stored_list(session_id, "quick_actions", index, key)
     if stored is None:
         await client.send_message(chat_id, "That button belongs to an older answer — ask again.", thread_id=thread_id)
         return
@@ -423,25 +434,41 @@ async def _handle_callback(query: dict) -> None:
     await _run_turn(chat_id, thread_id, tg_user, action.prompt, quick_action=action)
 
 
-async def _stored_list(session_id: str, field: str, index: int):
-    """One entry of the latest assistant message's persisted `field`.
+async def _stored_list(session_id: str, field: str, index: int, key: str):
+    """One entry of the persisted `field` of the assistant answer whose key
+    the button carries.
 
     Read back from the conversation rather than carried in the callback: a
     callback payload is client-supplied and only 64 bytes, so the button names
-    a position and the server's own record supplies the content.
+    an answer and a position and the server's own record supplies the content.
     """
     messages = await sessions.get_messages(session_id)
-    latest = next((item for item in reversed(messages) if item.get("role") == "assistant"), None)
-    items = (latest or {}).get(field) or []
+    match = next((item for item in reversed(messages) if item.get("role") == "assistant" and render.answer_key(item.get("content") or "") == key), None)
+    items = (match or {}).get(field) or []
     return items[index] if 0 <= index < len(items) else None
 
 
 # ------------------------------------------------------------------- the turn
 
+async def _session_for(chat_id: int, thread_id: int | None, tg_user: dict, identity: Identity | None = None) -> str:
+    """The conversation this chat continues for the account behind it. The
+    derived `tg:<chat>` id is kept while this account owns it (or nobody
+    does); after /unlink a new account meets a conversation another account
+    owns, and gets its own, account-scoped one instead of a refusal on every
+    message (review of 330bc651)."""
+    identity = identity or await tg_identity.identity_for(tg_user)
+    base = tg_identity.session_id(chat_id, thread_id, tg_user.get("id"))
+    try:
+        await session_access.require_session_access(base, identity, claim=True)
+        return base
+    except session_access.SessionAccessDenied:
+        return f"{base}:a{str(identity.user['id'])[:8]}"
+
+
 async def _run_turn(chat_id: int, thread_id: int | None, tg_user: dict, text: str,
                     *, quick_action: QuickAction | None = None, reply_to: int | None = None) -> None:
-    session_id = tg_identity.session_id(chat_id, thread_id, tg_user.get("id"))
     identity = await tg_identity.identity_for(tg_user)
+    session_id = await _session_for(chat_id, thread_id, tg_user, identity)
     body = ChatRequest(
         message=text[:MAX_INBOUND_CHARS],
         session_id=session_id,

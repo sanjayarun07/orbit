@@ -153,12 +153,25 @@ async def record(now: datetime | None = None) -> int:
     with the same taken_at so a tick can be read back as a whole."""
     now = now or _now()
     stored = 0
+    guard = timedelta(seconds=max(30, int(settings.tequity_record_interval_seconds or 300)) / 2)
     for channel in (*tequity.MOVERS.values(), tequity.TRENDING):
         snap = tequity._snapshots.get(channel)
         if not snap or time.time() - snap["received_at"] > tequity.STALE_SECONDS:
             continue
+        latest = await latest_tick_time(channel)
+        if latest is not None and now - latest < guard:
+            continue                                                       # this sample bucket is already recorded (a second recorder, a restart)
         stored += await store(rows_from(channel, snap, now))
     return stored
+
+
+async def latest_tick_time(channel: str) -> datetime | None:
+    pool = await _pool()
+    if pool is not None:
+        return await pool.fetchval("SELECT max(taken_at) FROM tequity_ticks WHERE channel = $1", channel)
+    with _lock:
+        times = [r["taken_at"] for r in _rows if r["channel"] == channel]
+    return max(times) if times else None
 
 
 async def prune(now: datetime | None = None) -> int:
@@ -188,15 +201,17 @@ async def is_leader() -> bool:
     try:
         if await client.set(_LEADER_KEY, _leader_id, nx=True, ex=_leader_ttl()):
             return True
-        holder = await client.get(_LEADER_KEY)
-        holder = holder.decode() if isinstance(holder, bytes) else holder
-        if holder == _leader_id:
-            await client.expire(_LEADER_KEY, _leader_ttl())
-            return True
-        return False
+        # Owner-checked renewal in one step, so a lease that lapsed and was
+        # taken by another process is never re-extended by the old holder.
+        renewed = await client.eval(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('expire', KEYS[1], ARGV[2]) else return 0 end",
+            1, _LEADER_KEY, _leader_id, _leader_ttl())
+        return bool(renewed)
     except Exception:
-        logger.info("tequity_ledger: leader check failed; recording", exc_info=True)
-        return True
+        # Redis is configured but unreachable: nobody can prove they lead, so
+        # nobody records this tick (review of 330bc651: every process did).
+        logger.info("tequity_ledger: leader check failed; skipping this tick", exc_info=True)
+        return False
 
 
 async def worker() -> None:

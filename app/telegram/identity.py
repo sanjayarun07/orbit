@@ -152,6 +152,58 @@ async def start_link_from_telegram(tg_user: dict) -> str:
     })
 
 
+async def peek_link_token(token: str) -> dict | None:
+    """The payload this token was minted with, without consuming it: what the
+    browser shows the person before they confirm the connection."""
+    redis = await get_redis()
+    if redis is not None:
+        raw = await redis.get(f"tg_link:{token}")
+        raw = raw.decode() if isinstance(raw, bytes) else raw
+    else:
+        entry = _link_tokens.get(token)
+        raw = entry[1] if entry is not None and entry[0] >= time.time() else None
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+async def start_claim_confirmation(token: str, user_id: str) -> str:
+    """A nonce that binds one pending link to one signed-in browser session.
+    The claim must present it: a link opened by a victim is then only
+    previewed, never attached, until that person clicks Connect (review of
+    330bc651: page load attached whichever Telegram identity minted the URL)."""
+    nonce = secrets.token_urlsafe(18)
+    body = json.dumps({"token": token, "user_id": user_id})
+    redis = await get_redis()
+    if redis is not None:
+        await redis.setex(f"tg_claim:{nonce}", 600, body)
+    else:
+        _prune_link_tokens()
+        _link_tokens[f"claim:{nonce}"] = (time.time() + 600, body)
+    return nonce
+
+
+async def take_claim_confirmation(nonce: str) -> dict | None:
+    redis = await get_redis()
+    if redis is not None:
+        raw = await redis.getdel(f"tg_claim:{nonce}")
+        raw = raw.decode() if isinstance(raw, bytes) else raw
+    else:
+        entry = _link_tokens.pop(f"claim:{nonce}", None)
+        raw = entry[1] if entry is not None and entry[0] >= time.time() else None
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 async def consume_link_token(token: str) -> dict | None:
     """The payload this token was minted with, once. None if unknown or expired."""
     redis = await get_redis()

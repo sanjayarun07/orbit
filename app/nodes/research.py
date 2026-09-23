@@ -1844,7 +1844,7 @@ async def research_node(state: AgentState) -> dict:
     web_part = _web_context_part(state)
     if web_part:
         streaming.emit("card", markdown=web_part[0], tool=WEB_CONTEXT_TOOL)
-    clauses = composition.carry_subject(composition.split_asks(request), request)
+    clauses, ask_note = composition.plan_asks(request)
     if len(clauses) >= 2:
         # A compound message: every ask answered, each through the same
         # path, the cards combined and read together. One card and silence
@@ -1890,7 +1890,7 @@ async def research_node(state: AgentState) -> dict:
                 if part.get(key) and key not in extras:
                     extras[key] = part[key]
         cards, trajectory = composition.combine(parts)
-        answer = await composition.synthesize(request, cards, trajectory)
+        answer = await composition.synthesize(request if not ask_note else f"{request}\n{ask_note}", cards, trajectory)
         result = {"answer": answer, "trajectory": trajectory or None, **extras}
     else:
         result = await _research_node(state, sink)

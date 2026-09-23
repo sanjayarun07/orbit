@@ -71,6 +71,61 @@ def _symbol_in(text: str) -> str | None:
     return None
 
 
+_RESOLUTION_NOTE = re.compile(r"\n(?:Resolved (?:from|subject)[^\n]*)$", re.S)
+_FORMAT_CLAUSE = re.compile(
+    r"^\s*(?:(?:please\s+)?(?:mark|label|flag|cite|include|exclude|separate|distinguish|treat|note|state|say|show|list|link|report|present|format|"
+    r"explain\s+(?:in|with|using)|keep|use|do\s+not|don'?t|never|avoid|if\s+.*?(?:say\s+so|say\s+unknown|say\s+that))\b[^.?!]*"
+    r"\b(?:claims?|assumptions?|sources?|evidence|links?|timestamps?|coverage|gaps?|units?|as\s+unknown|say\s+so|unknown|plain\s+language|"
+    r"do\s+not\s+(?:invent|prepare|execute|trade)|not\s+(?:invent|prepare|execute)|no\s+trade|without\s+predicting|database-only|primary\s+source)\b"
+    r"|^\s*(?:do\s+not|don'?t|never)\s+[^.?!]*$|^\s*if\s+[^.?!]*\bsay\s+so\b[^.?!]*$)", re.I | re.S)
+
+
+_CONSTRAINT = re.compile(r"\b(?:without|only|excluding|except|at\s+least|at\s+most|under|over|below|above|between|single[- ]asset|"
+                         r"on\s+(?:solana|base|ethereum|bsc|bnb|arbitrum|polygon|avalanche|hyperliquid|aster))\b|\b(?-i:[A-Z][A-Z0-9]{2,9})\b", re.I)
+
+
+def split_request(request: str) -> tuple[str, str | None]:
+    """The user's words and the resolution note the session appended, apart:
+    the note is context for every clause, never a clause (recheck of
+    2910d5e8: it was dispatched as an ask of its own)."""
+    m = _RESOLUTION_NOTE.search(request or "")
+    if not m:
+        return request or "", None
+    return (request or "")[:m.start()], m.group(0).strip()
+
+
+def is_format_clause(clause: str) -> bool:
+    """An instruction about the answer, not an ask: "Mark database-only
+    claims", "Label assumptions; do not invent valuation multiples", "If
+    snapshots are unavailable, say so"."""
+    return bool(_FORMAT_CLAUSE.match(clause or ""))
+
+
+def plan_asks(request: str) -> tuple[list[str], str]:
+    """The substantive clauses to dispatch, each carrying the message's
+    subject and the first clause's constraints when it names none of its own,
+    plus the note (resolution + format instructions) that every clause and
+    the synthesis must see."""
+    user_text, note = split_request(request)
+    clauses = split_asks(user_text)
+    if len(clauses) < 2:
+        return [request], ""
+    substantive = [c for c in clauses if not is_format_clause(c)] or clauses[:1]
+    instructions = [c for c in clauses if c not in substantive]
+    carried = carry_subject(substantive, user_text)
+    lead = substantive[0]
+    out = []
+    lead_has_terms = bool(_ADDRESS.search(lead) or _symbol_in(lead) or _CONSTRAINT.search(lead))
+    for original, clause in zip(substantive, carried):
+        if lead_has_terms and clause == original and original != lead and not _ADDRESS.search(original) and not _symbol_in(original):
+            clause = f"{original} (context: {lead})"                        # the lead's asset and constraints travel with the ask
+        if note:
+            clause = f"{clause}\n{note}"
+        out.append(clause)
+    extra = " ".join(instructions)
+    return out, ("\n".join(x for x in (note, f"Instructions for the answer: {extra}" if extra else "") if x)).strip()
+
+
 def carry_subject(clauses: list[str], request: str) -> list[str]:
     """Clauses that name no asset of their own get the message's subject, an
     address or a ticker: "Investigate the launch of token <mint>. Show

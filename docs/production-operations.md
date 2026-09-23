@@ -2793,3 +2793,30 @@ accept a venue (`alert me when TSLA on hyperliquid drops below 400`; `tasks.pric
 new task kind `movers_alert` ("tell me when any tokenized stock moves more than 10% on hyperliquid within an hour") diffs
 ticks every check, reports each pair once per window (`spec.last_fired`), and is chat-only for now (no form). The morning
 brief gains a "Perp venues" section: top three movers per venue, best stock, and the tokenized-stock share of volume.
+
+## Review of 330bc651 (2026-09-23): fixes
+
+- **Telegram link confirmation.** A `?tglink=` never attaches on page load. Signed in, the page calls
+  `GET /auth/telegram/claim/preview?token=` (who the link would connect, plus a confirmation nonce bound to this
+  browser session and this token, 10 minutes) and shows a Connect / Not me banner; `POST /auth/telegram/claim`
+  requires `{token, confirmation}` and refuses a nonce from another session. The token is consumed only on a
+  confirmed claim.
+- **Disabled deployments reject updates.** `client.webhook_secret()` is None without a bot token; the webhook route
+  returns 404 unless the integration is enabled and a secret exists.
+- **Stale snapshots are unavailable.** `tequity.snapshot()` returns None when a snapshot is still older than 120 s
+  after a refresh; movers/trending raise with the age and record an unavailable envelope; the brief and venue
+  alerts skip.
+- **Telegram conversations after unlink.** `bot._session_for` keeps `tg:<chat>` while this account owns it (or
+  nobody does) and otherwise uses `tg:<chat>:a<account>`; the session is resolved only after the account-independent
+  commands (/start, /help, /link).
+- **Buttons are bound to their answer.** Callback data is `qa:<answer key>:<index>` / `sg:<key>:<index>` where the
+  key is a hash of the answer text; a button whose answer is not found is refused, never resolved against a newer
+  answer.
+- **Recorder lease.** TTL is twice the interval plus a minute; renewal is owner-checked in one Redis EVAL; a Redis
+  error means no tick is recorded; a tick within half an interval of the channel's latest is skipped (sample
+  buckets are idempotent across recorders).
+- **Recheck of 2910d5e8.** Reminders take a delivery channel only from an affirmative trailing clause and keep
+  negations ("Do not email me" → in-app); a lowercase name in a data-ask position ("price of pepe") is a subject
+  switch; `composition.plan_asks` strips the resolution note before splitting, drops format-only clauses ("Mark
+  database-only claims", "If unavailable, say so") into an instruction note for the synthesis, and carries the lead
+  clause's asset and constraints into subject-less clauses ("Explain how the yield can change (context: …)").

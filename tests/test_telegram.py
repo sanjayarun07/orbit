@@ -241,7 +241,7 @@ def test_a_button_names_a_position_and_the_action_comes_from_the_server(monkeypa
 
     asyncio.run(bot.handle_update({
         "update_id": 5,
-        "callback_query": {"id": "cb1", "data": "qa:0", "from": {"id": 999},
+        "callback_query": {"id": "cb1", "data": f"qa:{render.answer_key('…')}:0", "from": {"id": 999},
                            "message": {"message_id": 3, "chat": {"id": 555, "type": "private"}}},
     }))
     body, _ = seen[-1]
@@ -250,7 +250,7 @@ def test_a_button_names_a_position_and_the_action_comes_from_the_server(monkeypa
 
     asyncio.run(bot.handle_update({
         "update_id": 6,
-        "callback_query": {"id": "cb2", "data": "sg:0", "from": {"id": 999},
+        "callback_query": {"id": "cb2", "data": f"sg:{render.answer_key('…')}:0", "from": {"id": 999},
                            "message": {"message_id": 3, "chat": {"id": 555, "type": "private"}}},
     }))
     assert seen[-1][0].message == "what moved it?"
@@ -596,7 +596,12 @@ def test_claiming_attaches_telegram_to_whatever_account_you_signed_into(monkeypa
     assert http.post("/auth/telegram/claim", json={"token": token}).status_code in (401, 403)
 
     me = sign_in(http, email="ravi@example.com")
-    body = http.post("/auth/telegram/claim", json={"token": token})
+    # Nothing attaches on its own: the page previews who the link would connect and the person confirms.
+    assert http.post("/auth/telegram/claim", json={"token": token}).status_code == 400
+    preview = http.get("/auth/telegram/claim/preview", params={"token": token})
+    assert preview.status_code == 200 and preview.json()["display"] == "@trader" and preview.json()["confirmation"]
+    assert asyncio.run(accounts.find_identity_owner("telegram", "999")) is None            # previewing linked nothing
+    body = http.post("/auth/telegram/claim", json={"token": token, "confirmation": preview.json()["confirmation"]})
     assert body.status_code == 200 and body.json()["linked"] is True
     assert asyncio.run(accounts.find_identity_owner("telegram", "999"))["id"] == me["user"]["id"]
     # The loop closes where it started.
@@ -609,12 +614,19 @@ def test_a_claim_token_works_once_and_a_web_token_is_not_a_claim_token(monkeypat
 
     token = asyncio.run(tg_identity.start_link_from_telegram({"id": 999}))
     monkeypatch.setattr(tg_client, "send_message", lambda *a, **k: _noop())
-    assert http.post("/auth/telegram/claim", json={"token": token}).status_code == 200
-    assert http.post("/auth/telegram/claim", json={"token": token}).status_code == 400   # single use
+
+    def confirm(tok):
+        pre = http.get("/auth/telegram/claim/preview", params={"token": tok})
+        return pre.json().get("confirmation") if pre.status_code == 200 else None
+    nonce = confirm(token)
+    assert http.post("/auth/telegram/claim", json={"token": token, "confirmation": nonce}).status_code == 200
+    assert confirm(token) is None                                                             # single use: no preview either
+    assert http.post("/auth/telegram/claim", json={"token": token, "confirmation": nonce}).status_code == 400
 
     # A web->Telegram token must not be redeemable as a Telegram->web claim.
     web_token = asyncio.run(tg_identity.start_link("some-user-id"))
-    assert http.post("/auth/telegram/claim", json={"token": web_token}).status_code == 400
+    assert http.get("/auth/telegram/claim/preview", params={"token": web_token}).status_code == 400
+    assert http.post("/auth/telegram/claim", json={"token": web_token, "confirmation": "x"}).status_code == 400
 
 
 def test_a_telegram_token_is_not_redeemable_as_a_start_payload(monkeypatch, sent):
@@ -700,3 +712,63 @@ def test_a_slow_turn_is_not_cancelled_and_its_answer_still_arrives(monkeypatch, 
     text = " ".join(str(p.get("text", "")) for m, p in sent if m in ("sendMessage", "editMessageText"))
     assert "Still working" in text          # the user is told, not left hanging
     assert "the late answer" in text        # and the answer arrives when it lands
+
+
+
+# ---------------------------------------------------------------- review of 330bc651
+
+def test_a_confirmation_is_bound_to_the_session_that_previewed(monkeypatch, sent):
+    """An attacker's link opened by a victim previews only; a nonce from one
+    session cannot confirm in another, and a confirmation without a preview
+    does not exist."""
+    monkeypatch.setattr(tg_client, "send_message", lambda *a, **k: _noop())
+    token = asyncio.run(tg_identity.start_link_from_telegram({"id": 4242, "username": "attacker"}))
+    victim = TestClient(app)
+    sign_in(victim, email="victim@example.com")
+    nonce = victim.get("/auth/telegram/claim/preview", params={"token": token}).json()["confirmation"]
+    other = TestClient(app)
+    sign_in(other, email="other@example.com")
+    assert other.post("/auth/telegram/claim", json={"token": token, "confirmation": nonce}).status_code == 400
+    assert victim.post("/auth/telegram/claim", json={"token": token, "confirmation": "made-up"}).status_code == 400
+    assert asyncio.run(accounts.find_identity_owner("telegram", "4242")) is None
+
+
+def test_a_disabled_deployment_rejects_every_update(monkeypatch):
+    monkeypatch.setattr(settings, "telegram_bot_token", None)
+    monkeypatch.setattr(settings, "telegram_webhook_secret", None)
+    assert tg_client.webhook_secret() is None and not tg_client.enabled()
+    http = TestClient(app)
+    guess = __import__("hashlib").sha256(b"orbit-telegram-webhook:").hexdigest()[:32]
+    r = http.post(f"/telegram/webhook/{guess}", json={"update_id": 1, "message": {"text": "hi", "chat": {"id": 1, "type": "private"}, "from": {"id": 1}}},
+                  headers={"X-Telegram-Bot-Api-Secret-Token": guess})
+    assert r.status_code == 404
+
+
+def test_after_unlink_the_next_message_gets_its_own_conversation(monkeypatch, sent):
+    seen = _turns(monkeypatch)
+
+    def update(text, n):
+        u = _message(text); u["update_id"] = n
+        return u
+    asyncio.run(bot.handle_update(update("price of BONK", 101)))
+    first_session = seen[-1][0].session_id
+    asyncio.run(bot.handle_update(update("/unlink", 102)))
+    asyncio.run(bot.handle_update(update("price of WIF", 103)))
+    assert seen[-1][0].session_id != first_session and seen[-1][0].session_id.startswith(first_session)
+    assert not any("belongs to another account" in str(p.get("text", "")) for m, p in sent if m == "sendMessage")
+
+
+def test_a_button_on_an_older_answer_is_refused_not_redirected(monkeypatch, sent):
+    old_key, new_key = render.answer_key("first answer"), render.answer_key("second answer")
+
+    async def fake_messages(session_id):
+        return [{"role": "assistant", "content": "first answer", "suggestions": ["Explain BONK holders"]},
+                {"role": "assistant", "content": "second answer", "suggestions": ["Watch my ANSEM exit"]}]
+    monkeypatch.setattr(bot.sessions, "get_messages", fake_messages)
+    seen = _turns(monkeypatch)
+    asyncio.run(bot.handle_update({"update_id": 7, "callback_query": {"id": "cb7", "data": f"sg:{old_key}:0", "from": {"id": 999},
+                                                                       "message": {"message_id": 1, "chat": {"id": 555, "type": "private"}}}}))
+    assert seen[-1][0].message == "Explain BONK holders"                                  # the old button still means what it said
+    asyncio.run(bot.handle_update({"update_id": 8, "callback_query": {"id": "cb8", "data": "sg:0", "from": {"id": 999},
+                                                                       "message": {"message_id": 1, "chat": {"id": 555, "type": "private"}}}}))
+    assert seen[-1][0].message == "Explain BONK holders" and any("older answer" in str(p.get("text", "")) for m, p in sent if m == "sendMessage")

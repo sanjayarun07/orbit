@@ -47,6 +47,11 @@ def webhook_secret() -> str:
     if settings.telegram_webhook_secret:
         return settings.telegram_webhook_secret
     token = settings.telegram_bot_token or ""
+    if not token:
+        # Nothing to derive from: an unconfigured deployment has no webhook
+        # secret at all, so the route cannot be satisfied (review of
+        # 330bc651: a constant hash of the empty token accepted forged updates).
+        return None
     return hashlib.sha256(f"orbit-telegram-webhook:{token}".encode()).hexdigest()[:32]
 
 
