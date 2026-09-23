@@ -2955,3 +2955,12 @@ the model; an address inside a source URL is never a wallet (`context_entities._
 at a sentence, and the general node applies the same headline-tap cut as the research node (`composition.cut_to_limit`;
 a tap classed as an explanation ran 600 words); the Home card for Base gainers is labelled as the Base-ecosystem list
 with global prices. Service-worker shell v14.
+
+**The two composition gaps the trust run left (2026-09-24).** An ask that names three or more of the deep-dive lens's
+dimensions about one token ("Build an evidence table: identity, holders, liquidity, deployer and security") is a
+due-diligence ask whatever verb it uses (`token_deepdive.names_dimensions`, counted from the lens's own dimension
+vocabulary); it ran one dimension, now the full lens. A compound answer whose first clause came from the contract
+pipeline showed two "Taken together" blocks: `composition.strip_synthesis` now strips the block behind a bold lead
+and keeps the lead (the gap sentence is a finding, not prose). The trust harness takes `--wallet <address>` (sent as
+the connected wallet on every turn; the tester's is the SOL+ANSEM wallet the user supplied) and `--include-skipped`
+(runs the cases that create notifications, watches and reminders; only with the user's approval, and clean up after).

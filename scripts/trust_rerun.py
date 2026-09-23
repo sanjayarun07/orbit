@@ -65,7 +65,7 @@ async def headline_cases() -> list[dict]:
     return out
 
 
-async def run(cases: list[dict], out_dir: Path) -> None:
+async def run(cases: list[dict], out_dir: Path, wallet: str | None = None) -> None:
     from app import accounts
     from app.execution_policy import execute_chat_turn
     from app.identity import _identity_for_user
@@ -95,7 +95,7 @@ async def run(cases: list[dict], out_dir: Path) -> None:
     records = out_dir / "turns.jsonl"
     transcript = out_dir / "transcript.md"
     with transcript.open("w") as t:
-        t.write(f"# Trust re-run — {stamp} UTC — build {git_sha()}\n\nTester account, no connected wallet. One session per persona.\n\n")
+        t.write(f"# Trust re-run — {stamp} UTC — build {git_sha()}\n\nTester account, connected wallet: {wallet or 'none'}. One session per persona.\n\n")
     for n, case in enumerate(cases, start=1):
         rec = {**case, "at": datetime.now(timezone.utc).isoformat()}
         rec.pop("card", None)
@@ -107,7 +107,7 @@ async def run(cases: list[dict], out_dir: Path) -> None:
             try:
                 for attempt in (0, 1):
                     try:
-                        resp = await asyncio.wait_for(execute_chat_turn(ChatRequest(message=case["prompt"], session_id=session), identity), timeout=170)
+                        resp = await asyncio.wait_for(execute_chat_turn(ChatRequest(message=case["prompt"], session_id=session, wallet_address=wallet), identity), timeout=170)
                         break
                     except Exception as exc:  # noqa: BLE001
                         if attempt == 0 and "already updating this chat" in str(exc):
@@ -145,15 +145,20 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=None)
     ap.add_argument("--only", default=None, help="comma-separated case ids or personas")
+    ap.add_argument("--wallet", default=None, help="public address sent as the connected wallet on every turn")
+    ap.add_argument("--include-skipped", action="store_true", help="run the cases that create notifications, alerts, reminders or watches (needs the user's approval)")
     args = ap.parse_args()
     out_dir = Path(args.out or (ROOT / f"reports/trust-rerun-{git_sha()}"))
     cases = load_cases()
     cases += asyncio.run(headline_cases())
+    if args.include_skipped:
+        for c in cases:
+            c.pop("skip", None)
     if args.only:
         keep = set(args.only.split(","))
         cases = [c for c in cases if c["id"] in keep or c["persona"] in keep]
     print(f"{len(cases)} cases -> {out_dir}", flush=True)
-    asyncio.run(run(cases, out_dir))
+    asyncio.run(run(cases, out_dir, args.wallet))
 
 
 if __name__ == "__main__":

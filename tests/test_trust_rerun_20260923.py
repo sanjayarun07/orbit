@@ -56,7 +56,9 @@ def test_a_tokens_pools_with_a_liquidity_floor_are_state_not_web():
             "| Pair | Chain / DEX | Priced token | Price | 24h volume | Liquidity | 24h price change |\n|---|---|---|---:|---:|---:|---:|\n"
             "| BONK/SOL | solana / orca | BONK | $0.00002 | $1.2M | $4.03M | -1.2% |\n| BONK/USDC | solana / meteora | BONK | $0.00002 | $0.1M | $416.47K | -1.1% |\n"
             "| BONK/SOL | solana / raydium | BONK | $0.00002 | $2.0M | $2.9M | -1.3% |\n| BONK/USDC | solana / meteora | BONK | $0.00002 | $0.9M | $3.24M | -1.0% |\n")
+    from datetime import datetime, timezone
+    at = datetime(2026, 9, 23, 18, 10, tzinfo=timezone.utc)                  # the card is stamped 18:00 UTC; the gate measures age
     rows = facts.facts_from_card("dexscreener_token_pairs", card, "market_ranking")
-    assert fact_gate.check(c, rows).ok
+    assert fact_gate.check(c, rows, now=at).ok
     thin = [r for r in rows if r.attrs["liquidity_usd"] < 1_000_000] * 3
-    assert not fact_gate.check(c, thin).ok
+    assert not fact_gate.check(c, thin, now=at).ok

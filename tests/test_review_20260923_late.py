@@ -100,3 +100,20 @@ def test_a_headline_tap_answered_by_the_general_node_is_cut_to_the_tap_limit(mon
     out = asyncio.run(general.general_node(state))
     body = out["answer"].split("\n\nSources:")[0]
     assert len(body.split()) <= composition.HEADLINE_TAP_WORDS + 5 and body.rstrip().endswith("read.")
+
+
+def test_a_pipeline_lead_survives_the_strip_but_its_summary_does_not():
+    piped = "**Not established: enough ranked rows (0 of 3).**\n\n**Taken together**\n\nsummary prose\n\n---\n\n# Card\n| a | b |\n"
+    out = composition.strip_synthesis(piped)
+    assert out.startswith("**Not established: enough ranked rows (0 of 3).**\n\n# Card") and "Taken together" not in out
+    assert composition.strip_synthesis("**Taken together**\n\nx\n\n---\n\n# Card") == "# Card"
+    assert composition.strip_synthesis("# Card only") == "# Card only"
+
+
+def test_an_ask_naming_three_dimensions_of_one_token_is_a_deep_dive():
+    from app import token_deepdive
+    five = "Build an evidence table for Solana token 9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump: identity, holders, liquidity, deployer and security. Include sources, timestamps and missing data."
+    assert token_deepdive.names_dimensions(five) >= 3
+    assert token_deepdive.names_dimensions("Who are the top holders of PEPE?") == 1
+    assert token_deepdive.names_dimensions("Find BONK pools on Solana with at least $1000000 liquidity") == 1
+    assert token_deepdive.names_dimensions("How's the crypto market today?") == 0

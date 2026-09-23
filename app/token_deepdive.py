@@ -85,6 +85,27 @@ _SECURITY = ("token_security", "token_discovery")
 _HOLDERS = ("token_discovery", "token_security")
 
 
+# The lens's dimensions as a reader names them: an ask that names three or
+# more of them about one token is a due-diligence ask whatever verb it uses
+# ("Build an evidence table: identity, holders, liquidity, deployer and
+# security" ran one dimension in the frozen trust run, 2026-09-23).
+_DIMENSION_WORDS = {
+    "identity_safety": re.compile(r"\b(?:identity|canonical|verified|legit(?:imacy)?|mint\s+authority|freeze\s+authority|honeypot|rug)\b", re.I),
+    "holders": re.compile(r"\b(?:holders?|concentration|whales?|top\s+wallets?|distribution)\b", re.I),
+    "liquidity": re.compile(r"\b(?:liquidity|pools?|lp\b|depth|slippage)\b", re.I),
+    "deployer": re.compile(r"\b(?:deployer|creator|launch|bundl\w+|snip\w+|first\s+buyers?)\b", re.I),
+    "security": re.compile(r"\b(?:security|audit\w*|contract\s+risk|exploit|permissions?|upgradeable|proxy)\b", re.I),
+    "supply": re.compile(r"\b(?:unlocks?|vesting|supply\s+schedule|emissions?|inflation|circulating)\b", re.I),
+    "sentiment": re.compile(r"\b(?:sentiment|social|twitter|crypto\s+twitter|\bx\s+says?)\b", re.I),
+    "market": re.compile(r"\b(?:price\s+action|volume|market\s+cap|mcap|fdv|momentum)\b", re.I),
+}
+
+
+def names_dimensions(request: str) -> int:
+    """How many of the lens's dimensions the request names."""
+    return sum(1 for pattern in _DIMENSION_WORDS.values() if pattern.search(request or ""))
+
+
 @dataclass
 class DimensionEvidence:
     name: str          # canonical dimension id (e.g. "identity_safety")

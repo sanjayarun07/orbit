@@ -212,13 +212,19 @@ def carry_subject(clauses: list[str], request: str) -> list[str]:
     return [c if (_ADDRESS.search(c) or _symbol_in(c)) else c + tail for c in clauses]
 
 
-_SYNTHESIS_HEAD = re.compile(r"^\*\*Taken together\*\*\n\n.*?\n\n---\n\n", re.S)
+_SYNTHESIS_HEAD = re.compile(r"^(?P<lead>\*\*[^\n]+\*\*\n\n)?\*\*Taken together\*\*\n\n.*?\n\n---\n\n", re.S)
 
 
 def strip_synthesis(answer: str) -> str:
     """The cards without an earlier "Taken together" block, so a second
-    composition reads the cards and writes one summary, not two."""
-    return _SYNTHESIS_HEAD.sub("", answer or "", count=1)
+    composition reads the cards and writes one summary, not two. A bold
+    lead before the block (the contract pipeline's gap sentence, "Not
+    established: …") is kept above the cards: it is a finding, not prose
+    (a compound answer showed two "Taken together" blocks, 2026-09-23)."""
+    m = _SYNTHESIS_HEAD.match(answer or "")
+    if not m:
+        return answer or ""
+    return (m.group("lead") or "") + (answer or "")[m.end():]
 
 
 def _shift(trajectory: dict, by: int) -> dict:

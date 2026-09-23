@@ -2112,7 +2112,9 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     # Never for an equity ask: "is MSTR a good buy" is classed equity by the
     # router, but this intercept ran first and resolved MSTR to a tokenized-
     # stock namesake on Jupiter, so a stock question got a token deep dive.
-    if _DEEPDIVE.search(request) and not TRENDING_TOKENS.search(request) and ("equity_research" not in set(state.get("capabilities", [])) or _TOKEN_ADDRESS.search(request)):
+    from app import token_deepdive as _lens
+    multi_dimension = _lens.names_dimensions(request) >= 3 and bool(_TOKEN_ADDRESS.search(request) or _named_tickers(request))
+    if (_DEEPDIVE.search(request) or multi_dimension) and not TRENDING_TOKENS.search(request) and ("equity_research" not in set(state.get("capabilities", [])) or _TOKEN_ADDRESS.search(request)):
         # An equity-classed ask still gets the token lens when it carries a
         # contract address: "deep dive on 0x… on robinhood" is a Robinhood
         # Chain token, and an address is never a stock (live, 2026-09-18).
