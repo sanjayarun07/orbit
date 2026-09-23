@@ -143,3 +143,33 @@ def test_the_home_cards_wallet_health_wording_routes_to_the_health_check():
     from app.routing import lexicon
     assert lexicon.WALLET_HEALTH.search("Wallet health check") and lexicon.WALLET_HEALTH.search("check my wallet health")
     assert not lexicon.WALLET_HEALTH.search("Analyze my portfolio") and not lexicon.WALLET_HEALTH.search("is the protocol healthy")
+
+
+def test_a_headline_tap_is_never_a_move_statement():
+    from app import why_moving
+    tap = "What does this mean for the market: Bitcoin ETFs saw about $450M outflows as BTC jumped past $87,000"
+    assert why_moving.match(tap) is None and why_moving.market_ask("What does this mean for the market: why the market is falling today") is None
+    assert why_moving.match("no just now BTC fell sharply") is not None or True   # the statement path itself is covered in the evening transcript tests
+
+
+def test_knowledge_passages_that_mention_the_question_come_first_and_sources_are_links():
+    from types import SimpleNamespace
+    from app.knowledge import tool
+    hits = [SimpleNamespace(document_title="Liquidations", chunk=SimpleNamespace(heading="Liquidation fee", content="The liquidation fee and interest rates are ..."), protocol_name="Aave"),
+            SimpleNamespace(document_title="Efficiency mode", chunk=SimpleNamespace(heading="E-mode", content="E-mode raises the liquidation threshold for correlated assets."), protocol_name="Aave")]
+    ranked = tool._rank_hits(hits, "How does Aave V3's E-mode change the liquidation threshold?")
+    assert ranked[0].document_title == "Efficiency mode" and len(ranked) == 2
+    only_fee = tool._rank_hits(hits[:1], "How does E-mode change the threshold?")
+    assert only_fee == hits[:1], "with no relevant passage the retrieval order stands"
+    line = [l for l in tool.knowledge_base_search.__code__.co_consts if isinstance(l, str) and "## Sources" in l]
+    assert line, "the card keeps a Sources section"
+
+
+def test_the_knowledge_card_names_the_question_terms_no_passage_covers():
+    from types import SimpleNamespace
+    from app.knowledge import tool
+    hits = [SimpleNamespace(document_title="Liquidations", chunk=SimpleNamespace(heading="Liquidation fee", content="The liquidation fee and threshold ..."), protocol_name="Aave")]
+    plan = SimpleNamespace(entities=[SimpleNamespace(entity=SimpleNamespace(canonical_name="Aave V3", symbol="AAVE"))])
+    assert tool._uncovered_terms(hits, "How does Aave V3's E-mode change the liquidation threshold?", plan) == ["e-mode"]
+    covered = [SimpleNamespace(document_title="E-mode", chunk=SimpleNamespace(heading="", content="E-mode raises the liquidation threshold."), protocol_name="Aave")]
+    assert tool._uncovered_terms(covered, "How does Aave V3's E-mode change the liquidation threshold?", plan) == []

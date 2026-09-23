@@ -152,6 +152,42 @@ def _compact_passages(context: str) -> str:
     return "\n\n".join(out)
 
 
+_STOP_WORDS = {"what", "which", "when", "where", "does", "do", "how", "why", "the", "and", "for", "with", "that", "this", "from", "into",
+               "about", "change", "changes", "work", "works", "mean", "means", "have", "has", "are", "is", "its", "their", "your", "explain"}
+
+
+def _question_terms(request: str) -> set[str]:
+    """The question's content words: what a relevant passage has to mention."""
+    words = re.findall(r"[a-z0-9][a-z0-9-]{2,}", (request or "").lower())
+    return {w for w in words if w not in _STOP_WORDS and not w.isdigit()}
+
+
+def _rank_hits(hits, request: str):
+    """The passages that mention the question's own terms first, and only
+    those when any do: an E-mode question showed passages about liquidation
+    fees and interest rates because retrieval ranks by the protocol, not the
+    ask (UI review, 2026-09-24). Retrieval order breaks ties."""
+    terms = _question_terms(request)
+    if not terms:
+        return list(hits)
+    scored = []
+    for index, hit in enumerate(hits):
+        haystack = " ".join([hit.document_title or "", getattr(hit.chunk, "heading", "") or "", hit.chunk.content or ""]).lower()
+        scored.append((sum(1 for t in terms if t in haystack), -index, hit))
+    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    relevant = [hit for score, _, hit in scored if score > 0]
+    return relevant or [hit for _, _, hit in scored]
+
+
+def _uncovered_terms(hits, request: str, plan) -> list[str]:
+    """The question's own terms that no passage mentions, the entity's name
+    aside: the card says "not in these passages: e-mode" instead of letting
+    fee passages stand in for an E-mode answer (UI review, 2026-09-24)."""
+    names = {w for e in getattr(plan, "entities", []) or [] for n in (e.entity.canonical_name, e.entity.symbol or "") for w in re.findall(r"[a-z0-9-]+", (n or "").lower())}
+    haystack = " ".join(" ".join([h.document_title or "", getattr(h.chunk, "heading", "") or "", h.chunk.content or ""]) for h in hits).lower()
+    return sorted(t for t in _question_terms(request) if t not in names and t not in haystack)
+
+
 def knowledge_base_search(request: str) -> str:
     """Retrieve passages with citations for a protocol / concept question."""
     hits, plan = _run(_search_with_resolver(request))
@@ -159,7 +195,8 @@ def knowledge_base_search(request: str) -> str:
         # No output means the router moves on to the next tool; a citation
         # list that cannot mention the subject is not an answer.
         raise RuntimeError("No indexed knowledge matched this question")
-    context, citations = build_context(hits)
+    uncovered = _uncovered_terms(hits, request, plan)
+    context, citations = build_context(_rank_hits(hits, request))
     entities = ", ".join(f"{r.entity.canonical_name} ({r.entity.entity_type}, {r.confidence:.2f})" for r in plan.entities[:6]) or "none resolved"
     # The card is what the user sees as well as what the model reads: the
     # passages, each cut to a readable length, and the sources -- never an
@@ -171,11 +208,13 @@ def knowledge_base_search(request: str) -> str:
         "# Knowledge base",
         f"**Provider**: Dopamint knowledge service · **Entities**: {entities}" + (f" · **Graph**: {len(plan.graph_expanded)} related" if plan.graph_expanded else ""),
         "",
+        *([f"**Not in these passages**: {', '.join(uncovered)}. The passages below are about {plan.entities[0].entity.canonical_name if getattr(plan, 'entities', None) else 'the protocol'} "
+           "but not that; an answer can say so, never fill it in."] if uncovered else []),
         "## Passages",
         passages,
         "",
         "## Sources",
-        *[f"[{c['n']}] {c['protocol'] + ' · ' if c['protocol'] else ''}{c['title']}{' › ' + c['heading'] if c['heading'] else ''} — {c['url']} ({'/'.join(c['sources'])})" for c in citations],
+        *[f"[{c['n']}] [{c['title']}{' › ' + c['heading'] if c['heading'] else ''}]({c['url']})" + (f" · {c['protocol']}" if c['protocol'] else "") + f" ({'/'.join(c['sources'])})" for c in citations],
     ]
     return "\n".join(lines)
 

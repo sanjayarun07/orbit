@@ -59,11 +59,22 @@ STATEMENT = re.compile(
 MARKET = re.compile(r"\bwhy\s+(?:is|are|did|has|was|were)?\s*(?:the\s+)?(?:crypto\s+|whole\s+|entire\s+)?markets?\s+(?:is\s+|are\s+)?(?P<dir>falling|down|dumping|crashing|bleeding|red|up|rallying|pumping|green|rising|dropping|tanking)\b", re.I)
 
 
+def _headline_tap(request: str) -> bool:
+    """A Home headline tap quotes a headline; "BTC jumped past $87,000" inside
+    it is the headline's words, not the user's statement about a move (a tap
+    on an ETF-outflows headline answered "Why is BTC up?", UI review
+    2026-09-24). The headline is answered as the question it is."""
+    from app.composition import _HEADLINE_TAP
+    return bool(_HEADLINE_TAP.match(request or ""))
+
+
 def market_ask(request: str) -> str | None:
     """"Why is the market falling?": the crypto market, led by BTC, unless
     stocks are named (Orbit is a Web3 copilot; the stock market only on
     request). Returns the direction or None."""
     text = request or ""
+    if _headline_tap(text):
+        return None
     m = MARKET.search(text)
     if not m or prefers_stock(text):
         return None
@@ -85,6 +96,8 @@ def _is_ticker(raw: str) -> bool:
 
 
 def match(request: str) -> tuple[str, str] | None:
+    if _headline_tap(request):
+        return None
     m = PATTERN.search(request or "")
     if not m:
         m2 = STATEMENT.search(request or "")

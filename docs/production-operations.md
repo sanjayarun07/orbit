@@ -2985,3 +2985,11 @@ asking again reschedules and resumes it, `tasks_nl`); and the Home card's own wo
 no possessive, so it went to the plain portfolio read and never showed the coverage and fee lines the card promises
 (`lexicon.WALLET_HEALTH` knows the bare phrase). Everything the run created was deleted afterwards. The harness backs
 off 25 s on the per-account chat limiter, which sub-second control turns trip.
+
+**UI review of fa8ed377 (2026-09-24).** A Home headline tap quoting "BTC jumped past $87,000" was read as the user's own
+move statement and answered "Why is BTC up?" while the headline was about ETF outflows: a headline tap
+(`composition._HEADLINE_TAP`) is never a why-moving ask (`why_moving._headline_tap`); it is answered as the headline's
+question through the open-research contract. The knowledge card ranks passages by the question's own terms
+(`knowledge.tool._rank_hits`), renders its sources as links, and when no passage mentions a term the question named
+(`_uncovered_terms`, the entity's name aside) it says so at the top ("Not in these passages: e-mode") so the answer
+states the gap instead of answering from passages about fees.
