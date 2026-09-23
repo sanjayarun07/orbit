@@ -94,8 +94,10 @@ def run_episode(episode: dict) -> dict:
     return {"id": episode["id"], "ok": not failures, "failures": failures, "ms": ms, "tools": router.calls}
 
 
-def _judge(episode: dict, out: dict | None, calls: list[str], answer_override: str | None = None) -> list[str]:
-    """The goal checks shared by replay and live runs."""
+def _judge(episode: dict, out: dict | None, calls: list[str], answer_override: str | None = None, live: bool = False) -> list[str]:
+    """The goal checks shared by replay and live runs. `replay_must_contain`
+    names fixture values (AERO leads the fixture's Base gainers); a live run
+    checks only provider-independent text."""
     goal = episode.get("goal") or {}
     failures: list[str] = []
     if goal.get("pipeline") == "legacy":
@@ -121,7 +123,7 @@ def _judge(episode: dict, out: dict | None, calls: list[str], answer_override: s
         have = sum(1 for f in out.get("facts") or [] if f.startswith(kind + ":"))
         if have < n:
             failures.append(f"{have} {kind} facts, need {n}")
-    for text in goal.get("must_contain") or []:
+    for text in list(goal.get("must_contain") or []) + ([] if live else list(goal.get("replay_must_contain") or [])):
         if text not in answer:
             failures.append(f"missing text: {text!r}")
     for key in ("must_contain_any", "must_contain_any_2"):
@@ -192,7 +194,7 @@ def run_live(episode: dict) -> dict:
     delta = {k: after.get(k, 0) - before.get(k, 0) for k in set(after) | set(before) if after.get(k, 0) != before.get(k, 0)}
     trajectory = out.get("trajectory") or {}
     calls = [v for k, v in trajectory.items() if k.startswith("tool_name")]
-    failures = _judge(episode, out, calls)
+    failures = _judge(episode, out, calls, live=True)
     return {"id": episode["id"], "ok": not failures, "failures": failures, "ms": ms, "tools": calls,
             "llm_calls": delta.get("llm_calls", 0), "perplexity_calls": sum(v for k, v in delta.items() if k.startswith("perplexity_") and k.endswith("_calls")),
             "perplexity_cost_usd": delta.get("perplexity_estimated_cost_microusd", 0) / 1e6, "pipeline": out.get("pipeline", "legacy"),
@@ -243,7 +245,7 @@ def main() -> int:
                        "ms_mean": sum(r["ms"] for r in runs) / len(runs), "tools": runs[0]["tools"],
                        "llm_calls": sum(r.get("llm_calls", 0) for r in runs) / len(runs), "perplexity_calls": sum(r.get("perplexity_calls", 0) for r in runs) / len(runs),
                        "cost_usd": sum(r.get("perplexity_cost_usd", 0) for r in runs) / len(runs), "pipeline": runs[0].get("pipeline"), "answer_head": runs[0].get("answer_head")})
-        print(f"{episode['id']:32} {'PASS' if ok_k else 'FAIL':4} {report[-1]['passes']}/{args.k} {report[-1]['ms_mean']:7.0f} ms  {runs[0]['tools'][:3]}" + ("" if ok_k else "  " + " | ".join(report[-1]["failures"])[:220]))
+        print(f"{episode['id']:32} {'PASS' if ok_k else 'FAIL':4} {report[-1]['passes']}/{args.k} {report[-1]['ms_mean']:7.0f} ms  {runs[0]['tools'][:3]}" + ("" if ok_k else "  " + " | ".join(report[-1]["failures"])[:220]), flush=True)
     print(f"\nepisodes {len(episodes)} · pass^{args.k} {passed_k}/{len(episodes)} · wrong-answer rate {wrong / max(1, len(episodes)):.0%}"
           + (f" · mean {sum(r['ms_mean'] for r in report) / max(1, len(report)):.0f} ms · mean LLM calls {sum(r['llm_calls'] for r in report) / max(1, len(report)):.1f} · mean web cost ${sum(r['cost_usd'] for r in report) / max(1, len(report)):.3f}" if args.live else ""))
     if args.out:

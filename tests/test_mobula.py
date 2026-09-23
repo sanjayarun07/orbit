@@ -647,6 +647,52 @@ def test_a_429_pauses_everyone_and_refuses_background_outright(monkeypatch):
     assert not _mobula_client.cooling() and _mobula_client.background_ok()
 
 
+def test_a_header_less_429_is_retried_once_before_anyone_is_paused(monkeypatch):
+    """Mobula's "Max usage reached" 429 clears within a second (live probe,
+    2026-09-23); a user's call retries once, and only a second 429 cools the
+    deployment down. Background calls never retry."""
+    from app.settings import settings as _s
+    monkeypatch.setattr(_s, "mobula_api_key", "test-key")
+    monkeypatch.setattr(_mobula_client, "MAX_WAIT_SECONDS", 0.05)
+    monkeypatch.setattr(_mobula_client, "RETRY_ONCE_SECONDS", 0.0)
+    _mobula_client.reset_for_test()
+    statuses = [429, 200]
+    sent = []
+
+    class Response:
+        def __init__(self, status):
+            self.status_code, self.headers = status, {}
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise _mobula_client.httpx.HTTPStatusError("x", request=None, response=self)
+        def json(self):
+            return {"data": [{"ok": True}]}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def get(self, url, params=None, headers=None):
+            sent.append(url)
+            return Response(statuses.pop(0))
+    monkeypatch.setattr(_mobula_client.httpx, "Client", Client)
+    assert _REAL_CLIENT_GET(2, "/token/holder-positions", {}) == [{"ok": True}]
+    assert len(sent) == 2 and not _mobula_client.cooling()
+    statuses[:] = [429, 429]
+    with pytest.raises(_mobula_client.httpx.HTTPStatusError):
+        _REAL_CLIENT_GET(2, "/token/holder-positions", {})
+    assert len(sent) == 4 and _mobula_client.cooling()
+    _mobula_client.reset_for_test()
+    statuses[:] = [429]
+    with pytest.raises(_mobula_client.httpx.HTTPStatusError):
+        _REAL_CLIENT_GET(2, "/token/holder-positions", {}, background=True)
+    assert len(sent) == 5, "a background call never retries"
+    _mobula_client.reset_for_test()
+
+
 def test_background_takes_only_from_a_half_full_bucket(monkeypatch):
     from app.settings import settings as _s
     monkeypatch.setattr(_s, "mobula_requests_per_minute", 60)

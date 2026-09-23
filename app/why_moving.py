@@ -71,11 +71,25 @@ def market_ask(request: str) -> str | None:
     return "up" if any(raw.startswith(w) for w in _UP) else "down"
 
 
+def _is_ticker(raw: str) -> bool:
+    """A statement's subject is a ticker when CoinGecko lists it: written as
+    one ($BTC, BTC) any listing will do; written in lowercase ("btc fell
+    sharply") one listed coin must clearly lead, so "tokens went up the most"
+    is never a statement about a coin called WENT (live episode, 2026-09-23)."""
+    from app import symbol_registry
+    sym = raw.lstrip("$").upper()
+    rows = symbol_registry.listed(sym)
+    if raw.startswith("$") or raw.isupper():
+        return bool(rows)
+    return symbol_registry.leader(rows) is not None
+
+
 def match(request: str) -> tuple[str, str] | None:
     m = PATTERN.search(request or "")
     if not m:
         m2 = STATEMENT.search(request or "")
-        if m2 and m2.group("sym").upper() not in _STOP and m2.group("sym").upper() not in {"USD", "USDC", "USDT", "AI", "ETF", "NFT", "DEX", "CEX", "LP"}:
+        if m2 and m2.group("sym").upper() not in _STOP and m2.group("sym").upper() not in {"USD", "USDC", "USDT", "AI", "ETF", "NFT", "DEX", "CEX", "LP"} \
+                and _is_ticker(m2.group(0).strip().split()[0]):
             raw = m2.group("dir").lower()
             direction = "up" if any(raw.startswith(w) for w in _UP) else "down" if any(raw.startswith(w) for w in _DOWN) else "moving"
             return m2.group("sym").upper(), direction
@@ -181,8 +195,17 @@ async def _news(query: str) -> str | None:
 
 
 def _trim(markdown: str, limit: int = 1800) -> str:
+    """The narrative cut to `limit` on a line boundary; a trailing "Sources:"
+    block always survives the cut, so a long news day never drops the
+    citations (the why-SOL episode lost them 5 of 5 after 15:00 UTC, 2026-09-23)."""
     text = (markdown or "").strip()
-    return text if len(text) <= limit else text[:limit].rsplit("\n", 1)[0] + "\n…"
+    body, sources = text, ""
+    marker = text.rfind("\nSources:")
+    if marker >= 0:
+        body, sources = text[:marker].rstrip(), text[marker:].strip()
+    if len(body) > limit:
+        body = body[:limit].rsplit("\n", 1)[0] + "\n…"
+    return body + ("\n\n" + sources if sources else "")
 
 
 async def compose(sym: str, direction: str, prefer_stock: bool = False) -> tuple[str, dict]:

@@ -104,6 +104,15 @@ def test_facts_are_typed_and_burn_addresses_classified():
     assert r[0].observed_at is not None
 
 
+def test_a_card_is_as_fresh_as_the_latest_stamp_on_its_provider_line():
+    # A ledger card carries its baseline and its last tick; the last tick is
+    # when the data was seen (Aster losers "232 min old", live 2026-09-23).
+    card = ("# Pairs down the most on Aster since 2026-09-23 00:00 UTC\n"
+            "**Provider**: Tequity tick ledger · **From tick**: 2026-09-23 10:53 UTC · **To tick**: 2026-09-23 14:56 UTC · 40 pairs present at both ends\n")
+    assert facts.observed_at(card) == "2026-09-23T14:56:00+00:00"
+    assert facts.observed_at("**Checked**: 2026-09-23 14:37:12 UTC") == "2026-09-23T14:37:12+00:00"
+
+
 def test_the_gate_requires_facts_that_match_the_contract():
     c = plan_by_rules("Hyperliquid gainers excluding stocks")
     rows = facts.facts_from_card("tequity_movers", HL_MOVERS, "market_ranking")

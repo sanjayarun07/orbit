@@ -2889,4 +2889,21 @@ prints them side by side. Under the flag, open-ended research (`contracts.is_ope
 no exact on-chain state in it) becomes an `open_research` contract: a structured web read first
 (`perplexity_tools.perplexity_search_with_sources`, inline [n] markers kept, numbered sources with url and date), then
 up to two router-planned tools, then the fact gate requiring a linked source. Exact state (addresses, wallets, holders,
-quotes, prices, yields) never goes web-first. The flag stays off until the comparison says it wins.
+quotes, prices, yields) never goes web-first.
+
+**The comparison (2026-09-23, `reports/episodes-live-2026-09-23/`, 24 live episodes × 5, baseline vs the flag).** The
+flag touches only `open_research` contracts, and every other kind was identical under both settings (same tools, same
+pass^5; latency differences there are provider noise). On the five open-research episodes it took pass^5 from 3/5 to
+5/5: "Who are the investors backing EigenLayer?" and "How does Aave V3's E-mode change the liquidation threshold?" were
+answered from the knowledge base alone with no source under the baseline, and with a dated, linked web read under the
+flag, for about +8 s and +$0.004 per answer. So `DISCOVERY_FIRST_RESEARCH` now defaults on; set it `false` to return
+open research to the legacy path. The run also found three defects that were not about the flag, all fixed the same day:
+a ranking ask ("Which Base tokens went up the most today?") was read as a move statement about a coin called WENT (the
+statement's subject must now be a listed ticker, `symbol_registry`); a ledger card's baseline tick was read as its age
+(a card's observed time is the latest stamp on its provider line); and the why-moving card's 1,800-character trim cut
+the Sources block off on a long news day. Two goals were made live-safe (`replay_must_contain` holds fixture values such
+as which ticker leads a recorded ranking; the live judge checks only provider-independent text). Holder episodes failed
+live only on Mobula 429s. Even on the 30 rps plan Mobula answers a header-less `429 Max usage reached` now and then
+that clears by the next call, and the client's 20 s deployment-wide cooldown made one such answer fail the whole
+turn; a user's call now retries once after a second (`mobula_client.RETRY_ONCE_SECONDS`) before the cooldown,
+background calls never retry, and both holder episodes then pass 5/5.

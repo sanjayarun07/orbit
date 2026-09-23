@@ -14,12 +14,14 @@
     ],
     "scope_satisfied": false,
     "must_contain": [
-     "could not be verified",
-     "AERO"
+     "could not be verified"
     ],
     "must_not_contain": [
      "Base-venue",
      "trades on Base show"
+    ],
+    "replay_must_contain": [
+     "AERO"
     ]
    }
   },
@@ -35,11 +37,11 @@
      "tequity_movers"
     ],
     "scope_satisfied": true,
-    "must_contain": [
-     "TSLA"
-    ],
     "must_not_contain": [
      "could not be verified"
+    ],
+    "replay_must_contain": [
+     "TSLA"
     ]
    }
   },
@@ -253,13 +255,15 @@
    },
    "goal": {
     "tools_any": [
-     "tequity_movers"
+     "tequity_movers",
+     "tequity_period_movers"
     ],
     "gate_ok": true,
     "must_not_contain": [
      "could not be verified"
     ]
-   }
+   },
+   "note": "Live, 'today' is a period the ledger measures since midnight (from its first tick, and the card says so); the 24h feed is the replay fixture. Either venue source is the right one."
   },
   {
    "id": "hl-volume-week",

@@ -50,10 +50,13 @@ class Settings(BaseSettings):
     # the whole answer. None uses the primary model.
     planner_model: str | None = None
     contract_pipeline_enabled: bool = True     # market rankings, holders, recent events and yields go through the contract pipeline
-    # Behind a flag until the episode comparison says it wins: open-ended
-    # research (not exact on-chain state) starts with a dated, source-linked
-    # web read, then targeted tools, then the evidence check.
-    discovery_first_research: bool = False
+    # Open-ended research (not exact on-chain state) starts with a dated,
+    # source-linked web read, then targeted tools, then the evidence check.
+    # On since the live comparison of 2026-09-23 (reports/episodes-live-2026-09-23):
+    # it only touches open_research contracts, where it took pass^5 from 3/5 to
+    # 5/5 (answers from the knowledge base alone carried no sources) for about
+    # +8 s and +$0.004 per answer; every other kind was identical under both.
+    discovery_first_research: bool = True
     intent_classifier_cache_entries: int = 512
     # MCP server (app/mcp_server.py) mounted at /mcp for Claude / ChatGPT / any
     # MCP host. When MCP_API_KEY is set, /mcp requires `Authorization: Bearer`.

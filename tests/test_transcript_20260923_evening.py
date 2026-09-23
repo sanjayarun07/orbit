@@ -12,9 +12,18 @@ def test_the_market_is_the_crypto_market_unless_stocks_are_named():
     assert why_moving.market_ask("why is the stock market down") is None and why_moving.market_ask("why is SOL down") is None
 
 
-def test_a_statement_about_a_move_is_a_why_moving_ask():
+def test_a_statement_about_a_move_is_a_why_moving_ask(monkeypatch):
+    from app import symbol_registry
+    listed = {"BTC": [{"id": "bitcoin", "name": "Bitcoin", "symbol": "BTC", "rank": 1}],
+              "SOL": [{"id": "solana", "name": "Solana", "symbol": "SOL", "rank": 6}],
+              "WENT": [{"id": "went-coin", "name": "Went", "symbol": "WENT", "rank": None}]}
+    monkeypatch.setattr(symbol_registry, "listed", lambda sym: listed.get(sym.upper(), []))
     assert why_moving.match("no just now BTC fell sharply") == ("BTC", "down") and why_moving.match("SOL is pumping hard") == ("SOL", "up")
+    assert why_moving.match("btc fell sharply") == ("BTC", "down")
     assert why_moving.match("USDC is down") is None and why_moving.match("the market fell") is None
+    # A ranking ask is not a statement about a coin called WENT (live episode, 2026-09-23).
+    assert why_moving.match("Which Base tokens went up the most today?") is None
+    assert why_moving.match("tokens in the Base ecosystem up the most today") is None
 
 
 def test_a_venue_typed_a_letter_off_is_the_venue_not_a_token():
@@ -35,3 +44,11 @@ def test_a_venue_pair_quote_comes_from_the_snapshot():
     except RuntimeError as exc:
         assert "ZZZ is not listed on hyperliquid" in str(exc)
     tequity.reset_for_test()
+
+
+def test_the_why_moving_narrative_keeps_its_sources_when_cut():
+    # A long news day trimmed the citations off the card (live episode, 2026-09-23).
+    news = "\n".join(f"line {i} of the narrative about the move [1]" for i in range(80)) + "\n\nSources:\n[1] https://example.com/a\n[2] https://example.com/b"
+    cut = why_moving._trim(news, 600)
+    assert cut.endswith("Sources:\n[1] https://example.com/a\n[2] https://example.com/b") and "…" in cut and len(cut) < len(news)
+    assert why_moving._trim("short\n\nSources:\n[1] x", 600) == "short\n\nSources:\n[1] x" and why_moving._trim("plain", 5) == "plain"

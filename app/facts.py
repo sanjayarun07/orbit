@@ -105,11 +105,20 @@ def parse_tables(markdown: str) -> list[list[dict[str, str]]]:
     return tables
 
 
+_STAMP = re.compile(r"(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?)\s*UTC", re.I)
+
+
 def observed_at(markdown: str) -> str | None:
+    """When the card's provider line says the data was seen: the latest UTC
+    stamp on that line, so a ledger card's "From tick … To tick …" is as
+    fresh as its last tick, not its baseline (the Aster losers episode read
+    a four-hour-old period start as a stale card, 2026-09-23)."""
     m = _FRESHNESS.search(markdown or "")
-    if m:
-        return m.group(1).replace(" ", "T") + ("" if len(m.group(1)) > 16 else ":00") + "+00:00"
-    return None
+    if not m:
+        return None
+    line = (markdown or "")[m.start():].split("\n", 1)[0]
+    stamps = [s.replace(" ", "T") + ("" if len(s) > 16 else ":00") + "+00:00" for s in _STAMP.findall(line)]
+    return max(stamps) if stamps else None
 
 
 def _first(row: dict, *names: str) -> str | None:
