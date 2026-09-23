@@ -37,6 +37,7 @@ def _matches(pattern: str):
 
 # "trending/hot/top/latest TOKENS" (token-level discovery), or any request
 # naming a launchpad -- distinct from "trending narratives/metas" (which is
+_META_WORD = re.compile(r"\b(?:metas?|narratives?)\b", re.I)
 # dexscreener_trending_metas) and from a generic "what's trending in crypto"
 # market brief. The discovery word must actually MODIFY tokens/coins (adjacent,
 # through a chain of discovery adjectives only) -- NOT merely co-occur with the
@@ -167,7 +168,9 @@ class DexScreenerProvider:
             # Narratives/metas, NOT a token list -- so it must yield to
             # dexscreener_boosted_tokens whenever the user names tokens/coins/
             # gems (they want tokens, not narrative buckets).
-            matches=lambda request: bool(_TREND_WORD.search(request)) and not _TOKEN_WORD.search(request),
+            # "memecoin metas / narratives" names the buckets themselves: the
+            # meme word does not turn it into a token-list ask (2026-09-23).
+            matches=lambda request: bool(_TREND_WORD.search(request)) and (not _TOKEN_WORD.search(request) or bool(_META_WORD.search(request))),
             chains=_SUPPORTED_CHAINS, quota_per_minute=60, cache_ttl_seconds=60, priority=5,
         ))
         router.register(ProviderTool(

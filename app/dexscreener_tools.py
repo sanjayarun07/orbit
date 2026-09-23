@@ -169,11 +169,14 @@ def dexscreener_boosted_tokens(request: str) -> str:
 
 
 def dexscreener_trending_metas(_request: str) -> str:
-    """Return current crypto narratives ranked by DEX Screener market activity."""
+    """DEX Screener's trending memecoin metas: its category tags for tokens on
+    DEXes, ranked by volume. A meta is a token bucket ("Cat", "Dog", "AI"),
+    not a market narrative (a theme drawing flows across sectors); the card
+    says so (user, 2026-09-23: "trending narratives and tokens are different")."""
     data = _get("/metas/trending/v1")
     rows = sorted(data if isinstance(data, list) else [], key=lambda item: float(item.get("volume") or 0), reverse=True)[:10]
     lines = [
-        "# Trending crypto narratives",
+        "# Trending memecoin metas on DEX Screener",
         f"**Data freshness**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         "",
         "| Narrative | Volume | Liquidity | Market cap | 24h change | Tokens |",
@@ -192,7 +195,9 @@ def dexscreener_trending_metas(_request: str) -> str:
         "",
         f"Source: [DEX Screener trending metas]({_BASE}/metas/trending/v1)",
         "",
-        "Narrative activity is a discovery signal, not a recommendation. Verify token-level liquidity and holder concentration before trading.",
+        "These are DEX Screener's category tags for memecoins trading on DEXes, ranked by 24h volume: the memecoin slice of the market, "
+        "not the market's narratives (a narrative is a theme drawing flows across sectors; a meta is a token bucket). "
+        "A discovery signal, not a recommendation. Verify token-level liquidity and holder concentration before trading.",
     ])
     return compact_tool_result("\n".join(lines))
 

@@ -905,6 +905,12 @@ def _mentions_asset(request: str) -> bool:
     return any(m.group(0).lstrip("$") not in _SYMBOL_STOP for m in _SYMBOL_LIKE.finditer(request))
 
 
+_NARRATIVE_ASK = re.compile(r"\b(?:trending|current|hot|top|main|dominant|leading|strongest)\s+(?:crypto\s+)?narratives?\b|\bnarratives?\b.{0,40}\b(?:trending|right\s+now|this\s+week|today|driving|dominat\w+|leading|currently)\b"
+                            r"|\bwhat\s+narratives?\b|\bwhich\s+narratives?\b", re.I)
+_DEX_SCOPED = re.compile(r"\b(?:dex\s*screener|dexscreener|on\s+dex(?:es)?|memecoins?|meme\s+(?:coins?|metas?|narratives?)|metas?|pump\.?fun|degen)\b", re.I)
+_NARRATIVE_QUERY = ("Which crypto narratives are drawing capital and attention this week? Name each narrative (a theme such as AI agents, RWA, "
+                    "restaking, perp DEXes, stablecoins, DePIN, memecoins), with dated evidence: sector volume or price moves, funding, protocol "
+                    "launches, X discussion. Distinguish narratives (themes) from individual tokens; give sources with dates.")
 _WHALE_ASK = re.compile(r"\b(?:whales?|whale\s+activity|smart\s+money|large\s+(?:buys|transfers|holders))\b", re.IGNORECASE)
 _SECURITY_ASK = lexicon.SECURITY          # the one security vocabulary (app/routing/lexicon.py)
 
@@ -1984,6 +1990,35 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     # ask, four tools. Movers, volume, sentiment and news are composed by name
     # and read together; the model never picks what to buy. A ticker in the
     # ask means a specific asset and belongs to the deep dive below.
+    if _NARRATIVE_ASK.search(request) and not _DEX_SCOPED.search(request) and not _mentions_asset(request) and perplexity_available():
+        # "What are the trending narratives right now?": narratives are themes
+        # drawing flows across the market, not DEX Screener's memecoin metas.
+        # The market read leads (dated, sourced); the metas card follows as
+        # the memecoin slice, labelled. A DEX- or meme-scoped ask keeps the
+        # metas card alone (user, 2026-09-23).
+        streaming.emit("status", text="Reading the market's narratives")
+        parts = []
+        try:
+            narrative = await asyncio.to_thread(perplexity_web_search, _NARRATIVE_QUERY)
+            if narrative and narrative.strip():
+                card = f"# Market narratives this week\n\n{narrative.strip()}"
+                streaming.emit("card", markdown=card, tool="perplexity_web_search")
+                parts.append((card, {"tool_name_0": "perplexity_web_search", "tool_args_0": {"query": _NARRATIVE_QUERY}, "observation_0": card}))
+        except Exception:
+            logger.info("narrative web read failed", exc_info=True)
+        try:
+            from app.dexscreener_tools import dexscreener_trending_metas
+            metas = await asyncio.to_thread(dexscreener_trending_metas, request)
+            streaming.emit("card", markdown=metas, tool="dexscreener_trending_metas")
+            parts.append((metas, {"tool_name_0": "dexscreener_trending_metas", "tool_args_0": {"request": request}, "observation_0": metas}))
+        except Exception:
+            logger.info("metas card failed", exc_info=True)
+        if parts:
+            cards, trajectory = composition.combine(parts)
+            note = ("Instructions for the answer: narratives are themes drawing flows across the market, not tokens; the DEX Screener metas card "
+                    "is the memecoin slice only and its buckets are tags, not narratives. Name each narrative with its dated evidence and source.")
+            answer = await composition.synthesize(f"{request}\n{note}", cards, trajectory)
+            return {"answer": answer, "trajectory": {"thought_0": "Narratives are themes; the market read leads and the DEX metas follow as the memecoin slice.", **trajectory}}
     if composition.MARKET_ADVICE.search(request) and not _mentions_asset(request):
         cards, trajectory = await composition.compose_market_advice(request)
         if cards:
