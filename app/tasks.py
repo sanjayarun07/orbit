@@ -39,7 +39,7 @@ _account_locks: dict[tuple[int, str], asyncio.Lock] = {}
 
 logger = logging.getLogger(__name__)
 
-KINDS = ("reminder", "price_alert", "brief")
+KINDS = ("reminder", "price_alert", "movers_alert", "brief")
 # Where a fired task is delivered. "inapp" is always written (the inbox row is
 # the delivery of record and the idempotency key); the other two are
 # best-effort pushes on top of it.
@@ -265,7 +265,25 @@ def validate_spec(kind: str, spec: dict) -> dict:
             raise ValueError("A price alert needs a numeric price") from None
         if not math.isfinite(price) or price <= 0:
             raise ValueError("The alert price must be a positive number")
-        spec.update({"symbol": symbol, "op": op, "price": price})
+        venue = str(spec.get("venue") or "").strip().lower() or None
+        if venue not in (None, "aster", "hyperliquid"):
+            raise ValueError("A venue must be aster or hyperliquid")
+        spec.update({"symbol": symbol, "op": op, "price": price, "venue": venue})
+    elif kind == "movers_alert":
+        venue = str(spec.get("venue") or "").strip().lower()
+        if venue not in ("aster", "hyperliquid"):
+            raise ValueError("A movers alert needs a venue: aster or hyperliquid")
+        try:
+            threshold = float(spec.get("threshold_pct"))
+        except (TypeError, ValueError):
+            raise ValueError("A movers alert needs a percentage threshold") from None
+        if not math.isfinite(threshold) or threshold <= 0 or threshold > 1000:
+            raise ValueError("The threshold must be a positive percentage")
+        window = int(spec.get("window_minutes") or 60)
+        if window < 10 or window > 7 * 24 * 60:
+            raise ValueError("The window must be between 10 minutes and 7 days")
+        spec.update({"venue": venue, "threshold_pct": threshold, "window_minutes": window, "stocks_only": bool(spec.get("stocks_only")),
+                     "repeat": True, "last_fired": dict(spec.get("last_fired") or {})})
     elif kind == "reminder":
         if not str(spec.get("message") or "").strip():
             raise ValueError("A reminder needs a message")
@@ -313,7 +331,9 @@ def _default_title(kind: str, spec: dict) -> str:
     if kind == "reminder":
         return f"Reminder: {spec.get('message', '')}".strip()
     if kind == "price_alert":
-        return f"{spec.get('symbol', '?')} {spec.get('op', '<')} ${float(spec.get('price', 0)):,.4g}"
+        return f"{spec.get('symbol', '?')} {spec.get('op', '<')} ${float(spec.get('price', 0)):,.4g}" + (f" on {spec['venue']}" if spec.get("venue") else "")
+    if kind == "movers_alert":
+        return f"{'Stocks' if spec.get('stocks_only') else 'Pairs'} moving over {float(spec.get('threshold_pct', 0)):g}% on {spec.get('venue', '?')} within {int(spec.get('window_minutes') or 60)} min"
     if kind == "brief":
         return "Morning brief"
     return kind
@@ -467,10 +487,21 @@ async def unread_count(user_id: str) -> int:
 # Evaluation
 # ----------------------------------------------------------------------------
 
-async def price_for(symbol: str) -> float | None:
-    """USD price for a ticker: CoinGecko for majors, Jupiter's verified
-    registry for Solana tokens. None when nothing trustworthy matches."""
+async def price_for(symbol: str, venue: str | None = None) -> float | None:
+    """USD price for a ticker: the venue's feed when an alert names Aster or
+    Hyperliquid (tokenized stocks live there), else CoinGecko for majors and
+    Jupiter's verified registry for Solana tokens. None when nothing
+    trustworthy matches."""
     symbol = symbol.upper().lstrip("$")
+    if venue:
+        from app import tequity
+
+        snap = await tequity.snapshot(tequity.MOVERS.get(venue, ""))
+        rows = ((snap or {}).get("data") or {}).get("data", {}).get("tokens") or []
+        for row in rows:
+            if isinstance(row, dict) and (str(row.get("base_asset") or "").upper() == symbol or str(row.get("symbol") or "").upper() == symbol) and row.get("last_price") is not None:
+                return float(row["last_price"])
+        return None
     coingecko_id = _MAJORS.get(symbol)
     if coingecko_id:
         try:
@@ -496,8 +527,10 @@ async def evaluate(task: dict) -> tuple[bool, str, str | None]:
     try:
         if kind == "reminder":
             return True, "fired", spec.get("message") or task["title"]
+        if kind == "movers_alert":
+            return await _evaluate_movers_alert(task)
         if kind == "price_alert":
-            price = await price_for(spec["symbol"])
+            price = await price_for(spec["symbol"], spec.get("venue"))
             if price is None:
                 return False, "price unavailable", None
             target = float(spec["price"])
@@ -514,6 +547,62 @@ async def evaluate(task: dict) -> tuple[bool, str, str | None]:
         # handler record the error and reschedule, occurrence intact.
         raise
     return False, "unknown kind", None
+
+
+async def _evaluate_movers_alert(task: dict) -> tuple[bool, str, str | None]:
+    """Pairs whose stored price moved more than the threshold within the
+    window, each reported once per window (spec.last_fired)."""
+    from app import tequity_ledger
+
+    spec = dict(task["spec"])
+    now = _now()
+    window = timedelta(minutes=int(spec.get("window_minutes") or 60))
+    out = await tequity_ledger.movers_between(spec["venue"], now - window, now, stocks_only=bool(spec.get("stocks_only")), limit=500)
+    rows = [r for r in (out.get("gainers") or []) if abs(r["change_between_pct"]) >= float(spec["threshold_pct"])]
+    if not out.get("from"):
+        return False, "no stored ticks in the window yet", None
+    fired = dict(spec.get("last_fired") or {})
+    fresh = []
+    for r in rows:
+        last = fired.get(r["symbol"])
+        if last and (now - datetime.fromisoformat(last)) < window:
+            continue
+        fresh.append(r)
+        fired[r["symbol"]] = now.isoformat()
+    fired = {k: v for k, v in fired.items() if (now - datetime.fromisoformat(v)) < window * 2}
+    await update_task(task["id"], task["user_id"], spec={**spec, "last_fired": fired})
+    if not fresh:
+        return False, f"{len(rows)} over threshold, none new", None
+    fresh.sort(key=lambda r: abs(r["change_between_pct"]), reverse=True)
+    label = "tokenized stock" if spec.get("stocks_only") else "pair"
+    moves = ", ".join(f"{r.get('base_asset') or r['symbol']} {r['change_between_pct']:+.1f}% (${r['price_then']:,.4g} → ${r['last_price']:,.4g})" for r in fresh[:6])
+    text = f"{len(fresh)} {label}{'s' if len(fresh) != 1 else ''} moved over {float(spec['threshold_pct']):g}% on {spec['venue']} within {int(window.total_seconds() // 60)} min: {moves}"
+    return True, text, text + ". Measured between stored 5-minute ticks of the venue's feed; not a recommendation."
+
+
+async def _venue_brief_lines() -> list[str]:
+    """One line per venue for the morning brief: top movers and the stock share of volume."""
+    from app import tequity
+
+    if not tequity.enabled():
+        return []
+    lines = []
+    for venue, channel in tequity.MOVERS.items():
+        try:
+            snap = await asyncio.wait_for(tequity.snapshot(channel), timeout=10)
+        except Exception:
+            snap = None
+        rows = [r for r in (((snap or {}).get("data") or {}).get("data", {}).get("tokens") or []) if isinstance(r, dict) and r.get("price_change_percent") is not None]
+        if not rows:
+            continue
+        rows.sort(key=lambda r: float(r["price_change_percent"]), reverse=True)
+        top = ", ".join(f"{r.get('base_asset') or r['symbol']} {float(r['price_change_percent']):+.1f}%" for r in rows[:3])
+        stocks = [r for r in rows if r.get("is_stock")]
+        volume = sum(float(r.get("quote_volume") or 0) for r in rows) or 1.0
+        stock_share = sum(float(r.get("quote_volume") or 0) for r in stocks) / volume * 100
+        best_stock = f"; stocks: {stocks[0].get('base_asset')} {float(stocks[0]['price_change_percent']):+.1f}%" if stocks else ""
+        lines.append(f"- **{venue.title()}**: {top}{best_stock} · tokenized stocks {stock_share:.0f}% of 24h quote volume")
+    return ["", "**Perp venues (24h, company feed)**", *lines] if lines else []
 
 
 async def compose_brief(task: dict) -> str:
@@ -534,6 +623,10 @@ async def compose_brief(task: dict) -> str:
             lines += ["", " · ".join(quotes)]
     except Exception:
         logger.debug("tasks: quotes unavailable for brief", exc_info=True)
+    try:
+        lines += await _venue_brief_lines()
+    except Exception:
+        logger.debug("tasks: venue lines unavailable for brief", exc_info=True)
     user = await accounts.get_user(task["user_id"])
     wallet = ((user or {}).get("preferences") or {}).get("default_wallet")
     if not wallet:
@@ -675,12 +768,12 @@ def _reschedule(task: dict, now: datetime, fired: bool) -> dict:
     that fired, otherwise its next time (a price alert with no interval of
     its own polls on the check interval). Shared by the ordinary completion
     and the recovery of a delivered occurrence, so they cannot differ."""
-    one_shot = "at" in task["schedule"] or (task["kind"] == "price_alert" and not task["spec"].get("repeat"))
+    one_shot = "at" in task["schedule"] or (task["kind"] in ("price_alert", "movers_alert") and not task["spec"].get("repeat"))
     if fired and one_shot:
         return {"status": "done", "next_run_at": None}
-    interval = task["schedule"] if not (task["kind"] == "price_alert" and "at" not in task["schedule"] and "every_minutes" not in task["schedule"]) else {"every_minutes": settings.task_alert_check_minutes}
+    interval = task["schedule"] if not (task["kind"] in ("price_alert", "movers_alert") and "at" not in task["schedule"] and "every_minutes" not in task["schedule"]) else {"every_minutes": settings.task_alert_check_minutes}
     nxt = next_run(interval, task.get("tz_offset_min", 0), after=now)
-    if nxt is None and task["kind"] == "price_alert":
+    if nxt is None and task["kind"] in ("price_alert", "movers_alert"):
         nxt = now + timedelta(minutes=settings.task_alert_check_minutes)
     return {"next_run_at": nxt, **({"status": "done"} if nxt is None else {})}
 

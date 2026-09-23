@@ -13,6 +13,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from app import tasks, task_scheduling
+from app.settings import settings
 from app.service_errors import ServiceError
 
 _DAYS = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6,
@@ -21,19 +22,24 @@ _TIME = r"(?P<h>\d{1,2})(?::(?P<m>\d{2}))?\s*(?P<ap>am|pm)?"
 _TIME_NC = r"\d{1,2}(?::\d{2})?\s*(?:am|pm)?"
 _REMIND = re.compile(r"^\s*(?:please\s+)?remind\s+me\s+(?P<rest>.+?)\s*$", re.I)
 _ALERT = re.compile(
-    r"^\s*(?:please\s+)?(?:alert|notify|tell|ping|warn)\s+me\s+(?:when|if|once)\s+\$?(?P<sym>[A-Za-z]{2,10})\s+"
+    r"^\s*(?:please\s+)?(?:alert|notify|tell|ping|warn)\s+me\s+(?:when|if|once)\s+\$?(?P<sym>[A-Za-z]{2,10})(?:\s+on\s+(?P<venue>aster|hyperliquid))?\s+"
     r"(?:(?P<dir>drops?|falls?|goes|rises?|climbs?|breaks?|is|gets?|moves?|dips?|pumps?)\s+)?"
     r"(?P<cmp>below|under|beneath|above|over|past|to|at)\s+\$?(?P<price>\d[\d,]*(?:\.\d+)?)\s*(?:usd|dollars|\$)?\s*(?P<repeat>every\s+time|each\s+time|repeatedly)?\s*[.!]?\s*$",
     re.I,
 )
 _BRIEF = re.compile(r"^\s*(?:send|give|email)\s+me\s+(?:a\s+|the\s+)?(?:daily\s+|morning\s+)?(?:market\s+)?brief(?:ing)?(?:\s+(?:every\s+day|daily))?(?:\s+at\s+" + _TIME + r")?(?:\s+by\s+(?P<channel>email|mail))?\s*[.!]?\s*$", re.I)
 _LIST = re.compile(r"^\s*(?:show|list|what\s+are)\s+(?:me\s+)?(?:my\s+)?(?:tasks|reminders|alerts|scheduled\s+tasks)\??\s*$", re.I)
+# "tell me when any tokenized stock moves more than 10% on hyperliquid within an hour"
+_MOVERS_ALERT = re.compile(
+    r"^\s*(?:please\s+)?(?:alert|notify|tell|ping|warn)\s+me\s+(?:when|if|once)\s+(?:any|a|some)\s+(?P<what>tokeni[sz]ed\s+stocks?|stocks?|equit(?:y|ies)|pairs?|tokens?|coins?|perps?)"
+    r"(?:\s+on\s+(?P<venue1>aster|hyperliquid))?\s+(?:moves?|jumps?|swings?|changes?|pumps?|dumps?)\s+(?:by\s+)?(?:more\s+than|over|above|\+/-|±)?\s*(?P<pct>\d+(?:\.\d+)?)\s*%"
+    r"(?:\s+on\s+(?P<venue2>aster|hyperliquid))?(?:\s+(?:in|within|over|during)\s+(?:an?\s+|the\s+(?:last|past)\s+)?(?P<n>\d+)?\s*(?P<unit>hours?|hrs?|h|minutes?|mins?|m|day|days?))?\s*[.!]?\s*$", re.I)
 _MUTATE = re.compile(r"^\s*(?P<verb>pause|resume|delete|remove|cancel|stop)\s+(?:my\s+)?(?:task|reminder|alert)\s*#?\s*(?P<n>\d+)\s*[.!]?\s*$", re.I)
 _MUTATE_ALL = re.compile(r"^\s*(?P<verb>pause|resume|delete|cancel|stop)\s+all\s+(?:my\s+)?(?:tasks|reminders|alerts)\s*[.!]?\s*$", re.I)
 
 
 def is_task_control(message: str) -> bool:
-    return any(p.match(message or "") for p in (_REMIND, _ALERT, _BRIEF, _LIST, _MUTATE, _MUTATE_ALL))
+    return any(p.match(message or "") for p in (_REMIND, _ALERT, _MOVERS_ALERT, _BRIEF, _LIST, _MUTATE, _MUTATE_ALL))
 
 
 def _clock(h: str | None, m: str | None, ap: str | None, default: tuple[int, int] = (9, 0)) -> tuple[int, int]:
@@ -170,15 +176,30 @@ async def handle(message: str, user: dict, tz_offset_min: int = 0) -> str | None
         op = "<" if cmp in ("below", "under", "beneath") or (cmp in ("to", "at") and (m.group("dir") or "").lower().startswith(("drop", "fall", "dip"))) else ">"
         price = float(m.group("price").replace(",", ""))
         symbol = m.group("sym").upper()
-        current = await tasks.price_for(symbol)
+        current = await tasks.price_for(symbol, (m.group("venue") or "").lower() or None)
         if current is None:
             return f"I couldn't find a trustworthy price for **{symbol}** (majors and Jupiter-verified Solana tokens are supported), so no alert was set."
-        spec = {"symbol": symbol, "op": op, "price": price, "repeat": bool(m.group("repeat"))}
+        spec = {"symbol": symbol, "op": op, "price": price, "repeat": bool(m.group("repeat")), "venue": (m.group("venue") or "").lower() or None}
         task = await _create(user, "price_alert", spec, {"every_minutes": 5}, task_scheduling.default_channel(), tz_offset_min)
         if isinstance(task, str):
             return task
         return (f"Alert set: **{symbol} {op} ${price:,.4g}** (now ${current:,.4g}). I check every few minutes and send you a note"
                 + (" each time it crosses." if spec["repeat"] else " the first time it crosses."))
+    m = _MOVERS_ALERT.match(text)
+    if m:
+        venue = (m.group("venue1") or m.group("venue2") or "").lower()
+        if not venue:
+            return "Which venue: Aster or Hyperliquid? For example: *tell me when any tokenized stock moves more than 10% on hyperliquid within an hour*."
+        unit = (m.group("unit") or "hour").lower()
+        n = int(m.group("n") or 1)
+        window = n * (1 if unit.startswith("m") and not unit.startswith("mo") else 1440 if unit.startswith("d") else 60)
+        stocks_only = bool(re.match(r"(?i)tokeni|stock|equit", m.group("what")))
+        spec = {"venue": venue, "threshold_pct": float(m.group("pct")), "window_minutes": window, "stocks_only": stocks_only}
+        task = await _create(user, "movers_alert", spec, {"every_minutes": settings.task_alert_check_minutes}, "inapp", tz_offset_min)
+        if isinstance(task, str):
+            return task
+        return (f"Movers alert set: any {'tokenized stock' if stocks_only else 'pair'} on {venue} that moves more than {float(m.group('pct')):g}% within {window} minutes "
+                f"goes to your inbox, each pair at most once per window. Measured between stored 5-minute ticks of the venue's feed; never a trade.")
     m = _REMIND.match(text)
     if m:
         rest, title, channel = _reminder_fields(m.group("rest"))

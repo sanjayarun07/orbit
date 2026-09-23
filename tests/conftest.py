@@ -22,6 +22,17 @@ from app import accounts, api_keys, billing, credits, tasks  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _no_tequity_socket(monkeypatch):
+    # The Tequity tools take a one-shot subscription when no snapshot is
+    # held; unit tests inject snapshots and must never open the socket.
+    from app import tequity as _tequity
+
+    async def _none(channels, *, until=None, stop_when=None):
+        return None
+    monkeypatch.setattr(_tequity, "_listen", _none)
+
+
+@pytest.fixture(autouse=True)
 def _no_token_2022_rpc(monkeypatch):
     # The portfolio reads both token programs (2026-09-23); unit tests that
     # stub the legacy read must not reach the real RPC for Token-2022.

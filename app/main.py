@@ -141,6 +141,7 @@ async def lifespan(_app: FastAPI):
     task_worker = asyncio.create_task(tasks.worker())
     kb_tool.set_loop(asyncio.get_running_loop())
     sentiment_analyst.set_loop(asyncio.get_running_loop())
+    tequity.set_loop(asyncio.get_running_loop())
     kb_warm = asyncio.create_task(_warm_knowledge())
     if settings.warm_caches_on_start:
         asyncio.create_task(asyncio.to_thread(token_unlocks.warm))

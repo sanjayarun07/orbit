@@ -88,7 +88,7 @@ def test_a_price_alert_needs_a_positive_finite_price():
         tasks.validate_spec("price_alert", {"symbol": "", "op": "<", "price": 100})
     with pytest.raises(ValueError):
         tasks.validate_spec("price_alert", {"symbol": "SOL", "op": "<=", "price": 100})
-    assert tasks.validate_spec("price_alert", {"symbol": " sol ", "op": ">", "price": "150"}) == {"symbol": "sol", "op": ">", "price": 150.0}
+    assert tasks.validate_spec("price_alert", {"symbol": " sol ", "op": ">", "price": "150"}) == {"symbol": "sol", "op": ">", "price": 150.0, "venue": None}
     with pytest.raises(ValueError):
         tasks.validate_spec("reminder", {"message": " "})
 

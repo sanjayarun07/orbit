@@ -54,7 +54,12 @@ _rows: list[dict] = []                       # memory mode (tests, no DATABASE_U
 _lock = threading.Lock()
 _MEMORY_ROWS = 20_000
 _LEADER_KEY = "tequity_ledger:leader"
-_LEADER_TTL = 180
+
+
+def _leader_ttl() -> int:
+    """Longer than the recording interval, or the lease lapses between ticks
+    and a second process can take it (review of 330bc651, 2026-09-23)."""
+    return max(180, 2 * int(settings.tequity_record_interval_seconds or 0) + 60)
 _leader_id = uuid.uuid4().hex
 _last_pruned: datetime | None = None
 
@@ -181,12 +186,12 @@ async def is_leader() -> bool:
     if client is None:
         return True
     try:
-        if await client.set(_LEADER_KEY, _leader_id, nx=True, ex=_LEADER_TTL):
+        if await client.set(_LEADER_KEY, _leader_id, nx=True, ex=_leader_ttl()):
             return True
         holder = await client.get(_LEADER_KEY)
         holder = holder.decode() if isinstance(holder, bytes) else holder
         if holder == _leader_id:
-            await client.expire(_LEADER_KEY, _LEADER_TTL)
+            await client.expire(_LEADER_KEY, _leader_ttl())
             return True
         return False
     except Exception:
@@ -258,14 +263,35 @@ async def tick_at(channel: str, moment: datetime) -> list[dict]:
         return [dict(r) for r in _rows if r["channel"] == channel and r["taken_at"] == when]
 
 
+async def first_tick_from(channel: str, moment: datetime) -> list[dict]:
+    """Every row of the first tick at or after `moment` for a channel."""
+    pool = await _pool()
+    if pool is not None:
+        when = await pool.fetchval("SELECT min(taken_at) FROM tequity_ticks WHERE channel = $1 AND taken_at >= $2", channel, moment)
+        if when is None:
+            return []
+        return [_from_db(r) for r in await pool.fetch("SELECT * FROM tequity_ticks WHERE channel = $1 AND taken_at = $2", channel, when)]
+    with _lock:
+        times = [r["taken_at"] for r in _rows if r["channel"] == channel and r["taken_at"] >= moment]
+        if not times:
+            return []
+        when = min(times)
+        return [dict(r) for r in _rows if r["channel"] == channel and r["taken_at"] == when]
+
+
 async def movers_between(venue: str, start: datetime, end: datetime, *, stocks_only: bool = False, limit: int = 15) -> dict:
-    """Price change per pair between the last tick at or before `start` and
+    """Price change per pair between the last tick at or before `start` (or
+    the first one after it, when the ledger begins inside the period) and
     the last tick at or before `end`, from stored prices (not the feed's own
     24h figure): the "since this morning" and "this week" reads."""
     channel = tequity.MOVERS.get(venue)
     if not channel:
         return {"venue": venue, "rows": [], "from": None, "to": None}
     a, b = await tick_at(channel, start), await tick_at(channel, end)
+    if not a:
+        a = await first_tick_from(channel, start)
+    if a and b and a[0]["taken_at"] == b[0]["taken_at"]:
+        a = []                                                            # one tick is not a change
     first = {r["symbol"]: r for r in a}
     out = []
     for r in b:

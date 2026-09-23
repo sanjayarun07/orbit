@@ -78,3 +78,10 @@ def test_the_worker_is_off_without_the_feed_or_an_interval(monkeypatch):
     monkeypatch.setattr(settings, "tequity_record_interval_seconds", 0)
     assert not tequity_ledger.enabled()
     asyncio.run(tequity_ledger.worker())                                                        # returns at once
+
+
+def test_the_lease_outlives_the_recording_interval(monkeypatch):
+    monkeypatch.setattr(settings, "tequity_record_interval_seconds", 300)
+    assert tequity_ledger._leader_ttl() == 660
+    monkeypatch.setattr(settings, "tequity_record_interval_seconds", 30)
+    assert tequity_ledger._leader_ttl() == 180

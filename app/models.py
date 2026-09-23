@@ -133,7 +133,7 @@ class FeedbackRequest(BaseModel):
 
 
 class TaskCreate(BaseModel):
-    kind: Literal["reminder", "price_alert", "brief"]
+    kind: Literal["reminder", "price_alert", "movers_alert", "brief"]
     spec: dict = Field(default_factory=dict)
     schedule: dict
     channel: Literal["inapp", "email"] = "inapp"

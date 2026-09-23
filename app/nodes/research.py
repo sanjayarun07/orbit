@@ -1807,13 +1807,17 @@ async def research_node(state: AgentState) -> dict:
         state = {**state, "request": request, "contextual_request": None,
                  "capabilities": sorted(set(state.get("capabilities") or []) | {"market_data", "derivatives"})}
         streaming.emit("status", text=f"Reading the tape for {asset}")
-    if tequity.enabled() and tequity.movers_matches(request):
+    if tequity.enabled() and (tequity.period_movers_matches(request) or tequity.movers_matches(request)):
         # Venue movers come from the company's own feed, whatever the
         # classifier called the ask ("which tokenized stocks are moving on
-        # hyperliquid" went to the web as equity research, 2026-09-23).
+        # hyperliquid" went to the web as equity research, 2026-09-23). With
+        # a period ("this week", "since this morning") they come from the
+        # tick ledger, measured between stored ticks.
+        periodic = tequity.period_movers_matches(request)
         try:
-            card = await asyncio.to_thread(tequity.movers, request)
-            return {"answer": card, "trajectory": {"thought_0": "Venue movers from the internal Tequity feed.", "tool_name_0": "tequity_movers",
+            card = await asyncio.to_thread(tequity.period_movers if periodic else tequity.movers, request)
+            name = "tequity_period_movers" if periodic else "tequity_movers"
+            return {"answer": card, "trajectory": {"thought_0": "Venue movers from the internal Tequity feed.", "tool_name_0": name,
                                                    "tool_args_0": {"request": request}, "observation_0": card}}
         except Exception:
             logger.warning("tequity movers unavailable; falling through to routing", exc_info=True)

@@ -2784,3 +2784,12 @@ Reads: `history(venue, symbol, since, until)`, `tick_at(channel, moment)`, `move
 from stored prices, not the feed's 24h figure), `volume_leaders(venue, days)`, `status()`. The worker is
 `tequity_ledger` in the startup task map. Nothing reads the ledger in a user-facing tool yet; the wire-only use
 cases (since-this-morning movers, weekly leaders, movers alerts) build on it.
+
+**Ledger use cases (2026-09-23).** `tequity_history` ("how has TSLA moved on hyperliquid this week": the stored price path,
+change between first and last tick, high/low, with a note when the ledger begins inside the period), `tequity_period_movers`
+(gainers/losers over a named period between stored ticks; the research-node intercept sends a venue movers ask with a
+period here and one without to the live feed), `tequity_volume_leaders` (mean 24h quote volume across ticks). Price alerts
+accept a venue (`alert me when TSLA on hyperliquid drops below 400`; `tasks.price_for(symbol, venue)` reads the feed). A
+new task kind `movers_alert` ("tell me when any tokenized stock moves more than 10% on hyperliquid within an hour") diffs
+ticks every check, reports each pair once per window (`spec.last_fired`), and is chat-only for now (no form). The morning
+brief gains a "Perp venues" section: top three movers per venue, best stock, and the tokenized-stock share of volume.

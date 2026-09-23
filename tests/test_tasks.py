@@ -35,7 +35,7 @@ def outbox(monkeypatch):
 def prices(monkeypatch):
     table = {"SOL": 100.0, "BTC": 60000.0}
 
-    async def fake_price(symbol):
+    async def fake_price(symbol, venue=None):
         return table.get(symbol.upper().lstrip("$"))
 
     monkeypatch.setattr(tasks, "price_for", fake_price)
