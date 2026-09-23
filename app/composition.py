@@ -148,11 +148,21 @@ def word_limit(request: str) -> int | None:
 
 
 def brief(summary: str, cards: str, limit: int) -> str:
-    """The summary alone, cut to the limit, with the cards' first sources as
-    links: a headline tap wants a short read, not the evidence cards (live
-    2026-09-23: 850-word answers under a news tile)."""
-    words = (summary or "").split()
-    text = " ".join(words[:limit]) + (" …" if len(words) > limit else "")
+    """The summary cut to the limit at paragraph boundaries (a table or a list
+    is one block, kept whole or dropped, never split), with the cards' first
+    sources as links: a headline tap wants a short read, not the evidence
+    cards (live 2026-09-23: 850-word answers under a news tile)."""
+    blocks = [b.strip() for b in re.split(r"\n\s*\n", (summary or "").strip()) if b.strip()]
+    kept, used = [], 0
+    for block in blocks:
+        n = len(block.split())
+        if kept and used + n > limit:
+            break
+        if not kept and n > limit:                                         # one long paragraph: cut it at the limit
+            block = " ".join(block.split()[:limit]) + " …"
+            n = limit
+        kept.append(block); used += n
+    text = "\n\n".join(kept) + ("" if len(kept) == len(blocks) else "\n\n…")
     links = []
     for label, url in _LINK.findall(cards or ""):
         if url not in [u for _, u in links]:

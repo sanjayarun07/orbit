@@ -1924,14 +1924,6 @@ async def research_node(state: AgentState) -> dict:
             cards, combined = composition.combine([web_part, (composition.strip_synthesis(result["answer"]), trajectory)])
             answer = await composition.synthesize(request, cards, combined)
             result = {**result, "answer": answer, "trajectory": combined or None}
-    limit = composition.word_limit(state["request"])
-    if limit and result.get("answer") and not is_clarification(result.get("answer")) and not result.get("pending_token"):
-        # A headline tap or a stated word limit: prose is cut to the limit with
-        # the sources kept; a card (a table) is left whole.
-        answer = result["answer"]
-        summary = answer[len("**Taken together**"):].split("\n\n---\n\n", 1)[0].strip() if answer.startswith("**Taken together**") else answer
-        if "\n|" not in summary and len(summary.split()) > limit:
-            result = {**result, "answer": composition.brief(summary, answer, limit)}
     window = snapshot_compare.dated_ask(state["request"])
     if window and result.get("answer") and (result.get("compound_answered") or not is_clarification(result.get("answer"))):
         # A dated comparison is answered from the snapshot ledger or it says
@@ -1946,6 +1938,15 @@ async def research_node(state: AgentState) -> dict:
     # never ships. The link note goes on after, so the check reads the answer
     # the tools produced.
     result = await answer_gate.gate(state["request"], result)
+    limit = composition.word_limit(state["request"])
+    if limit and result.get("answer") and not is_clarification(result.get("answer")) and not result.get("pending_token"):
+        # After the gate, so the judge reads the whole answer and a web
+        # replacement is cut too: a headline tap or a stated word limit gets
+        # prose cut to the limit with the sources kept; a table is left whole.
+        answer = result["answer"]
+        summary = answer[len("**Taken together**"):].split("\n\n---\n\n", 1)[0].strip() if answer.startswith("**Taken together**") else answer
+        if len(summary.split()) > limit:
+            result = {**result, "answer": composition.brief(summary, answer, limit)}
     if tape_frame and result.get("answer") and not is_clarification(result.get("answer")):
         result = {**result, "answer": f"{tape_frame}\n\n{result['answer']}"}
     if page and result.get("answer"):
