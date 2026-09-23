@@ -206,7 +206,7 @@ def test_reserve_never_overdraws_and_release_refunds_all():
 def test_billing_catalog_lists_the_three_plans():
     plans = TestClient(main.app).get("/billing/plans").json()
     assert [p["id"] for p in plans["plans"]] == ["free", "pro", "max"]
-    assert [p["monthly_credits"] for p in plans["plans"]] == [100, 2000, 7500]
+    assert [p["monthly_credits"] for p in plans["plans"]] == [300, 2000, 7500]
     assert [p["price_usd_month"] for p in plans["plans"]] == [0.0, 19.0, 49.0]
     assert plans["trial_credits"] == 10
 
