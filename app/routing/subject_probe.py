@@ -157,11 +157,15 @@ def has_own_subject(request: str) -> bool:
 
 def subject_of(request: str) -> str | None:
     """The name worth looking up in this message, or None."""
+    from app.tequity import fuzzy_venue
+
     starters = sentence_starters(request)
     for dollar, upper, capital in _SUBJECT.findall(request or ""):
         name = dollar or upper or capital
         if capital and capital in starters:
             continue
+        if not dollar and fuzzy_venue(name) and name.lower() != fuzzy_venue(name):
+            continue                                   # a venue typed a letter off is not a token ("hyperloquid", 2026-09-23); the venue itself is a subject
         if name and name.upper() not in _STOP:
             return name
     return None

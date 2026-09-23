@@ -191,12 +191,32 @@ _LOSERS = re.compile(r"\b(?:losers?|dumping|down\s+the\s+most|laggards?|worst)\b
 _TRENDING_WORDS = re.compile(r"\b(?:trending|hot|what'?s\s+moving|momentum)\b", re.I)
 
 
+_VENUE_NAMES = ("hyperliquid", "aster")
+
+
+def fuzzy_venue(word: str) -> str | None:
+    """A venue name typed a letter or two off ("hyperloquid"), or None. Only
+    words long enough that a near miss cannot be another word."""
+    import difflib
+    w = (word or "").lower()
+    if w in ("hl",):
+        return "hyperliquid"
+    if len(w) < 5:
+        return None
+    hit = difflib.get_close_matches(w, _VENUE_NAMES, n=1, cutoff=0.8)
+    return hit[0] if hit else None
+
+
 def _dex_of(request: str) -> str | None:
     m = _DEX.search(request or "")
-    if not m:
-        return None
-    word = m.group(1).lower()
-    return "hyperliquid" if word in ("hyperliquid", "hl") else "aster"
+    if m:
+        word = m.group(1).lower()
+        return "hyperliquid" if word in ("hyperliquid", "hl") else "aster"
+    for word in re.findall(r"[A-Za-z]{5,}", request or ""):
+        venue = fuzzy_venue(word)
+        if venue:
+            return venue
+    return None
 
 
 def venues_of(request: str) -> list[str]:
@@ -209,6 +229,11 @@ def venues_of(request: str) -> list[str]:
         v = "hyperliquid" if m.group(1).lower() in ("hyperliquid", "hl") else "aster"
         if v not in found:
             found.append(v)
+    if not found:
+        for word in re.findall(r"[A-Za-z]{5,}", text):
+            v = fuzzy_venue(word)
+            if v and v not in found:
+                found.append(v)
     if _BOTH.search(text) and len(found) < 2:
         found = ["aster", "hyperliquid"]
     return found
@@ -282,8 +307,10 @@ def period_start(request: str, now: datetime | None = None) -> datetime | None:
     return None
 
 
-def base_in(request: str) -> str | None:
-    """The base asset a request names ($tsla, TSLA, 'AAPL on hyperliquid'), or None."""
+def base_in(request: str, allow_lowercase: bool = False) -> str | None:
+    """The base asset a request names ($tsla, TSLA, 'AAPL on hyperliquid'), or None.
+    A lowercase ticker counts only where the caller knows the sentence is a
+    quote ask ("hyperliquid btc price")."""
     text = _DEX.sub(" ", request or "")
     m = re.search(r"\$([A-Za-z][A-Za-z0-9]{1,9})\b", text)
     if m:
@@ -292,6 +319,17 @@ def base_in(request: str) -> str | None:
     for m in re.finditer(r"\b([A-Z][A-Z0-9]{1,9})\b", text):
         if m.group(1) not in skip:
             return m.group(1)
+    # a lowercase ticker beside a venue word ("hyperliquid btc price"): the
+    # venue makes the word an asset, the stop set keeps the sentence's words out
+    lowercase_stop = {"price", "quote", "quotes", "the", "on", "for", "of", "in", "at", "check", "chk", "show", "give", "me", "what", "is", "current",
+                      "last", "now", "today", "and", "or", "please", "pls", "trading", "worth", "how", "much", "rate", "perp", "perps", "spot", "pair", "pairs",
+                      "market", "markets", "movers", "gainers", "losers", "volume", "stocks", "stock", "tokens", "token", "coins", "coin", "usdc", "usdt", "usd"}
+    if not allow_lowercase:
+        return None
+    for m in re.finditer(r"\b([a-z][a-z0-9]{1,5})\b", text):
+        word = m.group(1)
+        if word not in lowercase_stop and not fuzzy_venue(word):
+            return word.upper()
     return None
 
 
@@ -582,6 +620,43 @@ def volume_leaders(request: str) -> str:
     return compact_tool_result("\n\n".join(cards))
 
 
+_QUOTE_WORDS = re.compile(r"\b(?:price|quote|trading\s+at|how\s+much|last\s+price|worth|rate)\b", re.I)
+
+
+def quote_matches(request: str) -> bool:
+    text = request or ""
+    return bool(_dex_of(text) and base_in(text, allow_lowercase=True) and (_QUOTE_WORDS.search(text) or len(text.split()) <= 4)
+                and not re.search(r"\b(?:positions?|balances?|margin|my|movers?|gainers?|losers?|trending|volume\s+leaders?|funding|open\s+interest|oi|liquidations?|order\s*book|depth)\b", text, re.I))
+
+
+def quote(request: str) -> str:
+    """One pair on one venue from the latest snapshot: last price, 24h change
+    and quote volume, with the snapshot time ("hyperliquid btc price" had no
+    tool and wandered, live 2026-09-23)."""
+    venue = _dex_of(request) or "hyperliquid"
+    base = base_in(request, allow_lowercase=True)
+    if not base:
+        raise ValueError("Name the asset, e.g. 'hyperliquid BTC price'")
+    snap = _sync(snapshot(MOVERS[venue]))
+    if not snap:
+        raise _unavailable("tequity_quote", MOVERS[venue], f"{venue} quote")
+    rows = ((snap["data"].get("data") or {}).get("tokens") or [])
+    row = next((r for r in rows if isinstance(r, dict) and str(r.get("base_asset") or "").upper() == base.upper()), None)
+    if row is None:
+        near = [str(r.get("base_asset")) for r in rows if isinstance(r, dict) and str(r.get("base_asset") or "").upper().startswith(base.upper()[:2])][:6]
+        raise RuntimeError(f"{base} is not listed on {venue} in the feed's latest snapshot" + (f"; nearby symbols: {', '.join(near)}" if near else ""))
+    evidence.complete("tequity_quote", {"kind": "pair", "id": f"{venue}:{row.get('symbol')}", "chain": None, "symbol": base},
+                      {"last_price": row.get("last_price"), "change_24h_pct": row.get("price_change_percent"), "quote_volume": row.get("quote_volume")},
+                      [{"provider": "tequity", "endpoint": MOVERS[venue], "as_of": _stamp(snap)}])
+    kind = "stock" if row.get("is_stock") else ("perp" if venue == "hyperliquid" else "token")
+    lines = [f"# {base} on {venue.title()}", f"**Provider**: Tequity (internal feed) · **Pair**: {row.get('symbol')} · **Snapshot**: {_stamp(snap)}", "",
+             "| | Value |", "|---|---:|", f"| Last price | {_price(row.get('last_price'))} |", f"| 24h price change | {_pct(row.get('price_change_percent'))} |",
+             f"| 24h quote volume | {_money(row.get('quote_volume'))} |", f"| Type | {kind} |", "",
+             f"The venue's own last price for the {row.get('symbol')} pair at the snapshot time; not a global reference price, and not a quote for a size. "
+             "Ask `exit analysis for X` for an executable quote on a position."]
+    return compact_tool_result("\n".join(lines))
+
+
 class TequityProvider:
     name = "tequity"
 
@@ -595,6 +670,13 @@ class TequityProvider:
             keywords=("aster", "hyperliquid", "movers", "gainers", "losers", "tokenized stocks"),
             cache_ttl_seconds=10, priority=13, spec=TOOL_SPECS.get("tequity_movers"),
             description="Top movers on Aster or Hyperliquid from the company's live feed: pairs and tokenized stocks by 24h price change with volume",
+        ))
+        router.register(ProviderTool(
+            "tequity_quote", self.name, ("market_data",), quote,
+            enabled=enabled, matches=quote_matches,
+            keywords=("hyperliquid price", "aster price", "on hyperliquid", "on aster"),
+            cache_ttl_seconds=10, priority=15, spec=TOOL_SPECS.get("tequity_quote"),
+            description="One pair's last price, 24h change and volume on Aster or Hyperliquid from the company's live feed",
         ))
         router.register(ProviderTool(
             "tequity_trending", self.name, ("token_discovery", "market_data"), trending,

@@ -172,6 +172,13 @@ def run_live(episode: dict) -> dict:
     asyncio.set_event_loop(loop)
     tequity.set_loop(loop)                         # ledger reads from tool threads land on this loop
     try:
+        from app.knowledge import tool as kb_tool
+        from app import sentiment_analyst
+        kb_tool.set_loop(loop)                     # the knowledge and sentiment tools run their async work on the app loop, as the server registers
+        sentiment_analyst.set_loop(loop)
+    except Exception:
+        pass
+    try:
         run = loop.run_until_complete(graph.run_agent(episode["prompt"], "", "", {}))
         out = {"answer": getattr(run, "answer", "") or "", "trajectory": getattr(run, "trajectory", None), **captured}
     except Exception as exc:  # noqa: BLE001

@@ -50,9 +50,35 @@ _MIN_VOLUME_USD = 25_000
 _MIN_ORGANIC = 40
 
 
+# "BTC fell sharply", "SOL is dumping hard", "ETH just pumped": the statement
+# form of the same ask (live 2026-09-23: "no just now BTC fell sharply" went
+# to the web with no tape). Only a real symbol, only a real move word.
+STATEMENT = re.compile(
+    r"(?<![A-Za-z$])\$?(?P<sym>[A-Z][A-Z0-9]{1,9})\s+(?:just\s+|is\s+|has\s+|was\s+)?(?P<dir>fell|dropped|dumped|dumping|pumped|pumping|crashed|crashing|tanked|surged|"
+    r"rallied|spiked|jumped|mooned|soared|bleeding|down|up)\b(?:\s+(?:sharply|hard|fast|a\s+lot|big|\d+%))?", re.I)
+MARKET = re.compile(r"\bwhy\s+(?:is|are|did|has|was|were)?\s*(?:the\s+)?(?:crypto\s+|whole\s+|entire\s+)?markets?\s+(?:is\s+|are\s+)?(?P<dir>falling|down|dumping|crashing|bleeding|red|up|rallying|pumping|green|rising|dropping|tanking)\b", re.I)
+
+
+def market_ask(request: str) -> str | None:
+    """"Why is the market falling?": the crypto market, led by BTC, unless
+    stocks are named (Orbit is a Web3 copilot; the stock market only on
+    request). Returns the direction or None."""
+    text = request or ""
+    m = MARKET.search(text)
+    if not m or prefers_stock(text):
+        return None
+    raw = m.group("dir").lower()
+    return "up" if any(raw.startswith(w) for w in _UP) else "down"
+
+
 def match(request: str) -> tuple[str, str] | None:
     m = PATTERN.search(request or "")
     if not m:
+        m2 = STATEMENT.search(request or "")
+        if m2 and m2.group("sym").upper() not in _STOP and m2.group("sym").upper() not in {"USD", "USDC", "USDT", "AI", "ETF", "NFT", "DEX", "CEX", "LP"}:
+            raw = m2.group("dir").lower()
+            direction = "up" if any(raw.startswith(w) for w in _UP) else "down" if any(raw.startswith(w) for w in _DOWN) else "moving"
+            return m2.group("sym").upper(), direction
         return None
     sym = m.group("sym").upper()
     if sym in _STOP:

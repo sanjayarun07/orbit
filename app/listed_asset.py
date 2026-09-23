@@ -62,7 +62,7 @@ def ticker_in(request: str) -> str | None:
 
 
 _PRICE_ASK = re.compile(r"\b(?:price|quote|worth|trading\s+at|how\s+much|24h|change|market|chart|performance)\b", re.I)
-_DERIVATIVES = re.compile(r"\b(?:funding|open\s+interest|\boi\b|perps?|perpetuals?|liquidations?|hyperliquid|leverage)\b", re.I)
+_DERIVATIVES = re.compile(r"\b(?:funding|open\s+interest|\boi\b|perps?|perpetuals?|liquidations?|hyperliquid|hyperloquid|aster|leverage)\b", re.I)
 
 
 def matches(request: str) -> bool:

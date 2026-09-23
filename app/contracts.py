@@ -172,6 +172,11 @@ def _chain_of(text: str) -> str | None:
 def _venue_of(text: str) -> str | None:
     m = _VENUE.search(text or "")
     if not m:
+        from app.tequity import fuzzy_venue
+        for word in re.findall(r"[A-Za-z]{5,}", text or ""):
+            venue = fuzzy_venue(word)
+            if venue:
+                return venue
         return None
     word = m.group(1).lower().replace(" ", "")
     return {"hl": "hyperliquid", "pumpfun": "pump.fun", "pump.fun": "pump.fun"}.get(word, word)

@@ -2043,6 +2043,16 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     # otherwise). Checked BEFORE the overview: a message can carry both ("today
     # market trend on crypto. why zec is pumping"), and the specific question
     # is the part a brief alone silently dropped. Both cards are then composed.
+    market_direction = why_moving.market_ask(request)
+    if market_direction and not _mentions_asset(request):
+        # "Why is the market falling?": the crypto market overview first, then
+        # BTC's move as the market's leader; equities only when named.
+        streaming.emit("status", text="Reading the crypto market and BTC's move")
+        overview = await asyncio.to_thread(crypto_market_overview, request)
+        answer, trajectory = await why_moving.compose("BTC", market_direction, prefer_stock=False)
+        lead = "_The market here is the crypto market, led by BTC; say \"stock market\" for equities._"
+        return {"answer": f"{lead}\n\n{overview}\n\n---\n\n{answer}",
+                "trajectory": {"thought_0": "A market-wide why-moving ask: the crypto overview, then BTC's card and news.", **(trajectory or {})}}
     moving = why_moving.match(request)
     if moving and not _TOKEN_ADDRESS.search(request):
         prefer_stock = why_moving.prefers_stock(request) or "equity_research" in set(state.get("capabilities", []))
