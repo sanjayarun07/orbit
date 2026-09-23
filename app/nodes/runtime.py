@@ -47,6 +47,11 @@ _synthesis_lm = (
     if settings.synthesis_model and settings.synthesis_model != settings.model
     else None
 )
+_planner_lm = (
+    dspy.LM(settings.planner_model, timeout=settings.llm_request_timeout_seconds, num_retries=settings.llm_num_retries)
+    if settings.planner_model and settings.planner_model != settings.model
+    else None
+)
 dspy.configure(lm=_primary_lm)
 
 # Provider-side failures worth retrying on a DIFFERENT model (a transient outage
@@ -624,6 +629,29 @@ async def answer(program, field: str = "answer", *, tier: str = "primary", **kwa
         return await stream(program, field, lambda text: streaming.emit("delta", text=text), **kwargs)
     if tier == "synthesis":
         return await _call_synthesis_lm(program, **kwargs)
+    return await _call_lm(program, **kwargs)
+
+
+def planner_available() -> bool:
+    """Whether a model can write question contracts: the planner model, else
+    the primary one. Tests and keyless deployments use the rules planner."""
+    key = settings.openai_api_key if hasattr(settings, "openai_api_key") else None
+    return bool(settings.planner_model) or bool(key and not str(key).startswith("<") and "placeholder" not in str(key).lower())
+
+
+async def _call_planner_lm(program, **kwargs):
+    """The planner tier: `planner_model` when configured, else the primary
+    path; a transient failure on the planner model falls back to the primary."""
+    if _planner_lm is None:
+        return await _call_lm(program, **kwargs)
+    async with _llm_slots:
+        increment("llm_calls")
+        try:
+            return await _run_guarded(program, _planner_lm, kwargs)
+        except Exception as exc:
+            if not _is_transient_lm_error(exc):
+                raise
+            logger.warning("planner model '%s' failed transiently (%s); using the primary path", settings.planner_model, type(exc).__name__)
     return await _call_lm(program, **kwargs)
 
 

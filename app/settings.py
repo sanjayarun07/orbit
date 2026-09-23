@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # that job -- e.g. "hosted_vllm/DMind-3-mini" -- without touching routing
     # or the tool loops; a transient failure falls back to `model`.
     synthesis_model: str | None = None
+    # The question planner and fact verifier (app/contracts.py, app/fact_gate.py):
+    # the strongest model available, because a wrong plan propagates through
+    # the whole answer. None uses the primary model.
+    planner_model: str | None = None
+    contract_pipeline_enabled: bool = True     # market rankings, holders, recent events and yields go through the contract pipeline
     intent_classifier_cache_entries: int = 512
     # MCP server (app/mcp_server.py) mounted at /mcp for Claude / ChatGPT / any
     # MCP host. When MCP_API_KEY is set, /mcp requires `Authorization: Bearer`.

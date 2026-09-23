@@ -22,6 +22,15 @@ from app import accounts, api_keys, billing, credits, tasks  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _contract_pipeline_opt_in(monkeypatch):
+    # The contract pipeline (app/evidence_pipeline.py) is on in deployments and
+    # exercised by its own tests and the recorded episodes; the legacy-path
+    # tests keep the path they were written for.
+    from app.settings import settings as _settings
+    monkeypatch.setattr(_settings, "contract_pipeline_enabled", False)
+
+
+@pytest.fixture(autouse=True)
 def _no_tequity_socket(monkeypatch):
     # The Tequity tools take a one-shot subscription when no snapshot is
     # held; unit tests inject snapshots and must never open the socket.

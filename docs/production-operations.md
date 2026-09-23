@@ -2854,3 +2854,29 @@ router cannot place gets the research-mode answer in a research deployment; the 
 `deployment_mode` and `execution_enabled`, and the Explore swap starters are hidden when execution is off (shell
 v13). "Recently / latest" knowledge questions lead with the web's dated answer, the knowledge base following as
 background; the knowledge prompt distinguishes "fully backed" from "over-collateralized".
+
+## The contract pipeline (2026-09-23)
+
+Rank-and-accept is replaced, for four kinds of ask, by plan → gather → prove coverage → answer:
+
+- **Question contract** (`app/contracts.py`): kind (market_ranking, holders, recent_events, yields, other), subject,
+  venue, scope (venue_trades / global / on_chain / any), metric and unit, window, direction and limit, filters,
+  freshness, evidence order, required facts, or an `ambiguity` question. A planner model (`PLANNER_MODEL`, else
+  the primary model) writes it; the rules planner keeps the venue, window and filter readings and serves tests and
+  keyless deployments.
+- **Hard eligibility** (`tool_catalog.CONTRACT_COVERAGE`, `eligible()`): kind, scope, chain, venue, metric and
+  window are requirements, not scores. A tool failing only scope or venue is the *nearest verifiable* fallback and
+  the answer opens with "The exact scope asked for could not be verified from a source that covers it." A tool
+  failing metric or window is wrong and never runs; with no source at all the answer says so.
+- **Typed facts** (`app/facts.py`): cards are parsed generically (markdown tables → rows) into ranking, holder,
+  yield and event facts with the provider's own time; burn addresses, LP versus single-asset and event dates are
+  classified once here.
+- **Fact gate** (`app/fact_gate.py`): required facts per contract (rows for the scope and filters, a dated event
+  inside the window, single-asset yields when asked), freshness, and figures in the prose that no fact carries
+  (named under the answer). The topical answer gate does not run on a contract answer.
+- **Pipeline** (`app/evidence_pipeline.py`): at most three tools (one state source per scope, discovery first for
+  events), one repair call, one synthesis with the contract and gaps as instructions, one final check.
+  `CONTRACT_PIPELINE_ENABLED=false` returns everything to the legacy path.
+- **Episodes** (`evals/episodes/`, `scripts/episode_eval.py`, `tests/test_episodes.py`): recorded tool outputs
+  replayed through the pipeline; a goal is the end state (tools that ran and must not, scope satisfied, gate,
+  facts, must/must-not say). pass^k after τ-bench; CI runs every episode twice, `--k 5` locally.

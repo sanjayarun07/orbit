@@ -29,7 +29,7 @@ from app.token_resolve import bitquery_evm_lookup, clear_winner, token_candidate
 from app.token_deepdive import (
     ANALYSIS_RULES, build_token_evidence, bundle_signals, coverage_rows, evidence_skips, extract_market_price, format_evidence_bundle,
 )
-from app import decision_records, handles, holder_snapshots, jobs, listed_asset, role_memory, snapshot_compare, tequity
+from app import decision_records, evidence_pipeline, handles, holder_snapshots, jobs, listed_asset, role_memory, snapshot_compare, tequity
 from app.signals import Signal, Subject
 from app.source_cards import extract_source_cards
 from app.web_search import append_web_sources, is_crypto_trends_query, web_search
@@ -1943,7 +1943,10 @@ async def research_node(state: AgentState) -> dict:
     # asked it (app/answer_gate.py) -- a wrong subject or a missing answer
     # never ships. The link note goes on after, so the check reads the answer
     # the tools produced.
-    result = await answer_gate.gate(state["request"], result)
+    if result.get("pipeline") != "contract":
+        # The contract pipeline already proved or stated its coverage; the
+        # topical gate must not replace an honest gap with web prose.
+        result = await answer_gate.gate(state["request"], result)
     limit = composition.word_limit(state["request"])
     if limit and result.get("answer") and not is_clarification(result.get("answer")) and not result.get("pending_token"):
         # After the gate, so the judge reads the whole answer and a web
@@ -2263,6 +2266,15 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         if cap in _BACKSTOP_CAPABILITIES and cap in tool_matched and cap not in eligible_capabilities
     )
     eligible_capabilities = eligible_capabilities + backstop
+    if settings.contract_pipeline_enabled:
+        # Plan the evidence, gather it, prove coverage, then answer: the four
+        # contract kinds (rankings, holders, recent events, yields) leave the
+        # rank-and-accept path here (2026-09-23). None means "not one of them".
+        piped = await evidence_pipeline.answer(state, request, chains, context=resolution.note or "")
+        if piped is not None:
+            if piped.get("contract", {}).get("subject", {}).get("id"):
+                sink["resolved_token"] = sink.get("resolved_token") or {"symbol": piped["contract"]["subject"].get("symbol"), "address": piped["contract"]["subject"]["id"], "chain": piped["contract"]["subject"].get("chain")}
+            return piped
     # A one-letter name ("is M safe?") matches many tokens: ask, never search.
     if not resolution.chain and not address_match and not subject_probe.subject_of(request):
         # Asset intent required: "I am new to crypto" is not a question about token I (UI run, 2026-09-23).

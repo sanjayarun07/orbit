@@ -514,3 +514,75 @@ def catalog_markdown(router=None) -> str:
         if spec.not_answers:
             lines.append("- **Looks similar, belongs elsewhere**: " + " · ".join(f"“{a}”" for a in spec.not_answers))
     return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Contract coverage: what each tool can honestly satisfy, machine-checkable.
+# Scope, chains, venues, metrics and windows are HARD requirements judged by
+# `eligible()` before any ranking; a tool that fails them is out, however
+# healthy its output (review of the Home run, 2026-09-23: CoinGecko's Base
+# ecosystem list answered "gainers on Base"). Tools not listed here are
+# eligible only for `other` contracts (the legacy path).
+# ---------------------------------------------------------------------------
+
+_ALL_EVM = frozenset({"ethereum", "base", "arbitrum", "optimism", "bsc", "polygon", "avalanche"})
+
+CONTRACT_COVERAGE: dict[str, dict] = {
+    "coingecko_gainers_losers": {"kinds": {"market_ranking"}, "scope": "global", "chains": _ALL_EVM | {"solana", "sui"}, "metrics": {"price_change"}, "windows": (12.0, 24.0), "fresh": 120},
+    "coingecko_top_volume": {"kinds": {"market_ranking"}, "scope": "global", "chains": _ALL_EVM | {"solana", "sui"}, "metrics": {"volume"}, "windows": (12.0, 24.0), "fresh": 120},
+    "dexscreener_boosted_tokens": {"kinds": {"market_ranking"}, "scope": "venue_trades", "chains": _ALL_EVM | {"solana", "sui", "robinhood"}, "venues": {"dexscreener", "pump.fun"}, "metrics": {"boosts"}, "windows": (12.0, 24.0), "fresh": 300},
+    "geckoterminal_pools": {"kinds": {"market_ranking"}, "scope": "venue_trades", "chains": _ALL_EVM | {"solana"}, "venues": {"dexscreener", "pump.fun"}, "metrics": {"volume", "new_listings"}, "windows": (12.0, 24.0), "fresh": 120},
+    "tequity_movers": {"kinds": {"market_ranking"}, "scope": "venue_trades", "venues": {"aster", "hyperliquid"}, "chains": set(), "metrics": {"price_change"}, "windows": (12.0, 24.0), "fresh": 120},
+    "tequity_period_movers": {"kinds": {"market_ranking"}, "scope": "venue_trades", "venues": {"aster", "hyperliquid"}, "chains": set(), "metrics": {"price_change"}, "windows": (0.5, 720.0), "fresh": 600},
+    "tequity_volume_leaders": {"kinds": {"market_ranking"}, "scope": "venue_trades", "venues": {"aster", "hyperliquid"}, "chains": set(), "metrics": {"volume"}, "windows": (0.25, 720.0), "fresh": 600},
+    "tequity_trending": {"kinds": {"market_ranking"}, "scope": "venue_trades", "venues": {"aster", "hyperliquid"}, "chains": set(), "metrics": {"volume", "price_change"}, "windows": (12.0, 24.0), "fresh": 120},
+    "mobula_token_holders": {"kinds": {"holders"}, "scope": "on_chain", "chains": _ALL_EVM | {"solana"}, "metrics": {"holders"}, "windows": None, "fresh": 3600},
+    "solana_rpc_token_top_holders": {"kinds": {"holders"}, "scope": "on_chain", "chains": {"solana"}, "metrics": {"holders"}, "windows": None, "fresh": 300},
+    "bitquery_token_top_holders": {"kinds": {"holders"}, "scope": "on_chain", "chains": _ALL_EVM | {"solana"}, "metrics": {"holders"}, "windows": None, "fresh": 3600},
+    "goldrush_token_top_holders": {"kinds": {"holders"}, "scope": "on_chain", "chains": _ALL_EVM, "metrics": {"holders"}, "windows": None, "fresh": 3600},
+    "defillama_yields": {"kinds": {"yields"}, "scope": "global", "chains": _ALL_EVM | {"solana", "sui", "aptos", "tron", "hyperliquid"}, "metrics": {"apy"}, "windows": None, "fresh": 3600},
+    "perplexity_web_search": {"kinds": {"recent_events"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 3 * 86400, "discovery": True},
+    "knowledge_base_search": {"kinds": {"recent_events"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": None, "background": True},
+    "tradingview_news": {"kinds": {"recent_events"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 86400, "discovery": True},
+    "exchange_listing_announcements": {"kinds": {"recent_events"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 86400, "discovery": True},
+}
+
+
+def eligible(tool_name: str, contract) -> tuple[bool, str]:
+    """Whether a tool may serve a contract, and why not when it may not.
+    Kind, scope, chain, venue, metric and window are hard requirements."""
+    cov = CONTRACT_COVERAGE.get(tool_name)
+    if cov is None:
+        return False, "no contract coverage declared"
+    if contract.kind not in cov["kinds"]:
+        return False, f"serves {', '.join(sorted(cov['kinds']))}, not {contract.kind}"
+    if contract.metric and cov["metrics"] and contract.metric not in cov["metrics"]:
+        return False, f"metric {contract.metric} not in {', '.join(sorted(cov['metrics']))}"
+    if contract.scope == "venue_trades" and cov["scope"] not in ("venue_trades", "on_chain"):
+        return False, f"scope is {cov['scope']}, the ask needs trades on the venue"
+    if contract.scope == "on_chain" and cov["scope"] not in ("on_chain",):
+        return False, f"scope is {cov['scope']}, the ask needs on-chain records"
+    venues = cov.get("venues") or set()
+    if contract.venue:
+        if venues and contract.venue not in venues:
+            return False, f"venue {contract.venue} not covered"
+        if not venues and cov["scope"] != "any":
+            return False, f"venue {contract.venue} not covered"
+    elif venues and cov["scope"] == "venue_trades" and contract.kind == "market_ranking" and contract.subject.chain and "aster" in venues:
+        return False, "venue-specific feed, no venue asked"
+    chain = contract.subject.chain
+    if chain and cov["chains"] and chain not in cov["chains"]:
+        return False, f"chain {chain} not covered"
+    if chain and not cov["chains"] and cov["scope"] not in ("any",) and not venues:
+        return False, f"chain {chain} not covered"
+    if contract.window_hours and cov.get("windows"):
+        lo, hi = cov["windows"]
+        if not (lo <= contract.window_hours <= hi):
+            return False, f"window {contract.window_hours:g}h outside {lo:g}-{hi:g}h"
+    return True, "eligible"
+
+
+def eligible_tools(contract) -> list[tuple[str, str]]:
+    """(tool name, reason) for every catalogued tool, eligible ones first."""
+    rows = [(name, *eligible(name, contract)) for name in CONTRACT_COVERAGE]
+    return [(name, reason) for name, ok, reason in rows if ok] + [(name, reason) for name, ok, reason in rows if not ok]
