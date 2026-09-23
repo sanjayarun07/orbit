@@ -52,6 +52,33 @@ class Settings(BaseSettings):
     # connect a wallet and confirm a quote in the web UI.
     mcp_api_key: str | None = None
     public_base_url: str = "http://localhost:8000"
+    # Telegram bot (app/telegram/). Off until TELEGRAM_BOT_TOKEN is set: no
+    # route is registered, no webhook is claimed, nothing changes.
+    #
+    # A Telegram user is a way in to an ordinary Orbit account, created on
+    # their first message and keyed on their numeric Telegram id, so plans,
+    # credits, quotas, conversation retention and deletion are the same code
+    # paths the web uses. "Anonymous" here means no sign-in screen, not no
+    # account -- a signed-out browser visitor is scratch space that expires in
+    # two hours, and a Telegram chat is permanent and personal.
+    telegram_bot_token: str | None = None
+    # The path segment and the header Telegram echoes back, both checked. Left
+    # empty, one is derived from the bot token so a deployment that forgets to
+    # set it is not thereby open: the URL is still unguessable.
+    telegram_webhook_secret: str | None = None
+    # PUBLIC_BASE_URL + this path is what setWebhook is pointed at on startup.
+    # Empty disables the automatic claim (set the webhook by hand, or run two
+    # deployments against one bot without them fighting over it).
+    telegram_set_webhook_on_start: bool = True
+    # How long the bot waits for a turn before telling the user it is still
+    # working. Telegram shows "typing..." for 5 s per call, so the progress
+    # message is what actually reassures them.
+    telegram_turn_timeout_seconds: float = 180.0
+    # One edit per this many seconds while a turn runs: Telegram rate-limits
+    # edits per chat, and a deep dive emits far more status lines than that.
+    telegram_progress_interval_seconds: float = 1.5
+    # A web -> Telegram link token from Profile, consumed by /start.
+    telegram_link_ttl_seconds: int = 15 * 60
     # TradingView connector (app/integrations/tradingview.py): each user links
     # their own TradingView account (OAuth 2.1, Essential plan or higher) so
     # research can read live quotes, technicals, fundamentals, news and

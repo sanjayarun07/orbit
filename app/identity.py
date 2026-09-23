@@ -115,6 +115,17 @@ async def _identity_for_user(user: dict, ip: str, api_key: dict | None = None) -
     return Identity("api_key" if api_key else "user", account_id, ip, user=user, api_key=api_key, plan=plan, team_owner=team_owner)
 
 
+async def identity_for_user(user: dict, ip: str = "telegram") -> Identity:
+    """The Identity for an account resolved outside an HTTP request.
+
+    A transport that is not the browser -- the Telegram bot, a worker acting
+    for a user -- still needs the plan, the billed account and the monthly
+    grant resolved exactly as a cookie request would, or it would quietly bill
+    the wrong account. `ip` is only the rate-limit/telemetry label; the bot
+    passes a constant because a Telegram update has no client address."""
+    return await _identity_for_user(user, ip)
+
+
 async def resolve_identity(request: Request) -> Identity:
     ip = client_ip(request)
     bearer = request.headers.get("authorization", "").removeprefix("Bearer ").strip()

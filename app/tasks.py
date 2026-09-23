@@ -28,7 +28,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from app import accounts, credits, emailer, home_highlights, market_overview
+from app import accounts, credits, emailer, home_highlights, market_overview, notifications
 from app.billing_plans import get_plan
 from app.db import get_pg_pool
 from app.jupiter import jupiter
@@ -40,6 +40,10 @@ _account_locks: dict[tuple[int, str], asyncio.Lock] = {}
 logger = logging.getLogger(__name__)
 
 KINDS = ("reminder", "price_alert", "brief")
+# Where a fired task is delivered. "inapp" is always written (the inbox row is
+# the delivery of record and the idempotency key); the other two are
+# best-effort pushes on top of it.
+CHANNELS = ("inapp", "email", "telegram")
 TASK_LIMITS = {"anonymous": 0, "free": 3, "pro": 25, "max": 100}
 _MAJORS = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana", "BNB": "binancecoin", "XRP": "ripple", "DOGE": "dogecoin", "ADA": "cardano", "AVAX": "avalanche-2", "LINK": "chainlink", "TRX": "tron", "TON": "the-open-network", "SUI": "sui"}
 
@@ -259,7 +263,7 @@ async def _create_task_locked(user: dict, kind: str, spec: dict, schedule: dict,
     await assert_can_activate(user, db=db, plan=plan)
     task = {
         "id": str(uuid4()), "user_id": user["id"], "kind": kind, "title": (title or _default_title(kind, spec))[:140],
-        "spec": dict(spec), "schedule": dict(schedule), "channel": channel if channel in ("inapp", "email") else "inapp",
+        "spec": dict(spec), "schedule": dict(schedule), "channel": channel if channel in CHANNELS else "inapp",
         "status": "active", "tz_offset_min": int(tz_offset_min or 0), "created_at": _iso(_now()),
         "next_run_at": _iso(when), "last_run_at": None, "last_result": None, "fire_count": 0, "retry_count": 0,
     }
@@ -699,7 +703,16 @@ async def _run_claimed(task: dict, user: dict) -> dict:
         await credits.append(account_id, charge, "task:brief-refund", "task_refund", ref, {"kind": "brief"})
     if fired and body:
         _item, delivered_now = await notify(user["id"], task["title"], body, kind=task["kind"], task_id=task["id"], occurrence=ref)
-        if delivered_now and task.get("channel") == "email" and user.get("email"):
+        if delivered_now and task.get("channel") == "telegram":
+            # Same contract as email below: best-effort on top of the inbox
+            # row, recorded on failure, never retried.
+            try:
+                if not await notifications.send_telegram(user, task["title"], body):
+                    updates["last_result"] = f"{result} (telegram not delivered)"
+            except Exception:
+                logger.warning("tasks: telegram delivery failed for %s", task["id"], exc_info=True)
+                updates["last_result"] = f"{result} (telegram failed)"
+        elif delivered_now and task.get("channel") == "email" and user.get("email"):
             # Email failure behaviour, stated: the inbox row already stands as
             # the delivery of record, so a failed send is recorded and NOT
             # retried -- a retry cannot tell a lost email from a late one, and

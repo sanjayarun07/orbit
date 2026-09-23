@@ -32,6 +32,7 @@ from app import relay_tracking
 from fastapi.staticfiles import StaticFiles
 
 from app import deployment, execution_policy, plan_access, task_scheduling
+from app import telegram as telegram_bot
 from app.deployment import ExecutionDisabledError
 from app import streaming
 from app.service_errors import ServiceError, safe_detail as _safe_detail
@@ -144,6 +145,10 @@ async def lifespan(_app: FastAPI):
         asyncio.create_task(asyncio.to_thread(token_unlocks.warm))
         asyncio.create_task(tradingview.warm())
     kb_worker = asyncio.create_task(kb_ingest.worker())
+    if telegram_bot.enabled():
+        # Claimed in the background: Telegram being slow or unreachable must
+        # not hold up the app's readiness, and a failed claim is logged.
+        asyncio.create_task(telegram_bot.claim_webhook())
     # The holder snapshot ledger records tracked meme tokens in the
     # background; history only exists from the day recording starts.
     snapshot_worker = asyncio.create_task(holder_snapshots.worker())
@@ -258,6 +263,13 @@ async def mcp_admission(request: Request, call_next):
 
 
 app.mount("/mcp", mcp_server.mcp.streamable_http_app(), name="mcp")
+
+# The Telegram bot's webhook and the account-link endpoints. Registering the
+# router unconditionally keeps one code path: every handler inside refuses
+# with 503 (or 404 on the webhook, whose secret is unguessable) when
+# TELEGRAM_BOT_TOKEN is unset, so an unconfigured deployment exposes nothing
+# that works while a configured one needs no restart-time branching.
+app.include_router(telegram_bot.router)
 
 _workers: dict[str, "asyncio.Task"] = {}
 
@@ -490,6 +502,7 @@ async def coinbase_auth_verify(body: WalletAuthVerifyRequest, response: Response
     try:
         _token, verified = await verify_challenge(body.address, body.nonce, body.signature)
     except (ValueError, TypeError) as exc:
+        logger.info("coinbase wallet sign-in failed: %s", exc)
         raise HTTPException(401, _safe_detail(exc, "Wallet authentication failed")) from exc
     # The chain comes from the VERIFIED challenge, never from this request.
     # "evm" used to be the label here, which collapsed every network into one
@@ -505,12 +518,20 @@ async def wallet_auth_challenge(body: WalletChallengeRequest, request: Request):
     """The general pair: any wallet, EVM or Solana. No sign-in required to
     call this -- proving control of an address is itself how you sign in."""
     host = request.headers.get("host", request.url.hostname or "Orbit").split("/", 1)[0]
-    uri = f"{request.url.scheme}://{host}"
+    # Behind a TLS-terminating proxy (ngrok, Caddy) the app itself is spoken to
+    # over http, so request.url.scheme says "http" while the browser is on
+    # https. The URI inside a sign-in message is shown to the user by their
+    # wallet and is compared against the origin by strict SIWE/SIWS
+    # validators, so it has to be the scheme the BROWSER used.
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
+    scheme = forwarded or request.url.scheme
+    uri = f"{scheme}://{host}"
     try:
         if body.chain == "solana":
             return await create_solana_challenge(body.address, host, uri)
         return await create_challenge(body.address, host, uri, int(body.chain))
     except ValueError as exc:
+        logger.info("wallet challenge refused for chain=%s: %s", body.chain, exc)
         raise HTTPException(400, _safe_detail(exc, "Unsupported wallet or network")) from exc
 
 
@@ -519,6 +540,7 @@ async def wallet_auth_verify(body: WalletVerifyRequest, response: Response, requ
     requested = _wallet_chain_label(body.chain)
     address = body.address if requested == "solana" else body.address.lower()
     wallet_type = accounts.EOA
+    logger.info("wallet sign-in attempt: chain=%s address=%s…", requested, address[:6])
     try:
         if requested == "solana":
             await verify_solana_challenge(address, body.nonce, body.signature)
@@ -535,8 +557,11 @@ async def wallet_auth_verify(body: WalletVerifyRequest, response: Response, requ
             if chain != requested:
                 raise HTTPException(400, "This signature was issued for a different network. Request a fresh challenge.")
     except (ValueError, TypeError) as exc:
+        logger.info("wallet sign-in failed for chain=%s address=%s…: %s", requested, address[:6], exc)
         raise HTTPException(401, _safe_detail(exc, "Wallet authentication failed")) from exc
-    return await _finish_wallet_signin(chain, address, request, response, wallet_type)
+    result = await _finish_wallet_signin(chain, address, request, response, wallet_type)
+    logger.info("wallet sign-in succeeded: chain=%s address=%s…", chain, address[:6])
+    return result
 
 
 @app.post("/auth/logout")

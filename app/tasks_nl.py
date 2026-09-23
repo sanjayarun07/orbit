@@ -141,9 +141,9 @@ async def handle(message: str, user: dict, tz_offset_min: int = 0) -> str | None
     m = _BRIEF.match(text)
     if m:
         h, mi = _clock(m.group("h"), m.group("m"), m.group("ap"), default=(8, 0))
-        channel = "email" if m.group("channel") else "inapp"
+        channel = task_scheduling.default_channel("email" if m.group("channel") else None)
         task = await _create(user, "brief", {}, {"daily": f"{h:02d}:{mi:02d}"}, channel, tz_offset_min)
-        return task if isinstance(task, str) else f"Morning brief scheduled **daily at {h:02d}:{mi:02d}** ({'email + inbox' if channel == 'email' else 'inbox'}). First one: {_when(task)}. It costs 1 credit per delivery."
+        return task if isinstance(task, str) else f"Morning brief scheduled **daily at {h:02d}:{mi:02d}** ({_where(channel)}). First one: {_when(task)}. It costs 1 credit per delivery."
     m = _ALERT.match(text)
     if m:
         cmp = m.group("cmp").lower()
@@ -154,10 +154,10 @@ async def handle(message: str, user: dict, tz_offset_min: int = 0) -> str | None
         if current is None:
             return f"I couldn't find a trustworthy price for **{symbol}** (majors and Jupiter-verified Solana tokens are supported), so no alert was set."
         spec = {"symbol": symbol, "op": op, "price": price, "repeat": bool(m.group("repeat"))}
-        task = await _create(user, "price_alert", spec, {"every_minutes": 5}, "inapp", tz_offset_min)
+        task = await _create(user, "price_alert", spec, {"every_minutes": 5}, task_scheduling.default_channel(), tz_offset_min)
         if isinstance(task, str):
             return task
-        return (f"Alert set: **{symbol} {op} ${price:,.4g}** (now ${current:,.4g}). I check every few minutes and drop a note in your inbox"
+        return (f"Alert set: **{symbol} {op} ${price:,.4g}** (now ${current:,.4g}). I check every few minutes and send you a note"
                 + (" each time it crosses." if spec["repeat"] else " the first time it crosses."))
     m = _REMIND.match(text)
     if m:
@@ -166,11 +166,15 @@ async def handle(message: str, user: dict, tz_offset_min: int = 0) -> str | None
             return ("Tell me when and what — e.g. *remind me tomorrow at 9am to check SOL*, *remind me in 2 hours to rebalance*, "
                     "or *remind me every Monday at 9am to review my portfolio*.")
         schedule, msg = parsed
-        task = await _create(user, "reminder", {"message": msg}, schedule, "inapp", tz_offset_min, title=f"Reminder: {msg}")
+        task = await _create(user, "reminder", {"message": msg}, schedule, task_scheduling.default_channel(), tz_offset_min, title=f"Reminder: {msg}")
         if isinstance(task, str):
             return task
         return f"Reminder set — **{msg}** · {tasks.describe_schedule(schedule, tz_offset_min)}. Next: {_when(task)}."
     return None
+
+
+def _where(channel: str) -> str:
+    return {"email": "email + inbox", "telegram": "Telegram + inbox"}.get(channel, "inbox")
 
 
 async def _create(user, kind, spec, schedule, channel, tz, title=None):

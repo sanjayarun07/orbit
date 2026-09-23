@@ -415,6 +415,51 @@ CI builds and smoke-tests the image on every push and publishes it from `main`.
 Release gates, credential rotation and reconciliation guidance are in
 `docs/production-operations.md`.
 
+## Use Orbit from Telegram
+
+Orbit runs as a Telegram bot with the same agent behind it: the bot is a
+transport over the same chat turn the web UI and MCP use, so routing, the
+provider router, budgets, validation, credits and the risk charter are shared,
+not reimplemented.
+
+```bash
+# .env
+TELEGRAM_BOT_TOKEN=...            # from @BotFather
+TELEGRAM_WEBHOOK_SECRET=...       # openssl rand -hex 32
+PUBLIC_BASE_URL=https://your.domain
+```
+
+The webhook is claimed at startup. Empty token = the bot is off and nothing
+else changes.
+
+A Telegram user's first message creates an ordinary Orbit account keyed on
+their Telegram id — no sign-in screen, but a real account with the same plan,
+credits and 30-day conversation retention.
+
+**One account on both surfaces.** `/link` hands back a link that already
+carries the Telegram identity; the user signs in on the other side however
+they like — a wallet such as MetaMask or Phantom, or an email — and the chat
+joins that account by itself. Email is never required. The reverse direction,
+for someone who started on the web, is `POST /me/telegram/link` (Settings →
+Connections → Telegram). `/account` shows plan, credits and whether this chat
+is connected.
+
+Ask anything in words. `/wallet <address>` follows a public wallet read-only,
+`/desk on|off` is the trading desk, `/tasks` lists alerts and briefs, `/new`
+starts a fresh conversation, `/help` lists the rest. In a group the bot
+answers only a command, an `@mention`, or a reply to itself, and each person
+gets their own conversation so nobody inherits another's wallet or charter.
+
+**Alerts arrive as messages.** A task created in Telegram delivers there
+(`app/tasks.py` gained a `telegram` channel alongside `inapp` and `email`), so
+"alert me when SOL drops below 180" reaches you where you asked for it.
+
+**Nothing in Telegram can sign.** A swap renders as a review card and a plain
+link to the Orbit UI, where the user's own wallet confirms it. Links are never
+`web_app` buttons: Telegram's in-app webview has its own cookie jar, so the
+user would arrive signed out, and browser-extension wallets do not exist
+there at all.
+
 ## Use Orbit from Claude or ChatGPT (MCP)
 
 Orbit is also an MCP server with the same surface as the web UI, so any agent

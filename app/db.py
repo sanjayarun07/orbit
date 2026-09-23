@@ -200,6 +200,21 @@ CREATE INDEX IF NOT EXISTS user_wallets_user ON user_wallets (user_id);
 -- linked before this column existed default to 'eoa', which is what they were
 -- treated as; a pre-existing smart-wallet link keeps its old, broader scope.
 ALTER TABLE user_wallets ADD COLUMN IF NOT EXISTS wallet_type TEXT NOT NULL DEFAULT 'eoa';
+CREATE TABLE IF NOT EXISTS user_identities (
+    provider TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    display TEXT,
+    linked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (provider, external_id)
+);
+CREATE INDEX IF NOT EXISTS user_identities_user ON user_identities (user_id);
+-- A messaging account is a way IN to an Orbit account, exactly as a wallet is.
+-- The primary key is the pair, so one Telegram user maps to one Orbit account
+-- and re-linking moves the pointer rather than forking a second account. The
+-- provider column is here so the next surface (Discord, Slack) needs no
+-- migration; `display` is the @handle for the settings screen only -- it can
+-- change under the user at any time and is never an identifier.
 CREATE TABLE IF NOT EXISTS credit_ledger (
     id UUID PRIMARY KEY,
     account_id TEXT NOT NULL,
