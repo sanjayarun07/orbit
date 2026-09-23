@@ -118,7 +118,14 @@
   <div class="dialog">
     <div class="dialog-head"><h2 id="walletTitle">Connect wallet</h2><button class="close" data-close="walletDialog" aria-label="Close">×</button></div>
     <div class="dialog-body" id="walletDialogBody">
-      <div id="connectedPanel" class="connected-panel" hidden><strong id="connectedProvider">Connected</strong><div class="connected-address" id="connectedAddress"></div></div>
+      <div id="connectedPanel" class="connected-panel" hidden><strong id="connectedProvider">Connected</strong><div class="connected-address" id="connectedAddress"></div>
+        <!-- Connecting a wallet and signing in with it are two acts: the
+             second needs a signature, and it is attempted once on connect,
+             fire-and-forget. A declined or failed signature used to leave the
+             user connected, not signed in, with no way to try again. -->
+        <div id="walletSigninRow" hidden><button class="primary" id="walletSigninBtn" type="button">Sign in with this wallet</button>
+          <div class="field-help" id="walletSigninHelp">Sign a message to prove the wallet is yours. No email needed, and nothing is spent.</div></div>
+      </div>
       <div id="walletOptions">
         <button class="wallet-option" id="connectPrivyBtn" type="button"><span class="wallet-logo" style="background:#fff;color:#111">P</span><span>Email wallet<small id="privyOptionHelp">Email sign-in with Ethereum and Solana wallets</small></span></button>
         <button class="wallet-option" id="connectCoinbaseBtn" type="button"><span class="wallet-logo" style="background:#0052ff;color:#fff">C</span><span>Coinbase Wallet<small id="coinbaseOptionHelp">Smart Wallet, extension, or mobile</small></span></button>
@@ -205,12 +212,16 @@
             <button class="secondary" id="signoutBtn" type="button" hidden>Sign out</button>
           </div>
           <div class="field-help" id="accountHelp">Sign in to access your history, connect wallets, and receive 300 monthly credits.</div>
+          <div class="field-help" id="tgLinkBanner" hidden><b>Finishing your Telegram connection.</b> Sign in above with a wallet or an email — whichever you prefer — and this chat joins that account automatically. Nothing else to click.</div>
         </div>
         <div class="settings-section" id="connectionsSection" hidden>
           <h3>Connections</h3>
           <div class="row-list">
             <div class="key-row connection-row"><span><b>TradingView</b><br><span class="muted" id="tvStatus">Not connected</span></span><span class="connection-actions"><button class="secondary" id="tvConnectBtn" type="button">Connect</button><button class="secondary" id="tvDisconnectBtn" type="button" hidden>Disconnect</button></span></div>
+            <div class="key-row connection-row" id="tgRow" hidden><span><b>Telegram</b><br><span class="muted" id="tgStatus">Not connected</span></span><span class="connection-actions"><button class="secondary" id="tgConnectBtn" type="button">Connect</button><button class="secondary" id="tgDisconnectBtn" type="button" hidden>Disconnect</button></span></div>
           </div>
+          <div class="field-help" id="tgHelp" hidden>Use the same Orbit account in Telegram: same credits, plan, wallets and risk charter, and alerts arrive as messages instead of sitting in the inbox. Connecting works however you signed in here — a wallet is fine, an email is not required.</div>
+          <div class="field-help" id="tgNotice" hidden></div>
           <div class="field-help">Link your own TradingView account (Essential plan or higher) and research reads its live quotes, technicals, fundamentals, news and earnings calendars on your behalf. Orbit never holds a shared TradingView login.</div>
           <div class="field-help" id="tvNotice" hidden></div>
         </div>
@@ -1495,7 +1506,7 @@ async function executeRelayQuote(){
 
 async function hydrateHistory(){messagesEl.innerHTML="";if(!sessionId){sessionRevision=null;messagesEl.innerHTML=welcomeMarkup;return;}try{const res=await fetch(`/chat/history/${encodeURIComponent(sessionId)}`);if(!res.ok)throw new Error();const data=await res.json();sessionRevision=Number(data.context?.revision||0);syncTeamMode(data.context?.team_mode);syncPolicy(data.context?.risk_charter,data.context?.risk_charter_fields);if(!(data.messages||[]).length){chatRegistry=chatRegistry.filter(chat=>chat.id!==sessionId);saveChats();sessionId=null;sessionRevision=null;sessionStorage.removeItem("orbit_session_id");renderChatList();messagesEl.innerHTML=welcomeMarkup;return;}for(const msg of data.messages){if(msg.role==="user")addUserMessage(msg.content,msg.ts??null);else{const agentMessage=addAgentMessage(msg.content);finishAgentMessage(agentMessage,{answer:msg.content,ts:msg.ts??null,chart:msg.chart,trajectory:msg.trajectory,trade_plan:msg.trade_plan,quick_actions:msg.quick_actions,suggestions:msg.suggestions,session_revision:msg.session_revision,intent:msg.intent,capabilities:msg.capabilities,cross_chain_swap:msg.cross_chain_swap,context_capsules:msg.context_capsules,intent_lock:msg.intent_lock,evidence:msg.evidence,trade_readiness:msg.trade_readiness,gas_advisory:msg.gas_advisory});}}const groups=[...document.querySelectorAll(".quick-actions")];groups.slice(0,-1).forEach(group=>group.querySelectorAll(".followup-action").forEach(button=>{button.disabled=true;button.setAttribute("aria-disabled","true");}));scrollToBottom();}catch{sessionRevision=null;messagesEl.innerHTML=welcomeMarkup;}}   // history unreadable (e.g. signed out): keep the session, assert nothing
 
-function setReadOnlyWallet(address){walletInput.value=address;const button=$("#walletButton");button.classList.add("connected");button.classList.add("readonly");button.title="Public address, view only: this wallet cannot sign";$("#walletLabel").textContent=`${shortAddress(address)} · view only`;syncIdentityDisplay();}
+function setReadOnlyWallet(address){walletInput.value=address;const button=$("#walletButton");button.classList.add("connected");button.classList.add("readonly");button.title="Public address, view only: this wallet cannot sign";$("#walletLabel").textContent=`${shortAddress(address)} · view only`;syncIdentityDisplay();syncWalletSignin();}
 // One source of truth for "who is this, on screen" everywhere identity shows up
 // (the sidebar profile chip, Settings > Account): a connected wallet is the
 // clearest signal of who is using the app right now, so it wins over a signed-
@@ -1534,19 +1545,37 @@ function syncIdentityDisplay(){
 // exactly as before, not signed in. Fire-and-forget from each connect path
 // so the wallet-extension's signature prompt never delays showing "connected".
 function toHex(bytes){return Array.from(bytes).map(b=>b.toString(16).padStart(2,"0")).join("");}
+let retryWalletSignin=null,lastWalletSigninError=null;   // set by whichever provider connected
 async function signInWithWallet(chain,address,signMessage){
+  retryWalletSignin=()=>signInWithWallet(chain,address,signMessage);
   try{
     const challenge=await(await fetch("/auth/wallet/challenge",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({address,chain})})).json();
     if(!challenge?.message)throw new Error(challenge?.detail||"Could not start wallet sign-in");
-    const signature=await signMessage(challenge.message);
+    // A wallet that never raises its prompt would otherwise leave this
+    // promise pending for the life of the page, with the retry button
+    // disabled and nothing explaining the wait.
+    const signature=await Promise.race([
+      signMessage(challenge.message),
+      new Promise((_r,reject)=>setTimeout(()=>reject(new Error("Your wallet did not respond. Open the wallet extension — the signature request may be waiting there — then try again.")),120000)),
+    ]);
     const res=await fetch("/auth/wallet/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({address,chain,nonce:challenge.nonce,signature})});
     const data=await res.json();
     if(!res.ok||!data.authenticated)throw new Error(data?.detail||"Wallet sign-in failed");
     await loadAccount();
     return true;
   }catch(error){
-    console.warn("Wallet sign-in skipped:",error);
-    const panel=$("#connectedProvider");if(panel&&!account?.authenticated)panel.textContent=`${panel.textContent||"Connected"} · not signed in (${String(error?.message||error).slice(0,80)}). Sign in with email to keep history.`;
+    // Keep the reason. A declined signature, a provider that cannot sign a
+    // message, and a rejected signature are three different problems, and the
+    // user used to be shown none of them -- the wallet simply looked connected
+    // while the account stayed anonymous.
+    lastWalletSigninError=String(error?.message||error);
+    console.warn("Wallet sign-in failed:",error);
+    // Set, never append: this ran once per attempt and the line grew
+    // "· not signed in · not signed in" across retries.
+    const panel=$("#connectedProvider");
+    if(panel&&!account?.authenticated)panel.textContent=`Connected${activeProvider?" with "+activeProvider:""} · not signed in`;
+    const help=$("#walletSigninHelp");if(help)help.textContent=lastWalletSigninError;
+    syncWalletSignin();
     return false;
   }
 }
@@ -1562,7 +1591,19 @@ async function evmChainIdOf(provider){
 }
 async function solanaStandardSignMessage(wallet,account,message){
   const encoded=new TextEncoder().encode(message);
-  const results=await wallet.features["standard:signMessage"].signMessage({account,message:encoded});
+  const features=wallet?.features||{};
+  // Wallet Standard namespaces signing by CHAIN: `solana:signMessage`. Only
+  // connect, disconnect and events live under `standard:`. Reading
+  // features["standard:signMessage"] found undefined on MetaMask's Solana
+  // wallet, and the resulting TypeError was swallowed -- the wallet looked
+  // connected while the account stayed anonymous. Both names are tried
+  // because some wallets still expose the older one.
+  const feature=features["solana:signMessage"]||features["standard:signMessage"];
+  if(!feature?.signMessage){
+    const available=Object.keys(features).join(", ")||"none";
+    throw new Error(`This wallet does not offer message signing (features: ${available}). Use Sign in with email instead.`);
+  }
+  const results=await feature.signMessage({account,message:encoded});
   const signature=results?.[0]?.signature;
   if(!signature)throw new Error("No signature returned");
   return toHex(signature instanceof Uint8Array?signature:new Uint8Array(signature));
@@ -1583,26 +1624,67 @@ async function privySolanaSignMessage(provider,message){
   if(typeof signature==="string"){const raw=atob(signature);return toHex(Uint8Array.from(raw,c=>c.charCodeAt(0)));}
   return toHex(signature instanceof Uint8Array?signature:new Uint8Array(Object.values(signature)));
 }
-function setWalletConnected(address,label,addresses=[]){walletInput.value=address;walletInput.disabled=true;window.OrbitWalletContext={provider:activeProvider};syncPayChip();syncIdentityDisplay();$("#walletButton").classList.add("connected");$("#walletButton").classList.remove("readonly");$("#walletButton").title="";$("#walletLabel").textContent=shortAddress(address);$("#connectedPanel").hidden=false;$("#connectedProvider").textContent=`Connected with ${label}`;$("#connectedAddress").textContent=addresses.length?addresses.join(" · "):address;$("#walletOptions").hidden=true;$("#disconnectWalletBtn").hidden=false;}
+function syncWalletSignin(){const row=$("#walletSigninRow");if(!row)return;
+  const signedIn=Boolean(account?.authenticated);
+  const hasWallet=Boolean(walletInput.value);
+  row.hidden=signedIn||!hasWallet;
+  if(row.hidden)return;
+  const btn=$("#walletSigninBtn"),help=$("#walletSigninHelp");
+  if(!retryWalletSignin){
+    btn.hidden=true;
+    // Two different situations, and telling them apart matters: an address
+    // that was typed in has no key here and never can sign, while a wallet
+    // that reconnected after a reload just has not been asked yet.
+    help.textContent=activeProvider
+      ? "Open the wallet menu and connect again to sign in — the signature prompt needs a fresh click."
+      : "This is a public address, view only — it cannot sign. Connect the wallet itself (Phantom, MetaMask, WalletConnect…) to sign in, or use Sign in with email.";
+    return;}
+  btn.hidden=false;
+  if(lastWalletSigninError)help.textContent=lastWalletSigninError;
+  else help.textContent="Sign a message to prove the wallet is yours. No email needed, and nothing is spent.";}
+function setWalletConnected(address,label,addresses=[]){walletInput.value=address;walletInput.disabled=true;window.OrbitWalletContext={provider:activeProvider};syncPayChip();syncIdentityDisplay();$("#walletButton").classList.add("connected");$("#walletButton").classList.remove("readonly");$("#walletButton").title="";$("#walletLabel").textContent=shortAddress(address);$("#connectedPanel").hidden=false;$("#connectedProvider").textContent=`Connected with ${label}`;$("#connectedAddress").textContent=addresses.length?addresses.join(" · "):address;$("#walletOptions").hidden=true;$("#disconnectWalletBtn").hidden=false;syncWalletSignin();}
 function setWalletDisconnected(){activeProvider=null;metamaskWallet=null;metamaskAccount=null;window.OrbitSolanaWallet=null;window.OrbitWalletContext={provider:null};syncPayChip();walletInput.disabled=false;walletInput.value=profile.defaultWallet||"";$("#connectedPanel").hidden=true;$("#walletOptions").hidden=false;$("#privyAuth").hidden=true;$("#disconnectWalletBtn").hidden=true;if(walletInput.value)setReadOnlyWallet(walletInput.value);else{$("#walletButton").classList.remove("connected");$("#walletButton").classList.remove("readonly");$("#walletButton").title="";$("#walletLabel").textContent="Connect wallet";}syncIdentityDisplay();}
 function getPhantomProvider(){return window.solana?.isPhantom?window.solana:null;}
 function setPrivyStatus(message,type=""){const el=$("#privyStatus");el.textContent=message;el.className=`privy-auth-status ${type}`.trim();}
 function applyPrivyState(state,close=false){const button=$("#connectPrivyBtn"),help=$("#privyOptionHelp");button.disabled=!state.configured;help.textContent=state.configured?"Email sign-in with Ethereum and Solana wallets":"Currently unavailable";if(!state.authenticated)return;activeProvider="privy";const primary=state.solanaAddress||state.evmAddress;const addresses=[state.solanaAddress&&`SOL ${shortAddress(state.solanaAddress)}`,state.evmAddress&&`EVM ${shortAddress(state.evmAddress)}`].filter(Boolean);if(primary)setWalletConnected(primary,"Privy",addresses);
   if(state.solanaAddress){window.OrbitPrivy.getSolanaWallet().then(({provider})=>signInWithWallet("solana",state.solanaAddress,msg=>privySolanaSignMessage(provider,msg))).catch(()=>{});}
   else if(state.evmAddress){window.OrbitPrivy.getEvmWallet().then(async({provider})=>{const chain=await evmChainIdOf(provider);await signInWithWallet(chain,state.evmAddress.toLowerCase(),msg=>evmSignMessage(provider,state.evmAddress,msg));}).catch(()=>{});}
-  if(close)closeDialog("walletDialog");}
+  // Not closed while a signature may still be in flight: closing used to
+  // spend the user activation the wallet needs to raise its prompt, and
+  // the panel is where the status and the retry live.
+  if(close&&account?.authenticated)closeDialog("walletDialog");
+  syncWalletSignin();}
 function showPrivyError(error){console.warn("Email wallet unavailable",error);$("#privyAuth").hidden=true;$("#privyEmailRow").hidden=true;$("#privyCodeRow").hidden=true;$("#privyOptionHelp").textContent="Unavailable right now. Try another wallet.";}
 async function connectPrivy(){try{const state=await window.OrbitPrivy.initialize();if(!state.configured){throw new Error("Email wallets are currently unavailable. Choose another wallet to continue.");}if(state.authenticated){applyPrivyState(state,true);return;}$("#privyEmailRow").hidden=false;$("#privyAuth").hidden=false;$("#privyEmail").focus();}catch(error){showPrivyError(error);}}
 function applyCoinbaseState(state,close=false){if(!state?.connected||!state.address||!state.authenticated){if(activeProvider==="coinbase")setWalletDisconnected();return;}activeProvider="coinbase";setWalletConnected(state.address,"Coinbase Wallet · Signed in");loadAccount();if(close)closeDialog("walletDialog");}
 async function connectCoinbase(){const button=$("#connectCoinbaseBtn"),help=$("#coinbaseOptionHelp"),previous=activeProvider;button.disabled=true;help.textContent="Connect, then sign the gas-free login message…";activeProvider="coinbase";try{const state=await window.OrbitCoinbase.connect();applyCoinbaseState(state,true);help.textContent="Smart Wallet, extension, or mobile";}catch(error){activeProvider=previous;help.textContent=relayError(error);console.error(error);}finally{button.disabled=false;}}
 function applyReownState(state,close=false){const button=$("#connectReownBtn"),help=$("#reownOptionHelp");button.disabled=!state.configured;help.textContent=state.configured?"Connect a compatible Ethereum wallet":"Currently unavailable";if(!state.connected||!state.address)return;activeProvider="reown";setWalletConnected(state.address,"Reown WalletConnect");
   window.OrbitReown.getEvmWallet().then(async({provider,address})=>{const chain=await evmChainIdOf(provider);await signInWithWallet(chain,address.toLowerCase(),msg=>evmSignMessage(provider,address,msg));}).catch(()=>{});
-  if(close)closeDialog("walletDialog");}
+  // Not closed while a signature may still be in flight: closing used to
+  // spend the user activation the wallet needs to raise its prompt, and
+  // the panel is where the status and the retry live.
+  if(close&&account?.authenticated)closeDialog("walletDialog");
+  syncWalletSignin();}
 async function connectReown(){try{await window.OrbitReown.connect();applyReownState(window.OrbitReown.getState(),true);}catch(error){$("#reownOptionHelp").textContent=relayError(error);}}
 async function sendPrivyCode(){const button=$("#privySendCodeBtn");button.disabled=true;setPrivyStatus("Sending a secure one-time code…");try{await window.OrbitPrivy.sendEmailCode($("#privyEmail").value);$("#privyCodeRow").hidden=false;setPrivyStatus("Code sent. Enter it to create or reconnect your wallets.","ok");$("#privyCode").focus();}catch(error){setPrivyStatus(relayError(error),"error");}finally{button.disabled=false;}}
 async function verifyPrivyCode(){const button=$("#privyVerifyBtn");button.disabled=true;setPrivyStatus("Verifying and preparing your embedded wallets…");try{const state=await window.OrbitPrivy.verifyEmailCode($("#privyEmail").value,$("#privyCode").value);applyPrivyState(state,true);}catch(error){setPrivyStatus(relayError(error),"error");}finally{button.disabled=false;}}
-async function connectPhantom(){const provider=getPhantomProvider();if(!provider){$("#connectedProvider").textContent="Phantom was not found";window.open("https://phantom.app/","_blank","noopener");return;}try{const response=await provider.connect();activeProvider="phantom";const address=response.publicKey.toString();setWalletConnected(address,"Phantom");closeDialog("walletDialog");signInWithWallet("solana",address,phantomSignMessage);}catch(error){console.error(error);}}
-async function connectMetaMask(){const btn=$("#connectMetaMaskBtn");btn.disabled=true;try{const{createSolanaClient}=await import("https://esm.sh/@metamask/connect-solana@2");const client=await createSolanaClient({dapp:{name:"Orbit",url:location.origin},api:{supportedNetworks:{mainnet:`${location.origin}/rpc/solana`}}});const wallet=client.getWallet();const{accounts}=await wallet.features["standard:connect"].connect();if(!accounts?.length)throw new Error("No account returned");metamaskWallet=client;metamaskAccount=accounts[0];window.OrbitSolanaWallet={address:accounts[0].address,signAndSendTransaction:signAndSendMetaMaskSolanaTransaction};activeProvider="metamask";setWalletConnected(accounts[0].address,"MetaMask");closeDialog("walletDialog");signInWithWallet("solana",accounts[0].address,msg=>solanaStandardSignMessage(wallet,accounts[0],msg));}catch(error){$("#walletLabel").textContent="Connection failed";console.error(error);}finally{btn.disabled=false;}}
+// Connect, then prove it, without letting go of the user's click.
+// The signature used to be requested AFTER closeDialog, detached and
+// unawaited: a wallet extension will not raise its prompt once the user
+// activation from the click is gone, so /auth/wallet/verify was never reached
+// and the wallet sat "connected" while the account stayed anonymous. The
+// dialog now stays open with a status until the wallet answers.
+async function connectAndSignIn(chain,address,label,signMessage,addresses=[]){
+  setWalletConnected(address,label,addresses);
+  const panel=$("#connectedProvider");
+  if(panel)panel.textContent=`Connected with ${label} · check your wallet to finish signing in…`;
+  const ok=await signInWithWallet(chain,address,signMessage);
+  if(ok){closeDialog("walletDialog");}
+  else{syncWalletSignin();}      // stays open, showing the reason and a retry
+  return ok;
+}
+async function connectPhantom(){const provider=getPhantomProvider();if(!provider){$("#connectedProvider").textContent="Phantom was not found";window.open("https://phantom.app/","_blank","noopener");return;}try{const response=await provider.connect();activeProvider="phantom";const address=response.publicKey.toString();await connectAndSignIn("solana",address,"Phantom",phantomSignMessage);}catch(error){console.error(error);}}
+async function connectMetaMask(){const btn=$("#connectMetaMaskBtn");btn.disabled=true;try{const{createSolanaClient}=await import("https://esm.sh/@metamask/connect-solana@2");const client=await createSolanaClient({dapp:{name:"Orbit",url:location.origin},api:{supportedNetworks:{mainnet:`${location.origin}/rpc/solana`}}});const wallet=client.getWallet();const{accounts}=await wallet.features["standard:connect"].connect();if(!accounts?.length)throw new Error("No account returned");metamaskWallet=client;metamaskAccount=accounts[0];window.OrbitSolanaWallet={address:accounts[0].address,signAndSendTransaction:signAndSendMetaMaskSolanaTransaction};activeProvider="metamask";await connectAndSignIn("solana",accounts[0].address,"MetaMask",msg=>solanaStandardSignMessage(wallet,accounts[0],msg));}catch(error){$("#walletLabel").textContent="Connection failed";console.error(error);}finally{btn.disabled=false;}}
 async function disconnectWallet(){try{if(activeProvider==="privy")await window.OrbitPrivy.logout();else if(activeProvider==="coinbase")await window.OrbitCoinbase.disconnect();else if(activeProvider==="reown")await window.OrbitReown.disconnect();else if(activeProvider==="phantom")await getPhantomProvider()?.disconnect();else if(activeProvider==="metamask")await metamaskWallet?.disconnect();}catch{}setWalletDisconnected();if(sessionId)fetch(`/chat/wallet/${encodeURIComponent(sessionId)}`,{method:"DELETE"}).catch(()=>{});}
 $("#walletButton").addEventListener("click",()=>openDialog("walletDialog"));   // read-only wallet connection never requires signing in -- chat already tells anonymous users to do exactly this
 $("#relayQuoteBtn").addEventListener("click",requestRelayQuote);
@@ -1653,7 +1735,42 @@ async function saveProfile(){const status=$("#profileStatus"),button=$("#savePro
 const DEVICE_KEY="orbit_device_v1";
 let deviceId=readStorage(DEVICE_KEY,null);if(!deviceId){deviceId=(crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random()}`);writeStorage(DEVICE_KEY,deviceId);}
 let account=null;
-async function loadAccount(){try{const res=await fetch("/me",{headers:{"X-Orbit-Device":deviceId}});account=await res.json();}catch{account=null;}renderAccount();}
+let telegramConfigured=false,telegramLinked=[];
+// A link started in Telegram (/link -> ?tglink=). It is held until the user is
+// signed in -- with anything: a wallet, an email -- and then claimed. That way
+// the person who met Orbit in Telegram never has to find a Connect button, and
+// never accidentally builds a second account by signing in the ordinary way.
+// localStorage, not sessionStorage: Telegram opens the link in a NEW browser
+// tab, and people sign in wherever they already had Orbit open. A per-tab
+// stash meant the tab holding the token was not the tab that signed in, and
+// the claim never fired -- the connection silently did nothing. The token is
+// single-use and expires server side, so sharing it across this origin's tabs
+// costs nothing; the local copy carries its own expiry so a stale one from an
+// abandoned attempt cannot sit there forever.
+const TGLINK_KEY="orbit_tglink";
+let pendingTgLink=(()=>{try{
+  const fresh=new URLSearchParams(location.search).get("tglink");
+  if(fresh){history.replaceState(null,"",location.pathname);
+    localStorage.setItem(TGLINK_KEY,JSON.stringify({token:fresh,at:Date.now()}));return fresh;}
+  const raw=localStorage.getItem(TGLINK_KEY);if(!raw)return null;
+  const saved=JSON.parse(raw);
+  if(!saved?.token||Date.now()-saved.at>15*60*1000){localStorage.removeItem(TGLINK_KEY);return null;}
+  return saved.token;
+}catch{return null;}})();
+function clearTgLink(){pendingTgLink=null;try{localStorage.removeItem(TGLINK_KEY);}catch{}}
+async function claimTgLink(){if(!pendingTgLink||!account?.authenticated)return;const token=pendingTgLink;
+  try{const res=await fetch("/auth/telegram/claim",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(normalizeError(data,res.status));
+    clearTgLink();await refreshTelegram();
+    const who=data.display?" · "+data.display:"";
+    // Confirmed where the user already is: the wallet panel they just used,
+    // and the Connections row in Settings.
+    const provider=$("#connectedProvider");if(provider)provider.textContent=`${provider.textContent||"Connected"} · Telegram connected${who}`;
+    const notice=$("#tgNotice");if(notice){notice.hidden=false;notice.textContent=`Telegram connected${who}. Same credits, plan, wallets and risk charter on both.`;}
+  }catch(error){clearTgLink();const notice=$("#tgNotice");if(notice){notice.hidden=false;notice.textContent=`Telegram could not be connected: ${error.message||error}`;}}}
+function renderTgBanner(){const el=$("#tgLinkBanner");if(el)el.hidden=!(pendingTgLink&&!account?.authenticated);}
+async function loadAccount(){try{const res=await fetch("/me",{headers:{"X-Orbit-Device":deviceId}});account=await res.json();}catch{account=null;}if(account?.authenticated){await refreshTelegram();await claimTgLink();}else{telegramConfigured=false;telegramLinked=[];}renderAccount();renderTgBanner();}
 function renderCredits(){const chip=$("#creditsChip");if(!account){chip.hidden=true;return;}const balance=Number(account.credits?.balance??0);chip.hidden=false;$("#creditsCount").textContent=balance.toLocaleString();$("#creditsPlan").textContent=account.plan?.name||"Trial";chip.classList.toggle("low",balance<10);$("#accountCredits").textContent=balance.toLocaleString();$("#profileRisk").textContent=account.authenticated?`${account.plan?.name} · ${balance.toLocaleString()} credits`:`Trial · ${balance} credits left`;}
 function renderAccount(){
   renderCredits();fillGreeting();refreshInboxBadge();loadHighlights();loadSuggestions();
@@ -1670,7 +1787,8 @@ function renderAccount(){
   $("#profileRisk").textContent=signedIn?`${account.plan?.name} · ${Number(account.credits?.balance??0).toLocaleString()} credits`:`Trial · ${Number(account?.credits?.balance??0)} credits left`;
   const notif=account?.notifications||{};$("#notifLowCredit").checked=notif.low_credit_alert!==false;$("#notifThreshold").value=notif.low_credit_threshold??20;$("#notifReceipts").checked=notif.receipts!==false;$("#notifUpdates").checked=Boolean(notif.product_updates);
   $("#sessionsSection").hidden=!signedIn;$("#deleteAccountZone").hidden=!signedIn;$("#memorySection").hidden=!signedIn;if(signedIn)loadMemory();
-  const tv=account?.integrations?.tradingview||{};$("#connectionsSection").hidden=!signedIn||tv.enabled===false;$("#tvStatus").textContent=tv.connected?`Connected${tv.connected_at?" · since "+new Date(tv.connected_at).toLocaleDateString():""}`:"Not connected";$("#tvConnectBtn").hidden=Boolean(tv.connected);$("#tvDisconnectBtn").hidden=!tv.connected;
+  const tv=account?.integrations?.tradingview||{};$("#connectionsSection").hidden=!signedIn||(tv.enabled===false&&!telegramConfigured);
+  renderTelegram(signedIn);syncWalletSignin();$("#tvStatus").textContent=tv.connected?`Connected${tv.connected_at?" · since "+new Date(tv.connected_at).toLocaleDateString():""}`:"Not connected";$("#tvConnectBtn").hidden=Boolean(tv.connected);$("#tvDisconnectBtn").hidden=!tv.connected;
   const team=account?.team||{};const showMembers=signedIn&&(team.role==="owner"||team.role==="member");$("#membersTab").hidden=!showMembers;
   const invites=signedIn?(team.invites||[]):[];$("#teamInvitesSection").hidden=!invites.length;
   $("#teamInvites").innerHTML=invites.map(i=>`<div class="key-row"><span>${escapeHtml(i.owner_name||i.owner_email)} invited you to their team (${escapeHtml(i.role)})</span><button class="primary" type="button" data-accept="${escapeHtml(i.owner_id)}">Join</button></div>`).join("");
@@ -1807,6 +1925,40 @@ async function createApiKey(){const name=$("#apiKeyName").value.trim()||"API key
   catch(error){secretBox.hidden=false;secretBox.textContent=error.message;}}
 $("#signinBtn").addEventListener("click",()=>openSignin());
 $("#signoutBtn").addEventListener("click",signOut);
+// --- Telegram: one Orbit account on both surfaces -------------------------
+// There is no automatic mapping between a Telegram id and a web account --
+// Telegram knows neither your email nor your wallet -- so linking is always
+// this one deliberate act. The token is minted HERE, from a signed-in
+// browser, because it is a credential for this account; the bot cannot mint
+// its own. It works whatever you signed in with.
+async function refreshTelegram(){try{const res=await fetch("/me/telegram");if(!res.ok)return;const data=await res.json();telegramConfigured=Boolean(data.configured);telegramLinked=data.linked||[];}catch(error){telegramConfigured=false;}}
+function renderTelegram(signedIn){const row=$("#tgRow");if(!row)return;const show=Boolean(signedIn&&telegramConfigured);row.hidden=!show;$("#tgHelp").hidden=!show;const linked=telegramLinked[0];
+  $("#tgStatus").textContent=linked?`Connected${linked.display?" · "+linked.display:""}`:"Not connected";
+  $("#tgConnectBtn").hidden=Boolean(linked);$("#tgDisconnectBtn").hidden=!linked;}
+$("#tgConnectBtn").addEventListener("click",async()=>{const b=$("#tgConnectBtn"),notice=$("#tgNotice");b.disabled=true;
+  try{const res=await fetch("/me/telegram/link",{method:"POST"});const data=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(normalizeError(data,res.status));
+    notice.hidden=false;notice.textContent="Opening Telegram… tap Start in the chat to finish. The link works once and expires in 15 minutes.";
+    // A new tab, not a redirect: losing this page mid-link is how people end
+    // up unsure whether it worked.
+    window.open(data.url,"_blank","noopener");
+    setTimeout(async()=>{await refreshTelegram();renderTelegram(true);},4000);
+  }catch(error){notice.hidden=false;notice.textContent=error.message;}finally{b.disabled=false;}});
+$("#tgDisconnectBtn").addEventListener("click",async()=>{const b=$("#tgDisconnectBtn"),notice=$("#tgNotice");const linked=telegramLinked[0];if(!linked)return;b.disabled=true;
+  try{const res=await fetch(`/me/telegram/${encodeURIComponent(linked.external_id)}`,{method:"DELETE"});
+    if(!res.ok)throw new Error(normalizeError(await res.json().catch(()=>({})),res.status));
+    notice.hidden=false;notice.textContent="Telegram disconnected. That chat starts a separate Orbit account on its next message.";
+    await refreshTelegram();renderTelegram(true);
+  }catch(error){notice.hidden=false;notice.textContent=error.message;}finally{b.disabled=false;}});
+$("#walletSigninBtn").addEventListener("click",async()=>{const btn=$("#walletSigninBtn"),help=$("#walletSigninHelp");
+  if(!retryWalletSignin){help.textContent="Reconnect the wallet first.";return;}
+  btn.disabled=true;help.textContent="Check your wallet for a signature request…";
+  lastWalletSigninError=null;
+  const ok=await retryWalletSignin();
+  btn.disabled=false;
+  if(ok){help.textContent="Signed in. Your history, wallets and monthly credits are on this account.";}
+  else if(!lastWalletSigninError){help.textContent="That did not complete. Approve the signature in your wallet, or use Sign in with email.";}
+  syncWalletSignin();});
 $("#tvConnectBtn").addEventListener("click",()=>{location.href="/integrations/tradingview/connect";});
 $("#tvDisconnectBtn").addEventListener("click",async()=>{const b=$("#tvDisconnectBtn");b.disabled=true;try{const res=await fetch("/integrations/tradingview",{method:"DELETE"});if(!res.ok)throw new Error(normalizeError(await res.json().catch(()=>({})),res.status));$("#tvNotice").hidden=false;$("#tvNotice").textContent="TradingView disconnected.";await loadAccount();}catch(error){$("#tvNotice").hidden=false;$("#tvNotice").textContent=error.message;}finally{b.disabled=false;}});
 $("#plansBtn").addEventListener("click",openPlans);

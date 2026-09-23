@@ -43,6 +43,18 @@ EXPECTED: dict[tuple[str, str], str] = {
     ("POST", "/auth/signout"): "auth_entry",
     # --- provider-signed ---------------------------------------------------
     ("POST", "/billing/webhook"): "webhook",
+    # Telegram: an unguessable path segment AND the secret token Telegram
+    # echoes in a header, both compared with hmac.compare_digest. There is no
+    # session here by construction -- the caller is Telegram's servers, and
+    # the identity of the human is resolved from the update's own user id.
+    ("POST", "/telegram/webhook/{secret}"): "webhook",
+    # --- Telegram account linking: a sign-in act, so browser-only ----------
+    ("POST", "/me/telegram/link"): "browser",
+    # Finishing a link started in Telegram: the token alone links nothing, so
+    # the browser session is the other half of the proof.
+    ("POST", "/auth/telegram/claim"): "browser",
+    ("GET", "/me/telegram"): "browser",
+    ("DELETE", "/me/telegram/{external_id}"): "browser",
     # --- public read-only --------------------------------------------------
     ("GET", "/health"): "public",
     ("GET", "/readyz"): "public",

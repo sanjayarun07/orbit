@@ -3,10 +3,37 @@
 The task store and worker remain in tasks; this service owns account access,
 resume scheduling, validation errors, and chat timezone preference handling.
 """
+from contextvars import ContextVar, Token
+
 from app import accounts, tasks
 from app.identity import Identity
 from app.models import ChatRequest
 from app.service_errors import ServiceError
+
+# Where a task created during THIS turn should deliver, when the user did not
+# say. A browser turn leaves it unset and tasks land in the inbox, which is
+# what the user is looking at. A Telegram turn sets "telegram", because an
+# inbox row is invisible to someone who never opens the web app -- "alert me
+# when SOL drops" has to arrive where it was asked for.
+#
+# A ContextVar rather than a ChatRequest field: the transport knows this, the
+# request body does not, and a client must not be able to choose a delivery
+# channel for someone else's account by setting a flag.
+_preferred_channel: ContextVar[str | None] = ContextVar("task_preferred_channel", default=None)
+
+
+def use_channel(channel: str | None) -> Token:
+    return _preferred_channel.set(channel)
+
+
+def reset_channel(token: Token) -> None:
+    _preferred_channel.reset(token)
+
+
+def default_channel(explicit: str | None = None) -> str:
+    """The channel a new task should use: what the user asked for, else this
+    turn's transport, else the inbox."""
+    return explicit or _preferred_channel.get() or "inapp"
 
 
 async def list_for_user(identity: Identity) -> dict:

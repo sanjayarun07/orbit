@@ -35,6 +35,7 @@ _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _users: dict[str, dict] = {}
 _users_by_email: dict[str, str] = {}
 _wallets: dict[tuple[str, str], tuple[str, str, str]] = {}  # (chain, address_lower) -> (user_id, address, wallet_type)
+_identities: dict[tuple[str, str], tuple[str, str | None]] = {}  # (provider, external_id) -> (user_id, display)
 _magic_tokens: dict[str, tuple[float, dict]] = {}
 _magic_codes: dict[str, tuple[float, dict]] = {}
 _user_sessions: dict[str, tuple[float, dict]] = {}
@@ -366,12 +367,13 @@ async def find_wallet_owner(chain: str, address: str, wallet_type: str = EOA) ->
     return None
 
 
-async def create_wallet_user(chain: str, address: str, wallet_type: str = EOA) -> dict:
-    """A brand-new account with no email, for a wallet no one has linked yet.
-    Callers that need "find-or-create" must check find_wallet_owner first (not
-    get_user_by_wallet, which matches one exact chain label and so misses the
-    same EVM address on another network) -- a wallet already linked always
-    resolves to its existing account; this never reassigns one."""
+async def create_account() -> dict:
+    """A brand-new account with no email: the row every way-in shares.
+
+    A wallet signature and a Telegram user are both identities attached to an
+    account, not accounts themselves, so neither creation path may have its own
+    idea of what a fresh user row contains -- one of them would drift and the
+    two kinds of account would stop behaving alike in billing or deletion."""
     user = {
         "id": str(uuid4()), "email": None, "display_name": None, "plan_id": "free",
         "stripe_customer_id": None, "stripe_subscription_id": None, "subscription_status": None,
@@ -383,12 +385,76 @@ async def create_wallet_user(chain: str, address: str, wallet_type: str = EOA) -
             "INSERT INTO users (id, email, display_name, plan_id, preferences) VALUES ($1, NULL, NULL, 'free', '{}'::jsonb) RETURNING *",
             user["id"],
         )
-        stored = _row_to_user(row)
-    else:
-        _users[user["id"]] = user
-        stored = dict(user)
+        return _row_to_user(row)
+    _users[user["id"]] = user
+    return dict(user)
+
+
+async def create_wallet_user(chain: str, address: str, wallet_type: str = EOA) -> dict:
+    """A brand-new account for a wallet no one has linked yet.
+    Callers that need "find-or-create" must check find_wallet_owner first (not
+    get_user_by_wallet, which matches one exact chain label and so misses the
+    same EVM address on another network) -- a wallet already linked always
+    resolves to its existing account; this never reassigns one."""
+    stored = await create_account()
     await link_wallet(stored["id"], chain, address, wallet_type)
     return stored
+
+
+# ------------------------------------------------------- external identities
+
+async def link_identity(user_id: str, provider: str, external_id: str, display: str | None = None) -> None:
+    """Attach a messaging identity (provider, external_id) to an account.
+
+    ON CONFLICT moves the pointer: a Telegram user who signed in anonymously,
+    got an account of their own, and later links to their web account must end
+    up on the web account -- not owning two. The caller decides which account
+    wins; this only records it."""
+    pool = await get_pg_pool()
+    if pool is not None:
+        await pool.execute(
+            """
+            INSERT INTO user_identities (provider, external_id, user_id, display) VALUES ($1, $2, $3, $4)
+            ON CONFLICT (provider, external_id)
+            DO UPDATE SET user_id = EXCLUDED.user_id, display = EXCLUDED.display, linked_at = NOW()
+            """,
+            provider, str(external_id), user_id, display,
+        )
+        return
+    _identities[(provider, str(external_id))] = (user_id, display)
+
+
+async def find_identity_owner(provider: str, external_id: str) -> dict | None:
+    """The account this messaging identity signs in as, or None."""
+    pool = await get_pg_pool()
+    if pool is not None:
+        row = await pool.fetchrow(
+            "SELECT u.* FROM users u JOIN user_identities i ON i.user_id = u.id WHERE i.provider = $1 AND i.external_id = $2",
+            provider, str(external_id),
+        )
+        return _row_to_user(row) if row else None
+    owner = _identities.get((provider, str(external_id)))
+    return dict(_users[owner[0]]) if owner and owner[0] in _users else None
+
+
+async def list_identities(user_id: str) -> list[dict]:
+    pool = await get_pg_pool()
+    if pool is not None:
+        rows = await pool.fetch(
+            "SELECT provider, external_id, display, linked_at FROM user_identities WHERE user_id = $1 ORDER BY linked_at", user_id
+        )
+        return [{"provider": r["provider"], "external_id": r["external_id"], "display": r["display"],
+                 "linked_at": r["linked_at"].isoformat()} for r in rows]
+    return [{"provider": provider, "external_id": external, "display": display, "linked_at": None}
+            for (provider, external), (owner, display) in _identities.items() if owner == user_id]
+
+
+async def unlink_identity(provider: str, external_id: str) -> bool:
+    pool = await get_pg_pool()
+    if pool is not None:
+        result = await pool.execute("DELETE FROM user_identities WHERE provider = $1 AND external_id = $2", provider, str(external_id))
+        return result.endswith("1")
+    return _identities.pop((provider, str(external_id)), None) is not None
 
 
 async def sign_in_with_wallet(chain: str, address: str, ip: str | None = None, user_agent: str | None = None, wallet_type: str = EOA) -> tuple[dict, str, bool]:
@@ -723,6 +789,8 @@ async def delete_user(user_id: str) -> None:
         _users_by_email.pop(user["email"], None)
     for key in [k for k, entry in _wallets.items() if entry[0] == user_id]:
         _wallets.pop(key, None)
+    for key in [k for k, entry in _identities.items() if entry[0] == user_id]:
+        _identities.pop(key, None)
     _chat_sessions.pop(user_id, None)
     for key in [k for k, m in _team_members.items() if k[0] == user_id or m.get("user_id") == user_id]:
         _team_members.pop(key, None)
@@ -901,6 +969,7 @@ def reset() -> None:
     _users.clear()
     _users_by_email.clear()
     _wallets.clear()
+    _identities.clear()
     _magic_tokens.clear()
     _user_sessions.clear()
     _chat_sessions.clear()

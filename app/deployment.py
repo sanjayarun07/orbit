@@ -277,6 +277,13 @@ def audit(config: Settings | None = None) -> list[ConfigProblem]:
                 "No transactional email: magic-link sign-in and task email delivery "
                 "cannot reach anyone. Wallet sign-in still works.",
             )
+        if getattr(config, "telegram_bot_token", None) and not getattr(config, "telegram_webhook_secret", None):
+            add(
+                "telegram-webhook-secret-missing", WARNING, "TELEGRAM_WEBHOOK_SECRET",
+                "The Telegram webhook secret is derived from the bot token instead of set. "
+                "It still fails closed, but rotating the bot token silently changes the "
+                "webhook URL and the bot goes quiet until it is re-claimed.",
+            )
         if getattr(config, "x402_enabled", False) and "84532" in str(getattr(config, "x402_network", "")):
             add(
                 "x402-testnet", WARNING, "X402_NETWORK",

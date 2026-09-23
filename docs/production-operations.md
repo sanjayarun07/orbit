@@ -2424,3 +2424,355 @@ movers ask never drifts to the web), `tequity_trending` (cross-venue, composes w
 time and say that "24h price change" is a price move. The feed has no book, funding, open interest or per-row
 time, so it feeds discovery cards, never the deep dive or the exit monitor. Disable with `TEQUITY_ENABLED=false`.
 The worker is listed under `tequity` in the startup task map.
+
+## Orbit on Telegram: the bot as a third transport (2026-09-22)
+
+**A transport, not a second product.** `app/telegram/` is an adapter over
+`execution_policy.execute_chat_turn` -- the same call `POST /chat` and the
+MCP server make, with the same admission, per-session turn lease, call and
+cost budgets, answer validation, credits, risk charter and persistence. The
+package decides only what a transport is allowed to decide: who is calling,
+which conversation this is, whether a group message is addressed to us, and
+how an `AgentResponse` looks in a chat. Nothing in the graph, the provider
+router, the nodes or the execution gates changed.
+
+| File | What it owns |
+|---|---|
+| `client.py` | The Bot API methods this needs; never raises, logs and returns None (the `emailer.py` contract) |
+| `identity.py` | A Telegram user as a way in to an ordinary Orbit account; link tokens in both directions |
+| `bot.py` | Update dispatch, commands, the group rule, the turn |
+| `render.py` | Markdown → Telegram HTML, message splitting, inline keyboards |
+| `progress.py` | The `streaming.py` status events as one message that keeps being edited |
+| `webhook.py` | The HTTP edge and the account-link endpoints |
+
+**Identity: an account, not an anonymous session.** A Telegram user's first
+message creates an email-less account (`accounts.create_account`, extracted
+from `create_wallet_user` so the two ways in cannot drift) keyed on their
+numeric Telegram id in a new `user_identities` table. The turn then runs as
+`Identity(kind="user", ...)`, so plans, credits, quotas, 30-day conversation
+retention, export and deletion are the paths the web already uses. The
+anonymous path was deliberately not reused: it is keyed on an IP plus a device
+header and retains a conversation for two hours, which is right for a browser
+tab and wrong for a chat thread the user scrolls back through next week.
+"Anonymous" on Telegram means no sign-in screen, not no account.
+
+Linking an existing web account goes the other way: `POST /me/telegram/link`
+(browser session only -- it hands out a credential that binds a messaging
+account) mints a one-time token for `t.me/<bot>?start=<token>`, and `/start`
+repoints the identity. The shell account the bot made on first contact is then
+deleted, but only when it is *only* a shell -- no email, no wallet, no other
+identity, no Stripe customer. Deliberately not conditioned on the credit
+balance: a shell always holds the free monthly allowance, so that test would
+be true of every shell and the row would be orphaned forever.
+
+**The conversation is derived, not stored.** `tg:<chat_id>`, or
+`tg:<chat_id>:<thread_id>` in a forum topic. The same chat always resumes the
+same Orbit conversation across restarts, which is what makes follow-ups,
+pronouns and the focus entity work without the bot keeping state of its own.
+
+**A button names a position; the server supplies the action.** Telegram
+callback data is client-supplied and capped at 64 bytes, so a quick-action
+button carries `qa:<index>` and nothing else. The action itself is read back
+from the assistant message the server persisted it on, and
+`execute_chat_turn` still checks the reconstructed action byte for byte
+against that list before routing it. A forged callback can therefore only
+name a position in a list the server wrote.
+
+**The group rule.** In a group or supergroup the bot answers only a command, a
+direct `@mention`, or a reply to one of its own messages. A bot that replies
+to every message in a shared channel is spam, and every reply is a charged
+turn against someone's account.
+
+**Progress, because sixty seconds of silence looks broken.** Telegram has no
+stream, so the bot posts one placeholder and edits it from the same
+`streaming.attach` hook the SSE route uses: the status lines are already
+sentences a person can read ("Running mobula token details", "Writing the
+due-diligence verdict"). Edits are debounced to one per 1.5 s and stale lines
+are dropped rather than replayed. `card` and `delta` events are ignored --
+replacing the progress message with half an answer would leave the user
+reading a sentence about to be overwritten. A turn that outlives
+`TELEGRAM_TURN_TIMEOUT_SECONDS` is **not** cancelled: it was admitted and
+charged, it persists to the conversation on its own, and the user is told so.
+
+**Rendering is lossy on purpose.** Telegram HTML has no headings, lists or
+tables, so a heading becomes bold, a bullet becomes "•", and a markdown table
+becomes an aligned monospace block -- a pipe table rendered as prose on a
+phone is unreadable. Splitting happens on the *markdown*, before conversion,
+so a message boundary can never fall inside a tag (the failure that makes
+Telegram reject the whole message and show the user nothing), and an
+over-long code fence is re-emitted as several complete fences rather than cut
+in half. Every answer carries a one-line footer naming its providers, the
+as-of time and the validator's `warn`, because an answer whose provenance is
+invisible reads like every other bot in the group.
+
+**Nothing here can sign.** A quote renders as a review card that says
+"Nothing is signed yet" and a `web_app` button opening the conversation in the
+Orbit UI, where the user's own wallet confirms it -- the same hand-off the MCP
+server performs. There is no callback data anywhere in the package that could
+confirm a plan, and `/trade-plans/*` keeps its `require_browser_session`
+dependency untouched. `/wallet` accepts a public address only and answers
+anything seed-phrase-shaped with an explicit compromise warning.
+
+**The webhook is guarded twice.** An unguessable path segment and the
+`X-Telegram-Bot-Api-Secret-Token` header, both compared with
+`hmac.compare_digest`; a wrong path is a 404 so the secret cannot be probed.
+Unset, the secret is derived from the bot token rather than left blank, so a
+deployment that forgets it fails closed instead of open (the startup audit
+raises `telegram-webhook-secret-missing` as a warning). The route validates,
+hands the update to a tracked background task and returns 200 at once, because
+Telegram redelivers until it gets one and a deep dive takes longer than it
+will wait. Update ids are remembered so a redelivery is not charged twice.
+
+**Configuration.** `TELEGRAM_BOT_TOKEN` empty is the default and means the
+whole package is inert: the router is registered but every handler refuses,
+no webhook is claimed, and nothing else in the app changes. The webhook is
+claimed at startup against `PUBLIC_BASE_URL` (skipped, with a warning, when
+that is localhost). All four routes are declared in
+`tests/test_authorization_matrix.py`; 24 tests cover identity, linking,
+ownership, the group rule, callback authorization, rendering and refusal.
+
+**What is not here.** Signing inside Telegram (the Mini App: `initData` HMAC →
+browser session, Privy-first because extension wallets do not exist in the
+webview), a `telegram` delivery channel for `app/tasks.py`, and the watch/diff
+features the holder-snapshot ledger makes possible. Those are the next wave.
+
+### Push: the `telegram` task channel (2026-09-23)
+
+`app/tasks.py` delivered to the inbox and, optionally, email. Email reaches an
+inbox nobody opens; the reason to put Orbit in Telegram is that it can speak
+first. `CHANNELS` is now `("inapp", "email", "telegram")` and a fired task
+pushes to the owner's linked chat.
+
+**The contract is email's, exactly.** The inbox row remains the delivery of
+record and the idempotency key (`_occurrence_delivered`); the push is
+best-effort on top of it; a failed push is recorded in `last_result` and
+**never retried**, because a retry cannot tell a lost message from a late one
+and a duplicate price alert at 3am is the worse outcome. An account with no
+linked chat is a recorded failure, not a crash.
+
+**Which channel a new task gets.** `task_scheduling` holds a ContextVar the
+transport sets for the duration of a turn, and `tasks_nl` reads it wherever a
+channel used to be hard-coded. A browser turn leaves it unset and tasks land
+in the inbox, which is what the user is looking at; a Telegram DM sets
+`telegram`, because "alert me when SOL drops" has to arrive where it was
+asked. A ContextVar rather than a `ChatRequest` field on purpose: the
+transport knows this and the request body does not, so no client can choose a
+delivery channel by setting a flag.
+
+**A task created in a group keeps the inbox default** (`bot._is_private`). The
+task belongs to one account, and its holdings, thresholds and reminders are
+not the group's business. Delivery likewise addresses the DM: a Telegram
+private chat's id is the user's id, so the `user_identities.external_id` row
+is the chat.
+
+`/tasks` lists them from inside Telegram, for a user who never opens the web
+app. Six tests cover the channel default, the group exception, the push, the
+unlinked account and the accepted channel value.
+
+### A group is shared; a conversation is not (2026-09-23)
+
+Found by asking how two people use one bot. `session_id` was
+`tg:<chat_id>`, so everyone in a group shared one Orbit conversation. A
+conversation is owned by one account (`session_access.require_session_access`),
+so the first person to ask owned it and **every other member was refused
+forever** -- reproduced: two users, one supergroup, the second got "This
+conversation belongs to another account."
+
+Had they not been refused it would have been worse than a lockout. The
+session context carries the bound wallet, the focused entity and the risk
+charter, so a second member's follow-up would have run against the first
+member's wallet, and "sell half of it" would have resolved to someone else's
+position.
+
+A group conversation is now per person: `tg:<chat>:u<user>`, and
+`tg:<chat>:<topic>:u<user>` in a forum. A private chat is unchanged
+(`tg:<chat>`, where the chat id is the user id). Three tests cover two members
+of one group getting separate conversations and accounts, two private chats
+sharing nothing, and one member's bound wallet not reaching another's context.
+
+### Linking, from the side the user is actually on (2026-09-23)
+
+The first build had linking run web → Telegram: sign in on the web, find
+**Profile → Connect Telegram**, tap the `t.me` link. That is backwards for the
+common case. The person who needs linking is the one who met Orbit *in*
+Telegram and has no web account yet, and asking them to find a button on a
+surface they have never used is where they instead quietly acquire a second
+account.
+
+`/link` now mints a token that carries the **Telegram identity** and hands
+back `/ui/?tglink=<token>`. The browser stashes it, the user signs in with
+whatever they like — a wallet, an email — and the claim fires by itself on the
+next `/me`. They never see a Connect button. The web → Telegram token stays
+for the web-first user; `consume_link_token` returns a typed payload and each
+side accepts only its own `kind`, so neither token is redeemable as the other.
+
+Two proofs meet at `POST /auth/telegram/claim` and neither links anything
+alone: the token proves the holder began this from a particular Telegram
+account, the browser session proves which Orbit account they just signed into.
+A stolen token can therefore only attach a Telegram identity to an account its
+holder could already sign into. Single use, 15 minutes, and the bot says the
+link is personal and must not be forwarded.
+
+**Connecting a wallet is not signing in with one, and that was the real
+blocker.** Live test: the user connected Phantom, saw the wallet chip fill in,
+and stayed on "Trial · 0 credits" — `/account` in Telegram still said *not
+connected*. `signInWithWallet` runs once, fire-and-forget, from each connect
+path, *after* `closeDialog`; a declined or unsupported signature left the user
+connected, not signed in, with the reason written to `console.warn` and to a
+panel that had just closed. And because sign-in only ever ran on the connect
+path, there was **no way to try again** — with email sign-in also unavailable
+(a Resend key with no verified domain), the account was unreachable.
+
+The wallet panel now carries **Sign in with this wallet** whenever a wallet is
+connected and the account is not authenticated, and it states what happened:
+a declined signature and a provider that cannot sign a message are different
+problems and the user was previously told neither. The retry closure is
+captured inside `signInWithWallet` itself, so every provider path gets it
+without each one remembering to.
+
+The intermediate fix — a `link-bar` under the topbar — was removed at the
+user's direction: the web UI already has sign-in, and a second place to do it
+is a second thing to maintain and explain. The pending link is still held in
+`sessionStorage` and claimed automatically on the next `/me` after any
+sign-in, so the flow completes without a card; the confirmation lands in the
+wallet panel and in Settings → Connections.
+
+**`/account`** answers the question that follows any link — did it work? — from
+inside Telegram: plan, credit balance, email or wallets on the account, the
+wallet this chat is following, whether a risk charter is set, and, in one line,
+whether this chat is connected to a web account or still has one of its own.
+The web answers this with a Settings screen; a Telegram-only user has none.
+
+### Three reasons the automatic connection did nothing (2026-09-23)
+
+Live testing kept ending the same way: wallet connected, chat still on
+"Trial · 0 credits", `/account` in Telegram still *not connected*. The server
+was never at fault — a real Ed25519 signature against
+`/auth/wallet/challenge` + `/auth/wallet/verify` produces an authenticated
+account in one round trip. Three separate client-side faults hid that.
+
+**1. The pending link was stashed per tab.** Telegram opens a link in a *new*
+browser tab, and people sign in in the tab where they already had Orbit open.
+`sessionStorage` meant the tab holding the token was never the tab that signed
+in, so the claim had nothing to fire on. It is `localStorage` now, with its
+own 15-minute expiry on top of the server's single-use token, so any tab on
+the origin completes the link.
+
+**2. A failed wallet sign-in was invisible.** `signInWithWallet` runs
+fire-and-forget from each connect path, *after* `closeDialog`, and its catch
+wrote to `console.warn` and to a panel that had just closed. The wallet chip
+filled in, the account stayed anonymous, and nothing said why. The reason is
+now kept and shown in the wallet panel, and both outcomes are logged server
+side (`wallet sign-in attempt/succeeded/failed`, address truncated) so an
+operator can see a failure without the user opening devtools.
+
+**3. A pasted address was offered a sign-in it could never do.** A read-only
+public address has no key in the browser. The panel now says so instead of
+showing a button that cannot work.
+
+Also fixed while in here: the sign-in message's `URI:` line was built from
+`request.url.scheme`, which is `http` behind any TLS-terminating proxy
+(ngrok, Caddy) while the browser is on `https`. That line is shown to the user
+by their wallet and is compared against the origin by strict SIWE/SIWS
+validators. It now honours `X-Forwarded-Proto`, read from the header directly
+so it does not depend on uvicorn running with `--proxy-headers`.
+
+### The signature that was never asked for (2026-09-23)
+
+The server log named it: `POST /auth/wallet/challenge 200` and then nothing —
+`/auth/wallet/verify` was never reached, so `signMessage` never returned.
+Two faults, one behind the other.
+
+**The prompt could not be raised.** Each connect path did
+`setWalletConnected` → `closeDialog` → `signInWithWallet(...)`, unawaited. A
+wallet extension will not open its signature window once the user activation
+from the click has been spent, so the request sat pending for the life of the
+page with nothing awaiting it. `connectAndSignIn` now keeps the dialog open,
+shows "check your wallet to finish signing in…", and awaits the signature
+inside the click; the dialog closes only on success, and a failure leaves the
+reason and a retry on screen. A 120-second race turns a prompt that never
+appears into a sentence instead of an indefinite wait.
+
+**And the feature name was wrong.** `solanaStandardSignMessage` read
+`wallet.features["standard:signMessage"]`, which is `undefined` on MetaMask's
+Solana wallet: Wallet Standard namespaces signing by chain
+(`solana:signMessage`), and only connect, disconnect and events live under
+`standard:`. The resulting TypeError — "Cannot read properties of undefined
+(reading 'signMessage')" — was swallowed by the same catch. Both names are now
+tried, and a wallet offering neither says which features it does have rather
+than failing anonymously.
+
+Two smaller ones from the same session: the not-signed-in status appended to
+itself on every attempt ("· not signed in · not signed in") and now replaces;
+and a `/link` opened from Telegram lands in a NEW browser tab, so the pending
+token moved from `sessionStorage` to `localStorage` — the tab holding it was
+never the tab the user signed in from.
+
+### No Mini App, and no button on every answer (2026-09-23)
+
+A `web_app` button opens Telegram's in-app webview, which has **its own cookie
+jar**: a user signed into Orbit in their browser arrives there signed out, on
+the anonymous trial, with the account they just linked apparently missing.
+Worse for the one job a Mini App would exist to do — browser-extension wallets
+(MetaMask, Phantom) **do not exist in that webview at all**, so the wallet
+sign-in that now works would not work there.
+
+Every such button is now a plain `url`, which opens the real browser where the
+session and the wallet already are. Nothing to synchronise, because no second
+context is created.
+
+**The Mini App is deferred, not rejected.** Its only unique capability is
+signing a trade without leaving Telegram, and that is worth building when
+trading is actually switched on (`deployment mode=research`,
+`LIVE_TRADING=false`, STAB-09 open) and mobile-first users need it. Until
+then it would be a second UI, a second session system (initData -> cookie) and
+a second wallet stack (Privy-first, since extensions are unavailable) serving
+a flow nobody can use.
+
+**And "Open Orbit" is gone from ordinary answers.** It was appended to every
+reply. A research answer is finished in the chat; a button pointing away from
+it on every message is noise. It remains where the user asks for the web
+explicitly -- `/app` and `/account` -- and on a quote, where signing genuinely
+has to happen in a browser.
+
+The shape this settles on is two surfaces, one account: Telegram to ask,
+monitor and be pushed to; the browser to sign in, sign trades and change
+settings.
+
+### Review of the Telegram changes (2026-09-23)
+
+A pass over everything added for the bot, against the code as it now stands.
+
+**A slow turn was being cancelled after it had been paid for.** `_run_turn`
+waited with `asyncio.wait_for`, which cancels the coroutine it is waiting on.
+Admission, the credit charge and the turn lease all happen before the first
+provider call, so a deep dive that ran past `TELEGRAM_TURN_TIMEOUT_SECONDS`
+lost its paid work and left the conversation with no answer — the opposite of
+what the comment beside it claimed, and the opposite of what the SSE route
+does when a phone locks its screen. The turn is now a tracked background task
+waited on with `asyncio.wait`: past the timeout the user is told it is still
+running, the task finishes on its own, and `_deliver_when_ready` sends the
+answer as a new message. This is the durable-jobs "attach for N seconds, then
+append" pattern (`docs/durable-jobs-spec.md`) in miniature, and the shape the
+engine will formalise.
+
+**Dead surface removed.** `client.py` carried `send_photo`, `delete_message`
+and `delete_webhook`, none of them called by anything —  `send_photo` in
+particular existed for charts that cannot be sent, since `ChartCard` is a
+TradingView widget specification rather than an image. An untested
+convenience is a liability, not a head start. `webhook.py`'s unused
+`WEBHOOK_PATH` went with them.
+
+**Docstrings that outlived their design.** `bot.app_url` still described a
+"Mini App hand-off" and `render.keyboard` did not say that an ordinary answer
+now carries no link out. Both corrected, with the reason (`web_app` means a
+separate cookie jar and no extension wallets) recorded where the decision is
+made rather than only here.
+
+**README brought in line**: `/link` from the Telegram side, `/account`,
+`/tasks`, the per-person group conversations, the `telegram` task channel, and
+the explicit note that links are never `web_app` buttons.
+
+Verified after the pass: 1,774 tests pass, 47 of them covering the bot;
+`scripts/check_secrets.py` clean over 441 files; the inline UI JavaScript
+parses.
