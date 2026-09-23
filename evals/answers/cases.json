@@ -1,0 +1,46 @@
+{
+  "note": "Answer requirements, judged against pinned snapshots (evals/answers/snapshots/<id>.json). Dates are relative to each snapshot's captured_at. Refresh a snapshot with: python scripts/answer_eval.py capture --case <id>.",
+  "cases": [
+    {
+      "id": "holders-bonk",
+      "prompt": "top holders of BONK on solana",
+      "requires": [
+        {"check": "contains_any", "values": ["DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"]},
+        {"check": "tool_reached", "tools": ["mobula_token_holders", "bitquery_token_top_holders", "solana_rpc_token_top_holders"]},
+        {"check": "min_rows", "pattern": "^\\|\\s*\\d+\\s*\\|.*\\d+\\.\\d+%", "count": 5},
+        {"check": "regex", "pattern": "top 10 .{0,40}\\d+\\.\\d+% of supply"},
+        {"check": "contains_any", "values": ["pools, exchanges and burn addresses included", "Mobula's own exclusions", "not necessarily distinct owners"]},
+        {"check": "envelope", "tool": "mobula_token_holders", "status": ["complete", "partial"]},
+        {"check": "gaps_disclosed"}
+      ]
+    },
+    {
+      "id": "bundle-bonk",
+      "prompt": "is BONK bundled? run a bundle check",
+      "requires": [
+        {"check": "contains_any", "values": ["Bundle evidence"]},
+        {"check": "envelope", "tool": "mobula_token_bundle"},
+        {"check": "gaps_disclosed"},
+        {"check": "not_contains", "values": ["proof of intent is", "confirmed bundled"]}
+      ]
+    },
+    {
+      "id": "unlock-arb",
+      "prompt": "when is the next ARB unlock?",
+      "requires": [
+        {"check": "contains_any", "values": ["ARB", "Arbitrum"]},
+        {"check": "future_date"},
+        {"check": "gaps_disclosed"}
+      ]
+    },
+    {
+      "id": "explain-tvl",
+      "prompt": "explain TVL",
+      "requires": [
+        {"check": "contains_any", "values": ["total value locked"]},
+        {"check": "no_table"},
+        {"check": "not_contains", "values": ["Aave", "Lido", "EigenLayer"]}
+      ]
+    }
+  ]
+}

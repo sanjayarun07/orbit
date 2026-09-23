@@ -22,22 +22,35 @@ from app import accounts, api_keys, billing, credits, tasks  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _no_token_2022_rpc(monkeypatch):
+    # The portfolio reads both token programs (2026-09-23); unit tests that
+    # stub the legacy read must not reach the real RPC for Token-2022.
+    from app import portfolio as _portfolio
+
+    async def _none(wallet):
+        return {"value": []}
+    monkeypatch.setattr(_portfolio, "get_token_accounts_2022", _none)
+
+
+@pytest.fixture(autouse=True)
 def _reset_account_stores(monkeypatch):
     # Unit tests exercise the in-memory stores; a configured DATABASE_URL must
     # not leak Postgres (and its event-loop-bound pool) into every test.
     async def no_pool():
         return None
 
-    from app import decision_records as _decision_records, feedback as _feedback, holder_snapshots as _holder_snapshots, turn_log as _turn_log, user_memory as _user_memory
+    from app import decision_records as _decision_records, exit_monitor as _exit_monitor, feedback as _feedback, holder_snapshots as _holder_snapshots, jobs as _jobs, turn_log as _turn_log, user_memory as _user_memory
     from app import sentiment_analyst as _sentiment, x_tweets as _x_tweets
 
-    for module in (accounts, credits, api_keys, billing, tasks, _user_memory, _decision_records, _holder_snapshots, _turn_log, _x_tweets, _feedback):
+    for module in (accounts, credits, api_keys, billing, tasks, _user_memory, _decision_records, _holder_snapshots, _turn_log, _x_tweets, _feedback, _jobs, _exit_monitor):
         monkeypatch.setattr(module, "get_pg_pool", no_pool)
     _x_tweets.reset_for_test()
     _sentiment.reset_for_test()
     _user_memory.reset_for_test()
     _decision_records.reset_for_test()
     _turn_log.reset_for_test()
+    _jobs.reset_for_test()
+    _exit_monitor.reset_for_test()
     from app.integrations import tradingview as _tradingview
 
     monkeypatch.setattr(_tradingview, "get_pg_pool", no_pool)

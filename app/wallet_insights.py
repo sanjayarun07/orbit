@@ -15,14 +15,16 @@ def wallet_health(snapshot: dict) -> dict:
     concentrated = [item for item in holdings if float(item.get("allocation_pct") or 0) >= 80]
     if concentrated:
         symbols = ", ".join(item.get("symbol") or "UNKNOWN" for item in concentrated[:3])
-        findings.append({"severity": "info", "title": "Concentrated portfolio", "detail": f"At least 80% of priced value is concentrated in {symbols}."})
+        findings.append({"severity": "info", "title": "Concentrated portfolio",
+                         "detail": f"At least 80% of priced value is in {symbols}. Concentration is a fact, not a verdict: whether it is a risk depends on the asset "
+                                   "and on exit depth, which this check does not measure (say `exit analysis for X` for a live quote)."})
     if snapshot.get("unpriced_holdings"):
         findings.append({"severity": "warning", "title": "Unpriced holdings", "detail": f"{snapshot['unpriced_holdings']} holding(s) could not be valued and are excluded from allocation calculations."})
     return {
         "wallet": snapshot.get("wallet"),
         "status": "attention" if any(item["severity"] == "warning" for item in findings) else "healthy",
         "findings": findings,
-        "scope": "Solana balances, pricing, verification, concentration, and gas readiness. Program approvals are not yet included.",
+        "scope": "Solana balances, pricing, verification, concentration, and gas readiness. Liquidity, exit depth and program approvals are not measured; \"healthy\" means no warning fired, not that holdings are safe or liquid.",
     }
 
 

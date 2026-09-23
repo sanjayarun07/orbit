@@ -1,0 +1,436 @@
+{
+ "arm": "analyst",
+ "ran_at": "2026-09-22T22:31:33.059268",
+ "results": [
+  {
+   "id": "base:0x37e73ddd2bbaab0cef8ce7c0376b4c90e23074ce",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": true
+   },
+   "flag": true,
+   "reasons": [
+    "top10_pct shows highly concentrated ownership",
+    "holders_count is very low indicating few holders",
+    "insider_pct is relatively high suggesting coordinated insider holding",
+    "lp_burned_pct, lp_locked_pct, lp_unlocked_pct are missing indicating unknown liquidity safety",
+    "liquidity_usd is missing making liquidity risk unknown"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 3715
+  },
+  {
+   "id": "base:0x3a11b42f87ef34dceba0a9880cd6ab5d944568aa",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": true,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": true,
+   "reasons": [
+    "lp_burned_pct is missing",
+    "lp_locked_pct is missing",
+    "lp_unlocked_pct is missing",
+    "liquidity_usd is missing",
+    "top10_pct is very low but holders_count is very small, indicating high risk of coordinated holders",
+    "market_cap_usd is extremely low, increasing volatility and risk"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 1371
+  },
+  {
+   "id": "base:0x3c725423e2cad7239ef3c016a19f7a2d1c4aac37",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": true
+   },
+   "flag": true,
+   "reasons": [
+    "holders_count shows very low number of holders",
+    "lp_burned_pct is missing indicating unknown liquidity risk",
+    "lp_locked_pct is missing indicating unknown liquidity risk",
+    "lp_unlocked_pct is missing indicating unknown liquidity risk",
+    "liquidity_usd is missing indicating unknown liquidity risk",
+    "top10_pct is very low but top50_pct same as top10_pct suggests extreme concentration",
+    "dev_pct is zero, but deployer present which is a risk factor",
+    "flags.missing includes top_holders indicating insufficient transparency"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 1700
+  },
+  {
+   "id": "base:0x3d81ed2928c83d1cc448b6e30ed6911a44f348e1",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": true
+   },
+   "flag": true,
+   "reasons": [
+    "top10_pct concentration above 50%",
+    "top50_pct concentration above 50%",
+    "holders_count very low at 10",
+    "sniper_pct very high at 50.84%",
+    "bundler_pct at 10.88%, indicating possible coordinated holders",
+    "insider_pct at 10.89%, insiders hold significant share",
+    "missing lp_burned_pct is unknown",
+    "missing lp_locked_pct is unknown",
+    "missing lp_unlocked_pct is unknown",
+    "missing liquidity_usd unknown liquidity value",
+    "missing top_holders unknown top holder details"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 1574
+  },
+  {
+   "id": "base:0x86c2e892d2e63178229bac9e9375c2621b16238e",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": true
+   },
+   "flag": true,
+   "reasons": [
+    "top10_pct concentration",
+    "holders_count very low number",
+    "lp_burned_pct missing",
+    "lp_locked_pct missing",
+    "lp_unlocked_pct missing"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 1124
+  },
+  {
+   "id": "base:0xb200000000000000000000451d033a5000cb479e",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": true,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": true,
+   "reasons": [
+    "insider_pct indicates a large insider holding of 28.59%, top10_pct shows a significant concentration with 31.93% held by top 10 wallets, bundler_pct is high at 33.0% suggesting concentrated or coordinated supply, missing lp_locked_pct and lp_unlocked_pct means liquidity status is unknown, deployer is known which may indicate potential deployer control over contract"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 1493
+  },
+  {
+   "id": "bnb:0x18fbc6ea1c58dcc45b6940b78e487859d9a37777",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": true
+   },
+   "flag": true,
+   "reasons": [
+    "top10_pct concentration exceeds 20%, indicating high holder concentration",
+    "top50_pct concentration at 57.67%, suggesting coordinated supply control",
+    "holders_count is very low at 69, increasing exit risk",
+    "lp_burned_pct is missing, meaning liquidity pull risk cannot be assessed",
+    "lp_locked_pct is missing, liquidity lock status is unknown",
+    "lp_unlocked_pct is missing, so unlocked liquidity may allow rug pulls",
+    "liquidity_usd is missing, can't verify liquidity pool size and safety",
+    "deployer has a known address which may hold large influence or withdraw liquidity"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 1901
+  },
+  {
+   "id": "solana:2qxqzjqmdb2tjutsvmvi7ru1efetvkanngny7zwppyun",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": true,
+    "liquidity_collapse": null,
+    "price_collapse": true
+   },
+   "flag": true,
+   "reasons": [
+    "top10_pct shows very high concentration",
+    "holders_count indicates very low holder diversity",
+    "dev_pct is very low but does not compensate for other risks",
+    "insider_pct is moderately high, indicating potential coordinated supply",
+    "lp_burned_pct, lp_locked_pct, and lp_unlocked_pct are missing, so liquidity safety is unknown"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 1273
+  },
+  {
+   "id": "solana:3hedibcqx7tvm8aaacf6y3g87bsxnpyem7dpapdovutw",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": true
+   },
+   "flag": true,
+   "reasons": [
+    "lp_unlocked_pct is missing",
+    "lp_burned_pct is missing",
+    "liquidity_usd is missing",
+    "top10_pct shows no risky concentration",
+    "top50_pct shows no risky concentration",
+    "insider_pct is moderately high but not extremely large"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 1220
+  },
+  {
+   "id": "solana:3nz9jmvbmgaqocybic2c7lqcjscmgsaz6vqqtdzcqmjh",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": true,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": true,
+   "reasons": [
+    "top10_pct shows moderate concentration of supply, insider_pct indicates significant insider holding, sniper_pct reveals initial holders potentially front-running, missing liquidity figures prevent safety assessment, missing holders count prevents evaluation of distribution"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 1374
+  },
+  {
+   "id": "base:0x0051bf1bc7be38a728703a76a518ad2d24cdb3d7",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": true,
+   "reasons": [
+    "top10_pct shows extremely concentrated supply; holders_count of only 21 indicates few participants; lp_burned_pct, lp_locked_pct, lp_unlocked_pct missing means liquidity status unknown; deployer address present implies possible control; missing liquidity and top_holders data adds unknown risk"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 11
+  },
+  {
+   "id": "base:0x015838170685694a1243543d1c683154e6dbc533",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": true,
+   "reasons": [
+    "top10_pct indicates concentrated supply",
+    "insider_pct indicates insider holding",
+    "lp_burned_pct is missing",
+    "lp_locked_pct is missing",
+    "lp_unlocked_pct is missing",
+    "liquidity_usd is missing",
+    "top50_pct is missing due to inaccuracy in holder data"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 8
+  },
+  {
+   "id": "base:0x06640d7ba28d7e914a7f1e0d0283e95f4b02111c",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": true,
+   "reasons": [
+    "holders_count is very low at 21 indicating high risk",
+    "top10_pct is 45.59% showing high concentration of supply",
+    "lp_burned_pct is missing indicating unknown liquidity risks",
+    "lp_locked_pct is missing indicating unknown liquidity risks",
+    "lp_unlocked_pct is missing indicating unknown liquidity risks",
+    "liquidity_usd is missing indicating unknown liquidity presence",
+    "market_cap_usd is zero indicating no market validation or activity"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 3
+  },
+  {
+   "id": "base:0x06b2fcf8a0078ae64d17cddd77b73db2f94064c3",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": true,
+   "reasons": [
+    "top10_pct shows nearly 50% concentration in top holders",
+    "holders_count is only 13, very low and indicative of risk",
+    "sniper_pct is extremely high at over 49%, suggesting coordinated early buyers",
+    "lp_burned_pct, lp_locked_pct, and lp_unlocked_pct are missing, unknown liquidity risk",
+    "liquidity_usd is missing, so liquidity is unknown",
+    "deployer is present but no % reported, deployer risk cannot be dismissed"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 1
+  },
+  {
+   "id": "base:0x0709e78ac82ebdb980014dd731a47d017632d222",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": true,
+   "reasons": [
+    "holders_count is very low (12 holders only) indicating highly concentrated supply",
+    "lp_burned_pct is missing, liquidity pull risk cannot be ruled out",
+    "lp_locked_pct is missing, liquidity lock status unknown",
+    "lp_unlocked_pct is missing, uncertain liquidity safety",
+    "liquidity_usd is missing, liquidity size unknown",
+    "top_holders data missing, concentration or coordinated supply risk unknown"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 2
+  },
+  {
+   "id": "base:0x08abb63c1bb02acaef642955f2c4c4b060d3ecad",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": true,
+   "reasons": [
+    "top10_pct shows high holder concentration",
+    "top50_pct shows high holder concentration",
+    "sniper_pct indicates potential coordinated supply",
+    "lp_burned_pct is missing, unknown liquidity safety",
+    "lp_locked_pct is missing, unknown liquidity safety",
+    "lp_unlocked_pct is missing, unknown liquidity safety",
+    "liquidity_usd is missing, unknown liquidity safety"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 2
+  },
+  {
+   "id": "base:0x094e24bc7bbc0861c6b3f95ca2f87eeb9c802ba3",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": true,
+   "reasons": [
+    "top10_pct near 48.4% concentration",
+    "top50_pct near 48.9% concentration",
+    "sniper_pct 9.88% indicating possible coordinated buying",
+    "bundler_pct 10.66% showing bundled/linked holders",
+    "insider_pct 9.87% suggests insider holdings",
+    "lp_burned_pct missing, liquidity figures missing, leaving potential liquidity risk unknown"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 2
+  },
+  {
+   "id": "base:0x0a18f7b4f365bdde24fbc0f9044bf08aec0bf2e4",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": true,
+   "reasons": [
+    "top10_pct concentration is very high at 50.88%",
+    "top50_pct concentration is also very high at 51.00%",
+    "insider_pct is significant at 12.47%",
+    "missing liquidity figures (lp_burned_pct, lp_locked_pct, lp_unlocked_pct) imply unknown liquidity status",
+    "price_usd and market_cap_usd are zero, indicating non-functional or potentially unsellable token",
+    "flags indicate missing top_holders data, which adds to uncertainty",
+    "deployer address present, but dev_pct is zero; still, combined with other flags, risk is elevated"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 3
+  },
+  {
+   "id": "base:0x0dfe54e7765d8af988b5ba08eee2b4aa6dfc153d",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": true,
+   "reasons": [
+    "top10_pct shows extreme concentration of tokens, sniper_pct indicates a large early holder potentially acting in a coordinated way, insider_pct highlights significant insider holdings, holders_count is extremely low implying high risk, lp_burned_pct, lp_locked_pct, lp_unlocked_pct, and liquidity_usd are missing creating uncertainty on liquidity safety"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 2
+  },
+  {
+   "id": "base:0x0e264383d9a01aa631eb2f377c53e2beeaeef38f",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": true,
+   "reasons": [
+    "top10_pct shows significant concentration",
+    "lp_burned_pct is missing",
+    "lp_locked_pct is missing",
+    "lp_unlocked_pct is missing",
+    "liquidity_usd is missing",
+    "deployer is present and this info alone flags risk"
+   ],
+   "critic_overturned": null,
+   "model_calls": 1,
+   "latency_ms": 1
+  }
+ ]
+}

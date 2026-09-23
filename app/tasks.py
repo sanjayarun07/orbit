@@ -245,9 +245,37 @@ async def assert_can_activate(user: dict, exclude_task_id: str | None = None, db
         raise ValueError(f"The {plan.name} plan allows {limit} active tasks; pause or delete one first")
 
 
+def validate_spec(kind: str, spec: dict) -> dict:
+    """The spec a task may be created or updated with. A price alert needs a
+    symbol, an op and a finite positive price: "SOL < $-1" was accepted from
+    the form (UI run, 2026-09-23)."""
+    import math
+
+    spec = dict(spec or {})
+    if kind == "price_alert":
+        symbol = str(spec.get("symbol") or "").strip()
+        if not symbol or len(symbol) > 32:
+            raise ValueError("A price alert needs a token symbol")
+        op = spec.get("op", "<")
+        if op not in ("<", ">"):
+            raise ValueError("A price alert compares with < or >")
+        try:
+            price = float(spec.get("price"))
+        except (TypeError, ValueError):
+            raise ValueError("A price alert needs a numeric price") from None
+        if not math.isfinite(price) or price <= 0:
+            raise ValueError("The alert price must be a positive number")
+        spec.update({"symbol": symbol, "op": op, "price": price})
+    elif kind == "reminder":
+        if not str(spec.get("message") or "").strip():
+            raise ValueError("A reminder needs a message")
+    return spec
+
+
 async def create_task(user: dict, kind: str, spec: dict, schedule: dict, channel: str = "inapp", tz_offset_min: int = 0, title: str | None = None) -> dict:
     if kind not in KINDS:
         raise ValueError(f"Unknown task kind {kind!r}")
+    spec = validate_spec(kind, spec)
     when = next_run(schedule, tz_offset_min)
     if when is None:
         raise ValueError("That schedule has no future run (is the time in the past?)")
@@ -294,6 +322,10 @@ def _default_title(kind: str, spec: dict) -> str:
 async def update_task(task_id: str, user_id: str, *, db=None, **fields) -> dict | None:
     allowed = {"status", "next_run_at", "last_run_at", "last_result", "fire_count", "channel", "schedule", "spec", "claimed_until", "claimed_occurrence", "retry_count"}
     changes = {k: v for k, v in fields.items() if k in allowed}
+    if "spec" in changes:
+        current = await get_task(task_id, db=db)
+        if current is not None:
+            changes["spec"] = validate_spec(current["kind"], changes["spec"])
     pool = await get_pg_pool()
     if pool is not None:
         current = await get_task(task_id, db=db)

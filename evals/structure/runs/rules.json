@@ -1,0 +1,403 @@
+{
+ "arm": "rules",
+ "ran_at": "2026-09-22T22:31:16.216554",
+ "results": [
+  {
+   "id": "base:0x37e73ddd2bbaab0cef8ce7c0376b4c90e23074ce",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": true
+   },
+   "flag": false,
+   "reasons": [
+    "top ten wallets hold over 40% of supply",
+    "insiders hold over 10%"
+   ],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "base:0x3a11b42f87ef34dceba0a9880cd6ab5d944568aa",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": true,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": false,
+   "reasons": [],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "base:0x3c725423e2cad7239ef3c016a19f7a2d1c4aac37",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": true
+   },
+   "flag": false,
+   "reasons": [],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "base:0x3d81ed2928c83d1cc448b6e30ed6911a44f348e1",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": true
+   },
+   "flag": true,
+   "reasons": [
+    "top ten wallets hold over 40% of supply",
+    "snipers hold over 15%",
+    "insiders hold over 10%"
+   ],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "base:0x86c2e892d2e63178229bac9e9375c2621b16238e",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": true
+   },
+   "flag": false,
+   "reasons": [
+    "top ten wallets hold over 40% of supply",
+    "snipers hold over 15%"
+   ],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "base:0xb200000000000000000000451d033a5000cb479e",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": true,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": false,
+   "reasons": [
+    "bundled wallets hold over 15%",
+    "insiders hold over 10%"
+   ],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "bnb:0x18fbc6ea1c58dcc45b6940b78e487859d9a37777",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": true
+   },
+   "flag": false,
+   "reasons": [],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "solana:2qxqzjqmdb2tjutsvmvi7ru1efetvkanngny7zwppyun",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": true,
+    "liquidity_collapse": null,
+    "price_collapse": true
+   },
+   "flag": false,
+   "reasons": [],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "solana:3hedibcqx7tvm8aaacf6y3g87bsxnpyem7dpapdovutw",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": true
+   },
+   "flag": false,
+   "reasons": [],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "solana:3nz9jmvbmgaqocybic2c7lqcjscmgsaz6vqqtdzcqmjh",
+   "bad": true,
+   "clean": false,
+   "outcome": {
+    "concentration_up": true,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": false,
+   "reasons": [],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "base:0x0051bf1bc7be38a728703a76a518ad2d24cdb3d7",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": false,
+   "reasons": [
+    "top ten wallets hold over 40% of supply",
+    "insiders hold over 10%"
+   ],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "base:0x015838170685694a1243543d1c683154e6dbc533",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": false,
+   "reasons": [
+    "top ten wallets hold over 40% of supply"
+   ],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "base:0x06640d7ba28d7e914a7f1e0d0283e95f4b02111c",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": false,
+   "reasons": [
+    "top ten wallets hold over 40% of supply"
+   ],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "base:0x06b2fcf8a0078ae64d17cddd77b73db2f94064c3",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": false,
+   "reasons": [
+    "top ten wallets hold over 40% of supply",
+    "snipers hold over 15%"
+   ],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "base:0x0709e78ac82ebdb980014dd731a47d017632d222",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": false,
+   "reasons": [],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "base:0x08abb63c1bb02acaef642955f2c4c4b060d3ecad",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": false,
+   "reasons": [
+    "top ten wallets hold over 40% of supply",
+    "snipers hold over 15%"
+   ],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "base:0x094e24bc7bbc0861c6b3f95ca2f87eeb9c802ba3",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": false,
+   "reasons": [
+    "top ten wallets hold over 40% of supply"
+   ],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "base:0x0a18f7b4f365bdde24fbc0f9044bf08aec0bf2e4",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": false,
+   "reasons": [
+    "top ten wallets hold over 40% of supply",
+    "insiders hold over 10%"
+   ],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "base:0x0dfe54e7765d8af988b5ba08eee2b4aa6dfc153d",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": true,
+   "reasons": [
+    "top ten wallets hold over 40% of supply",
+    "snipers hold over 15%",
+    "insiders hold over 10%"
+   ],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  },
+  {
+   "id": "base:0x0e264383d9a01aa631eb2f377c53e2beeaeef38f",
+   "bad": false,
+   "clean": true,
+   "outcome": {
+    "concentration_up": false,
+    "liquidity_collapse": null,
+    "price_collapse": null
+   },
+   "flag": false,
+   "reasons": [
+    "top ten wallets hold over 40% of supply"
+   ],
+   "unknown": [
+    "lp_unlocked_pct",
+    "liquidity_usd"
+   ],
+   "model_calls": 0,
+   "latency_ms": 0
+  }
+ ]
+}

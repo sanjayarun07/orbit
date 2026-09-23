@@ -2077,6 +2077,354 @@ concurrent schema runs against a real Postgres, three rounds, produced no
 error. `tests/test_schema_lock.py` refuses any store that runs its
 `_TABLE_SQL` on a bare connection again.
 
+## Durable jobs, wave 1 (2026-09-22)
+
+`app/jobs.py` implements `docs/durable-jobs-spec.md`: tables `jobs` and
+`job_events`; a claim by compare-and-swap on (id, status, lease_id); a
+heartbeat that extends the lease and a guard every paid call passes; CAS
+checkpoints of plan, state, evidence, signals and the operation cache; the
+pause states; a per-replica worker started in the lifespan (`jobs` in
+`/readyz`); `attach()` for the chat turn (inline when no worker runs in
+the process, which is what the suite and a bare dev server use); delivery
+of a detached job's answer to its conversation with one credit charge
+keyed by the job id; scrub on account deletion; jobs and events in the
+export; `GET /jobs`, `GET /jobs/{id}`, `POST /jobs/{id}/cancel`.
+
+The deep dive is the first handler (`_deep_dive_job` in
+`app/nodes/research.py`): five plan steps, every evidence source through
+the operation cache (`build_token_evidence` takes `call` and `step`
+hooks), the synthesis cached too, the receipt written at the end and
+linked by id. Verified: the acceptance list in `tests/test_jobs.py`
+(resume after a crash with zero repeated calls, two claimers, a lost
+lease, an expired approval, a deletion mid-run, detached delivery once);
+a live deep dive on the test server through the worker in 36 s with all
+five steps done and the receipt linked; on real Postgres, a job whose
+worker died with an expired lease is claimed again and finished.
+
+Costs: a deep dive that settles while the turn is attached is charged as
+before through its trajectory; one that outlives the turn costs the turn
+(one credit) plus the deep-dive charge at settle. Next waves: the desk and
+the tape; then reminders, price alerts and the brief as scheduled jobs;
+then the paper-desk cycles.
+
+## Review of the job engine (2026-09-22): seven findings closed
+
+1. **A cancelled or restarted request stranded its job's answer.** `attach`
+   now detaches on cancellation, and delivery treats an attachment older
+   than the attach window plus thirty seconds as expired; maintenance
+   delivers those too.
+2. **Concurrent checkpoints overwrote each other's cache entries.** The
+   operation cache is merged key by key and the evidence and signal lists
+   appended, as jsonb `||` in Postgres and a merge under the lock in
+   memory; six concurrent calls keep six entries.
+3. **Delivery was not idempotent.** It is claimed first by compare-and-swap
+   on `delivered`, the session write is skipped when a message with the
+   job id already exists, and a failed delivery releases the claim for the
+   next pass.
+4. **Account deletion left job events.** The scrub deletes the events and
+   clears the rows' ownership in one transaction; a test pins the order.
+5. **A down database silently fell back to memory.** With Postgres
+   configured, the store raises `StoreUnavailable` instead; the deep dive
+   then runs ephemerally, in memory, and its answer says the run was not
+   recorded and cannot resume.
+6. **The detached answer did not reach the open page.** The response
+   carries the job id; the browser polls the job and refreshes the
+   conversation when it settles (a harness case proves it).
+7. **A background job lost its owner's TradingView connection.** An owned
+   job binds its owner's integration token and receipt owner for the run
+   and resets both after; an anonymous or inline run keeps the caller's.
+
+Also in this pass: the evidence envelope (`app/evidence.py`) recorded
+beside the holders, bundle and wallet cards and read by the validator's
+coverage check, the receipt and the job row; answer requirements
+(`evals/answers/cases.json`, `scripts/answer_eval.py`, replayed on pinned
+snapshots by `tests/test_answer_eval.py`); and the holders job pilot
+(`app/jobs_holders.py`, measured by `scripts/holders_pilot.py`).
+
+## The exit monitor (2026-09-22): can this position get out, and has that changed
+
+The second capability of the narrowed proposition ("understand who
+controls the supply, whether your position can exit, and when those
+conditions change"). `app/exit_monitor.py` reads the wallet's real balance
+of a token from the chain (both token programs), asks Jupiter for an
+exact-size sell quote to USDC at 25, 50 and 100 percent, and shows four
+numbers never conflated: marked value (quantity times reference price),
+quoted proceeds (what the route returns for that size), minimum output
+(the transaction's floor at the quoted slippage), and, not here, realised
+proceeds. A failed route is a row that says why ("no route", "quote
+provider rate-limited"), never a missing row. Partial exits are separate
+scenarios and do not add up; the card says so. Nothing prepares or
+submits a trade: the quote path is `plans.simulate_swap`, the read-only
+one.
+
+**Watching.** `watch my exit on BONK` persists the position with its
+entry quotes (`exit_positions`, `exit_quotes`) and schedules a durable
+job (`exit_monitor`) that re-reads the balance, quotes, records and
+compares every `exit_monitor_interval_minutes` (15). The job engine now
+lets a handler reschedule its own row (`next_run_at` in the result), so
+one row runs for the life of the position. The card shows the change
+since entry and the full-exit quote over time. `exit analysis for X`,
+`can I exit my X position`, `how is my exit on X`, `stop watching my
+exit on X` and `show my exits` are anchored chat controls
+(`app/exit_controls.py`) for signed-in users with a connected or named
+Solana wallet; a symbol resolves through Jupiter's registry, one verified
+match wins and several ask for the mint. Ten watched positions per user.
+
+**The deterioration alert** (the third capability's first alert): when
+the full-exit quote falls by more than `exit_alert_drop_pct` (20%) against
+the entry quote or the last alert's quote, an inbox item carries both
+quotes, both price impacts, the route and the marked value, and says it is
+neither a price alert nor a sell instruction; at most once per
+`exit_alert_cooldown_hours` (6). Positions are in the export and cascade
+with the user. Verified live against a real BONK holder on the test
+server; `tests/test_exit_monitor.py` covers the quotes, the card, the
+reschedule, the alert with its cooldown, stopping, and the controls.
+
+## Review of the exit monitor and delivery (2026-09-22): seven findings closed
+
+1. **An attached answer was delivered and charged again** once its
+   attachment expired. `attach` now acknowledges the job (delivered = true)
+   at the moment it returns the answer; a request that died before that
+   point leaves it unacknowledged for maintenance.
+2. **A crash after the delivery claim lost the answer.** The claim is an
+   expiring `delivering_until`; `delivered` is set only after the
+   conversation write and the charge; a lapsed claim is retried.
+3. **A failed RPC read was reported as "holds none".** `position_of` raises
+   `BalanceUnavailable`; the chat says the balance could not be read and
+   that it is not a zero; the monitor keeps the last known quantity and
+   records the gap.
+4. **A size change read as deterioration.** A position that changed by more
+   than 1% since the baseline is re-baselined at the new size, with no alert.
+5. **A failed entry quote disabled alerts for good.** The entry is a
+   baseline only when its full-exit quote succeeded; otherwise the monitor
+   is pending and the first valid quote becomes the baseline.
+6. **A registration could fail halfway.** The job is created first and the
+   position row linked to it; a failure cancels the job and creates nothing.
+7. **A retried alert duplicated the inbox item.** The occurrence key is
+   stable per baseline (`user_inbox` has a unique index on task and
+   occurrence), so a retry after a failed checkpoint notifies once.
+
+Also: **the no-route alert.** A full exit that was quoted and cannot be
+quoted now raises an inbox alert naming the reason and the sizes that
+still quote; a provider gap (rate limit, outage, unreadable balance) is
+not a market fact and raises nothing.
+
+## Third review of the exit monitor and delivery (2026-09-22): three findings closed
+
+1. **Acknowledgement moved from attach to the chat commit.** `attach`
+   returns the settled row without marking it delivered; the research node
+   carries the job id with `job_attached`, and the turn acknowledges the job
+   only after `commit_turn` has written the answer to the conversation. A
+   turn that fails or is cancelled in between leaves the job for maintenance.
+   The browser receives a job id only for a detached job.
+2. **Registration is all or nothing.** A failure after the position insert
+   (the history write, for one) removes the position and cancels the job.
+   A stale active row whose monitor is gone is closed and registered afresh
+   by the next watch, never reported as "already watching".
+3. **No-route only when the provider said so.** Timeouts, dropped
+   connections, auth errors and unknown failures are "quote unavailable"
+   rows, never the no-route alert; only an explicit no-route answer raises it.
+
+## Fourth review of delivery (2026-09-22): three findings closed
+
+1. **The committed message carries the job id.** The turn writes `job_id`
+   into the assistant message's metadata before acknowledging; delivery
+   treats a conversation that already holds a message with the job id as
+   delivered and charged by that turn, so it appends nothing, charges
+   nothing, and only sets the acknowledgement that was missed. A failed
+   acknowledgement after a successful commit never fails the turn.
+2. **A failed job returned through chat is acknowledged the same way**: the
+   terminal-error branch carries the job id and the attached flag.
+3. **No-route is read from the provider's body.** An HTTP 400 whose JSON
+   says `COULD_NOT_FIND_ANY_ROUTE` is a no-route; a 502 with a text body is
+   an outage.
+
+## Checkpoint fingerprints (2026-09-22)
+
+From TradingAgents' checkpoint identity, adapted. A job row carries a
+fingerprint of what its checkpoints were built under: kind, spec, the
+handler's declared version and the settings the handler names at
+registration (`jobs.register(kind, handler, version=..., settings_keys=...)`).
+At every claim the engine recomputes it; a mismatch (a deploy that bumped
+the handler version, a changed setting) drops the plan, state, operation
+cache, evidence and signals, records a `reset` event, and the plan
+restarts, so evidence gathered under one set of assumptions is never
+mixed with another. The deep dive names the model, the synthesis model,
+the Mobula host, the volatile-cache age and the sentiment and Polymarket
+switches; the exit monitor its interval, threshold and cooldown; the
+holders pilot the Mobula host. Bump a handler's version whenever its
+evidence shape changes.
+
+Also this pass: a background delivery retry charges even when its message
+already exists (`delivered_by = job` on the messages it writes); only a
+message the attached turn committed skips the charge.
+
+## The structure benchmark (2026-09-22): the first numbers
+
+TradingAgents' evaluation runner, adapted to our own data. `scripts/
+structure_benchmark.py label` reads the holder ledger: each well-recorded
+subject becomes a case whose evidence is its FIRST snapshot and whose
+outcome is decided by the snapshots in the next 24 hours -- concentration
+up ten points, liquidity down to under 30%, price down to under 30% --
+each label present only when both ends recorded the field. Three arms
+run on the same saved evidence: deterministic rules (`app/structure_rules.py`),
+one grounded analyst, and the analyst plus an independent critic. The
+runner scores recall on bad outcomes, false alerts on clean ones, unknown
+fields, latency and model calls, and names the misses.
+
+First run, 279 cases (34 bad, 237 clean, 8 unknown) and a stratified 20:
+
+| Arm | Recall on bad | False alerts on clean | Model calls |
+|---|---|---|---|
+| rules, all 279 | 9% | 5% | 0 |
+| rules, 20 | 10% | 10% | 0 |
+| analyst, 20 | 100% | 100% | 20 |
+| analyst + critic, 20 | 80% | 90% | 40 |
+
+The reading is plain: on a decision-time structure snapshot alone, the
+analyst flags everything and the rules flag almost nothing; neither
+discriminates, and the critic buys a little precision at double the cost.
+So a structural verdict from the first snapshot is not a risk assessment
+and must not be presented as one. What the product needs before an
+analyst can be trusted here is the evidence the proposition names: the
+launch's transactions and relationships, and the position's exit quote.
+The benchmark is the gate those additions have to pass. Re-label as the
+ledger grows; the runs under `evals/structure/runs/` are the record.
+
+## Evidence anchors (2026-09-23)
+
+An envelope's observations now carry anchors: where each can be verified
+without trusting us. An anchor is a transaction signature, a slot, or a
+provider record, with the provider's own time for the fact (`at`), kept
+apart from our collection time (`as_of`), and the envelope names the
+version of the code that read the provider's answer (`interpreter`).
+Built from fields the providers already return: Mobula's funding lookups
+carry a transaction hash and date, its trades a transaction hash, its
+holder positions a first and last trade time; every Jupiter quote carries
+`contextSlot`.
+
+Where they land: the bundle check anchors every shared-funder claim to
+the funding transaction (the card's "Shared funding sources" table links
+them on Solana) and every same-second claim to the first-holding time;
+the holders envelope anchors its top rows to the provider's records; the
+trades tool now records an envelope with one transaction anchor per
+trade; the exit monitor's quote rows carry the slot and the card says
+which slot the numbers came from; the deep dive's coverage rows count the
+anchors per dimension. Anchors are capped at 60 per envelope and travel
+in the public form, on the job row and beside the answer. A claim without
+an anchor is still a claim, marked as unanchored by `Evidence.anchored()`,
+never silently dropped. This is what the launch dossier will show as
+"the transactions supporting each inference".
+
+## Position-aware workspace, first slice (2026-09-23)
+
+**What changed since entry, said apart.** The exit monitor's deterioration alert now opens with a decomposition
+(`exit_monitor.explain_change` / `explain_sentence`): the reference price's move, the quote's discount to that
+reference then and now (discount = 1 − quoted ⁄ marked), the route then and now, and missing data as its own
+state. `what changed since I entered X` renders the same reading on demand, with the holding change, or says
+plainly that there is no entry snapshot when X is not watched.
+
+**Rules per position.** `exit_positions.rules` (jsonb): `drop_pct` (proceeds fall vs baseline; default
+`EXIT_ALERT_DROP_PCT`), `discount_pct` (absolute discount to the reference; fires on its own), `channel`
+(`inapp` | `email`). Set by chat: `tell me when the discount on my full-position exit quote exceeds 5%`,
+`email me when my BONK exit drops 10%`, `exit alerts to inbox`; `show my exits` lists them. An email goes out
+only when the inbox row was new (the inbox is the delivery record) through `emailer.send_email`.
+
+**Sizing before entry.** `compare buying $500, $2,000 and $5,000 of X` (chain and trailing sentences
+tolerated; works for guests) quotes USDC→X and the immediate reverse exit of exactly what that entry receives,
+with slots; labelled a liquidity diagnostic, never a forecast. Jupiter quotes are paced (0.5 s) and retried
+with backoff (1.5 s, 3 s) on 429: six in a row hit the public limit live.
+
+## UI flow report fixes (2026-09-23)
+
+- **Instruction words are not assets.** `subject_probe.subject_of` skips a capitalised sentence starter
+  followed by a determiner, pronoun or "token" (Save this…, Separate token…, Show my…); the context capsule
+  binds "X token" only when X is a $ticker, all-caps, or a capitalised non-starter.
+- **`app` speech act.** Save/export/watchlist/alert-settings requests classify as `app` (docstring,
+  Jev options, examples v4, three routing cases) and route to `product_actions.answer`, which says what exists
+  (Recents, account export, exit monitors, Settings › Tasks) and what does not (report export, ranked
+  watchlist). 118/118 intent accuracy in resolve mode.
+- **A declared token is never a deployer wallet.** `mobula_meme.declared_token` (token/mint/contract/CA
+  before the address, or "launch of" without "wallet"); `wallet_deployer` resolves the deployer from Mobula
+  `/metadata` (`deployer`) and says so when there is none. Compound clauses without a subject of their own
+  carry the message's address (`composition.carry_subject`).
+- **One synthesis per answer.** `composition.combine` strips each part's earlier "Taken together"; the web
+  branch strips the compound one. Clause deltas are muted (`streaming.muted("delta")`) so concurrent clauses
+  no longer interleave sentences in the transcript.
+- **Dated comparisons.** `snapshot_compare.dated_ask` recognises "between/since <date>" asks; the answer opens
+  with the ledger's two-row comparison (`holder_snapshots.as_of` + `diff`) or the limitation ("No saved
+  snapshot of X for <date>… everything below is current data").
+
+**Review of c8bf7764 (2026-09-23).** `$BONK` is carried whole into subject-less clauses; the sizing pattern uses
+named token groups so a mint with digits is the token; `what changed since I entered X` prefers the connected
+wallet's watch (else every watch, each on its own), reads the holding against the baseline's quantity, and says
+when the wallet no longer holds the token; a rejected alert email leaves `last_alert.email_pending` set and is
+retried every tick until the provider accepts it (the inbox row and the cooldown stand meanwhile).
+
+## Complete UI review fixes (2026-09-23)
+
+- **Portfolio reads both token programs.** `solana_rpc.get_all_token_accounts` returns legacy and Token-2022
+  accounts plus the programs whose read failed; `build_portfolio_snapshot` marks `partial` and `unread_programs`,
+  and the portfolio node says "Snapshot partial … not an empty wallet" instead of "no SPL token holdings". The
+  tester's wallet (ANSEM under Token-2022) now agrees between the portfolio and the exit analysis; SOL exposure
+  uses the full denominator.
+- **Units survive synthesis.** The desk thesis and the composite synthesis carry explicit rules: dollar
+  liquidity/volume/market cap are never a support or invalidation price; a level needs a price figure in the
+  data; a catalyst needs a dated event; unverified identity caps conviction at 4/10; "24h price change" is a
+  price move, never volume growth. The GeckoTerminal and DEX Screener columns now say "24h price change".
+- **Small prices and the priced token.** `_money` prints four significant figures below $1 ($0.000006300, never
+  $0.0000); pair tables carry a "Priced token" column and a note that a row where the requested token is the
+  second name prices the other token.
+- **Holder table semantics.** "First token trade" and "Wallet funded" are separate columns; absent buy/sell
+  counts print "—" (unknown, not zero); a note explains Mobula's PnL basis.
+- **Price alerts are validated at the boundary.** `tasks.validate_spec` requires a symbol, `<`/`>` and a finite
+  positive price on create and on spec updates; the form's "-1" now returns 400.
+
+## Funded UI review fixes (2026-09-23, 48 persona cases)
+
+- **Follow-ups keep the subject.** `subject_probe.subject_of` treats a capitalised sentence opener as grammar when it
+  is an English imperative, auxiliary or pronoun (Build, Mark, Handle, You, Were…) or is followed by a determiner or
+  "token"; CLMM/DLMM/AMM/PDA and other jargon are never symbols. A message that names nothing of its own and talks
+  about the analysis (`subject_probe.continues_subject`) is bound to the session focus: a token ("Resolved from
+  canonical session context: token X mint … on chain") or a topic ("this continues the discussion about
+  EigenLayer"); `advance_session_context` keeps the focus on such follow-ups, records a named topic as the focus,
+  and clears it only for a message with its own subject or a market-wide ask (trending, gainers, the market today).
+- **One-letter tickers need asset intent.** "I am new to crypto" no longer asks which token I is.
+- **Product questions.** "What can I do here without connecting a wallet" is the `app` act and gets the plain
+  capability answer (`product_actions.WHAT_CAN`).
+- **Conditional orders.** "If SOL drops below $100, automatically buy 2 SOL" is answered before any rule with
+  `speech.CONDITIONAL_ORDER_ANSWER` (no automatic orders exist; the price alert and exit watch do). Questions
+  ("should I buy if it dips?") stay advice.
+- **Token vs wallet roles.** A Solana address with token words (token, mint, first/early buyers, bundle, snipe,
+  holders, deployer, launch) is never read as a wallet's history: the Helius matcher declines and the wallet
+  detector's `TOKEN_SHAPED` vocabulary now includes buyers.
+- **Exit controls.** Tickers are stripped of sentence punctuation ("ANSEM."); the exit ask accepts "in the
+  connected wallet" and trailing sentences; the threshold reply explains the trigger (cadence, comparison,
+  cooldown, never sells).
+- **Constraints before ranking.** DeFiLlama yields honour "without another volatile token / single-asset / only
+  USDC" (pool `exposure == single`); protocol TVL matches the named protocol only; "BNB Smart Chain" scopes
+  discovery to bsc.
+- **Evidence discipline in prompts.** ResearchAnswer and the deep-dive rules: correct a contradicted premise
+  first; no launch date without a dating source; a token program implies no extensions; "secure", "safe",
+  "unanimous" need the evidence and its sample; honour stated constraints or say no match. Wallet health states
+  concentration as a fact and says liquidity is not measured.
+- **Polish.** Plan copy says 300 credits; `show my tasks` cites a real task number; "Name it X" and "in-app inbox
+  only / by email" become the reminder's title and channel.
+
+## Tequity: the company's equities and perps feed (2026-09-23)
+
+`app/tequity.py` subscribes once per process to `TEQUITY_WS_URL` (default `wss://tequity-dn.i5.xyz/ws`; plain
+`ws://` is rejected upstream) and keeps the latest snapshot of every channel: `equities:movers:aster` (500 pairs,
+every ~3 s), `equities:movers:hyperliquid` (358 pairs, ~5 s), `equities:trending` (50 pairs, ~4 s), plus
+`equities:news` and `equities:stats*`, which had emitted nothing in the first 150 s of listening. A tool reads the
+snapshot (stale after 120 s) or takes one from an 8-second one-shot subscription. Tools: `tequity_movers`
+(venue-scoped gainers/losers, tokenized stocks filtered on `is_stock`; also a research-node intercept so a venue
+movers ask never drifts to the web), `tequity_trending` (cross-venue, composes with the narrative card),
+`tequity_news` (reachable only once a news snapshot exists). Cards carry the server timestamp as the snapshot
+time and say that "24h price change" is a price move. The feed has no book, funding, open interest or per-row
+time, so it feeds discovery cards, never the deep dive or the exit monitor. Disable with `TEQUITY_ENABLED=false`.
+The worker is listed under `tequity` in the startup task map.
+
 ## Orbit on Telegram: the bot as a third transport (2026-09-22)
 
 **A transport, not a second product.** `app/telegram/` is an adapter over

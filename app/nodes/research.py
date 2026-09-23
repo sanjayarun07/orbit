@@ -29,7 +29,7 @@ from app.token_resolve import bitquery_evm_lookup, clear_winner, token_candidate
 from app.token_deepdive import (
     ANALYSIS_RULES, build_token_evidence, bundle_signals, coverage_rows, evidence_skips, extract_market_price, format_evidence_bundle,
 )
-from app import decision_records, handles, holder_snapshots, listed_asset, role_memory
+from app import decision_records, handles, holder_snapshots, jobs, listed_asset, role_memory, snapshot_compare, tequity
 from app.signals import Signal, Subject
 from app.source_cards import extract_source_cards
 from app.web_search import append_web_sources, is_crypto_trends_query, web_search
@@ -726,8 +726,10 @@ def _detect_wallet_request(request: str) -> tuple[str, str | None] | None:
         r"positions?|exposure)\b",
         lowered,
     )
-    token_subject = re.search(r"\b(?:token|coin|contract|mint|memecoin|meme coin|erc-?20)\b", lowered)
-    explicit_wallet = re.search(r"\b(?:wallet|portfolio|balances?|pnl|transactions?|counterparties)\b", lowered)
+    token_subject = re.search(r"\b(?:token|coin|contract|mint|memecoin|meme coin|erc-?20)\b", lowered) or lexicon.TOKEN_SHAPED.search(request)
+    # "transactions" alone is not a wallet word: "latest transactions and first
+    # buyers for <mint>" is the token's tape, not the mint's inbox (2026-09-23).
+    explicit_wallet = re.search(r"\b(?:wallet|portfolio|balances?|pnl|counterparties)\b", lowered)
     if not (address_match and wallet_lookup and (not token_subject or explicit_wallet)):
         return None
     address = address_match.group(1) or address_match.group(2)
@@ -873,7 +875,8 @@ _NAMED_STOP = {"THE", "A", "AN", "MY", "THIS", "THAT", "IT", "SOME", "TOP", "NEW
                "ANY", "YOUR", "MEME", "NATIVE", "UTILITY", "GOVERNANCE", "WRAPPED", "BASE", "ETHEREUM", "BSC", "BEST", "WHICH", "WHAT", "EACH", "EVERY", "OTHER", "SAME",
                "OWN", "REAL", "FAKE", "ONE", "FIRST", "LATEST", "CURRENT", "GIVE", "SHOW", "GET", "FULL", "MORE", "ABOUT", "FOR", "WITH", "AND", "OF", "TO", "IN", "ON"}
 _SYMBOL_LIKE = re.compile(r"(?<![A-Za-z0-9$])\$?[A-Z][A-Z0-9]{1,9}(?![A-Za-z0-9])")
-_SYMBOL_STOP = {"I", "A", "OK", "ETF", "ETFS", "USD", "USDT", "USDC", "AI", "DEFI", "NFT", "NFTS", "DEX", "CEX", "TVL", "APY", "APR", "ATH", "ATL", "OI", "RSI", "MACD", "EMA", "SMA", "US", "UK", "EU", "SEC", "FED", "CPI", "L1", "L2"}
+_SYMBOL_STOP = {"I", "A", "OK", "ETF", "ETFS", "USD", "USDT", "USDC", "AI", "DEFI", "NFT", "NFTS", "DEX", "CEX", "TVL", "APY", "APR", "ATH", "ATL", "OI", "RSI", "MACD", "EMA", "SMA", "US", "UK", "EU", "SEC", "FED", "CPI", "L1", "L2",
+                "CLMM", "DLMM", "AMM", "PDA", "PDAS", "LP", "LPS", "DAO", "KYC", "ICO", "IDO", "FDV", "MCAP", "OTC", "PNL", "ROI", "RWA", "EVM", "SPL", "ERC", "KOL", "KOLS", "MEV", "TWAP", "VWAP", "LTV", "API", "MCP"}
 
 
 # A question that wants a token's data: with one of these words, a bare
@@ -1473,15 +1476,65 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
         address = resolved.group(1) or resolved.group(2)
         chain = resolution.chain
 
+    # The deep dive is a durable job (docs/durable-jobs-spec.md): it outlives
+    # this request, resumes after a restart or a lost worker, and never
+    # repeats a paid call. The turn stays attached for job_attach_seconds.
+    user_id, account_id, session_id = jobs.current_owner.get()
+    charter = (state.get("session_context") or {}).get("risk_charter")
+    spec = {"request": request, "address": address, "chain": chain, "symbol": symbol, "charter": charter}
     streaming.emit("status", text=f"Composing the evidence bundle for {symbol or address}")
-    bundle = await build_token_evidence(address, chain, symbol)
+    try:
+        job = await jobs.create("deep_dive", spec, user_id=user_id, account_id=account_id, session_id=session_id)
+    except jobs.StoreUnavailable:
+        # The durable store is down: answer now, in memory, and say so.
+        # Nothing is kept and nothing resumes (review, 2026-09-22).
+        logger.warning("jobs store unavailable; running the deep dive ephemerally", exc_info=True)
+        result = await jobs.run_ephemeral("deep_dive", spec, user_id=user_id)
+        result["answer"] = (result.get("answer") or "") + "\n\n_The research store was unavailable, so this run was not recorded and cannot be resumed._"
+        return result
+    row = await jobs.attach(job["id"], on_event=lambda e: streaming.emit("status", text=e["title"]))
+    status = row.get("status")
+    if status == "succeeded" and isinstance(row.get("result"), dict):
+        # The turn commits this answer; the commit acknowledges the job.
+        return {**row["result"], "job_id": job["id"], "job_attached": True}
+    if status in jobs.TERMINAL:
+        return {"answer": f"The deep dive of {symbol or address} could not be completed: {row.get('error') or status}.", "trajectory": None,
+                "job_id": job["id"], "job_attached": True}
+    # Still running: the answer is appended to this conversation when it settles.
+    return {"answer": f"Still working on the deep dive of {symbol or address}; the answer will appear here.", "trajectory": None,
+            "job_id": job["id"], "resolved_token": {"symbol": symbol, "address": address, "chain": chain}}
+
+
+async def _deep_dive_job(job: dict, ctx: "jobs.JobContext") -> dict:
+    """The deep dive as a durable job handler: five plan steps, every source
+    through the operation cache, the verdict and the receipt at the end.
+    Restartable from any checkpoint: a resumed run re-walks the bundle and
+    finds every finished source cached."""
+    spec = job["spec"]
+    request, address, chain, symbol, charter = spec["request"], spec["address"], spec["chain"], spec.get("symbol"), spec.get("charter")
+    await ctx.plan(["Evidence: router dimensions", "Evidence: Mobula forensics", "Evidence: crowd and markets",
+                    "Evidence: ledger, unlocks, technicals", "Verdict and receipt"])
+    phases = {"dimensions": "0", "forensics": "1", "crowd": "2", "ledger": "3"}
+    current: list[str] = []
+
+    async def step(phase: str, title: str | None = None) -> None:
+        if current:
+            await ctx.finish_step(current[-1])
+        current.append(phases[phase])
+        await ctx.step(phases[phase])
+
+    bundle = await build_token_evidence(address, chain, symbol, call=ctx.call, step=step)
+    if current:
+        await ctx.finish_step(current[-1])
+    await ctx.step("4")
     bundle_has_history = any(d.name == "history" and d.status == "available" for d in getattr(bundle, "dimensions", []) or [])
     evidence = format_evidence_bundle(bundle)
-    charter = (state.get("session_context") or {}).get("risk_charter")
+    for signal in bundle.signals:
+        await ctx.add_signal(signal)
 
-    # Reflection loop (role memory). Fetching this asset's price is the trigger to
-    # reflect on any earlier decisions now old enough to have an outcome; then
-    # RECALL prior lessons and feed them into synthesis so the analyst improves.
+    # Reflection loop (role memory): this asset's price is the trigger to
+    # reflect on decisions old enough to have an outcome; then RECALL prior
+    # lessons and feed them into synthesis so the analyst improves.
     price_now = extract_market_price(bundle)
     await _reflect_due_decisions(chain, address, price_now)
     lessons = role_memory.recall_lessons(chain, address)
@@ -1489,34 +1542,38 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
 
     subject = Subject(kind="token", id=address, chain=chain, symbol=symbol)
     as_of = datetime.now(timezone.utc).isoformat()
-    try:
-        streaming.emit("status", text="Writing the due-diligence verdict")
+
+    async def synthesize() -> dict:
         result = await runtime.answer(
             runtime.token_deepdive_agent, tier="synthesis",
-            request=request, evidence=evidence,
-            analysis_rules=ANALYSIS_RULES,
-            user_context=charter or "no profile set",
-            learned_lessons=learned,
+            request=request, evidence=evidence, analysis_rules=ANALYSIS_RULES,
+            user_context=charter or "no profile set", learned_lessons=learned,
         )
-        answer = (getattr(result, "answer", "") or "").strip() or evidence
+        return {"answer": (getattr(result, "answer", "") or "").strip(), "stance": str(getattr(result, "stance", "") or ""),
+                "confidence": str(getattr(result, "confidence", "") or "")}
+
+    try:
+        verdict = await ctx.call("synthesis", synthesize, args={"evidence": evidence[:200], "charter": charter, "learned": learned})
+        answer = verdict.get("answer") or evidence
         # The lens's typed view. An answer whose stance or confidence did not
         # come back as one word abstains: an unparsed opinion is not a vote.
-        analyst = Signal.from_stance(
-            "token_deep_dive", subject, as_of,
-            str(getattr(result, "stance", "") or ""), str(getattr(result, "confidence", "") or ""),
-            reasoning=answer.strip().split("\n", 1)[0][:400],
-        )
+        analyst = Signal.from_stance("token_deep_dive", subject, as_of, verdict.get("stance", ""), verdict.get("confidence", ""),
+                                     reasoning=answer.strip().split("\n", 1)[0][:400])
+    except jobs.LostLease:
+        raise
     except Exception:
         logger.warning("token deep-dive synthesis failed; returning raw bundle", exc_info=True)
         answer = evidence
         analyst = Signal.abstain("token_deep_dive", subject, as_of, "synthesis failed")
+    await ctx.add_signal(analyst)
 
     # The receipt: every analyst's vote or abstention, what was not seen, the
     # price then and the verdict as given. Answering "why did you say that"
     # later reads this alone.
-    await decision_records.record(
+    receipt = await decision_records.record(
         kind="deep_dive", subject=subject, signals=[analyst, *bundle_signals(bundle)], verdict=answer,
-        coverage=coverage_rows(bundle), skipped=evidence_skips(bundle), price=price_now,
+        coverage=coverage_rows(bundle), skipped=evidence_skips(bundle), price=price_now, user_id=job.get("user_id"),
+        session_id=job.get("session_id"),
     )
     # A token someone looked at is worth recording: the ledger keeps its
     # structure from now on, so the next deep-dive can say what moved.
@@ -1546,11 +1603,17 @@ async def _run_token_deep_dive(state: AgentState, request: str) -> dict | None:
             trajectory[f"tool_name_{index}"] = dimension.source
             trajectory[f"observation_{index}"] = dimension.detail
             index += 1
+    await ctx.finish_step("4")
     return {
         "answer": answer,
         "trajectory": trajectory,
         "resolved_token": {"symbol": symbol, "address": address, "chain": chain},
+        "receipt_id": (receipt or {}).get("id") if isinstance(receipt, dict) else None,
     }
+
+
+jobs.register("deep_dive", _deep_dive_job, version="2026-09-22.1",
+              settings_keys=("model", "synthesis_model", "mobula_base_url", "job_volatile_max_age_seconds", "twitterapi_io_key", "polymarket_enabled"))
 
 
 # The knowledge synthesis saying the passages do not answer the question --
@@ -1744,6 +1807,16 @@ async def research_node(state: AgentState) -> dict:
         state = {**state, "request": request, "contextual_request": None,
                  "capabilities": sorted(set(state.get("capabilities") or []) | {"market_data", "derivatives"})}
         streaming.emit("status", text=f"Reading the tape for {asset}")
+    if tequity.enabled() and tequity.movers_matches(request):
+        # Venue movers come from the company's own feed, whatever the
+        # classifier called the ask ("which tokenized stocks are moving on
+        # hyperliquid" went to the web as equity research, 2026-09-23).
+        try:
+            card = await asyncio.to_thread(tequity.movers, request)
+            return {"answer": card, "trajectory": {"thought_0": "Venue movers from the internal Tequity feed.", "tool_name_0": "tequity_movers",
+                                                   "tool_args_0": {"request": request}, "observation_0": card}}
+        except Exception:
+            logger.warning("tequity movers unavailable; falling through to routing", exc_info=True)
     if _PERSONAL_ASK.search(request) and not _mentions_asset(request):
         holdings = _remembered_holdings(state)
         if holdings:
@@ -1767,7 +1840,7 @@ async def research_node(state: AgentState) -> dict:
     web_part = _web_context_part(state)
     if web_part:
         streaming.emit("card", markdown=web_part[0], tool=WEB_CONTEXT_TOOL)
-    clauses = composition.split_asks(request)
+    clauses = composition.carry_subject(composition.split_asks(request), request)
     if len(clauses) >= 2:
         # A compound message: every ask answered, each through the same
         # path, the cards combined and read together. One card and silence
@@ -1785,7 +1858,8 @@ async def research_node(state: AgentState) -> dict:
             # clause to finish set the whole answer's resolved token and
             # note (review, 2026-09-22).
             try:
-                return await _research_node({**state, "request": clause, "contextual_request": None}, own)
+                with streaming.muted("delta"):
+                    return await _research_node({**state, "request": clause, "contextual_request": None}, own)
             except Exception:
                 logger.warning("compound ask clause failed: %r", clause[:60], exc_info=True)
                 return {"answer": "", "trajectory": None}
@@ -1799,6 +1873,11 @@ async def research_node(state: AgentState) -> dict:
         notes = [own["resolution_note"] for own in sinks if own.get("resolution_note")]
         if notes:
             sink["resolution_note"] = "\n".join(dict.fromkeys(notes))
+        # Every ask is kept, a clause's question to the user included; but an
+        # answer that carries one clause's "which token?" is not itself a
+        # clarification when another clause answered (it read as one and
+        # dropped the comparison lead, 2026-09-23).
+        extras["compound_answered"] = any(part.get("answer") and not is_clarification(part.get("answer")) for part in results)
         for clause, part in zip(clauses, results):
             if part.get("answer") and not (part.get("trajectory") or {}).get("tool_name_0", "").startswith("_"):
                 streaming.emit("card", markdown=part["answer"], tool=(part.get("trajectory") or {}).get("tool_name_0"))
@@ -1817,9 +1896,20 @@ async def research_node(state: AgentState) -> dict:
         # clarifying question from the tools' path stays a question.
         trajectory = result.get("trajectory") or {}
         if trajectory.get("tool_name_0") != WEB_CONTEXT_TOOL:
-            cards, combined = composition.combine([web_part, (result["answer"], trajectory)])
+            # One summary over all the cards: the compound path's own
+            # "Taken together" is dropped before this one is written.
+            cards, combined = composition.combine([web_part, (composition.strip_synthesis(result["answer"]), trajectory)])
             answer = await composition.synthesize(request, cards, combined)
             result = {**result, "answer": answer, "trajectory": combined or None}
+    window = snapshot_compare.dated_ask(state["request"])
+    if window and result.get("answer") and (result.get("compound_answered") or not is_clarification(result.get("answer"))):
+        # A dated comparison is answered from the snapshot ledger or it says
+        # it cannot be; current data is never presented as "between" dates.
+        token = result.get("resolved_token") or sink.get("resolved_token")
+        if token and not token.get("symbol"):
+            token = {**token, "symbol": composition._symbol_in(state["request"])}       # the ledger card names the ticker the user typed
+        lead = await snapshot_compare.lead(token, window)
+        result = {**result, "answer": f"{lead}\n\n---\n\n{result['answer']}"}
     # The way out: the answer is checked against the question as the user
     # asked it (app/answer_gate.py) -- a wrong subject or a missing answer
     # never ships. The link note goes on after, so the check reads the answer
@@ -1940,7 +2030,10 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     # A security ask that names no token at all ("honeypot check", "is it a
     # rug") cannot be answered by guessing a token; the tools need a contract
     # and a chain. Asked, not guessed.
-    if "token_security" in set(state.get("capabilities", [])) and not _TOKEN_ADDRESS.search(request) and not _named_tickers(request):
+    # A bare symbol beside a data word ("is BONK bundled") names a token the
+    # same way the resolver reads it (answer eval, 2026-09-22).
+    names_a_token = bool(_named_tickers(request) or (_bare_symbols(request) if _DATA_ASK.search(request) else []))
+    if "token_security" in set(state.get("capabilities", [])) and not _TOKEN_ADDRESS.search(request) and not names_a_token:
         # "is it audited?" / "audit report?" right after a token turn: the
         # token in the conversation's focus is the subject (2026-09-18: the
         # question was asked back although ANSEM had just been resolved).
@@ -2105,7 +2198,8 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     eligible_capabilities = eligible_capabilities + backstop
     # A one-letter name ("is M safe?") matches many tokens: ask, never search.
     if not resolution.chain and not address_match and not subject_probe.subject_of(request):
-        single = re.search(r"(?<![A-Za-z0-9$])\$?([A-Z])(?![A-Za-z0-9])", request)
+        # Asset intent required: "I am new to crypto" is not a question about token I (UI run, 2026-09-23).
+        single = re.search(r"(?<![A-Za-z0-9$])\$([A-Z])(?![A-Za-z0-9])", request) or (re.search(r"(?<![A-Za-z0-9$])([A-Z])(?![A-Za-z0-9])", request) if _DATA_ASK.search(request) else None)
         if single:
             return {"answer": (f"Which token is **{single.group(1)}**? A one-letter ticker matches many tokens. Name it with its full name, "
                                "a $ticker or its contract address and the chain, and I'll pull the data."), "trajectory": None}

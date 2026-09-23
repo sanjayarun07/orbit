@@ -173,6 +173,19 @@ const SOLANA = { id: 792703809, name: "Solana", nativeSymbol: "SOL", vmType: "sv
 const BASE = { id: 8453, name: "Base", nativeSymbol: "ETH", vmType: "evm" };
 
 const CASES = {
+  /** A detached job is watched; when it settles the conversation is refreshed. */
+  async detached_job_refreshes_the_conversation() {
+    const { dom, sandbox, setScriptVar } = load();
+    setScriptVar("sessionId", "conv-1");                       // an open conversation, the one the answer lands in
+    const calls = [];
+    sandbox.fetch = async (url) => { calls.push(String(url)); return { ok: true, status: 200, json: async () => (String(url).includes("/jobs/") ? { status: "succeeded" } : { messages: [] }) }; };
+    sandbox.setTimeout = (fn) => { fn(); return 0; };          // the poll fires at once
+    sandbox.watchJob("job-1");
+    await new Promise(r => setImmediate(r));
+    await new Promise(r => setImmediate(r));
+    return { loadError: sandbox.__loadError ?? null, calls };
+  },
+
   /** Signing out clears the conversation on screen, not just the account chip
    *  (live, 2026-09-22: the transcript stayed visible on a shared screen until
    *  a reload). */

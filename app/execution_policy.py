@@ -19,7 +19,8 @@ from app.experience import (advance_session_context, build_context_capsules, bui
     with_resolved_token, build_gas_advisory, build_intent_lock, build_trade_readiness)
 from app.graph import run_agent
 from app.identity import Identity, current_identity, service_identity
-from app import charts, decision_records, followups, streaming, turn_log, user_memory
+from app import charts, decision_records, exit_controls, followups, jobs, streaming, turn_log, user_memory
+from app import evidence as evidence_envelopes
 
 # Fire-and-forget work that must still finish: kept here so a shutdown can
 # wait for it instead of dropping it (asyncio keeps only weak references to
@@ -51,6 +52,7 @@ from app.routing.workflow import WorkflowState, WorkflowEvent, apply_event
 from app.service_errors import ServiceError, safe_detail as _safe_detail
 from app.sessions import CoordinationStoreFull, acquire_session_turn, commit_turn, extend_retention, get_session_snapshot, history_text_from_messages
 from app.settings import settings
+from app.billing_plans import FREE
 from app.solana_rpc import rpc
 
 logger = logging.getLogger(__name__)
@@ -143,7 +145,7 @@ async def _admitted_chat_turn(body: ChatRequest, identity: Identity | str) -> Ag
             raise ServiceError(402, {
                 "error": "insufficient_credits", "balance": exc.balance, "required": exc.required,
                 "plan": identity.plan.id, "signed_in": identity.signed_in,
-                "message": ("You've used your trial credits. Sign in to get 100 free credits every month."
+                "message": (f"You've used your trial credits. Sign in to get {FREE.monthly_credits} free credits every month."
                             if not identity.signed_in else "You're out of credits for this month. Upgrade or buy a credit pack."),
             })
     # principal_id, not account_id: a plan belongs to the person who asked for
@@ -326,10 +328,14 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         remembered_wallet = ((session_context or {}).get("connected_wallet") or {}).get("address")
         effective_wallet = body.wallet_address or remembered_wallet or ""
         task_reply = await task_scheduling.handle_chat_control(body, identity, action)
+        if task_reply is None and action is None and (identity.signed_in or exit_controls.is_public_control(body.message)) and exit_controls.is_exit_control(body.message):
+            # Sizing before entry needs no account (a guest asked it, 2026-09-23); the position controls need one.
+            task_reply = await exit_controls.handle(body.message, identity.user if identity.signed_in else None, effective_wallet or None)
         if task_reply is not None:
             from app.graph import AgentRun
             # No trajectory: a task control is a plain (1-credit) turn, not a tool turn.
-            run = AgentRun(answer=task_reply, trajectory=None, trade_plan=None, intent="general", capabilities=[])
+            run = AgentRun(answer=task_reply, trajectory=None, trade_plan=None, intent="general", capabilities=[], control=True)
+            turn_evidence = []
         else:
             # The user's TradingView token is bound to this turn (None when
             # they have no connection), so the TradingView tools can match
@@ -339,6 +345,10 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             # Decision receipts made during this turn belong to this user
             # (None: an anonymous decision, kept without an owner).
             receipts_bound = decision_records.bind_turn(signed_in_user)
+            # A job started in this turn: owned by this user, billed to this
+            # account, its answer delivered to this conversation.
+            jobs_bound = jobs.bind_turn(signed_in_user, identity.account_id if signed_in_user else None, session_id)
+            evidence_bound = evidence_envelopes.start_turn()
             try:
                 run = await asyncio.wait_for(
                     run_agent(
@@ -350,9 +360,12 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
                     ),
                     timeout=settings.chat_execution_timeout_seconds,
                 )
+                turn_evidence = evidence_envelopes.collected()
             finally:
+                evidence_envelopes.end_turn(evidence_bound)
                 tradingview.current_token.reset(tv_bound)
                 decision_records.current_user.reset(receipts_bound)
+                jobs.current_owner.reset(jobs_bound)
         increment(f"intent_{run.intent}")
         answer, trajectory, plan = run
         client_trajectory = trajectory if settings.expose_tool_trajectory else public_activity(trajectory)
@@ -371,7 +384,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         # Step-7 answer validation: provenance / freshness / grounding of the
         # surfaced answer against the tool evidence. Advisory only -- attached for
         # the client and monitoring, never blocks or rewrites the answer.
-        validation = validate_answer(body.message, answer, trajectory, run.intent)
+        validation = validate_answer(body.message, answer, trajectory, run.intent, evidence=turn_evidence)
         if validation is not None and validation.status == "warn":
             increment("answer_validation_warn")
         # Close the loop: credit or debit every tool that ran, so the router's
@@ -425,7 +438,13 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
                 logger.debug("chart card skipped", exc_info=True)
                 return None
 
-        chart, suggestions = await asyncio.gather(_chart(), followups.generate(body.message, answer, run.intent, plan))
+        async def _related():
+            # A command about the user's own tasks or positions is not a
+            # research subject: "who operates this wallet" was offered under
+            # the user's own exit card (live, 2026-09-22).
+            return [] if getattr(run, "control", False) else await followups.generate(body.message, answer, run.intent, plan)
+
+        chart, suggestions = await asyncio.gather(_chart(), _related())
         if memory_user and user_memory.enabled() and plan is None:
             # Off the turn's critical path: the answer is already written.
             background(user_memory.extract(memory_user, session_id, body.message, answer, run.intent))
@@ -448,6 +467,10 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             "risk_assessment": run.risk_assessment.model_dump() if run.risk_assessment else None,
             "team_report": run.team_report,
             "validation": validation.model_dump() if validation else None,
+            # The job whose answer this is: the durable record delivery and
+            # billing reconcile from, whatever happens to the acknowledgement
+            # (review, 2026-09-22).
+            "job_id": getattr(run, "job_id", None) if getattr(run, "job_attached", False) else None,
         }
         await commit_turn(
             session_id,
@@ -456,6 +479,16 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             assistant_metadata,
             next_context,
         )
+        if getattr(run, "job_id", None) and getattr(run, "job_attached", False):
+            # The job's answer is now in the conversation and charged as this
+            # turn: acknowledge it so it is never delivered again. The commit
+            # is the durable record; a failed acknowledgement is reconciled
+            # by maintenance from the message's job id, so it never fails
+            # the turn.
+            try:
+                await jobs.acknowledge(run.job_id)
+            except Exception:
+                logger.warning("job %s: acknowledgement failed after commit; maintenance reconciles", run.job_id, exc_info=True)
         if identity.signed_in:
             # Still under the lease, so this refresh of last_used (and the
             # longer retention a signed-in account's history gets) can never
@@ -467,6 +500,8 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             except Exception:
                 logger.warning("chat session ownership update failed", exc_info=True)
         return AgentResponse(
+            envelopes=[e.public() for e in turn_evidence],
+            job_id=getattr(run, "job_id", None) if not getattr(run, "job_attached", False) else None,
             answer=answer,
             trade_plan=plan,
             trajectory=client_trajectory,

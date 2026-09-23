@@ -283,11 +283,27 @@ def _consistency_check(trajectory: dict) -> ValidationCheck:
     return ValidationCheck(name="consistency", status="not_applicable", detail="No metric reported by two or more sources.")
 
 
+def _coverage_check(answer: str, envelopes: list) -> ValidationCheck:
+    """Every envelope that was partial or unavailable must be disclosed by
+    the answer. Missing evidence that reads as a clean result is the defect
+    the envelope exists to catch."""
+    if not envelopes:
+        return ValidationCheck(name="coverage", status="not_applicable", detail="no evidence envelopes this turn")
+    from app import evidence as _evidence
+
+    hidden = _evidence.undisclosed_gaps(answer, envelopes)
+    if hidden:
+        return ValidationCheck(name="coverage", status="warn", detail="; ".join(e.gap() for e in hidden[:3]) + " -- not stated in the answer")
+    gaps = [e for e in envelopes if e.status != "complete"]
+    return ValidationCheck(name="coverage", status="ok", detail=(f"{len(gaps)} gap(s) disclosed" if gaps else f"{len(envelopes)} envelope(s), all complete"))
+
+
 def validate_answer(
     request: str,
     answer: str,
     trajectory: object,
     intent: str | None,
+    evidence: list | None = None,
 ) -> AnswerValidation | None:
     """Validate a surfaced answer. Returns None when there is nothing to validate
     (a non-data intent with no evidence) so callers can skip attaching it."""
@@ -307,7 +323,8 @@ def validate_answer(
     freshness, as_of, age = _freshness_check(request, answer)
     grounding = _grounding_check(answer, traj, has_trajectory)
     consistency = _consistency_check(traj)
+    coverage = _coverage_check(answer, list(evidence or []))
 
-    checks = [provenance, freshness, grounding, consistency]
+    checks = [provenance, freshness, grounding, consistency, coverage]
     status = "warn" if any(c.status == "warn" for c in checks) else "ok"
     return AnswerValidation(status=status, checks=checks, sources=sources[:8], as_of=as_of, age_minutes=age)

@@ -60,8 +60,8 @@ ANONYMOUS = Plan(
     features=("10 trial credits", "Research and market data", "No history, wallets or trades"),
 )
 FREE = Plan(
-    "free", "Free", 0.0, 100, api_keys=False, mcp=False, chat_requests_per_minute=10,
-    features=("100 credits / month", "Conversation history", "Wallet connection and trade review", "Risk charter"),
+    "free", "Free", 0.0, 300, api_keys=False, mcp=False, chat_requests_per_minute=10,
+    features=("300 credits / month", "Conversation history", "Wallet connection and trade review", "Risk charter"),
 )
 PRO = Plan(
     "pro", "Pro", 19.0, 2000, api_keys=True, mcp=True, chat_requests_per_minute=30,

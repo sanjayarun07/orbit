@@ -43,6 +43,7 @@ SPEECH_ACTS = {
     "explain": "Asks how a concept works, naming no specific asset to look up: 'explain what TVL means', 'how do perpetual futures work?'.",
     "portfolio": "About the user's OWN holdings, balances, exposure or activity: 'how much SOL do I have', 'what's my exposure to SOL'.",
     "policy": "About THIS assistant's own trading limits or risk settings: 'what are my trading limits', 'what is my risk charter'.",
+    "app": "Asks this product to operate itself or what it can do, no look-up: save or export this investigation or a report, a watchlist, alert or notification settings, 'what can I do here without a wallet', 'how do I use this'.",
     "abstain": "ONLY when the act itself cannot be determined: an action that is negated ('don't buy'), conditional ('buy if it dips'), or two acts mixed. A terse, slang or fragmentary request is NOT abstain -- it has an act; classify it.",
 }
 DOMAINS = {

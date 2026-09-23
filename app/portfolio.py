@@ -9,7 +9,7 @@ import math
 
 from app.jupiter import jupiter
 from app.settings import settings
-from app.solana_rpc import get_sol_balance, get_token_accounts
+from app.solana_rpc import get_sol_balance, get_token_accounts, get_token_accounts_2022
 
 WRAPPED_SOL_MINT = "So11111111111111111111111111111111111111112"
 _FALLBACK_LOOKUPS = 10  # per-mint retries for mints the batch search did not return
@@ -47,6 +47,23 @@ async def _price_mints(mints: list[str]) -> dict[str, dict]:
     return found
 
 
+async def _all_token_accounts(wallet_address: str) -> tuple[list[dict], list[str]]:
+    """Token accounts under BOTH programs, and the programs whose read failed.
+    The portfolio read only the legacy program while the exit monitor read
+    both, so one wallet showed "no SPL holdings" and an ANSEM position within
+    minutes (UI run, 2026-09-23)."""
+    results = await asyncio.gather(get_token_accounts(wallet_address), get_token_accounts_2022(wallet_address), return_exceptions=True)
+    accounts, failed = [], []
+    for name, result in zip(("spl-token", "spl-token-2022"), results):
+        if isinstance(result, BaseException):
+            failed.append(name)
+            continue
+        accounts.extend((result or {}).get("value") or [])
+    if len(failed) == 2:
+        raise RuntimeError(f"token accounts unavailable: {results[0]}")
+    return accounts, failed
+
+
 async def build_portfolio_snapshot(wallet_address: str) -> dict:
     """Aggregate SOL + SPL balances with USD pricing and allocation percentages.
 
@@ -54,13 +71,13 @@ async def build_portfolio_snapshot(wallet_address: str) -> dict:
     priced (largest raw balances first) within `portfolio_snapshot_timeout_seconds`;
     past either limit the snapshot is returned with the rest unpriced and
     `partial: true` rather than holding a chat turn hostage."""
-    sol_balance, accounts = await asyncio.gather(
+    sol_balance, (accounts, unread_programs) = await asyncio.gather(
         get_sol_balance(wallet_address),
-        get_token_accounts(wallet_address),
+        _all_token_accounts(wallet_address),
     )
 
     raw_holdings = []
-    for entry in accounts.get("value", []):
+    for entry in accounts:
         parsed = entry["account"]["data"]["parsed"]["info"]
         amount = float(parsed["tokenAmount"]["uiAmount"] or 0)
         if amount <= 0:
@@ -70,7 +87,7 @@ async def build_portfolio_snapshot(wallet_address: str) -> dict:
 
     cap = max(1, settings.portfolio_max_priced_holdings)
     to_price = [WRAPPED_SOL_MINT] + [h["mint"] for h in raw_holdings[:cap]]
-    partial = len(raw_holdings) > cap
+    partial = len(raw_holdings) > cap or bool(unread_programs)
     try:
         price_by_mint = await asyncio.wait_for(_price_mints(to_price), timeout=settings.portfolio_snapshot_timeout_seconds)
     except asyncio.TimeoutError:
@@ -123,6 +140,7 @@ async def build_portfolio_snapshot(wallet_address: str) -> dict:
         "total_usd_value": total_usd_value,
         "unpriced_holdings": sum(1 for h in holdings if h["usd_value"] is None),
         "partial": partial,
+        "unread_programs": unread_programs,
     }
 
 

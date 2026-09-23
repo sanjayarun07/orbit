@@ -123,8 +123,13 @@ def route_capabilities(request: str) -> CapabilityRoute | None:
     # address+check wallet rule ("rug check 0x..." is about the token).
     if lx.SECURITY_STRONG.search(request):
         return _route("research", ("token_security", "token_discovery"), chains, reason="token_security_jargon")
+    # The amount/own-position test reads the user's words only: a resolution
+    # note appended by session context ("…token PEPE mint 0x69…") carries
+    # digits that made "what should I check to avoid buying the wrong one?" a
+    # trade simulation (funded UI run, 2026-09-23).
+    user_text = request.split("\nResolved ", 1)[0]
     if lx.SIMULATE_TRADE.search(request) and not (
-        lx.ADVICE_QUESTION.search(request) and not lx.OWN_POSITION_OR_AMOUNT.search(request)
+        lx.ADVICE_QUESTION.search(request) and not lx.OWN_POSITION_OR_AMOUNT.search(user_text)
     ):
         return _route("portfolio", ("trade_simulation", "portfolio"), chains, reason="trade_simulation")
     if lx.TRADE.search(request) or lx.IMPERATIVE_MOVE.search(request):

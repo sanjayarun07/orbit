@@ -146,8 +146,11 @@ async def portfolio_node(state: AgentState) -> dict:
         requested = symbol or (reference.address if reference else "that token")
         if requested.upper() == "SOL":
             holding = {"symbol": "SOL", **snapshot["sol"]}
-        if holding is None:
-            answer = f"Your connected wallet currently has **0 {requested}** in its reported Solana balances."
+        if holding is None and snapshot.get("unread_programs"):
+            answer = (f"I could not read {requested}: the {', '.join(snapshot['unread_programs'])} accounts did not answer, so the snapshot is partial. "
+                      "Not a zero balance.")
+        elif holding is None:
+            answer = f"Your connected wallet currently has **0 {requested}** in its reported Solana balances (both token programs read)."
         else:
             value = holding.get("usd_value")
             value_text = f" (approximately **${float(value):,.2f}**)" if value is not None else ""
@@ -167,8 +170,11 @@ async def portfolio_node(state: AgentState) -> dict:
     if "token_holdings" in capabilities:
         snapshot = await build_portfolio_snapshot(state["wallet_address"])
         holdings = list(snapshot.get("holdings", []))
-        if not holdings:
-            answer = "Your connected Solana wallet currently has **no SPL token holdings**."
+        if not holdings and snapshot.get("unread_programs"):
+            answer = (f"**Snapshot partial**: the {', '.join(snapshot['unread_programs'])} accounts could not be read, so no SPL holdings can be listed "
+                      "right now. This is not an empty wallet; try again in a moment.")
+        elif not holdings:
+            answer = "Your connected Solana wallet currently has **no SPL token holdings** (both token programs read)."
         else:
             rows = []
             for holding in holdings:

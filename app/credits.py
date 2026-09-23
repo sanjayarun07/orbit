@@ -159,6 +159,17 @@ async def has_ref(account_id: str, ref_type: str, ref_id: str) -> bool:
     return (account_id, ref_type, ref_id) in _refs
 
 
+async def ref_delta(account_id: str, ref_type: str, ref_id: str) -> int | None:
+    """The delta of the ledger row with this reference, or None when there is none."""
+    pool = await get_pg_pool()
+    if pool is not None:
+        return await pool.fetchval("SELECT delta FROM credit_ledger WHERE account_id = $1 AND ref_type = $2 AND ref_id = $3", account_id, ref_type, ref_id)
+    for row in _ledger.get(account_id, []):
+        if row["ref_type"] == ref_type and row["ref_id"] == ref_id:
+            return int(row["delta"])
+    return None
+
+
 async def history(account_id: str, limit: int = 50) -> list[dict]:
     pool = await get_pg_pool()
     if pool is not None:
@@ -244,8 +255,18 @@ async def ensure_monthly_grant(account_id: str, plan: Plan, now: datetime | None
     """Free-tier allowance, applied lazily once per calendar month. Paid plans
     get theirs from the invoice webhook (Phase 2) but this also covers a paid
     plan set by an admin without Stripe."""
-    if plan.monthly_credits > 0:
-        await append(account_id, plan.monthly_credits, "monthly_grant", "grant", f"month:{plan.id}:{month_key(now)}")
+    if plan.monthly_credits <= 0:
+        return
+    ref = f"month:{plan.id}:{month_key(now)}"
+    if await append(account_id, plan.monthly_credits, "monthly_grant", "grant", ref):
+        return
+    # The allowance was raised mid-month (Free: 100 -> 300, 2026-09-23): an
+    # account already granted the old amount this month gets the difference,
+    # once. Idempotent per (month, new amount); a lowered allowance is never
+    # clawed back.
+    granted = await ref_delta(account_id, "grant", ref)
+    if granted is not None and granted < plan.monthly_credits:
+        await append(account_id, plan.monthly_credits - granted, "monthly_grant", "grant", f"{ref}:uplift:{plan.monthly_credits}")
 
 
 async def grant(account_id: str, amount: int, reason: str, ref_type: str, ref_id: str, meta: dict | None = None) -> bool:

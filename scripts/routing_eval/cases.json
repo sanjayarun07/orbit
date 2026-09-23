@@ -1,1394 +1,1497 @@
 [
-  {
-    "id": "holders-base-aero",
-    "query": "Top holders for 0x940181a94A35A4569E4529A3CDfB74e38FD98631 on Base",
-    "expected_tools": [
-      "goldrush_token_top_holders"
-    ],
-    "forbidden_tools": [
-      "dexscreener_pair_search",
-      "jupiter",
-      "relay"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "EVM holders -> goldrush, not the old dexscreener fall-through"
-  },
-  {
-    "id": "holders-arb-arb",
-    "query": "Top holders for 0x912CE59144191C1204E64559FE8253a0e49E6548 on Arbitrum",
-    "expected_tools": [
-      "goldrush_token_top_holders"
-    ],
-    "forbidden_tools": [
-      "dexscreener_pair_search"
-    ],
-    "expected_intent": "research",
-    "router": true
-  },
-  {
-    "id": "holders-sol-mint",
-    "query": "Top holders for DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 on Solana",
-    "expected_tools": [
-      "mobula_token_holders",
-      "bitquery_token_top_holders"
-    ],
-    "forbidden_tools": [
-      "goldrush_token_top_holders",
-      "dexscreener_pair_search"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "Solana holders -> bitquery (Covalent rejects Solana) Memecoin holder analysis goes to Mobula first (user direction 2026-09-18); Bitquery and the RPC fallback stay behind it."
-  },
-  {
-    "id": "holders-bonk-symbol",
-    "query": "top holders of BONK",
-    "expected_tools": [
-      "bitquery_token_top_holders"
-    ],
-    "forbidden_tools": [
-      "dexscreener_pair_search",
-      "jupiter"
-    ],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "symbol -> verified-Solana canonical -> bitquery (needs research_node resolution)"
-  },
-  {
-    "id": "holders-pepe-ask",
-    "query": "top holders of PEPE",
-    "expected_tools": [],
-    "forbidden_tools": [
-      "jupiter",
-      "relay"
-    ],
-    "expect_ask": true,
-    "router": false,
-    "notes": "cross-chain ambiguous symbol -> ASK which chain, do not guess"
-  },
-  {
-    "id": "safety-sol-rug",
-    "query": "is DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 a rug on solana",
-    "expected_tools": [
-      "solana_token_security"
-    ],
-    "forbidden_tools": [
-      "dexscreener_pair_search",
-      "jupiter"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "Solana safety -> Jupiter Shield dossier"
-  },
-  {
-    "id": "safety-evm-honeypot",
-    "query": "Is 0x940181a94A35A4569E4529A3CDfB74e38FD98631 a honeypot on Base?",
-    "expected_tools": [
-      "goplus_token_security",
-      "honeypot_token_security"
-    ],
-    "forbidden_tools": [
-      "dexscreener_pair_search"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "EVM security -> GoPlus/Honeypot"
-  },
-  {
-    "id": "price-liq-base",
-    "query": "Show price and liquidity for 0x940181a94A35A4569E4529A3CDfB74e38FD98631 on Base",
-    "expected_tools": [
-      "birdeye_token_overview",
-      "coingecko_token_by_contract",
-      "dexscreener_pair_search",
-      "dexscreener_token_pairs"
-    ],
-    "forbidden_tools": [
-      "jupiter",
-      "relay"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "2026-09-16: dexscreener_token_pairs (chain+address lookup) added -- the LLM tool-selection pilot picked it over dexscreener_pair_search (symbol search) for this exact-address request, which is the more precise match; the original label predated the tool catalogue."
-  },
-  {
-    "id": "hyperliquid-funding",
-    "query": "What is the funding rate and price for BTC on Hyperliquid?",
-    "expected_tools": [
-      "goldrush_hyperliquid_market"
-    ],
-    "forbidden_tools": [
-      "perplexity_web_search",
-      "openai_web_search"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "perp market data, no chain keywords -> the fixed routing"
-  },
-  {
-    "id": "gainers-sol",
-    "query": "Top gainers on Solana today",
-    "expected_tools": [
-      "coingecko_gainers_losers"
-    ],
-    "forbidden_tools": [
-      "jupiter"
-    ],
-    "expected_intent": "research",
-    "router": true
-  },
-  {
-    "id": "trending-sol",
-    "query": "trending tokens on solana",
-    "expected_tools": [
-      "geckoterminal_pools",
-      "dexscreener_boosted_tokens",
-      "dexscreener_trending_metas"
-    ],
-    "forbidden_tools": [
-      "bitquery_token_top_holders"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "discovery, must NOT be read as a ticker -> holders"
-  },
-  {
-    "id": "social-trending-memes",
-    "query": "Trending meme on twitter socials",
-    "expected_tools": [
-      "x_social_trending"
-    ],
-    "forbidden_tools": [
-      "dexscreener_trending_metas",
-      "coingecko_top_volume",
-      "jupiter"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "a social-attention ask about the market, not a market table (2026-09-18 transcript: answered with narrative categories by volume)"
-  },
-  {
-    "id": "social-trending-ct",
-    "query": "what memecoins are trending on crypto twitter today",
-    "expected_tools": [
-      "x_social_trending"
-    ],
-    "forbidden_tools": [
-      "dexscreener_trending_metas",
-      "jupiter"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "same ask, other wording"
-  },
-  {
-    "id": "new-pairs-base",
-    "query": "New token launches on Base today",
-    "expected_tools": [
-      "geckoterminal_pools",
-      "dexscreener_latest_profiles"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true
-  },
-  {
-    "id": "tvl-sol",
-    "query": "TVL on Solana",
-    "expected_tools": [
-      "defillama_chain_tvl"
-    ],
-    "forbidden_tools": [
-      "defillama_protocols"
-    ],
-    "expected_intent": "research",
-    "router": true
-  },
-  {
-    "id": "tvl-protocol",
-    "query": "Aave TVL",
-    "expected_tools": [
-      "defillama_protocols"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true
-  },
-  {
-    "id": "sentiment",
-    "query": "Crypto fear and greed index right now",
-    "expected_tools": [
-      "market_sentiment_snapshot"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true
-  },
-  {
-    "id": "listings",
-    "query": "Latest Binance token listings",
-    "expected_tools": [
-      "exchange_listing_announcements"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true
-  },
-  {
-    "id": "wallet-balances-base",
-    "query": "Show token balances for 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 on Base",
-    "expected_tools": [
-      "mobula_wallet_portfolio",
-      "goldrush_wallet_balances"
-    ],
-    "forbidden_tools": [
-      "jupiter",
-      "relay"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "wallet tracking goes to Mobula first (user decision 2026-09-18); GoldRush stays a correct answer"
-  },
-  {
-    "id": "wallet-txns-sol",
-    "query": "Show recent transactions for GThUX1Atko4tqhN2NaiTazWSeFWMuiUvfFnyJyUghFMJ",
-    "expected_tools": [
-      "mobula_wallet_history",
-      "helius_wallet_transactions"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "Solana wallet -> Mobula first (user decision 2026-09-18), Helius behind it"
-  },
-  {
-    "id": "hyperliquid-positions",
-    "query": "Show hyperliquid perp positions for 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-    "expected_tools": [
-      "goldrush_hyperliquid_positions"
-    ],
-    "forbidden_tools": [
-      "jupiter"
-    ],
-    "expected_intent": "portfolio",
-    "router": true,
-    "notes": "perp positions for a pasted address are a portfolio ask (user decision 2026-09-17, same as catalog-open-perps-for-addr); the address becomes the turn's read-only wallet"
-  },
-  {
-    "id": "market-overview",
-    "query": "crypto market overview",
-    "expected_tools": [
-      "crypto_market_overview"
-    ],
-    "forbidden_tools": [
-      "perplexity_finance_search"
-    ],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "research_node interceptor, chat-mode only"
-  },
-  {
-    "id": "market-how",
-    "query": "hows the market today",
-    "expected_tools": [
-      "crypto_market_overview"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": false
-  },
-  {
-    "id": "research-news",
-    "query": "Latest news on the Fed rate decision",
-    "expected_tools": [
-      "perplexity_web_search",
-      "openai_web_search"
-    ],
-    "forbidden_tools": [
-      "jupiter"
-    ],
-    "expected_intent": "research",
-    "router": true
-  },
-  {
-    "id": "trade-swap",
-    "query": "Swap 1 SOL for USDC",
-    "expected_tools": [],
-    "forbidden_tools": [
-      "perplexity_web_search"
-    ],
-    "expected_intent": "trade",
-    "router": false,
-    "notes": "execution intent classified as trade (deterministic pipeline, not the research router)"
-  },
-  {
-    "id": "trade-bridge",
-    "query": "Bridge 100 USDC from Base to Solana",
-    "expected_tools": [],
-    "forbidden_tools": [],
-    "expected_intent": "cross_chain_swap",
-    "router": false
-  },
-  {
-    "id": "recent-trades-sol",
-    "query": "Recent trades for mint DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 on Solana",
-    "expected_tools": [
-      "bitquery_recent_dex_trades"
-    ],
-    "forbidden_tools": [
-      "jupiter"
-    ],
-    "expected_intent": "research",
-    "router": true
-  },
-  {
-    "id": "deepdive-bonk",
-    "query": "deep dive on BONK",
-    "expected_tools": [
-      "token_deep_dive"
-    ],
-    "forbidden_tools": [
-      "jupiter",
-      "relay",
-      "perplexity_web_search"
-    ],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "structured 10-dimension token deep-dive lens (research_node intercept)"
-  },
-  {
-    "id": "token-unlock-schedule",
-    "query": "OPEN token unlock schedule",
-    "expected_tools": [
-      "defillama_token_unlocks"
-    ],
-    "forbidden_tools": [
-      "dexscreener_pair_search",
-      "jupiter"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "an unlock ask is the vesting schedule, not a pair search (2026-09-18 transcript)"
-  },
-  {
-    "id": "token-unlock-next",
-    "query": "when is the next ARB unlock",
-    "expected_tools": [
-      "defillama_token_unlocks"
-    ],
-    "forbidden_tools": [
-      "dexscreener_pair_search",
-      "jupiter"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "same ask, other wording"
-  },
-  {
-    "id": "audit-report-symbol",
-    "query": "Audit report on ANSEM",
-    "expected_tools": [
-      "solana_token_security"
-    ],
-    "forbidden_tools": [
-      "perplexity_web_search",
-      "openai_web_search",
-      "jupiter"
-    ],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "an audit ask names a token: contract security, not a web search (2026-09-18 transcript: French public-sector audit reports)"
-  },
-  {
-    "id": "audit-report-symbol-token",
-    "query": "Audit report on ANSEM TOKEN",
-    "expected_tools": [
-      "solana_token_security"
-    ],
-    "forbidden_tools": [
-      "perplexity_web_search",
-      "jupiter"
-    ],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "same ask; used to answer 'Which token should I check?'"
-  },
-  {
-    "id": "risks-of-buying-bonk",
-    "query": "What are the risks of buying BONK?",
-    "expected_tools": [
-      "token_deep_dive"
-    ],
-    "forbidden_tools": [
-      "knowledge_base_search",
-      "jupiter",
-      "relay"
-    ],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "ownership-risk ask about a token -> the deep-dive lens, never the protocol knowledge base (2026-09-18 transcript: KB answered that its passages say nothing about BONK)"
-  },
-  {
-    "id": "adv-advice-not-exec",
-    "query": "should I buy SOL right now?",
-    "expected_tools": [],
-    "forbidden_tools": [
-      "jupiter",
-      "relay"
-    ],
-    "router": false,
-    "notes": "ADVERSARIAL: a recommendation ask is answered as advice/portfolio, must NEVER route to execution"
-  },
-  {
-    "id": "adv-off-topic",
-    "query": "What is the capital of France?",
-    "expected_tools": [],
-    "forbidden_tools": [
-      "jupiter",
-      "relay",
-      "solana_token_security",
-      "bitquery_token_top_holders"
-    ],
-    "router": false,
-    "notes": "ADVERSARIAL: off-topic -> no crypto tool fires"
-  },
-  {
-    "id": "adv-safety-word-no-mint",
-    "query": "is it safe to keep my funds in a hot wallet?",
-    "expected_tools": [],
-    "forbidden_tools": [
-      "solana_token_security",
-      "goplus_token_security",
-      "jupiter"
-    ],
-    "router": false,
-    "notes": "ADVERSARIAL: 'safe' with no mint/address must NOT trigger token-security"
-  },
-  {
-    "id": "adv-chain-named-usdc",
-    "query": "liquidity of USDC on Arbitrum",
-    "expected_tools": [
-      "birdeye_token_overview",
-      "dexscreener_pair_search",
-      "coingecko_token_by_contract"
-    ],
-    "forbidden_tools": [
-      "jupiter",
-      "relay"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "named chain honored; documents the DEX-Screener under-sampling limit for a quote token"
-  },
-  {
-    "id": "advice-should-i-buy-hype",
-    "query": "should i buy HYPE token ?",
-    "expected_tools": [],
-    "forbidden_tools": [
-      "jupiter_simulate_swap",
-      "sol_balance",
-      "spl_balances"
-    ],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "Recommendation question with no holding/amount: advice -> research, never the trade simulator (live mis-route 2026-09-15)"
-  },
-  {
-    "id": "lt-explain-tvl",
-    "query": "explain what TVL means",
-    "expected_tools": [],
-    "forbidden_tools": [],
-    "expected_intent": "general",
-    "router": false,
-    "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
-  },
-  {
-    "id": "lt-explain-perps",
-    "query": "how do perpetual futures work?",
-    "expected_tools": [],
-    "forbidden_tools": [],
-    "expected_intent": "general",
-    "router": false,
-    "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
-  },
-  {
-    "id": "lt-advice-hold-sol",
-    "query": "is it worth holding SOL through the next halving cycle?",
-    "expected_tools": [],
-    "forbidden_tools": [
-      "jupiter_simulate_swap"
-    ],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
-  },
-  {
-    "id": "lt-advice-thoughts-hype",
-    "query": "thoughts on HYPE?",
-    "expected_tools": [],
-    "forbidden_tools": [
-      "jupiter_simulate_swap"
-    ],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
-  },
-  {
-    "id": "lt-advice-sell-all",
-    "query": "should I sell everything and go to stables?",
-    "expected_tools": [],
-    "forbidden_tools": [],
-    "expected_intent": "portfolio",
-    "router": false,
-    "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
-  },
-  {
-    "id": "lt-safety-casual",
-    "query": "can you check if BONK is safe to ape into",
-    "expected_tools": [],
-    "forbidden_tools": [
-      "jupiter_simulate_swap"
-    ],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
-  },
-  {
-    "id": "lt-portfolio-exposure",
-    "query": "what's my exposure to SOL right now",
-    "expected_tools": [],
-    "forbidden_tools": [],
-    "expected_intent": "portfolio",
-    "router": false,
-    "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
-  },
-  {
-    "id": "lt-portfolio-howmuch",
-    "query": "how much SOL do I have",
-    "expected_tools": [],
-    "forbidden_tools": [],
-    "expected_intent": "portfolio",
-    "router": false,
-    "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
-  },
-  {
-    "id": "lt-news-solana",
-    "query": "any news on Solana today?",
-    "expected_tools": [],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
-  },
-  {
-    "id": "lt-compare",
-    "query": "compare BONK and WIF for me",
-    "expected_tools": [],
-    "forbidden_tools": [
-      "jupiter_simulate_swap"
-    ],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
-  },
-  {
-    "id": "lt-bridge-cost-question",
-    "query": "what would it cost to bridge 1 ETH to base?",
-    "expected_tools": [],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
-  },
-  {
-    "id": "lt-negated-buy",
-    "query": "I don't want to buy BONK, just tell me its market cap",
-    "expected_tools": [],
-    "forbidden_tools": [
-      "jupiter_simulate_swap"
-    ],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
-  },
-  {
-    "id": "lt-conditional-order",
-    "query": "if SOL drops under 100 buy 2 SOL",
-    "expected_tools": [],
-    "forbidden_tools": [
-      "jupiter_simulate_swap"
-    ],
-    "expected_intent": "general",
-    "router": false,
-    "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
-  },
-  {
-    "id": "lt-why-dump",
-    "query": "why is PEPE dumping",
-    "expected_tools": [],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
-  },
-  {
-    "id": "lt-imperative-swap",
-    "query": "swap 2 SOL for USDC",
-    "expected_tools": [],
-    "forbidden_tools": [],
-    "expected_intent": "trade",
-    "router": false,
-    "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
-  },
-  {
-    "id": "policy-wallet",
-    "query": "my wallet policy?",
-    "expected_tools": [],
-    "forbidden_tools": [
-      "portfolio_snapshot"
-    ],
-    "expected_intent": "general",
-    "router": false,
-    "notes": "policy question: answered from settings + charter, never the portfolio or the model (2026-09-15)"
-  },
-  {
-    "id": "policy-max-spend",
-    "query": "max spend policy?",
-    "expected_tools": [],
-    "forbidden_tools": [
-      "portfolio_snapshot"
-    ],
-    "expected_intent": "general",
-    "router": false,
-    "notes": "policy question: answered from settings + charter, never the portfolio or the model (2026-09-15)"
-  },
-  {
-    "id": "policy-limits",
-    "query": "what are my trading limits",
-    "expected_tools": [],
-    "forbidden_tools": [
-      "portfolio_snapshot"
-    ],
-    "expected_intent": "general",
-    "router": false,
-    "notes": "policy question: answered from settings + charter, never the portfolio or the model (2026-09-15)"
-  },
-  {
-    "id": "kb-mechanism-aave-emode",
-    "query": "How does Aave V3's E-mode change the liquidation threshold?",
-    "expected_tools": [
-      "knowledge_base_search"
-    ],
-    "forbidden_tools": [
-      "defillama_protocols",
-      "jupiter"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "protocol mechanism from indexed docs, not a live number"
-  },
-  {
-    "id": "kb-what-is-protocol",
-    "query": "what is Morpho Blue and how does it work",
-    "expected_tools": [
-      "knowledge_base_search"
-    ],
-    "forbidden_tools": [
-      "jupiter",
-      "relay"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "'what is X' for a registry protocol -> knowledge base first"
-  },
-  {
-    "id": "kb-incident",
-    "query": "has Aave ever been hacked?",
-    "expected_tools": [
-      "knowledge_base_search"
-    ],
-    "forbidden_tools": [
-      "jupiter",
-      "portfolio_snapshot"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "DefiLlama hacks are indexed as incident documents"
-  },
-  {
-    "id": "kb-investors",
-    "query": "who are the investors backing EigenLayer",
-    "expected_tools": [
-      "knowledge_base_search"
-    ],
-    "forbidden_tools": [
-      "jupiter",
-      "portfolio_snapshot"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "funding rounds + FUNDED_BY edges"
-  },
-  {
-    "id": "kb-governance",
-    "query": "what did the Lido community vote on recently",
-    "expected_tools": [
-      "knowledge_base_search"
-    ],
-    "forbidden_tools": [
-      "jupiter"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "Snapshot proposals and forum threads are governance documents"
-  },
-  {
-    "id": "kb-competitors",
-    "query": "who are Kamino's competitors on Solana",
-    "expected_tools": [
-      "knowledge_base_search"
-    ],
-    "forbidden_tools": [
-      "jupiter",
-      "relay"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "COMPETITOR_OF edges derived from category + chain"
-  },
-  {
-    "id": "kb-not-live-tvl",
-    "query": "what is Aave's TVL right now",
-    "expected_tools": [
-      "defillama_protocols",
-      "defillama_chain_tvl"
-    ],
-    "forbidden_tools": [
-      "knowledge_base_search"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "live number: the KB matcher must decline ('right now')"
-  },
-  {
-    "id": "news-tile-explainer",
-    "query": "Tell me more about this and why it matters for the market: Bitcoin ETFs lose $450M as CLARITY Act stalls",
-    "expected_tools": [
-      "perplexity_web_search"
-    ],
-    "forbidden_tools": [
-      "dexscreener_pair_search",
-      "jupiter",
-      "relay"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "home news tile follow-up: a headline explainer is web research, never a token lookup on 'Bitcoin' (2026-09-16 live)"
-  },
-  {
-    "id": "fees-named-protocol",
-    "query": "how much revenue does Aave make",
-    "expected_tools": [
-      "defillama_fees_revenue"
-    ],
-    "forbidden_tools": [
-      "defillama_chain_tvl",
-      "jupiter",
-      "portfolio_snapshot"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "free DefiLlama dimensions API; was a web-search fall-through"
-  },
-  {
-    "id": "fees-leaderboard",
-    "query": "top DeFi protocols by fees this month",
-    "expected_tools": [
-      "defillama_fees_revenue"
-    ],
-    "forbidden_tools": [
-      "jupiter"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "no protocol named -> leaderboard"
-  },
-  {
-    "id": "yields-asset-chain",
-    "query": "best USDC yield on Base",
-    "expected_tools": [
-      "defillama_yields"
-    ],
-    "forbidden_tools": [
-      "jupiter",
-      "relay",
-      "dexscreener_pair_search"
-    ],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "DefiLlama pools filtered by asset + chain; Layer-1 abstains (no anchored rule), the speech model + tool backstop pick it in chat mode"
-  },
-  {
-    "id": "yields-staking",
-    "query": "what APY does stETH pay right now",
-    "expected_tools": [
-      "defillama_yields"
-    ],
-    "forbidden_tools": [
-      "jupiter",
-      "knowledge_base_search"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "live number: yields tool, never the KB"
-  },
-  {
-    "id": "kb-stablecoin-backing",
-    "query": "what backs USDe and how does it keep its peg",
-    "expected_tools": [
-      "knowledge_base_search"
-    ],
-    "forbidden_tools": [
-      "jupiter",
-      "dexscreener_pair_search"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "stablecoin mechanism from the market-wide DefiLlama stablecoins set"
-  },
-  {
-    "id": "kb-global-incident",
-    "query": "what happened in the Ronin bridge hack",
-    "expected_tools": [
-      "knowledge_base_search"
-    ],
-    "forbidden_tools": [
-      "jupiter"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "incident outside the protocol registry: global hacks list"
-  },
-  {
-    "id": "trending-by-volume",
-    "query": "trending tokens by volume in 24hrs",
-    "expected_tools": [
-      "coingecko_top_volume"
-    ],
-    "forbidden_tools": [
-      "dexscreener_boosted_tokens",
-      "bitquery_token_top_holders"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "a volume RANKING -- paid DEX Screener boosts are attention, not volume (user transcript 2026-09-16)"
-  },
-  {
-    "id": "slang-vol-1",
-    "query": "which tokens got the most turnover today",
-    "expected_tools": [
-      "coingecko_top_volume"
-    ],
-    "forbidden_tools": [
-      "dexscreener_boosted_tokens"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "slang stress 2026-09-16: 'turnover' as a volume synonym"
-  },
-  {
-    "id": "slang-vol-2",
-    "query": "most traded coins rn",
-    "expected_tools": [
-      "coingecko_top_volume"
-    ],
-    "forbidden_tools": [
-      "dexscreener_boosted_tokens"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "slang stress: 'most traded ... rn'"
-  },
-  {
-    "id": "slang-vol-3",
-    "query": "top coins today by $ traded",
-    "expected_tools": [
-      "coingecko_top_volume"
-    ],
-    "forbidden_tools": [
-      "dexscreener_boosted_tokens"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "slang stress: '$ traded' as a volume synonym"
-  },
-  {
-    "id": "slang-boosts-1",
-    "query": "which tokens are getting promoted on dex screener",
-    "expected_tools": [
-      "dexscreener_boosted_tokens"
-    ],
-    "forbidden_tools": [
-      "coingecko_top_volume"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "slang stress: 'promoted' as a boosts synonym"
-  },
-  {
-    "id": "slang-newlist-1",
-    "query": "what just dropped on pump.fun",
-    "expected_tools": [
-      "mobula_new_launches",
-      "geckoterminal_pools"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "slang stress: 'just dropped' as a new-listing synonym A pump.fun launch question goes to Mobula Pulse first (dev/sniper/bundler columns, 2026-09-18); GeckoTerminal pools stay behind it."
-  },
-  {
-    "id": "slang-newlist-2",
-    "query": "fresh launches on solana today",
-    "expected_tools": [
-      "geckoterminal_pools"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "slang stress: 'fresh launches'"
-  },
-  {
-    "id": "slang-narrative-1",
-    "query": "what's the hot narrative rn",
-    "expected_tools": [
-      "dexscreener_trending_metas"
-    ],
-    "forbidden_tools": [
-      "dexscreener_boosted_tokens"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "slang stress: narratives vs a token list"
-  },
-  {
-    "id": "slang-perps-1",
-    "query": "hyperliquid oi right now",
-    "expected_tools": [
-      "goldrush_hyperliquid_market"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "slang stress: 'oi' = open interest"
-  },
-  {
-    "id": "slang-social-1",
-    "query": "what are crypto twitter kols saying about sol",
-    "expected_tools": [
-      "x_kol_sentiment"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "slang stress: KOL/social sentiment"
-  },
-  {
-    "id": "slang-pricechange-1",
-    "query": "what coins spiked hardest today",
-    "expected_tools": [
-      "coingecko_gainers_losers"
-    ],
-    "forbidden_tools": [
-      "coingecko_top_volume"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "slang stress: 'spiked' as a price-change synonym"
-  },
-  {
-    "id": "slang-security-1",
-    "query": "is this token safe to ape on base 0x1234567890abcdef1234567890abcdef12345678",
-    "expected_tools": [
-      "goplus_token_security"
-    ],
-    "forbidden_tools": [
-      "birdeye_token_overview"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "slang stress: 'safe to ape' as a security question"
-  },
-  {
-    "id": "slang-balances-vs-tx-1",
-    "query": "what's this wallet holding on base 0x1234567890abcdef1234567890abcdef12345678",
-    "expected_tools": [
-      "mobula_wallet_portfolio",
-      "goldrush_wallet_balances"
-    ],
-    "forbidden_tools": [
-      "goldrush_wallet_transactions"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "slang stress: 'holding' -> balances, not transactions Mobula leads wallet questions (user decision 2026-09-18)."
-  },
-  {
-    "id": "slang-balances-vs-tx-2",
-    "query": "recent activity for this wallet on ethereum 0x1234567890abcdef1234567890abcdef12345678",
-    "expected_tools": [
-      "mobula_wallet_history",
-      "goldrush_wallet_transactions"
-    ],
-    "forbidden_tools": [
-      "goldrush_wallet_balances"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "slang stress: 'recent activity' -> transactions, not balances Mobula leads wallet questions (user decision 2026-09-18)."
-  },
-  {
-    "id": "slang-liquidity-vs-holders-1",
-    "query": "deepest liquidity pairs on solana",
-    "expected_tools": [
-      "dexscreener_pair_search",
-      "geckoterminal_pools"
-    ],
-    "forbidden_tools": [
-      "bitquery_token_top_holders",
-      "solana_rpc_token_top_holders"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "slang stress: a liquidity ranking pulled in holders tools via the semantic fallback; tests whether tool arbitration filters them back out"
-  },
-  {
-    "id": "catalog-biggest-losers-on-base-today",
-    "query": "biggest losers on base today",
-    "expected_tools": [
-      "coingecko_gainers_losers"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for coingecko_gainers_losers; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
-  },
-  {
-    "id": "catalog-boosted-tokens-on-base",
-    "query": "boosted tokens on base",
-    "expected_tools": [
-      "dexscreener_boosted_tokens"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for dexscreener_boosted_tokens; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
-  },
-  {
-    "id": "catalog-hot-metas-right-now",
-    "query": "hot metas right now",
-    "expected_tools": [
-      "dexscreener_trending_metas"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for dexscreener_trending_metas; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
-  },
-  {
-    "id": "catalog-newest-token-profiles",
-    "query": "newest token profiles",
-    "expected_tools": [
-      "dexscreener_latest_profiles"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for dexscreener_latest_profiles; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
-  },
-  {
-    "id": "catalog-useless-token-pairs",
-    "query": "USELESS token pairs",
-    "expected_tools": [
-      "dexscreener_pair_search"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for dexscreener_pair_search; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
-  },
-  {
-    "id": "catalog-new-pairs-on-solana",
-    "query": "new pairs on solana",
-    "expected_tools": [
-      "geckoterminal_pools"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for geckoterminal_pools; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
-  },
-  {
-    "id": "catalog-new-pump.fun-launches",
-    "query": "new pump.fun launches",
-    "expected_tools": [
-      "geckoterminal_pools"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for geckoterminal_pools; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
-  },
-  {
-    "id": "catalog-overview-of-mint-on-solana",
-    "query": "overview of DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 on solana",
-    "expected_tools": [
-      "birdeye_token_overview"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for birdeye_token_overview; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
-  },
-  {
-    "id": "catalog-what-is-addr-on-base-(identity-+-price)",
-    "query": "what is 0x940181a94A35A4569E4529A3CDfB74e38FD98631 on base",
-    "expected_tools": [
-      "coingecko_token_by_contract",
-      "birdeye_token_overview"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for coingecko_token_by_contract; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user; either identity+price tool is a correct first pick for 'what is <address>' (2026-09-17)"
-  },
-  {
-    "id": "catalog-recent-trades-of-addr-on-base",
-    "query": "recent trades of 0x940181a94A35A4569E4529A3CDfB74e38FD98631 on base",
-    "expected_tools": [
-      "bitquery_recent_dex_trades"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for bitquery_recent_dex_trades; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
-  },
-  {
-    "id": "catalog-last-swaps-for-mint",
-    "query": "last swaps for DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
-    "expected_tools": [
-      "bitquery_recent_dex_trades"
-    ],
-    "forbidden_tools": [
-      "jupiter",
-      "relay"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for bitquery_recent_dex_trades; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
-  },
-  {
-    "id": "catalog-is-addr-on-bsc-safe",
-    "query": "is 0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82 on bsc safe",
-    "expected_tools": [
-      "goplus_token_security"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for goplus_token_security; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user"
-  },
-  {
-    "id": "catalog-rug-check-addr",
-    "query": "rug check 0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82 on bsc",
-    "expected_tools": [
-      "mobula_token_security",
-      "goplus_token_security"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for goplus_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user; realised with a chain 2026-09-17: an 0x address is ambiguous across EVM chains and the node asks for one Mobula's LP-lock card and GoPlus's flags are both right for a rug check; the plan runs both (2026-09-18)."
-  },
-  {
-    "id": "catalog-can-i-sell-addr-on-ethereum",
-    "query": "can I sell 0x6982508145454Ce325dDbE47a25d4ec3d2311933 on ethereum",
-    "expected_tools": [
-      "honeypot_token_security",
-      "goplus_token_security"
-    ],
-    "forbidden_tools": [
-      "jupiter",
-      "relay"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for honeypot_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user; GoPlus reports is_honeypot and sell tax too, either is a correct first pick (2026-09-17)"
-  },
-  {
-    "id": "catalog-honeypot-check",
-    "query": "honeypot check 0x6982508145454Ce325dDbE47a25d4ec3d2311933 on ethereum",
-    "expected_tools": [
-      "honeypot_token_security",
-      "goplus_token_security"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for honeypot_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user; realised with an address 2026-09-17 (the tool needs one; a bare 'honeypot check' is asked for the contract, see tests); GoPlus reports is_honeypot and sell tax too, either is a correct first pick (2026-09-17)"
-  },
-  {
-    "id": "catalog-is-mint-safe",
-    "query": "is DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 safe",
-    "expected_tools": [
-      "solana_token_security"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for solana_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
-  },
-  {
-    "id": "catalog-freeze-authority-on-mint",
-    "query": "freeze authority on DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
-    "expected_tools": [
-      "solana_token_security"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for solana_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
-  },
-  {
-    "id": "catalog-what-does-addr-hold-on-ethereum",
-    "query": "what does 0xd8dA6BF26964aF9D7eEd9e03E51415D2aA6f0c8f hold on ethereum",
-    "expected_tools": [
-      "mobula_wallet_portfolio",
-      "bitquery_wallet_balances"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for bitquery_wallet_balances; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user Mobula leads wallet questions (user decision 2026-09-18)."
-  },
-  {
-    "id": "catalog-recent-transactions-of-addr-on-arbitrum",
-    "query": "recent transactions of 0xd8dA6BF26964aF9D7eEd9e03E51415D2aA6f0c8f on arbitrum",
-    "expected_tools": [
-      "mobula_wallet_history",
-      "goldrush_wallet_transactions"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for goldrush_wallet_transactions; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user Mobula leads wallet questions (user decision 2026-09-18)."
-  },
-  {
-    "id": "catalog-open-perps-for-addr",
-    "query": "open perps for 0xd8dA6BF26964aF9D7eEd9e03E51415D2aA6f0c8f",
-    "expected_tools": [
-      "goldrush_hyperliquid_positions"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "portfolio",
-    "router": true,
-    "notes": "catalog example for goldrush_hyperliquid_positions; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user as portfolio"
-  },
-  {
-    "id": "catalog-fear-and-greed-today",
-    "query": "fear and greed today",
-    "expected_tools": [
-      "market_sentiment_snapshot"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for market_sentiment_snapshot; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
-  },
-  {
-    "id": "catalog-is-it-altcoin-season",
-    "query": "is it altcoin season",
-    "expected_tools": [
-      "market_sentiment_snapshot"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for market_sentiment_snapshot; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
-  },
-  {
-    "id": "catalog-recent-delistings",
-    "query": "recent delistings",
-    "expected_tools": [
-      "exchange_listing_announcements"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for exchange_listing_announcements; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
-  },
-  {
-    "id": "catalog-background-on-berachain",
-    "query": "background on Berachain",
-    "expected_tools": [
-      "rootdata_project_search"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for rootdata_project_search; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user"
-  },
-  {
-    "id": "catalog-a16z-crypto-portfolio",
-    "query": "a16z crypto portfolio",
-    "expected_tools": [
-      "rootdata_vc_search"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for rootdata_vc_search; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user"
-  },
-  {
-    "id": "catalog-fed-decision-impact-on-crypto",
-    "query": "Fed decision impact on crypto",
-    "expected_tools": [
-      "perplexity_finance_search"
-    ],
-    "forbidden_tools": [],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "catalog example for perplexity_finance_search; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user"
-  },
-  {
-    "id": "trending-bare",
-    "query": "check trending tokens",
-    "expected_tools": [
-      "coingecko_top_volume"
-    ],
-    "forbidden_tools": [
-      "dexscreener_boosted_tokens"
-    ],
-    "expected_intent": "research",
-    "router": true,
-    "notes": "a bare 'trending tokens' is an organic question (volume ranking); paid boosts answer only attention words or a chain scope (2026-09-17)"
-  },
-  {
-    "id": "advice-market-wide",
-    "query": "suggest some crypto to buy for day trading based on technicals, news, sentiment",
-    "expected_tools": [
-      "coingecko_gainers_losers",
-      "coingecko_top_volume",
-      "market_sentiment_snapshot",
-      "perplexity_finance_search"
-    ],
-    "forbidden_tools": [
-      "jupiter",
-      "relay"
-    ],
-    "expected_intent": "research",
-    "router": false,
-    "notes": "market-wide advice with no asset: composed from movers, volume, sentiment and news, read together; never a quote (2026-09-17)"
-  }
+ {
+  "id": "holders-base-aero",
+  "query": "Top holders for 0x940181a94A35A4569E4529A3CDfB74e38FD98631 on Base",
+  "expected_tools": [
+   "goldrush_token_top_holders"
+  ],
+  "forbidden_tools": [
+   "dexscreener_pair_search",
+   "jupiter",
+   "relay"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "EVM holders -> goldrush, not the old dexscreener fall-through"
+ },
+ {
+  "id": "holders-arb-arb",
+  "query": "Top holders for 0x912CE59144191C1204E64559FE8253a0e49E6548 on Arbitrum",
+  "expected_tools": [
+   "goldrush_token_top_holders"
+  ],
+  "forbidden_tools": [
+   "dexscreener_pair_search"
+  ],
+  "expected_intent": "research",
+  "router": true
+ },
+ {
+  "id": "holders-sol-mint",
+  "query": "Top holders for DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 on Solana",
+  "expected_tools": [
+   "mobula_token_holders",
+   "bitquery_token_top_holders"
+  ],
+  "forbidden_tools": [
+   "goldrush_token_top_holders",
+   "dexscreener_pair_search"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "Solana holders -> bitquery (Covalent rejects Solana) Memecoin holder analysis goes to Mobula first (user direction 2026-09-18); Bitquery and the RPC fallback stay behind it."
+ },
+ {
+  "id": "holders-bonk-symbol",
+  "query": "top holders of BONK",
+  "expected_tools": [
+   "bitquery_token_top_holders"
+  ],
+  "forbidden_tools": [
+   "dexscreener_pair_search",
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "symbol -> verified-Solana canonical -> bitquery (needs research_node resolution)"
+ },
+ {
+  "id": "holders-pepe-ask",
+  "query": "top holders of PEPE",
+  "expected_tools": [],
+  "forbidden_tools": [
+   "jupiter",
+   "relay"
+  ],
+  "expect_ask": true,
+  "router": false,
+  "notes": "cross-chain ambiguous symbol -> ASK which chain, do not guess"
+ },
+ {
+  "id": "safety-sol-rug",
+  "query": "is DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 a rug on solana",
+  "expected_tools": [
+   "solana_token_security"
+  ],
+  "forbidden_tools": [
+   "dexscreener_pair_search",
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "Solana safety -> Jupiter Shield dossier"
+ },
+ {
+  "id": "safety-evm-honeypot",
+  "query": "Is 0x940181a94A35A4569E4529A3CDfB74e38FD98631 a honeypot on Base?",
+  "expected_tools": [
+   "goplus_token_security",
+   "honeypot_token_security"
+  ],
+  "forbidden_tools": [
+   "dexscreener_pair_search"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "EVM security -> GoPlus/Honeypot"
+ },
+ {
+  "id": "price-liq-base",
+  "query": "Show price and liquidity for 0x940181a94A35A4569E4529A3CDfB74e38FD98631 on Base",
+  "expected_tools": [
+   "birdeye_token_overview",
+   "coingecko_token_by_contract",
+   "dexscreener_pair_search",
+   "dexscreener_token_pairs"
+  ],
+  "forbidden_tools": [
+   "jupiter",
+   "relay"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "2026-09-16: dexscreener_token_pairs (chain+address lookup) added -- the LLM tool-selection pilot picked it over dexscreener_pair_search (symbol search) for this exact-address request, which is the more precise match; the original label predated the tool catalogue."
+ },
+ {
+  "id": "hyperliquid-funding",
+  "query": "What is the funding rate and price for BTC on Hyperliquid?",
+  "expected_tools": [
+   "goldrush_hyperliquid_market"
+  ],
+  "forbidden_tools": [
+   "perplexity_web_search",
+   "openai_web_search"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "perp market data, no chain keywords -> the fixed routing"
+ },
+ {
+  "id": "gainers-sol",
+  "query": "Top gainers on Solana today",
+  "expected_tools": [
+   "coingecko_gainers_losers"
+  ],
+  "forbidden_tools": [
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": true
+ },
+ {
+  "id": "trending-sol",
+  "query": "trending tokens on solana",
+  "expected_tools": [
+   "geckoterminal_pools",
+   "dexscreener_boosted_tokens",
+   "dexscreener_trending_metas"
+  ],
+  "forbidden_tools": [
+   "bitquery_token_top_holders"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "discovery, must NOT be read as a ticker -> holders"
+ },
+ {
+  "id": "social-trending-memes",
+  "query": "Trending meme on twitter socials",
+  "expected_tools": [
+   "x_social_trending"
+  ],
+  "forbidden_tools": [
+   "dexscreener_trending_metas",
+   "coingecko_top_volume",
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "a social-attention ask about the market, not a market table (2026-09-18 transcript: answered with narrative categories by volume)"
+ },
+ {
+  "id": "social-trending-ct",
+  "query": "what memecoins are trending on crypto twitter today",
+  "expected_tools": [
+   "x_social_trending"
+  ],
+  "forbidden_tools": [
+   "dexscreener_trending_metas",
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "same ask, other wording"
+ },
+ {
+  "id": "new-pairs-base",
+  "query": "New token launches on Base today",
+  "expected_tools": [
+   "geckoterminal_pools",
+   "dexscreener_latest_profiles"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true
+ },
+ {
+  "id": "tvl-sol",
+  "query": "TVL on Solana",
+  "expected_tools": [
+   "defillama_chain_tvl"
+  ],
+  "forbidden_tools": [
+   "defillama_protocols"
+  ],
+  "expected_intent": "research",
+  "router": true
+ },
+ {
+  "id": "tvl-protocol",
+  "query": "Aave TVL",
+  "expected_tools": [
+   "defillama_protocols"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true
+ },
+ {
+  "id": "sentiment",
+  "query": "Crypto fear and greed index right now",
+  "expected_tools": [
+   "market_sentiment_snapshot"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true
+ },
+ {
+  "id": "listings",
+  "query": "Latest Binance token listings",
+  "expected_tools": [
+   "exchange_listing_announcements"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true
+ },
+ {
+  "id": "wallet-balances-base",
+  "query": "Show token balances for 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 on Base",
+  "expected_tools": [
+   "mobula_wallet_portfolio",
+   "goldrush_wallet_balances"
+  ],
+  "forbidden_tools": [
+   "jupiter",
+   "relay"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "wallet tracking goes to Mobula first (user decision 2026-09-18); GoldRush stays a correct answer"
+ },
+ {
+  "id": "wallet-txns-sol",
+  "query": "Show recent transactions for GThUX1Atko4tqhN2NaiTazWSeFWMuiUvfFnyJyUghFMJ",
+  "expected_tools": [
+   "mobula_wallet_history",
+   "helius_wallet_transactions"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "Solana wallet -> Mobula first (user decision 2026-09-18), Helius behind it"
+ },
+ {
+  "id": "hyperliquid-positions",
+  "query": "Show hyperliquid perp positions for 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+  "expected_tools": [
+   "goldrush_hyperliquid_positions"
+  ],
+  "forbidden_tools": [
+   "jupiter"
+  ],
+  "expected_intent": "portfolio",
+  "router": true,
+  "notes": "perp positions for a pasted address are a portfolio ask (user decision 2026-09-17, same as catalog-open-perps-for-addr); the address becomes the turn's read-only wallet"
+ },
+ {
+  "id": "market-overview",
+  "query": "crypto market overview",
+  "expected_tools": [
+   "crypto_market_overview"
+  ],
+  "forbidden_tools": [
+   "perplexity_finance_search"
+  ],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "research_node interceptor, chat-mode only"
+ },
+ {
+  "id": "market-how",
+  "query": "hows the market today",
+  "expected_tools": [
+   "crypto_market_overview"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": false
+ },
+ {
+  "id": "research-news",
+  "query": "Latest news on the Fed rate decision",
+  "expected_tools": [
+   "perplexity_web_search",
+   "openai_web_search"
+  ],
+  "forbidden_tools": [
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": true
+ },
+ {
+  "id": "trade-swap",
+  "query": "Swap 1 SOL for USDC",
+  "expected_tools": [],
+  "forbidden_tools": [
+   "perplexity_web_search"
+  ],
+  "expected_intent": "trade",
+  "router": false,
+  "notes": "execution intent classified as trade (deterministic pipeline, not the research router)"
+ },
+ {
+  "id": "trade-bridge",
+  "query": "Bridge 100 USDC from Base to Solana",
+  "expected_tools": [],
+  "forbidden_tools": [],
+  "expected_intent": "cross_chain_swap",
+  "router": false
+ },
+ {
+  "id": "recent-trades-sol",
+  "query": "Recent trades for mint DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 on Solana",
+  "expected_tools": [
+   "bitquery_recent_dex_trades"
+  ],
+  "forbidden_tools": [
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": true
+ },
+ {
+  "id": "deepdive-bonk",
+  "query": "deep dive on BONK",
+  "expected_tools": [
+   "token_deep_dive"
+  ],
+  "forbidden_tools": [
+   "jupiter",
+   "relay",
+   "perplexity_web_search"
+  ],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "structured 10-dimension token deep-dive lens (research_node intercept)"
+ },
+ {
+  "id": "token-unlock-schedule",
+  "query": "OPEN token unlock schedule",
+  "expected_tools": [
+   "defillama_token_unlocks"
+  ],
+  "forbidden_tools": [
+   "dexscreener_pair_search",
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "an unlock ask is the vesting schedule, not a pair search (2026-09-18 transcript)"
+ },
+ {
+  "id": "token-unlock-next",
+  "query": "when is the next ARB unlock",
+  "expected_tools": [
+   "defillama_token_unlocks"
+  ],
+  "forbidden_tools": [
+   "dexscreener_pair_search",
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "same ask, other wording"
+ },
+ {
+  "id": "audit-report-symbol",
+  "query": "Audit report on ANSEM",
+  "expected_tools": [
+   "solana_token_security"
+  ],
+  "forbidden_tools": [
+   "perplexity_web_search",
+   "openai_web_search",
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "an audit ask names a token: contract security, not a web search (2026-09-18 transcript: French public-sector audit reports)"
+ },
+ {
+  "id": "audit-report-symbol-token",
+  "query": "Audit report on ANSEM TOKEN",
+  "expected_tools": [
+   "solana_token_security"
+  ],
+  "forbidden_tools": [
+   "perplexity_web_search",
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "same ask; used to answer 'Which token should I check?'"
+ },
+ {
+  "id": "risks-of-buying-bonk",
+  "query": "What are the risks of buying BONK?",
+  "expected_tools": [
+   "token_deep_dive"
+  ],
+  "forbidden_tools": [
+   "knowledge_base_search",
+   "jupiter",
+   "relay"
+  ],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "ownership-risk ask about a token -> the deep-dive lens, never the protocol knowledge base (2026-09-18 transcript: KB answered that its passages say nothing about BONK)"
+ },
+ {
+  "id": "adv-advice-not-exec",
+  "query": "should I buy SOL right now?",
+  "expected_tools": [],
+  "forbidden_tools": [
+   "jupiter",
+   "relay"
+  ],
+  "router": false,
+  "notes": "ADVERSARIAL: a recommendation ask is answered as advice/portfolio, must NEVER route to execution"
+ },
+ {
+  "id": "adv-off-topic",
+  "query": "What is the capital of France?",
+  "expected_tools": [],
+  "forbidden_tools": [
+   "jupiter",
+   "relay",
+   "solana_token_security",
+   "bitquery_token_top_holders"
+  ],
+  "router": false,
+  "notes": "ADVERSARIAL: off-topic -> no crypto tool fires"
+ },
+ {
+  "id": "adv-safety-word-no-mint",
+  "query": "is it safe to keep my funds in a hot wallet?",
+  "expected_tools": [],
+  "forbidden_tools": [
+   "solana_token_security",
+   "goplus_token_security",
+   "jupiter"
+  ],
+  "router": false,
+  "notes": "ADVERSARIAL: 'safe' with no mint/address must NOT trigger token-security"
+ },
+ {
+  "id": "adv-chain-named-usdc",
+  "query": "liquidity of USDC on Arbitrum",
+  "expected_tools": [
+   "birdeye_token_overview",
+   "dexscreener_pair_search",
+   "coingecko_token_by_contract"
+  ],
+  "forbidden_tools": [
+   "jupiter",
+   "relay"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "named chain honored; documents the DEX-Screener under-sampling limit for a quote token"
+ },
+ {
+  "id": "advice-should-i-buy-hype",
+  "query": "should i buy HYPE token ?",
+  "expected_tools": [],
+  "forbidden_tools": [
+   "jupiter_simulate_swap",
+   "sol_balance",
+   "spl_balances"
+  ],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "Recommendation question with no holding/amount: advice -> research, never the trade simulator (live mis-route 2026-09-15)"
+ },
+ {
+  "id": "lt-explain-tvl",
+  "query": "explain what TVL means",
+  "expected_tools": [],
+  "forbidden_tools": [],
+  "expected_intent": "general",
+  "router": false,
+  "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
+ },
+ {
+  "id": "lt-explain-perps",
+  "query": "how do perpetual futures work?",
+  "expected_tools": [],
+  "forbidden_tools": [],
+  "expected_intent": "general",
+  "router": false,
+  "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
+ },
+ {
+  "id": "lt-advice-hold-sol",
+  "query": "is it worth holding SOL through the next halving cycle?",
+  "expected_tools": [],
+  "forbidden_tools": [
+   "jupiter_simulate_swap"
+  ],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
+ },
+ {
+  "id": "lt-advice-thoughts-hype",
+  "query": "thoughts on HYPE?",
+  "expected_tools": [],
+  "forbidden_tools": [
+   "jupiter_simulate_swap"
+  ],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
+ },
+ {
+  "id": "lt-advice-sell-all",
+  "query": "should I sell everything and go to stables?",
+  "expected_tools": [],
+  "forbidden_tools": [],
+  "expected_intent": "portfolio",
+  "router": false,
+  "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
+ },
+ {
+  "id": "lt-safety-casual",
+  "query": "can you check if BONK is safe to ape into",
+  "expected_tools": [],
+  "forbidden_tools": [
+   "jupiter_simulate_swap"
+  ],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
+ },
+ {
+  "id": "lt-portfolio-exposure",
+  "query": "what's my exposure to SOL right now",
+  "expected_tools": [],
+  "forbidden_tools": [],
+  "expected_intent": "portfolio",
+  "router": false,
+  "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
+ },
+ {
+  "id": "lt-portfolio-howmuch",
+  "query": "how much SOL do I have",
+  "expected_tools": [],
+  "forbidden_tools": [],
+  "expected_intent": "portfolio",
+  "router": false,
+  "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
+ },
+ {
+  "id": "lt-news-solana",
+  "query": "any news on Solana today?",
+  "expected_tools": [],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
+ },
+ {
+  "id": "lt-compare",
+  "query": "compare BONK and WIF for me",
+  "expected_tools": [],
+  "forbidden_tools": [
+   "jupiter_simulate_swap"
+  ],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
+ },
+ {
+  "id": "lt-bridge-cost-question",
+  "query": "what would it cost to bridge 1 ETH to base?",
+  "expected_tools": [],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
+ },
+ {
+  "id": "lt-negated-buy",
+  "query": "I don't want to buy BONK, just tell me its market cap",
+  "expected_tools": [],
+  "forbidden_tools": [
+   "jupiter_simulate_swap"
+  ],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
+ },
+ {
+  "id": "lt-conditional-order",
+  "query": "if SOL drops under 100 buy 2 SOL",
+  "expected_tools": [],
+  "forbidden_tools": [
+   "jupiter_simulate_swap"
+  ],
+  "expected_intent": "general",
+  "router": false,
+  "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
+ },
+ {
+  "id": "lt-why-dump",
+  "query": "why is PEPE dumping",
+  "expected_tools": [],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
+ },
+ {
+  "id": "lt-imperative-swap",
+  "query": "swap 2 SOL for USDC",
+  "expected_tools": [],
+  "forbidden_tools": [],
+  "expected_intent": "trade",
+  "router": false,
+  "notes": "long-tail phrasing (model-first routing eval, 2026-09-15)"
+ },
+ {
+  "id": "policy-wallet",
+  "query": "my wallet policy?",
+  "expected_tools": [],
+  "forbidden_tools": [
+   "portfolio_snapshot"
+  ],
+  "expected_intent": "general",
+  "router": false,
+  "notes": "policy question: answered from settings + charter, never the portfolio or the model (2026-09-15)"
+ },
+ {
+  "id": "policy-max-spend",
+  "query": "max spend policy?",
+  "expected_tools": [],
+  "forbidden_tools": [
+   "portfolio_snapshot"
+  ],
+  "expected_intent": "general",
+  "router": false,
+  "notes": "policy question: answered from settings + charter, never the portfolio or the model (2026-09-15)"
+ },
+ {
+  "id": "policy-limits",
+  "query": "what are my trading limits",
+  "expected_tools": [],
+  "forbidden_tools": [
+   "portfolio_snapshot"
+  ],
+  "expected_intent": "general",
+  "router": false,
+  "notes": "policy question: answered from settings + charter, never the portfolio or the model (2026-09-15)"
+ },
+ {
+  "id": "kb-mechanism-aave-emode",
+  "query": "How does Aave V3's E-mode change the liquidation threshold?",
+  "expected_tools": [
+   "knowledge_base_search"
+  ],
+  "forbidden_tools": [
+   "defillama_protocols",
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "protocol mechanism from indexed docs, not a live number"
+ },
+ {
+  "id": "kb-what-is-protocol",
+  "query": "what is Morpho Blue and how does it work",
+  "expected_tools": [
+   "knowledge_base_search"
+  ],
+  "forbidden_tools": [
+   "jupiter",
+   "relay"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "'what is X' for a registry protocol -> knowledge base first"
+ },
+ {
+  "id": "kb-incident",
+  "query": "has Aave ever been hacked?",
+  "expected_tools": [
+   "knowledge_base_search"
+  ],
+  "forbidden_tools": [
+   "jupiter",
+   "portfolio_snapshot"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "DefiLlama hacks are indexed as incident documents"
+ },
+ {
+  "id": "kb-investors",
+  "query": "who are the investors backing EigenLayer",
+  "expected_tools": [
+   "knowledge_base_search"
+  ],
+  "forbidden_tools": [
+   "jupiter",
+   "portfolio_snapshot"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "funding rounds + FUNDED_BY edges"
+ },
+ {
+  "id": "kb-governance",
+  "query": "what did the Lido community vote on recently",
+  "expected_tools": [
+   "knowledge_base_search"
+  ],
+  "forbidden_tools": [
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "Snapshot proposals and forum threads are governance documents"
+ },
+ {
+  "id": "kb-competitors",
+  "query": "who are Kamino's competitors on Solana",
+  "expected_tools": [
+   "knowledge_base_search"
+  ],
+  "forbidden_tools": [
+   "jupiter",
+   "relay"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "COMPETITOR_OF edges derived from category + chain"
+ },
+ {
+  "id": "kb-not-live-tvl",
+  "query": "what is Aave's TVL right now",
+  "expected_tools": [
+   "defillama_protocols",
+   "defillama_chain_tvl"
+  ],
+  "forbidden_tools": [
+   "knowledge_base_search"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "live number: the KB matcher must decline ('right now')"
+ },
+ {
+  "id": "news-tile-explainer",
+  "query": "Tell me more about this and why it matters for the market: Bitcoin ETFs lose $450M as CLARITY Act stalls",
+  "expected_tools": [
+   "perplexity_web_search"
+  ],
+  "forbidden_tools": [
+   "dexscreener_pair_search",
+   "jupiter",
+   "relay"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "home news tile follow-up: a headline explainer is web research, never a token lookup on 'Bitcoin' (2026-09-16 live)"
+ },
+ {
+  "id": "fees-named-protocol",
+  "query": "how much revenue does Aave make",
+  "expected_tools": [
+   "defillama_fees_revenue"
+  ],
+  "forbidden_tools": [
+   "defillama_chain_tvl",
+   "jupiter",
+   "portfolio_snapshot"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "free DefiLlama dimensions API; was a web-search fall-through"
+ },
+ {
+  "id": "fees-leaderboard",
+  "query": "top DeFi protocols by fees this month",
+  "expected_tools": [
+   "defillama_fees_revenue"
+  ],
+  "forbidden_tools": [
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "no protocol named -> leaderboard"
+ },
+ {
+  "id": "yields-asset-chain",
+  "query": "best USDC yield on Base",
+  "expected_tools": [
+   "defillama_yields"
+  ],
+  "forbidden_tools": [
+   "jupiter",
+   "relay",
+   "dexscreener_pair_search"
+  ],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "DefiLlama pools filtered by asset + chain; Layer-1 abstains (no anchored rule), the speech model + tool backstop pick it in chat mode"
+ },
+ {
+  "id": "yields-staking",
+  "query": "what APY does stETH pay right now",
+  "expected_tools": [
+   "defillama_yields"
+  ],
+  "forbidden_tools": [
+   "jupiter",
+   "knowledge_base_search"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "live number: yields tool, never the KB"
+ },
+ {
+  "id": "kb-stablecoin-backing",
+  "query": "what backs USDe and how does it keep its peg",
+  "expected_tools": [
+   "knowledge_base_search"
+  ],
+  "forbidden_tools": [
+   "jupiter",
+   "dexscreener_pair_search"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "stablecoin mechanism from the market-wide DefiLlama stablecoins set"
+ },
+ {
+  "id": "kb-global-incident",
+  "query": "what happened in the Ronin bridge hack",
+  "expected_tools": [
+   "knowledge_base_search"
+  ],
+  "forbidden_tools": [
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "incident outside the protocol registry: global hacks list"
+ },
+ {
+  "id": "trending-by-volume",
+  "query": "trending tokens by volume in 24hrs",
+  "expected_tools": [
+   "coingecko_top_volume"
+  ],
+  "forbidden_tools": [
+   "dexscreener_boosted_tokens",
+   "bitquery_token_top_holders"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "a volume RANKING -- paid DEX Screener boosts are attention, not volume (user transcript 2026-09-16)"
+ },
+ {
+  "id": "slang-vol-1",
+  "query": "which tokens got the most turnover today",
+  "expected_tools": [
+   "coingecko_top_volume"
+  ],
+  "forbidden_tools": [
+   "dexscreener_boosted_tokens"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "slang stress 2026-09-16: 'turnover' as a volume synonym"
+ },
+ {
+  "id": "slang-vol-2",
+  "query": "most traded coins rn",
+  "expected_tools": [
+   "coingecko_top_volume"
+  ],
+  "forbidden_tools": [
+   "dexscreener_boosted_tokens"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "slang stress: 'most traded ... rn'"
+ },
+ {
+  "id": "slang-vol-3",
+  "query": "top coins today by $ traded",
+  "expected_tools": [
+   "coingecko_top_volume"
+  ],
+  "forbidden_tools": [
+   "dexscreener_boosted_tokens"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "slang stress: '$ traded' as a volume synonym"
+ },
+ {
+  "id": "slang-boosts-1",
+  "query": "which tokens are getting promoted on dex screener",
+  "expected_tools": [
+   "dexscreener_boosted_tokens"
+  ],
+  "forbidden_tools": [
+   "coingecko_top_volume"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "slang stress: 'promoted' as a boosts synonym"
+ },
+ {
+  "id": "slang-newlist-1",
+  "query": "what just dropped on pump.fun",
+  "expected_tools": [
+   "mobula_new_launches",
+   "geckoterminal_pools"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "slang stress: 'just dropped' as a new-listing synonym A pump.fun launch question goes to Mobula Pulse first (dev/sniper/bundler columns, 2026-09-18); GeckoTerminal pools stay behind it."
+ },
+ {
+  "id": "slang-newlist-2",
+  "query": "fresh launches on solana today",
+  "expected_tools": [
+   "geckoterminal_pools"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "slang stress: 'fresh launches'"
+ },
+ {
+  "id": "slang-narrative-1",
+  "query": "what's the hot narrative rn",
+  "expected_tools": [
+   "dexscreener_trending_metas"
+  ],
+  "forbidden_tools": [
+   "dexscreener_boosted_tokens"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "slang stress: narratives vs a token list"
+ },
+ {
+  "id": "slang-perps-1",
+  "query": "hyperliquid oi right now",
+  "expected_tools": [
+   "goldrush_hyperliquid_market"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "slang stress: 'oi' = open interest"
+ },
+ {
+  "id": "slang-social-1",
+  "query": "what are crypto twitter kols saying about sol",
+  "expected_tools": [
+   "x_kol_sentiment"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "slang stress: KOL/social sentiment"
+ },
+ {
+  "id": "slang-pricechange-1",
+  "query": "what coins spiked hardest today",
+  "expected_tools": [
+   "coingecko_gainers_losers"
+  ],
+  "forbidden_tools": [
+   "coingecko_top_volume"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "slang stress: 'spiked' as a price-change synonym"
+ },
+ {
+  "id": "slang-security-1",
+  "query": "is this token safe to ape on base 0x1234567890abcdef1234567890abcdef12345678",
+  "expected_tools": [
+   "goplus_token_security"
+  ],
+  "forbidden_tools": [
+   "birdeye_token_overview"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "slang stress: 'safe to ape' as a security question"
+ },
+ {
+  "id": "slang-balances-vs-tx-1",
+  "query": "what's this wallet holding on base 0x1234567890abcdef1234567890abcdef12345678",
+  "expected_tools": [
+   "mobula_wallet_portfolio",
+   "goldrush_wallet_balances"
+  ],
+  "forbidden_tools": [
+   "goldrush_wallet_transactions"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "slang stress: 'holding' -> balances, not transactions Mobula leads wallet questions (user decision 2026-09-18)."
+ },
+ {
+  "id": "slang-balances-vs-tx-2",
+  "query": "recent activity for this wallet on ethereum 0x1234567890abcdef1234567890abcdef12345678",
+  "expected_tools": [
+   "mobula_wallet_history",
+   "goldrush_wallet_transactions"
+  ],
+  "forbidden_tools": [
+   "goldrush_wallet_balances"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "slang stress: 'recent activity' -> transactions, not balances Mobula leads wallet questions (user decision 2026-09-18)."
+ },
+ {
+  "id": "slang-liquidity-vs-holders-1",
+  "query": "deepest liquidity pairs on solana",
+  "expected_tools": [
+   "dexscreener_pair_search",
+   "geckoterminal_pools"
+  ],
+  "forbidden_tools": [
+   "bitquery_token_top_holders",
+   "solana_rpc_token_top_holders"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "slang stress: a liquidity ranking pulled in holders tools via the semantic fallback; tests whether tool arbitration filters them back out"
+ },
+ {
+  "id": "catalog-biggest-losers-on-base-today",
+  "query": "biggest losers on base today",
+  "expected_tools": [
+   "coingecko_gainers_losers"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for coingecko_gainers_losers; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+ },
+ {
+  "id": "catalog-boosted-tokens-on-base",
+  "query": "boosted tokens on base",
+  "expected_tools": [
+   "dexscreener_boosted_tokens"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for dexscreener_boosted_tokens; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+ },
+ {
+  "id": "catalog-hot-metas-right-now",
+  "query": "hot metas right now",
+  "expected_tools": [
+   "dexscreener_trending_metas"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for dexscreener_trending_metas; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+ },
+ {
+  "id": "catalog-newest-token-profiles",
+  "query": "newest token profiles",
+  "expected_tools": [
+   "dexscreener_latest_profiles"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for dexscreener_latest_profiles; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+ },
+ {
+  "id": "catalog-useless-token-pairs",
+  "query": "USELESS token pairs",
+  "expected_tools": [
+   "dexscreener_pair_search"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for dexscreener_pair_search; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+ },
+ {
+  "id": "catalog-new-pairs-on-solana",
+  "query": "new pairs on solana",
+  "expected_tools": [
+   "geckoterminal_pools"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for geckoterminal_pools; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+ },
+ {
+  "id": "catalog-new-pump.fun-launches",
+  "query": "new pump.fun launches",
+  "expected_tools": [
+   "geckoterminal_pools"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for geckoterminal_pools; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+ },
+ {
+  "id": "catalog-overview-of-mint-on-solana",
+  "query": "overview of DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 on solana",
+  "expected_tools": [
+   "birdeye_token_overview"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for birdeye_token_overview; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+ },
+ {
+  "id": "catalog-what-is-addr-on-base-(identity-+-price)",
+  "query": "what is 0x940181a94A35A4569E4529A3CDfB74e38FD98631 on base",
+  "expected_tools": [
+   "coingecko_token_by_contract",
+   "birdeye_token_overview"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for coingecko_token_by_contract; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user; either identity+price tool is a correct first pick for 'what is <address>' (2026-09-17)"
+ },
+ {
+  "id": "catalog-recent-trades-of-addr-on-base",
+  "query": "recent trades of 0x940181a94A35A4569E4529A3CDfB74e38FD98631 on base",
+  "expected_tools": [
+   "bitquery_recent_dex_trades"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for bitquery_recent_dex_trades; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+ },
+ {
+  "id": "catalog-last-swaps-for-mint",
+  "query": "last swaps for DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+  "expected_tools": [
+   "bitquery_recent_dex_trades"
+  ],
+  "forbidden_tools": [
+   "jupiter",
+   "relay"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for bitquery_recent_dex_trades; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+ },
+ {
+  "id": "catalog-is-addr-on-bsc-safe",
+  "query": "is 0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82 on bsc safe",
+  "expected_tools": [
+   "goplus_token_security"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for goplus_token_security; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user"
+ },
+ {
+  "id": "catalog-rug-check-addr",
+  "query": "rug check 0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82 on bsc",
+  "expected_tools": [
+   "mobula_token_security",
+   "goplus_token_security"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for goplus_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user; realised with a chain 2026-09-17: an 0x address is ambiguous across EVM chains and the node asks for one Mobula's LP-lock card and GoPlus's flags are both right for a rug check; the plan runs both (2026-09-18)."
+ },
+ {
+  "id": "catalog-can-i-sell-addr-on-ethereum",
+  "query": "can I sell 0x6982508145454Ce325dDbE47a25d4ec3d2311933 on ethereum",
+  "expected_tools": [
+   "honeypot_token_security",
+   "goplus_token_security"
+  ],
+  "forbidden_tools": [
+   "jupiter",
+   "relay"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for honeypot_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user; GoPlus reports is_honeypot and sell tax too, either is a correct first pick (2026-09-17)"
+ },
+ {
+  "id": "catalog-honeypot-check",
+  "query": "honeypot check 0x6982508145454Ce325dDbE47a25d4ec3d2311933 on ethereum",
+  "expected_tools": [
+   "honeypot_token_security",
+   "goplus_token_security"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for honeypot_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user; realised with an address 2026-09-17 (the tool needs one; a bare 'honeypot check' is asked for the contract, see tests); GoPlus reports is_honeypot and sell tax too, either is a correct first pick (2026-09-17)"
+ },
+ {
+  "id": "catalog-is-mint-safe",
+  "query": "is DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 safe",
+  "expected_tools": [
+   "solana_token_security"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for solana_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+ },
+ {
+  "id": "catalog-freeze-authority-on-mint",
+  "query": "freeze authority on DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+  "expected_tools": [
+   "solana_token_security"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for solana_token_security; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+ },
+ {
+  "id": "catalog-what-does-addr-hold-on-ethereum",
+  "query": "what does 0xd8dA6BF26964aF9D7eEd9e03E51415D2aA6f0c8f hold on ethereum",
+  "expected_tools": [
+   "mobula_wallet_portfolio",
+   "bitquery_wallet_balances"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for bitquery_wallet_balances; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user Mobula leads wallet questions (user decision 2026-09-18)."
+ },
+ {
+  "id": "catalog-recent-transactions-of-addr-on-arbitrum",
+  "query": "recent transactions of 0xd8dA6BF26964aF9D7eEd9e03E51415D2aA6f0c8f on arbitrum",
+  "expected_tools": [
+   "mobula_wallet_history",
+   "goldrush_wallet_transactions"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for goldrush_wallet_transactions; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user Mobula leads wallet questions (user decision 2026-09-18)."
+ },
+ {
+  "id": "catalog-open-perps-for-addr",
+  "query": "open perps for 0xd8dA6BF26964aF9D7eEd9e03E51415D2aA6f0c8f",
+  "expected_tools": [
+   "goldrush_hyperliquid_positions"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "portfolio",
+  "router": true,
+  "notes": "catalog example for goldrush_hyperliquid_positions; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user as portfolio"
+ },
+ {
+  "id": "catalog-fear-and-greed-today",
+  "query": "fear and greed today",
+  "expected_tools": [
+   "market_sentiment_snapshot"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for market_sentiment_snapshot; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+ },
+ {
+  "id": "catalog-is-it-altcoin-season",
+  "query": "is it altcoin season",
+  "expected_tools": [
+   "market_sentiment_snapshot"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for market_sentiment_snapshot; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+ },
+ {
+  "id": "catalog-recent-delistings",
+  "query": "recent delistings",
+  "expected_tools": [
+   "exchange_listing_announcements"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for exchange_listing_announcements; proposed 2026-09-17 from disagree mode (LOW-CONF), approved by the user"
+ },
+ {
+  "id": "catalog-background-on-berachain",
+  "query": "background on Berachain",
+  "expected_tools": [
+   "rootdata_project_search"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for rootdata_project_search; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user"
+ },
+ {
+  "id": "catalog-a16z-crypto-portfolio",
+  "query": "a16z crypto portfolio",
+  "expected_tools": [
+   "rootdata_vc_search"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for rootdata_vc_search; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user"
+ },
+ {
+  "id": "catalog-fed-decision-impact-on-crypto",
+  "query": "Fed decision impact on crypto",
+  "expected_tools": [
+   "perplexity_finance_search"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "catalog example for perplexity_finance_search; proposed 2026-09-17 from disagree mode (DISAGREE), approved by the user"
+ },
+ {
+  "id": "trending-bare",
+  "query": "check trending tokens",
+  "expected_tools": [
+   "coingecko_top_volume"
+  ],
+  "forbidden_tools": [
+   "dexscreener_boosted_tokens"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "a bare 'trending tokens' is an organic question (volume ranking); paid boosts answer only attention words or a chain scope (2026-09-17)"
+ },
+ {
+  "id": "advice-market-wide",
+  "query": "suggest some crypto to buy for day trading based on technicals, news, sentiment",
+  "expected_tools": [
+   "coingecko_gainers_losers",
+   "coingecko_top_volume",
+   "market_sentiment_snapshot",
+   "perplexity_finance_search"
+  ],
+  "forbidden_tools": [
+   "jupiter",
+   "relay"
+  ],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "market-wide advice with no asset: composed from movers, volume, sentiment and news, read together; never a quote (2026-09-17)"
+ },
+ {
+  "id": "bundle-ticker-ask",
+  "query": "is BONK bundled? run a bundle check",
+  "expected_tools": [
+   "mobula_token_bundle"
+  ],
+  "forbidden_tools": [
+   "perplexity_web_search",
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "symbol -> verified-Solana canonical -> bitquery (needs research_node resolution)"
+ },
+ {
+  "id": "bundle-address-ask",
+  "query": "bundle check 9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump on solana",
+  "expected_tools": [
+   "mobula_token_bundle"
+  ],
+  "forbidden_tools": [
+   "mobula_wallet_portfolio",
+   "mcp_nansen_address_portfolio",
+   "jupiter"
+  ],
+  "expected_intent": "research",
+  "router": false,
+  "notes": "a pasted address beside launch-forensics words is the token, not a wallet (live, 2026-09-23)"
+ },
+ {
+  "id": "app-save-export",
+  "query": "Save this investigation so I can revisit it, and export an evidence-linked report with sources, timestamps and coverage gaps.",
+  "expected_tools": [],
+  "forbidden_tools": [],
+  "expected_intent": "general",
+  "router": false,
+  "notes": "app action, not the token SAVE (UI run 2026-09-23)"
+ },
+ {
+  "id": "app-watchlist-ranked",
+  "query": "Show my token watchlist ranked by meaningful changes in liquidity, holder concentration, deployer activity and exit quotes. Explain why each token is flagged.",
+  "expected_tools": [],
+  "forbidden_tools": [],
+  "expected_intent": "general",
+  "router": false,
+  "notes": "app feature, not a portfolio ask; MY is not a token (UI run 2026-09-23)"
+ },
+ {
+  "id": "app-export-pdf",
+  "query": "export this report as a PDF",
+  "expected_tools": [],
+  "forbidden_tools": [],
+  "expected_intent": "general",
+  "router": false,
+  "notes": "app action"
+ },
+ {
+  "id": "app-what-can-i-do",
+  "query": "I am new to crypto. What can I do here without connecting a wallet? Explain in plain language.",
+  "expected_tools": [],
+  "forbidden_tools": [],
+  "expected_intent": "general",
+  "router": false,
+  "notes": "about the product, not a web question; I is not a token (funded UI run 2026-09-23)"
+ },
+ {
+  "id": "tequity-aster-gainers",
+  "query": "top gainers on Aster today",
+  "expected_tools": [
+   "tequity_movers"
+  ],
+  "forbidden_tools": [
+   "dexscreener_boosted_tokens",
+   "geckoterminal_pools"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "internal Tequity feed (2026-09-23)"
+ },
+ {
+  "id": "tequity-hl-stocks",
+  "query": "which tokenized stocks are moving on hyperliquid",
+  "expected_tools": [
+   "tequity_movers"
+  ],
+  "forbidden_tools": [
+   "hyperliquid_positions"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "stocks filter on the movers snapshot"
+ },
+ {
+  "id": "tequity-trending",
+  "query": "what's trending on hyperliquid right now",
+  "expected_tools": [
+   "tequity_trending"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "cross-venue trending list"
+ }
 ]

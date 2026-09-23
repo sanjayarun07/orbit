@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 
 import httpx
 
+from app import evidence as _evidence
 from app.provider_router import NoData, ProviderRouter, ProviderTool
 from app.settings import settings
 from app.tool_catalog import TOOL_SPECS
@@ -60,8 +61,7 @@ def address_in(request: str) -> str | None:
 # wallet's activity (2026-09-18), so a token-shaped phrasing with no explicit
 # wallet word is left to the token tools.
 _WALLET_WORD = re.compile(r"\b(?:wallet|portfolio|net\s*worth|pnl|p&l|allocation|exposure|account|address|my\b|this\s+wallet)\b", re.I)
-_TOKEN_SHAPED = re.compile(r"\b(?:trades?|holders?|volume|price|liquidity|pairs?|chart|market\s*cap|supply)\s+(?:of|for)\b"
-                           r"|\b(?:holders?|insiders?|snip\w+|bundl\w+|whales?|concentration|distribution|top\s*\d+|liquidity|lp|rug\w*|honeypot|deployer|dev)\b", re.I)
+from app.routing.lexicon import TOKEN_SHAPED as _TOKEN_SHAPED          # the one token-shaped vocabulary (app/routing/lexicon.py)
 
 
 # "the largest wallets holding ANSEM <mint>" names wallets, but the address
@@ -230,11 +230,30 @@ def portfolio(request: str) -> str:
         priced_total += value
         kept.append(row[:8])
     rows = kept
-    # Mobula's total includes what was quarantined; when anything was, the
-    # total is of the priced holdings and says so, and shares are recomputed.
-    total = data.get("total_wallet_balance") if not unpriced else priced_total
+    # The total is always the sum of what was priced and shown: Mobula's own
+    # total counts spam and quarantined holdings (a hidden "airdrop" worth a
+    # made-up $1e20 inflated it, 2026-09-22). Shares are recomputed likewise.
+    excluded = bool(unpriced or spam)
+    total = priced_total if (rows or dust or excluded) else data.get("total_wallet_balance")
     if unpriced and priced_total > 0:
         rows = [(v, sym, ch, bal, price, value, change, v / priced_total * 100) for v, sym, ch, bal, price, value, change, _ in rows]
+    holdings_seen = len(data.get("assets") or [])
+    env_data = {"total_usd": float(total or 0), "priced_holdings": len(rows) + dust, "unpriced_holdings": len(unpriced), "spam_hidden": spam}
+    env_sources = [_evidence.source("mobula", "wallet/portfolio")]
+    if unpriced:
+        reasons = sorted({w for _, _, w in unpriced})
+        env = _evidence.partial("mobula_wallet_portfolio", {"kind": "wallet", "id": wallet}, env_data, env_sources, attempted=holdings_seen,
+                                successful=holdings_seen - len(unpriced), missing=[f"{len(unpriced)} holding(s) not valued: {', '.join(reasons)}"],
+                                errors=[{"operation": "price verification", "reason": why, "count": sum(1 for _, _, w in unpriced if w == why)} for why in reasons])
+    else:
+        env = _evidence.complete("mobula_wallet_portfolio", {"kind": "wallet", "id": wallet}, env_data, env_sources, attempted=max(1, holdings_seen))
+    # Anchors: the portfolio record itself, and every shown holding as the
+    # provider's record for that token in this wallet (a balance has no
+    # transaction; the record and its time are what can be checked).
+    env.add_anchor(_evidence.record(wallet, "mobula", None, at=env_sources[0]["as_of"], note="wallet portfolio record"))
+    for value, symbol, chains, balance, price, raw, change, allocation in rows[:20]:
+        env.add_anchor(_evidence.record(f"{wallet}:{symbol}", "mobula", chains.split(",")[0].strip().lower() if chains else None,
+                                        at=env_sources[0]["as_of"], note=f"{symbol} {_amount(balance)} priced {_usd(price)}"))
     lines = [
         f"# Wallet portfolio — {_short(wallet)}",
         f"**Provider**: Mobula (40+ chains) · **Checked**: {_stamp()} · **Total{' (priced holdings)' if unpriced else ''}**: {_usd(total)}",

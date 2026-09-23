@@ -13,7 +13,9 @@ class SpeechResolution(dspy.Signature):
     SOL?', 'is X a good buy', 'compare BONK and WIF for me'.
     research: a factual lookup about markets, tokens, protocols, wallets, news
     or prices -- 'why is PEPE dumping', 'best exchange for SOL', 'what would it
-    cost to bridge 1 ETH to Base'.
+    cost to bridge 1 ETH to Base'. Launch forensics on a token ('is BONK
+    bundled', 'who sniped WIF', 'coordinated buys on X') are token research,
+    never a general web question.
     explain: a request to understand a concept or how something works, with no
     specific asset to look up -- 'explain what TVL means', 'how do perpetual
     futures work?', 'How do I trade meme coins?'.
@@ -24,6 +26,14 @@ class SpeechResolution(dspy.Signature):
     or risk settings for the user -- 'my wallet policy?', 'max spend policy?',
     'what are my trading limits', 'what is my risk charter', 'how much can I
     spend per trade here'. It asks about configured rules, not about holdings.
+    app: a request to operate THIS product itself rather than look anything
+    up -- save, bookmark or export this investigation or a report, a
+    watchlist or ranked list of saved tokens, alert or notification settings,
+    account or data actions -- 'save this investigation so I can revisit it',
+    'export an evidence-linked report', 'show my token watchlist ranked by
+    changes'. "my watchlist" is an app feature, not the user's holdings; a
+    verb like Save, Export or Separate that opens the sentence is never an
+    asset name.
     'Buy NVDA' is equity research; this application does not execute stock
     orders. Negated, conditional, mixed, or unclear actions are abstain. Only
     explicit crypto quote requests may set explicit_action=true. Context can

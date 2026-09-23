@@ -51,6 +51,10 @@ _UNLOCK_TTL = 3600.0
 # that silently corrupts a token verdict.
 ANALYSIS_RULES = (
     "Grounding rules — apply strictly, never violate:\n"
+    "- Never write 'secure', 'safe' or 'unanimously bullish': say which checks passed, which were "
+    "not run, and the sample behind any crowd read. Sources are records and links, not tool names.\n"
+    "- Never state a launch or creation date without a source that dates it; a first-buyer time is "
+    "not a launch date. A token program does not imply extensions.\n"
     "- Use only figures present in the evidence bundle below; never reconstruct a "
     "current metric, price, or event from prior knowledge. State a gap; do not fill it.\n"
     "- Holder lists include pools, exchanges, and treasury/program addresses — they "
@@ -87,6 +91,7 @@ class DimensionEvidence:
     detail: str        # the tool output, or a short reason when unavailable
     source: str | None = None   # the tool/provider that produced it
     as_of: str | None = None
+    envelope: dict | None = None  # the tool's evidence envelope (app/evidence.py), when it recorded one
 
 
 @dataclass
@@ -105,8 +110,32 @@ class TokenEvidenceBundle:
 
 
 def coverage_rows(bundle: TokenEvidenceBundle) -> list[dict]:
-    """The coverage envelope as plain rows for a receipt."""
-    return [{"name": d.name, "status": d.status, "source": d.source} for d in bundle.dimensions]
+    """The coverage envelope as plain rows for a receipt: a dimension's
+    availability, and when its tool recorded an envelope, that tool's own
+    coverage and failed operations (a bundle check with 18 of 25 funding
+    lookups failed is "available" and "partial" at once)."""
+    rows = []
+    for d in bundle.dimensions:
+        row = {"name": d.name, "status": d.status, "source": d.source}
+        if d.envelope:
+            row["evidence"] = d.envelope.get("status")
+            row["coverage"] = d.envelope.get("coverage")
+            row["anchors"] = len(d.envelope.get("anchors") or [])
+            if d.envelope.get("errors"):
+                row["errors"] = d.envelope["errors"]
+        rows.append(row)
+    return rows
+
+
+def attach_envelopes(dims: list[DimensionEvidence]) -> None:
+    """Pair each dimension with the envelope its tool recorded this turn."""
+    from app import evidence as _evidence
+
+    by_tool = {e.tool: e for e in _evidence.collected()}
+    for d in dims:
+        env = by_tool.get(d.source or "")
+        if env is not None:
+            d.envelope = env.public()
 
 
 def evidence_skips(bundle: TokenEvidenceBundle) -> list[SubjectSkip]:
@@ -193,12 +222,36 @@ async def _route(query: str, capabilities: tuple[str, ...], chains: tuple[str, .
         return None
 
 
-async def build_token_evidence(address: str, chain: str, symbol: str | None = None) -> TokenEvidenceBundle:
+async def _direct(name: str, factory, *, args=None, volatile: bool = False):
+    """The default `call` hook: no cache, just the call."""
+    result = factory()
+    return await result if asyncio.iscoroutine(result) else result
+
+
+async def _no_step(step_id: str, title: str | None = None) -> None:
+    return None
+
+
+async def _dim(query: str, caps: tuple[str, ...], chs: tuple[str, ...]) -> dict | None:
+    """One router dimension as a JSON-able record (a job caches it)."""
+    result = await _route(query, caps, chs)
+    if result is not None and getattr(result, "output", "").strip():
+        return {"output": result.output, "tool": result.tool}
+    return None
+
+
+async def build_token_evidence(address: str, chain: str, symbol: str | None = None, *, call=None, step=None) -> TokenEvidenceBundle:
     """Compose the deep-dive evidence bundle for a resolved (address, chain).
 
     Runs one router call per dimension concurrently; each dimension is marked
     available (with its source) or unavailable (with a reason). Never raises -- a
-    dead source degrades that one dimension, not the bundle."""
+    dead source degrades that one dimension, not the bundle.
+
+    `call(name, factory, args=..., volatile=...)` wraps every source: the
+    durable job passes its operation cache so a resumed deep dive repeats no
+    paid call; `step(id)` marks the job's plan as the bundle proceeds."""
+    call = call or _direct
+    step = step or _no_step
     ch = (chain,) if chain else ()
     subject = Subject(kind="token", id=address, chain=chain, symbol=symbol)
     signals: list[Signal] = []
@@ -215,12 +268,15 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
         ("sentiment", "Market sentiment (global)",
          "crypto fear and greed sentiment index right now", ("market_sentiment",), ()),
     ]
-    results = await asyncio.gather(*[_route(q, caps, chs) for _, _, q, caps, chs in specs])
+    await step("dimensions")
+    results = await asyncio.gather(*[
+        call(f"dim:{name}", lambda q=q, caps=caps, chs=chs: _dim(q, caps, chs), args={"q": q, "caps": caps, "chains": chs}, volatile=(name == "market"))
+        for name, _, q, caps, chs in specs])
 
     dims: list[DimensionEvidence] = []
     for (name, label, _q, _caps, _chs), result in zip(specs, results):
-        if result is not None and getattr(result, "output", "").strip():
-            dims.append(DimensionEvidence(name, label, "available", result.output, result.tool, _now()))
+        if isinstance(result, dict) and (result.get("output") or "").strip():
+            dims.append(DimensionEvidence(name, label, "available", result["output"], result.get("tool"), _now()))
         else:
             dims.append(DimensionEvidence(
                 name, label, "unavailable",
@@ -230,9 +286,10 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
     # memecoin (user, 2026-09-18: "use this for meme token complete in depth
     # analysis"). Called by name, not through the router, so it never competes
     # with the identity dossier above: they answer different questions.
+    await step("forensics")
     if mobula_security.enabled():
         try:
-            locks = await asyncio.to_thread(mobula_security.token_security, f"{address} on {chain}")
+            locks = await call("mobula:security", lambda: asyncio.to_thread(mobula_security.token_security, f"{address} on {chain}"), args=[address, chain])
         except Exception:
             locks = None
         if locks:
@@ -245,7 +302,7 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
     # split and sizes. For a memecoin this is half the thesis.
     if mobula_meme.enabled():
         try:
-            trades = await asyncio.to_thread(mobula_meme.token_trades, f"latest trades {address} on {chain}")
+            trades = await call("mobula:trades", lambda: asyncio.to_thread(mobula_meme.token_trades, f"latest trades {address} on {chain}"), args=[address, chain], volatile=True)
         except Exception:
             trades = None
         dims.append(DimensionEvidence("latest_trades", "Latest trades", "available", trades, "mobula_token_trades", _now())
@@ -255,7 +312,7 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
     # Who got in first and whether they are still in: the sniper / exit read.
     if mobula_meme.enabled():
         try:
-            first = await asyncio.to_thread(mobula_meme.token_first_buyers, f"first buyers {address} on {chain}")
+            first = await call("mobula:first_buyers", lambda: asyncio.to_thread(mobula_meme.token_first_buyers, f"first buyers {address} on {chain}"), args=[address, chain])
         except Exception:
             first = None
         dims.append(DimensionEvidence("first_buyers", "First buyers & snipers", "available", first, "mobula_token_first_buyers", _now())
@@ -268,12 +325,16 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
     # vote abstains, with the same reason.
     if mobula_meme.enabled():
         try:
-            analysis = await asyncio.to_thread(mobula_meme._bundle_analysis, address, chain)
+            cached = await call("mobula:bundle", lambda: _bundle_record(address, chain), args=[address, chain])
+            analysis = mobula_meme.BundleAnalysis(**cached) if isinstance(cached, dict) and "level" in cached else None
+            if isinstance(cached, dict) and cached.get("no_data"):
+                raise NoData(cached["no_data"])
         except NoData as exc:
             analysis, reason = None, str(exc)
         except Exception as exc:  # noqa: BLE001 - a dead source degrades one dimension
             analysis, reason = None, f"Bundle check did not complete ({type(exc).__name__})."
         if analysis is not None:
+            mobula_meme.bundle_evidence(analysis)
             dims.append(DimensionEvidence("bundle", "Bundle check (launch coordination)", "available",
                                           mobula_meme._render_bundle(analysis), "mobula_token_bundle", _now()))
             signals.append(mobula_meme.bundle_signal(subject, _now_iso(), analysis))
@@ -283,9 +344,12 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
 
     # What X is saying, judged: a dimension for the lens and a vote on the
     # receipt (user decision 2026-09-21). Needs a symbol to search for.
+    await step("crowd")
     if symbol and sentiment_analyst.enabled():
         try:
-            out = await sentiment_analyst.analyze(symbol, subject=subject)
+            out = await call("x:sentiment", lambda: _sentiment_record(symbol, subject), args=[symbol])
+            if isinstance(out, dict) and isinstance(out.get("signal"), dict):
+                out = {**out, "signal": Signal(**out["signal"])}
         except Exception as exc:  # noqa: BLE001
             out = None
             dims.append(DimensionEvidence("x_sentiment", "X sentiment (crowd lean)", "unavailable", f"X sentiment did not complete ({type(exc).__name__})."))
@@ -300,7 +364,7 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
     # Money-backed odds, when a market exists (majors and events; rarely memes).
     if symbol and polymarket_odds.enabled():
         try:
-            markets = await asyncio.to_thread(polymarket_odds.markets_for, symbol)
+            markets = await call("polymarket:markets", lambda: asyncio.to_thread(polymarket_odds.markets_for, symbol), args=[symbol], volatile=True)
             card = polymarket_odds.render_card(symbol, markets)
         except Exception:
             card = None
@@ -310,9 +374,10 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
     # How the structure has moved since Orbit first recorded this token (the
     # snapshot ledger). Only when there is history: a single row is the
     # present, which the dimensions above already show.
+    await step("ledger")
     if holder_snapshots.enabled():
         try:
-            card = await holder_snapshots.history_card(subject)
+            card = await call("ledger:history", lambda: holder_snapshots.history_card(subject), args=[subject.key])
         except Exception:
             card = None
         if card:
@@ -321,7 +386,7 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
     # Token unlocks -- the most deterministic near-term headwind. Real, free, and
     # verified-by-address via DefiLlama emissions; unavailable when the token isn't
     # tracked (most memecoins) rather than silently omitted.
-    unlocks = await asyncio.to_thread(token_unlocks, symbol, address, chain)
+    unlocks = await call("defillama:unlocks", lambda: asyncio.to_thread(token_unlocks, symbol, address, chain), args=[symbol, address, chain])
     if unlocks:
         dims.append(DimensionEvidence("unlocks", "Token unlocks / emissions", "available", unlocks, "defillama_emissions", _now()))
     else:
@@ -330,7 +395,8 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
             "Not tracked by DefiLlama emissions (typical for memecoins / no vesting schedule)."))
 
     # Technical-indicator rating from the user's own TradingView, when connected.
-    technicals = await asyncio.to_thread(tradingview.technicals_for, symbol or address) if symbol and tradingview.available() else None
+    technicals = (await call("tradingview:technicals", lambda: asyncio.to_thread(tradingview.technicals_for, symbol or address), args=[symbol], volatile=True)
+                  if symbol and tradingview.available() else None)
     if technicals:
         dims.append(DimensionEvidence("technicals", "Technical indicators (TradingView)", "available", technicals, "tradingview_snapshot", _now()))
 
@@ -343,7 +409,27 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
     ):
         dims.append(DimensionEvidence(name, label, "unavailable", reason))
 
+    attach_envelopes(dims)
     return TokenEvidenceBundle(address=address, chain=chain, dimensions=dims, signals=signals)
+
+
+async def _bundle_record(address: str, chain: str) -> dict:
+    """The bundle analysis as a JSON-able record; NoData becomes a record too,
+    so a cached "no first buyers" is not retried."""
+    import dataclasses
+    try:
+        analysis = await asyncio.to_thread(mobula_meme._bundle_analysis, address, chain)
+    except NoData as exc:
+        return {"no_data": str(exc)}
+    return dataclasses.asdict(analysis)
+
+
+async def _sentiment_record(symbol: str, subject: Subject) -> dict | None:
+    out = await sentiment_analyst.analyze(symbol, subject=subject)
+    if out is None:
+        return None
+    signal = out.get("signal")
+    return {**out, "signal": signal.model_dump(mode="json") if hasattr(signal, "model_dump") else signal}
 
 
 _PRICE = re.compile(r"price[^$\n]{0,24}\$\s*([0-9][0-9,]*\.?[0-9]*)", re.IGNORECASE)

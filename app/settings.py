@@ -304,6 +304,25 @@ class Settings(BaseSettings):
     holder_snapshot_max_per_tick: int = 5           # three calls each: a quarter of the minute rate
     holder_snapshot_pulse_chains: str = "solana,base,bsc"
     holder_snapshot_min_holders: int = 10          # a launch with fewer holders is not tracked yet
+    # Durable jobs (app/jobs.py, docs/durable-jobs-spec.md): work that outlives
+    # a request. A chat turn stays attached to its job this long; past it the
+    # answer is appended to the conversation when the job settles.
+    jobs_enabled: bool = True
+    job_attach_seconds: float = 90.0
+    job_lease_seconds: float = 60.0
+    job_max_attempts: int = 3
+    job_volatile_max_age_seconds: float = 60.0     # cached price-class results older than this are refetched on resume
+    # The exit monitor (app/exit_monitor.py): a position's exact-size exit
+    # quotes recorded on a schedule; an alert when the full-exit quote falls.
+    exit_monitor_interval_minutes: int = 15
+    exit_alert_drop_pct: float = 20.0                # quoted full-exit proceeds down this much vs entry or the last alert
+    exit_alert_cooldown_hours: float = 6.0
+    exit_positions_per_user: int = 10
+    # Tequity (app/tequity.py): the company's internal equities/perps websocket.
+    # Movers on Aster and Hyperliquid, a cross-venue trending list, news and
+    # stats. Not a secret; wss only (ws:// is rejected upstream).
+    tequity_enabled: bool = True
+    tequity_ws_url: str | None = "wss://tequity-dn.i5.xyz/ws"
     bitquery_api_key: str | None = None
     bitquery_graphql_url: str = "https://streaming.bitquery.io/eap"
     bitquery_requests_per_minute: int = 30

@@ -446,6 +446,18 @@ def _llama_pools() -> list[dict]:
     return _llama_cached("pools", f"{settings.defillama_yields_base_url}/pools", _LLAMA_CACHE_TTL["pools"], lambda d: [p for p in (d.get("data") or []) if isinstance(p, dict)])
 
 
+# An address the request treats as a TOKEN (token/mint/contract, first
+# buyers, bundles, holders) is not a wallet whose history to read: the ANSEM
+# mint's incoming dust transfers were shown as "token transactions" (UI run,
+# 2026-09-23). "wallet" in the request keeps the wallet reading.
+_TOKEN_ROLE = re.compile(r"\b(?:token|mint|contract|ca|memecoin|first\s+buyers?|early\s+buyers?|buyers?|bundl\w+|snip\w+|holders?|deployer|launch\w*)\b", re.I)
+
+
+def _token_role(request: str) -> bool:
+    text = request or ""
+    return bool(_TOKEN_ROLE.search(text)) and not re.search(r"\bwallet\b", text, re.I)
+
+
 def _requested_chain(request: str) -> str | None:
     for chain in ("ethereum", "solana", "base", "arbitrum", "optimism", "polygon", "bsc", "avalanche", "hyperliquid", "sui", "aptos", "tron", "linea", "scroll", "berachain", "sonic", "mantle", "blast"):
         if re.search(rf"\b{chain}\b", request, re.I):
@@ -479,8 +491,9 @@ class DefiLlamaProvider:
             response.raise_for_status()
             rows = response.json()
         chain_terms = {"ethereum", "solana", "base", "arbitrum", "bsc", "avalanche", "polygon", "optimism"}
-        ignored = {"show", "top", "defi", "protocol", "protocols", "tvl", "on", "for", "the"} | chain_terms
-        terms = {word.lower() for word in re.findall(r"[A-Za-z0-9-]+", request) if word.lower() not in ignored}
+        # Only a named subject matches a protocol: "what is Aave's TVL right now"
+        # matched What The Hook on "what" (UI run, 2026-09-23).
+        terms = {t for t in _named_defi_subject(request) if len(t) >= 3} - chain_terms
         matches = [row for row in rows if terms & set(re.findall(r"[a-z0-9-]+", str(row.get("name") or row.get("slug") or "").lower()))]
         requested_chain = next((chain for chain in chain_terms if re.search(rf"\b{chain}\b", request, re.I)), None)
         candidates = matches or rows
@@ -537,7 +550,11 @@ class DefiLlamaProvider:
         chain = _requested_chain(request)
         subject = _named_defi_subject(request) - {"yield", "yields", "apy", "apr", "best", "rate", "rates", "highest", "safest", "earn", "lend", "lending", "stake", "staking", "farm", "farming", "pools", "pool", "stable", "stablecoin", "stablecoins"} - {s.lower() for s in symbols}
         wants_stable = bool(re.search(r"\bstable(?:coin)?s?\b", request, re.I))
+        # "without exposing me to another volatile token", "single-asset", "only USDC": one-asset pools only (UI run, 2026-09-23)
+        wants_single = bool(re.search(r"\b(?:without\s+(?:exposing\s+me\s+to\s+)?(?:another|other|any|a)\s+(?:volatile\s+)?(?:token|asset|coin)s?|single[- ]asset|only\s+(?:usdc|usdt|dai|usde|stables?)|no\s+(?:il|impermanent\s+loss)|not\s+(?:an?\s+)?lp)\b", request, re.I))
         rows = [p for p in pools if isinstance(p, dict) and p.get("apy") is not None]
+        if wants_single:
+            rows = [p for p in rows if str(p.get("exposure") or "").lower() == "single"]
         if symbols:
             rows = [p for p in rows if any(s in {t.upper() for t in re.split(r"[-/ ]", str(p.get("symbol") or ""))} for s in symbols)]
         if chain:
@@ -554,7 +571,7 @@ class DefiLlamaProvider:
         selected = sorted(rows, key=lambda p: float(p.get("apy") or 0), reverse=True)[:8]
         if not selected:
             raise RuntimeError("DeFiLlama has no yield pools matching that request")
-        what = " ".join(x for x in [", ".join(sorted(symbols)) if symbols else "", f"on {chain.title()}" if chain else "", "stablecoin" if wants_stable else ""] if x).strip()
+        what = " ".join(x for x in [", ".join(sorted(symbols)) if symbols else "", f"on {chain.title()}" if chain else "", "stablecoin" if wants_stable else "", "single-asset only" if wants_single else ""] if x).strip()
         lines = [f"# Yields{': ' + what if what else ''}", f"**Provider**: DeFiLlama · **Checked**: {_utc()} · pools ≥ $1M TVL, APY ≤ 500%", "",
                  "| Pool | Project | Chain | APY | Base / reward | TVL | Notes |", "|---|---|---|---:|---:|---:|---|"]
         for p in selected:
@@ -1043,7 +1060,7 @@ class HeliusProvider:
         router.register(ProviderTool(
             "helius_wallet_transactions", self.name, ("wallet_intelligence",), self.transactions,
             enabled=self.enabled,
-            matches=lambda request: _has_chain_and_address(request) and _chain(request) == "solana" and bool(_WALLET_ACTIVITY.search(request)),
+            matches=lambda request: _has_chain_and_address(request) and _chain(request) == "solana" and bool(_WALLET_ACTIVITY.search(request)) and not _token_role(request),
             keywords=("wallet", "transactions", "activity", "history"), chains=("solana",),
             quota_per_minute=settings.helius_requests_per_minute, cache_ttl_seconds=20, priority=11,
             description="Recent transaction history for a Solana wallet address",

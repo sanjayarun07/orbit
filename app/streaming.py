@@ -15,6 +15,7 @@ spawns; a thread reports through the loop it was started from.
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from typing import Any
 
@@ -33,10 +34,25 @@ def active() -> bool:
     return _channel.get() is not None
 
 
+_muted: ContextVar[frozenset] = ContextVar("turn_stream_muted", default=frozenset())
+
+
+@contextmanager
+def muted(*events: str):
+    """Drop these events for the code inside: concurrent clauses of a
+    compound ask each streamed their own sentences into one transcript
+    ("SeptemberCould you please 22 provide", UI run 2026-09-23)."""
+    token = _muted.set(_muted.get() | frozenset(events))
+    try:
+        yield
+    finally:
+        _muted.reset(token)
+
+
 def emit(event: str, **data: Any) -> None:
     """Report to the streaming client, if any. Safe from any thread."""
     channel = _channel.get()
-    if channel is None:
+    if channel is None or event in _muted.get():
         return
     loop, queue = channel
     item = {"event": event, **data}

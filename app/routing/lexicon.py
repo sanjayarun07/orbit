@@ -68,6 +68,14 @@ PERP_POSITIONS = re.compile(
 WALLET_OWNER = re.compile(r"\b(?:wallet|portfolio|balances?|pnl|transactions?|counterparties)\b", re.I)
 ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}|(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])")
 TOKEN = re.compile(r"\b(?:tokens?|coins?|mints?|contracts?|memecoins?|meme\s+coins?|holders?|liquidity)\b", re.I)
+# A pasted address is a TOKEN when the ask is about what a token has --
+# holders, trades, liquidity, snipers, a bundle, its deployer -- and a
+# WALLET only when a wallet word says so. One pattern for the wallet tool's
+# own veto and the research node's wallet detector (2026-09-23: "bundle
+# check <mint>" reached the portfolio because the detector knew only
+# "token/coin/contract/mint").
+TOKEN_SHAPED = re.compile(r"\b(?:trades?|holders?|volume|price|liquidity|pairs?|chart|market\s*cap|supply)\s+(?:of|for)\b"
+                          r"|\b(?:holders?|insiders?|snip\w+|bundl\w+|whales?|concentration|distribution|top\s*\d+|liquidity|lp|rug\w*|honeypot|deployer|dev|(?:first|early)\s+buyers?|buyers?)\b", re.I)
 # THE security vocabulary. Every layer that recognises a token-security ask --
 # the Layer-1 rule, the research node's intercept, the tool matchers and the
 # catalog's "security" dimension -- reads this one pattern. Six hand-kept
@@ -96,6 +104,10 @@ SECURITY_STRONG = re.compile(
     # and came back with French public-sector audit reports).
     r"|\baudit(?:s|ed|ing)?(?:\s+reports?)?\s+(?:on|of|for)\b"
     r"|\bsecurity\s+(?:check|report|audit|review)\b"
+    # Launch forensics: "is BONK bundled", "bundle check", "who sniped X",
+    # "coordinated buys". Crypto-only jargon; a ticker-phrased ask went to web
+    # search and came back about Ruby's Bundler (answer eval, 2026-09-22).
+    r"|\bbundl(?:ed|e\s+check|ing)\b|\bsnip(?:ed|ers?|ing)\b|\bcoordinated\s+(?:buys?|wallets?|launch)\b|\bsame[- ]block\s+buys?\b|\blinked\s+wallets\b"
     r"|\b(?:is|was|been)\s+\S+\s+audited\b"
     r"|\$[A-Za-z][A-Za-z0-9]{1,9}\b[^.\n?!]{0,24}\baudit",
     re.I,

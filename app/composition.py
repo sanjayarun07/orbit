@@ -55,6 +55,50 @@ def split_asks(request: str) -> list[str]:
     return parts if len(parts) >= 2 else [request]
 
 
+_ADDRESS = re.compile(r"(?<![A-Za-z0-9])(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])")
+_OWN_SUBJECT = re.compile(r"\$[A-Za-z][A-Za-z0-9._-]{0,15}|\b[A-Z][A-Z0-9]{2,9}\b")
+_CHAIN_WORD = re.compile(r"\b(solana|base|ethereum|arbitrum|optimism|polygon|bsc|bnb|avalanche)\b", re.I)
+
+
+_NOT_A_SYMBOL = {"USD", "USDC", "USDT", "ETF", "NFT", "DEX", "CEX", "LP", "TVL", "APY", "APR", "ATH", "ATL", "AI", "OK", "UTC", "PDF", "CSV", "USA"}
+
+
+def _symbol_in(text: str) -> str | None:
+    for m in _OWN_SUBJECT.finditer(text or ""):
+        word = m.group(0).lstrip("$")
+        if m.group(0).startswith("$") or (len(word) >= 3 and word not in _NOT_A_SYMBOL):
+            return word
+    return None
+
+
+def carry_subject(clauses: list[str], request: str) -> list[str]:
+    """Clauses that name no asset of their own get the message's subject, an
+    address or a ticker: "Investigate the launch of token <mint>. Show
+    deployer funding…" split into a second clause that asked for the contract
+    again, and "What changed in ANSEM … ? Compare saved snapshots…" into
+    clauses that asked which token (2026-09-23)."""
+    chain = _CHAIN_WORD.search(request or "")
+    on = f" on {chain.group(1).lower()}" if chain else ""
+    m = _ADDRESS.search(request or "")
+    if m:
+        tail = f" (token {m.group(1)}{on})"
+    else:
+        symbol = _symbol_in(request)
+        if not symbol:
+            return clauses
+        tail = f" ({symbol} token{on})"
+    return [c if (_ADDRESS.search(c) or _symbol_in(c)) else c + tail for c in clauses]
+
+
+_SYNTHESIS_HEAD = re.compile(r"^\*\*Taken together\*\*\n\n.*?\n\n---\n\n", re.S)
+
+
+def strip_synthesis(answer: str) -> str:
+    """The cards without an earlier "Taken together" block, so a second
+    composition reads the cards and writes one summary, not two."""
+    return _SYNTHESIS_HEAD.sub("", answer or "", count=1)
+
+
 def _shift(trajectory: dict, by: int) -> dict:
     out = {}
     for key, value in trajectory.items():
@@ -67,7 +111,7 @@ def combine(parts: list[tuple[str, dict]]) -> tuple[str, dict]:
     """(answer, trajectory) from per-clause (answer, trajectory) pairs."""
     answers, trajectory, offset = [], {}, 0
     for answer, traj in parts:
-        answers.append(answer)
+        answers.append(strip_synthesis(answer))          # one "Taken together" per answer: the one written after this
         traj = traj or {}
         steps = {int(m.group(1)) for k in traj for m in [re.fullmatch(r"tool_name_(\d+)", k)] if m}
         trajectory.update(_shift(traj, offset))

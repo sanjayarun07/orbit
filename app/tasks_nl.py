@@ -50,6 +50,26 @@ def _clock(h: str | None, m: str | None, ap: str | None, default: tuple[int, int
     return max(0, min(23, hour)), max(0, min(59, minute))
 
 
+_NAME_IT = re.compile(r"\s*[.;,]?\s*(?:name|call|title)\s+it\s+[\"'“”‘’]?(?P<title>[^.;\"'“”‘’]+?)[\"'“”‘’]?(?=\s*[.;]|\s*$)", re.I)
+_CHANNEL_WORDS = re.compile(r"\s*[.;,]?\s*(?:use\s+(?:the\s+)?|via\s+|by\s+|through\s+)?(?:the\s+)?(?P<channel>in[- ]app\s+inbox|inbox|in[- ]app|email|e-mail)(?:\s+only)?\s*[.;]?", re.I)
+
+
+def _reminder_fields(rest: str) -> tuple[str, str | None, str]:
+    """Strip "Name it X" and "use the in-app inbox only / by email" from the
+    reminder text: they are the task's title and channel, not its message
+    (UI run, 2026-09-23: they were copied into the reminder body)."""
+    title, channel = None, "inapp"
+    m = _NAME_IT.search(rest)
+    if m:
+        title = m.group("title").strip()
+        rest = rest[:m.start()] + rest[m.end():]
+    m = _CHANNEL_WORDS.search(rest)
+    if m:
+        channel = "email" if m.group("channel").lower().startswith("e") else "inapp"
+        rest = rest[:m.start()] + rest[m.end():]
+    return rest.strip(" .;,"), title, channel
+
+
 def parse_reminder(rest: str, tz_offset_min: int, now: datetime | None = None) -> tuple[dict, str] | None:
     """Returns (schedule, message) for the text after "remind me"."""
     now = now or datetime.now(timezone.utc)
@@ -161,15 +181,17 @@ async def handle(message: str, user: dict, tz_offset_min: int = 0) -> str | None
                 + (" each time it crosses." if spec["repeat"] else " the first time it crosses."))
     m = _REMIND.match(text)
     if m:
-        parsed = parse_reminder(m.group("rest"), tz_offset_min)
+        rest, title, channel = _reminder_fields(m.group("rest"))
+        parsed = parse_reminder(rest, tz_offset_min)
         if not parsed:
             return ("Tell me when and what — e.g. *remind me tomorrow at 9am to check SOL*, *remind me in 2 hours to rebalance*, "
                     "or *remind me every Monday at 9am to review my portfolio*.")
         schedule, msg = parsed
-        task = await _create(user, "reminder", {"message": msg}, schedule, task_scheduling.default_channel(), tz_offset_min, title=f"Reminder: {msg}")
+        task = await _create(user, "reminder", {"message": msg}, schedule, task_scheduling.default_channel(channel), tz_offset_min, title=title or f"Reminder: {msg}")
         if isinstance(task, str):
             return task
-        return f"Reminder set — **{msg}** · {tasks.describe_schedule(schedule, tz_offset_min)}. Next: {_when(task)}."
+        return (f"Reminder set — **{title or msg}** · {tasks.describe_schedule(schedule, tz_offset_min)} · {'email' if channel == 'email' else 'in-app inbox'}. "
+                f"Next: {_when(task)}.")
     return None
 
 
@@ -199,5 +221,5 @@ async def _render_list(user: dict) -> str:
     lines = ["**Your tasks**", ""]
     for index, task in enumerate(items, start=1):
         lines.append(f"{index}. **{task['title']}** · {tasks.describe_schedule(task['schedule'], task.get('tz_offset_min', 0))} · {task['status']} · next {_when(task)}")
-    lines += ["", "Say *pause task 2*, *delete task 1*, or open Settings → Tasks."]
+    lines += ["", "Say `pause task 1`, `delete task 1`, or open Settings → Tasks." if len(items) == 1 else f"Say `pause task 2`, `delete task 1` (numbers 1–{len(items)}), or open Settings → Tasks."]
     return "\n".join(lines)

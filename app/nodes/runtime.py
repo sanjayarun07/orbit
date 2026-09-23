@@ -107,7 +107,10 @@ class CompositeSynthesis(dspy.Signature):
     token is audited unless a card names an audit report or auditing firm;
     say "no audit report in the evidence" instead. If a card asks the user
     a question instead of answering, repeat the question; never pick a
-    subject the question did not name."""
+    subject the question did not name. Keep every figure's unit and meaning:
+    a "24h price change" column is a PRICE move, never volume growth; dollar
+    liquidity, volume or market cap are totals, never a price level; a value
+    shown as $0.0000 is a rounded small price, not a near-zero price."""
 
     request: str = dspy.InputField()
     evidence: str = dspy.InputField(desc="The cards, separated by ---; each is verbatim tool output")
@@ -168,6 +171,17 @@ class ResearchAnswer(dspy.Signature):
     Never claim a trade executed. Never invent a mint address; only use exact
     mints supplied by the user, found in conversation_history, or returned by
     search_verified_tokens.
+
+    Evidence discipline (UI review, 2026-09-23): when the data contradicts the
+    question's premise ("why is SOL down" while the card shows +1.5%), say so
+    first and answer the true state. Never state a launch or creation date
+    without a source that dates it; a first-buyer or first-trade time is not a
+    launch date. A token program (Token-2022) does not imply any extension;
+    name only extensions the data lists. "Secure", "safe", "unanimous" or
+    "bullish crowd" need the evidence that says so, with its sample size;
+    otherwise describe what was checked and what was not. Honour the user's
+    stated constraints (a horizon, "without another volatile token", one
+    chain): when nothing matches, say no match rather than a near miss.
     """
 
     request: str = dspy.InputField()
@@ -350,6 +364,13 @@ class MarketResearch(dspy.Signature):
     Finish with two lines: "CONVICTION x/10" and "WRONG IF <one falsifiable
     condition>". Cite only figures present in `market_data`; if a section's data
     is missing, say so in a few words rather than inventing anything.
+    Units are not interchangeable: liquidity, volume and market cap are dollar
+    TOTALS and are never a support, resistance or invalidation PRICE. A price
+    level may be named only when that price figure is in `market_data`;
+    otherwise write "no level in the data". Name a catalyst only when the data
+    dates an event; "possible announcements" is not a catalyst. Name the asset
+    as the data identifies it (chain, contract) and say when the identity is
+    unverified; then conviction cannot exceed 4/10.
     """
 
     asset: str = dspy.InputField()
