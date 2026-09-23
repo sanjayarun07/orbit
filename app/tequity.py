@@ -235,20 +235,25 @@ def period_start(request: str, now: datetime | None = None) -> datetime | None:
     text = m.group(0).lower()
     if "morning" in text or text == "today":
         return now.replace(hour=0, minute=0, second=0, microsecond=0)
-    if "week" in text and not (m.group("n") or m.group("n2")):
-        return now - timedelta(days=7)
-    if "24" in text:
-        return now - timedelta(hours=24)
     n, u = (m.group("n") or m.group("n2")), (m.group("u") or m.group("u2") or "")
-    if n:
+    if n:                                                                  # a quantity and its unit first: "last 24 days" is days (review of 07190a22)
         unit = u.lower()[:1]
         return now - (timedelta(hours=int(n)) if unit == "h" else timedelta(days=int(n)) if unit == "d" else timedelta(weeks=int(n)))
+    if "week" in text:
+        return now - timedelta(days=7)
+    if re.fullmatch(r"(?:last|past)\s+24\s*h(?:ours)?", text):
+        return now - timedelta(hours=24)
     if m.group("since"):
         if m.group("since").lower() == "yesterday":
             return (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         from app.snapshot_compare import dates_in
         found = dates_in(m.group("since"), now)
-        return found[0] if found else None
+        if not found:
+            return None
+        when = found[0]
+        if when > now:
+            when = when.replace(year=when.year - 1)                        # a period never starts in the future
+        return when
     return None
 
 
@@ -492,10 +497,10 @@ def history(request: str) -> str:
     start = period_start(request)
     if not base or not start:
         raise ValueError("Name the asset and the period, e.g. 'how has TSLA moved on hyperliquid this week'")
-    _sync(snapshot(MOVERS[venue]))
+    current = _sync(snapshot(MOVERS[venue]))                              # None when the feed is stale: then no "Feed now" line
     symbol = resolve_pair(venue, base) or f"{base}USDC"
     ticks = _sync(tequity_ledger.history(venue, symbol, start))
-    live = next((r for r in (((_snapshots.get(MOVERS[venue]) or {}).get("data") or {}).get("data", {}).get("tokens") or []) if isinstance(r, dict) and r.get("symbol") == symbol), None)
+    live = next((r for r in (((current or {}).get("data") or {}).get("data", {}).get("tokens") or []) if isinstance(r, dict) and r.get("symbol") == symbol), None)
     evidence.complete("tequity_history", {"kind": "pair", "id": f"{venue}:{symbol}", "chain": None, "symbol": base},
                       {"ticks": len(ticks), "from": ticks[0]["taken_at"].isoformat() if ticks else None, "to": ticks[-1]["taken_at"].isoformat() if ticks else None},
                       [{"provider": "tequity_ledger", "endpoint": "tequity_ticks", "as_of": _fmt_when(ticks[-1]["taken_at"]) if ticks else None}], attempted=1)

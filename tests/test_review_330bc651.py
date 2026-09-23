@@ -74,5 +74,6 @@ def test_compound_asks_keep_their_note_constraints_and_instructions():
     assert len(clauses) == 1 and clauses[0].startswith("List funding rounds") and "Resolved from conversation context" in clauses[0]
     assert "Mark database-only claims" in note and not any(c.startswith("Resolved") or c.startswith("Mark") for c in clauses)
     clauses, note = composition.plan_asks("What changed in ANSEM holders between September 21 and September 22? Compare saved snapshots. If snapshots are unavailable, say so.")
-    assert clauses == ["What changed in ANSEM holders between September 21 and September 22", "Compare saved snapshots (ANSEM token)"] and "say so" in note
+    assert clauses == ["What changed in ANSEM holders between September 21 and September 22",
+                       "Compare saved snapshots (context: What changed in ANSEM holders between September 21 and September 22)"] and "say so" in note
     assert composition.plan_asks("price and volume of BONK") == (["price and volume of BONK"], "")

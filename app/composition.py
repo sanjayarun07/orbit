@@ -117,8 +117,11 @@ def plan_asks(request: str) -> tuple[list[str], str]:
     out = []
     lead_has_terms = bool(_ADDRESS.search(lead) or _symbol_in(lead) or _CONSTRAINT.search(lead))
     for original, clause in zip(substantive, carried):
-        if lead_has_terms and clause == original and original != lead and not _ADDRESS.search(original) and not _symbol_in(original):
-            clause = f"{original} (context: {lead})"                        # the lead's asset and constraints travel with the ask
+        if lead_has_terms and original != lead and not _ADDRESS.search(original) and not _symbol_in(original):
+            # The lead's asset AND its constraints travel with the ask, whether
+            # or not a ticker was already carried (review of 07190a22: "at
+            # least $1,000,000 liquidity" was lost once BONK had been added).
+            clause = f"{original} (context: {lead})"
         if note:
             clause = f"{clause}\n{note}"
         out.append(clause)

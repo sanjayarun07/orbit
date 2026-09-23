@@ -172,7 +172,9 @@ async def peek_link_token(token: str) -> dict | None:
 
 
 async def start_claim_confirmation(token: str, user_id: str) -> str:
-    """A nonce that binds one pending link to one signed-in browser session.
+    """A nonce that binds one pending link to the signed-in account that
+    previewed it (the browser session proves the account; the nonce is
+    checked against that account id and the token).
     The claim must present it: a link opened by a victim is then only
     previewed, never attached, until that person clicks Connect (review of
     330bc651: page load attached whichever Telegram identity minted the URL)."""

@@ -557,7 +557,13 @@ async def _evaluate_movers_alert(task: dict) -> tuple[bool, str, str | None]:
     spec = dict(task["spec"])
     now = _now()
     window = timedelta(minutes=int(spec.get("window_minutes") or 60))
-    out = await tequity_ledger.movers_between(spec["venue"], now - window, now, stocks_only=bool(spec.get("stocks_only")), limit=500)
+    # The baseline must sit close to the window's start and the endpoint close
+    # to now: two recording intervals, or the change is not one "within" the
+    # window and the alert says why it skipped instead (review of 07190a22).
+    max_gap = timedelta(seconds=2 * max(30, int(settings.tequity_record_interval_seconds or 300)))
+    out = await tequity_ledger.movers_between(spec["venue"], now - window, now, stocks_only=bool(spec.get("stocks_only")), limit=500, max_gap=max_gap)
+    if out.get("coverage_gap"):
+        return False, f"skipped: insufficient coverage ({out['coverage_gap']})", None
     rows = [r for r in (out.get("gainers") or []) if abs(r["change_between_pct"]) >= float(spec["threshold_pct"])]
     if not out.get("from"):
         return False, "no stored ticks in the window yet", None
@@ -570,7 +576,9 @@ async def _evaluate_movers_alert(task: dict) -> tuple[bool, str, str | None]:
         fresh.append(r)
         fired[r["symbol"]] = now.isoformat()
     fired = {k: v for k, v in fired.items() if (now - datetime.fromisoformat(v)) < window * 2}
-    await update_task(task["id"], task["user_id"], spec={**spec, "last_fired": fired})
+    # Not persisted here: the cooldown commits in _run_claimed only once the
+    # inbox row exists, so a failed delivery is retried, not suppressed.
+    task["_pending_fired"] = fired
     if not fresh:
         return False, f"{len(rows)} over threshold, none new", None
     fresh.sort(key=lambda r: abs(r["change_between_pct"]), reverse=True)
@@ -851,6 +859,8 @@ async def _run_claimed(task: dict, user: dict) -> dict:
                 updates["last_result"] = f"{result} (email failed)"
         if delivered_now:
             updates["fire_count"] = int(task.get("fire_count") or 0) + 1
+        if task.get("_pending_fired") is not None:
+            updates["spec"] = {**task["spec"], "last_fired": task["_pending_fired"]}    # the inbox row stands: now the cooldown
     updates.update(_reschedule(task, now, fired))
     await update_task(task["id"], task["user_id"], **updates)
     return {"id": task["id"], "fired": fired, "result": updates["last_result"], "status": updates.get("status", "active")}

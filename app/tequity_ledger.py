@@ -158,11 +158,22 @@ async def record(now: datetime | None = None) -> int:
         snap = tequity._snapshots.get(channel)
         if not snap or time.time() - snap["received_at"] > tequity.STALE_SECONDS:
             continue
-        latest = await latest_tick_time(channel)
-        if latest is not None and now - latest < guard:
+        if await has_tick_near(channel, now, guard):
             continue                                                       # this sample bucket is already recorded (a second recorder, a restart)
         stored += await store(rows_from(channel, snap, now))
     return stored
+
+
+async def has_tick_near(channel: str, moment: datetime, within: timedelta) -> bool:
+    """Whether a tick of this channel sits within `within` of `moment`, on
+    either side: the sample-bucket test, indifferent to ticks recorded for
+    other moments (a backfilled earlier tick is not the same bucket)."""
+    pool = await _pool()
+    if pool is not None:
+        return bool(await pool.fetchval("SELECT 1 FROM tequity_ticks WHERE channel = $1 AND taken_at > $2 AND taken_at < $3 LIMIT 1",
+                                        channel, moment - within, moment + within))
+    with _lock:
+        return any(r["channel"] == channel and abs(r["taken_at"] - moment) < within for r in _rows)
 
 
 async def latest_tick_time(channel: str) -> datetime | None:
@@ -195,9 +206,14 @@ async def is_leader() -> bool:
     try:
         client = await get_redis()
     except Exception:
-        client = None
+        # Redis is configured and cannot be initialised: nobody can prove
+        # they lead (review of 07190a22: this path granted leadership).
+        logger.info("tequity_ledger: redis unavailable; skipping this tick", exc_info=True)
+        return False
     if client is None:
-        return True
+        if settings.redis_url:
+            return False                                                   # configured but not available: fail closed
+        return True                                                        # memory mode by choice: a single process
     try:
         if await client.set(_LEADER_KEY, _leader_id, nx=True, ex=_leader_ttl()):
             return True
@@ -294,7 +310,8 @@ async def first_tick_from(channel: str, moment: datetime) -> list[dict]:
         return [dict(r) for r in _rows if r["channel"] == channel and r["taken_at"] == when]
 
 
-async def movers_between(venue: str, start: datetime, end: datetime, *, stocks_only: bool = False, limit: int = 15) -> dict:
+async def movers_between(venue: str, start: datetime, end: datetime, *, stocks_only: bool = False, limit: int = 15,
+                         max_gap: timedelta | None = None) -> dict:
     """Price change per pair between the last tick at or before `start` (or
     the first one after it, when the ledger begins inside the period) and
     the last tick at or before `end`, from stored prices (not the feed's own
@@ -307,6 +324,19 @@ async def movers_between(venue: str, start: datetime, end: datetime, *, stocks_o
         a = await first_tick_from(channel, start)
     if a and b and a[0]["taken_at"] == b[0]["taken_at"]:
         a = []                                                            # one tick is not a change
+    coverage = None
+    if max_gap is not None and a and b:
+        # An alert's window is a promise: the baseline must sit within
+        # max_gap of the window's start and the endpoint within max_gap of
+        # its end, or the change is not a change "within" that window
+        # (review of 07190a22: a five-hour-old baseline fired a one-hour alert).
+        t0, t1 = a[0]["taken_at"], b[0]["taken_at"]
+        if abs(t0 - start) > max_gap or end - t1 > max_gap:
+            coverage = (f"baseline tick {abs((t0 - start).total_seconds()) / 60:.0f} min from the window start, "
+                        f"latest tick {(end - t1).total_seconds() / 60:.0f} min old; limit {max_gap.total_seconds() / 60:.0f} min")
+            a = []
+    elif max_gap is not None and not (a and b):
+        coverage = "no stored ticks at both ends of the window"
     first = {r["symbol"]: r for r in a}
     out = []
     for r in b:
@@ -317,7 +347,7 @@ async def movers_between(venue: str, start: datetime, end: datetime, *, stocks_o
         out.append({**r, "price_then": p0, "change_between_pct": (p1 - p0) / p0 * 100})
     out.sort(key=lambda r: r["change_between_pct"], reverse=True)
     return {"venue": venue, "from": a[0]["taken_at"] if a else None, "to": b[0]["taken_at"] if b else None,
-            "gainers": out[:limit], "losers": list(reversed(out))[:limit], "pairs": len(out)}
+            "gainers": out[:limit], "losers": list(reversed(out))[:limit], "pairs": len(out), "coverage_gap": coverage}
 
 
 async def volume_leaders(venue: str, days: float, *, stocks_only: bool = False, limit: int = 15) -> list[dict]:
@@ -328,8 +358,9 @@ async def volume_leaders(venue: str, days: float, *, stocks_only: bool = False, 
     if pool is not None and channel:
         rows = await pool.fetch(
             "SELECT symbol, bool_or(is_stock) AS is_stock, avg(quote_volume) AS mean_volume, count(*) AS ticks, max(last_price) AS high, min(last_price) AS low "
-            "FROM tequity_ticks WHERE channel = $1 AND taken_at >= $2 GROUP BY symbol ORDER BY mean_volume DESC NULLS LAST LIMIT $3",
-            channel, since, limit * 3)
+            "FROM tequity_ticks WHERE channel = $1 AND taken_at >= $2 AND ($4::bool = FALSE OR is_stock) "
+            "GROUP BY symbol ORDER BY mean_volume DESC NULLS LAST LIMIT $3",
+            channel, since, limit, stocks_only)                              # the stock filter before the limit, never after (review of 07190a22)
         out = [dict(r) for r in rows]
     else:
         with _lock:

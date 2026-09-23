@@ -2820,3 +2820,13 @@ brief gains a "Perp venues" section: top three movers per venue, best stock, and
   switch; `composition.plan_asks` strips the resolution note before splitting, drops format-only clauses ("Mark
   database-only claims", "If unavailable, say so") into an instruction note for the synthesis, and carries the lead
   clause's asset and constraints into subject-less clauses ("Explain how the yield can change (context: …)").
+
+**Review of 07190a22 (2026-09-23): fixes.** A movers alert requires coverage: the baseline tick within two recording
+intervals of the window's start and the latest tick within two intervals of now (`movers_between(max_gap=)`), else
+it skips with the gap named. The alert's cooldown (`spec.last_fired`) commits in `_run_claimed` only after the inbox
+row exists; a failed delivery is retried, not suppressed. History's "Feed now" line comes from the validated
+snapshot only. Leadership fails closed when Redis is configured but unavailable (memory mode by choice still runs).
+"last 24 days" is days (quantity and unit parse first; the 24-hour shortcut needs the exact phrase); a "since
+<date>" in the future rolls back a year. A subject-less clause carries the lead clause's asset and constraints even
+when a ticker was already added. The SQL stock ranking filters on `is_stock` before it limits. The sample-bucket
+guard is two-sided (a backfilled earlier tick is not the current bucket).

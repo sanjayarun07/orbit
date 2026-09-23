@@ -27,6 +27,8 @@ def _feed(monkeypatch):
     hl = tequity.MOVERS["hyperliquid"]
     tequity._store(hl, _snap([_row("TSLAUSDC", "TSLA", 400.0, 1.0, 5e6, True), _row("BTCUSDC", "BTC", 90000.0, -1.0, 2e9)]), time.time())
     asyncio.run(tequity_ledger.record(NOW - timedelta(hours=5)))
+    tequity._store(hl, _snap([_row("TSLAUSDC", "TSLA", 400.0, 1.0, 5.5e6, True), _row("BTCUSDC", "BTC", 89000.0, -1.0, 2.05e9)]), time.time())
+    asyncio.run(tequity_ledger.record(NOW - timedelta(minutes=61)))
     tequity._store(hl, _snap([_row("TSLAUSDC", "TSLA", 440.0, 1.0, 6e6, True), _row("BTCUSDC", "BTC", 85500.0, -1.0, 2.1e9)]), time.time())
     asyncio.run(tequity_ledger.record(NOW - timedelta(minutes=30)))
     tequity._store(hl, _snap([_row("TSLAUSDC", "TSLA", 452.0, 2.5, 7e6, True), _row("BTCUSDC", "BTC", 85000.0, -1.2, 2.2e9)]), time.time())
@@ -46,7 +48,7 @@ def test_periods_and_bases_are_read_from_the_ask():
 
 def test_history_reads_stored_prices_and_says_where_the_ledger_begins():
     card = tequity.history("how has TSLA moved on hyperliquid this week")
-    assert card.startswith("# TSLA on Hyperliquid since") and "| Change between those ticks | +13.00% |" in card and "3 ticks | $452.00 / $400.00 |" in card
+    assert card.startswith("# TSLA on Hyperliquid since") and "| Change between those ticks | +13.00% |" in card and "4 ticks | $452.00 / $400.00 |" in card
     assert "later than the period asked for; the change is measured from there" in card and "Feed now: $452.00, +2.50%" in card
     assert tequity.history_matches("how has TSLA moved on hyperliquid this week") and not tequity.history_matches("how has TSLA moved this week")
     assert not tequity.history_matches("my TSLA position on hyperliquid this week")
@@ -83,9 +85,11 @@ def test_movers_alert_fires_once_per_pair_per_window():
     task = asyncio.run(tasks.create_task({"id": "u1", "email": "u@example.com"}, "movers_alert", spec, {"every_minutes": 5}))
     fire, text, body = asyncio.run(tasks.evaluate(task))
     assert fire and text.startswith("1 tokenized stock moved over 2% on hyperliquid within 60 min: TSLA +13.0% ($400 → $452)") and "not a recommendation" in body
-    task = asyncio.run(tasks.get_task(task["id"]))
-    assert "TSLAUSDC" in task["spec"]["last_fired"]
-    fire, text, _ = asyncio.run(tasks.evaluate(task))                                   # same move inside the window: nothing new
+    assert "TSLAUSDC" in task["_pending_fired"]                                           # the cooldown is pending, not committed
+    stored = asyncio.run(tasks.get_task(task["id"]))
+    assert stored["spec"].get("last_fired", {}) == {}
+    asyncio.run(tasks.update_task(task["id"], "u1", spec={**stored["spec"], "last_fired": task["_pending_fired"]}))   # what delivery commits
+    fire, text, _ = asyncio.run(tasks.evaluate(asyncio.run(tasks.get_task(task["id"]))))   # same move inside the window: nothing new
     assert not fire and text == "1 over threshold, none new"
     with pytest.raises(ValueError):
         tasks.validate_spec("movers_alert", {"venue": "hyperliquid", "threshold_pct": 0})
