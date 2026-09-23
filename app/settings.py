@@ -291,6 +291,11 @@ class Settings(BaseSettings):
     exit_alert_drop_pct: float = 20.0                # quoted full-exit proceeds down this much vs entry or the last alert
     exit_alert_cooldown_hours: float = 6.0
     exit_positions_per_user: int = 10
+    # Tequity (app/tequity.py): the company's internal equities/perps websocket.
+    # Movers on Aster and Hyperliquid, a cross-venue trending list, news and
+    # stats. Not a secret; wss only (ws:// is rejected upstream).
+    tequity_enabled: bool = True
+    tequity_ws_url: str | None = "wss://tequity-dn.i5.xyz/ws"
     bitquery_api_key: str | None = None
     bitquery_graphql_url: str = "https://streaming.bitquery.io/eap"
     bitquery_requests_per_minute: int = 30

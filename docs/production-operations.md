@@ -2410,3 +2410,17 @@ retried every tick until the provider accepts it (the inbox row and the cooldown
   concentration as a fact and says liquidity is not measured.
 - **Polish.** Plan copy says 300 credits; `show my tasks` cites a real task number; "Name it X" and "in-app inbox
   only / by email" become the reminder's title and channel.
+
+## Tequity: the company's equities and perps feed (2026-09-23)
+
+`app/tequity.py` subscribes once per process to `TEQUITY_WS_URL` (default `wss://tequity-dn.i5.xyz/ws`; plain
+`ws://` is rejected upstream) and keeps the latest snapshot of every channel: `equities:movers:aster` (500 pairs,
+every ~3 s), `equities:movers:hyperliquid` (358 pairs, ~5 s), `equities:trending` (50 pairs, ~4 s), plus
+`equities:news` and `equities:stats*`, which had emitted nothing in the first 150 s of listening. A tool reads the
+snapshot (stale after 120 s) or takes one from an 8-second one-shot subscription. Tools: `tequity_movers`
+(venue-scoped gainers/losers, tokenized stocks filtered on `is_stock`; also a research-node intercept so a venue
+movers ask never drifts to the web), `tequity_trending` (cross-venue, composes with the narrative card),
+`tequity_news` (reachable only once a news snapshot exists). Cards carry the server timestamp as the snapshot
+time and say that "24h price change" is a price move. The feed has no book, funding, open interest or per-row
+time, so it feeds discovery cards, never the deep dive or the exit monitor. Disable with `TEQUITY_ENABLED=false`.
+The worker is listed under `tequity` in the startup task map.

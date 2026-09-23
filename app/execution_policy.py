@@ -52,6 +52,7 @@ from app.routing.workflow import WorkflowState, WorkflowEvent, apply_event
 from app.service_errors import ServiceError, safe_detail as _safe_detail
 from app.sessions import CoordinationStoreFull, acquire_session_turn, commit_turn, extend_retention, get_session_snapshot, history_text_from_messages
 from app.settings import settings
+from app.billing_plans import FREE
 from app.solana_rpc import rpc
 
 logger = logging.getLogger(__name__)
@@ -144,7 +145,7 @@ async def _admitted_chat_turn(body: ChatRequest, identity: Identity | str) -> Ag
             raise ServiceError(402, {
                 "error": "insufficient_credits", "balance": exc.balance, "required": exc.required,
                 "plan": identity.plan.id, "signed_in": identity.signed_in,
-                "message": ("You've used your trial credits. Sign in to get 100 free credits every month."
+                "message": (f"You've used your trial credits. Sign in to get {FREE.monthly_credits} free credits every month."
                             if not identity.signed_in else "You're out of credits for this month. Upgrade or buy a credit pack."),
             })
     # principal_id, not account_id: a plan belongs to the person who asked for

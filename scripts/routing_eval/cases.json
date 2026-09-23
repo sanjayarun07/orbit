@@ -1455,5 +1455,43 @@
   "expected_intent": "general",
   "router": false,
   "notes": "about the product, not a web question; I is not a token (funded UI run 2026-09-23)"
+ },
+ {
+  "id": "tequity-aster-gainers",
+  "query": "top gainers on Aster today",
+  "expected_tools": [
+   "tequity_movers"
+  ],
+  "forbidden_tools": [
+   "dexscreener_boosted_tokens",
+   "geckoterminal_pools"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "internal Tequity feed (2026-09-23)"
+ },
+ {
+  "id": "tequity-hl-stocks",
+  "query": "which tokenized stocks are moving on hyperliquid",
+  "expected_tools": [
+   "tequity_movers"
+  ],
+  "forbidden_tools": [
+   "hyperliquid_positions"
+  ],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "stocks filter on the movers snapshot"
+ },
+ {
+  "id": "tequity-trending",
+  "query": "what's trending on hyperliquid right now",
+  "expected_tools": [
+   "tequity_trending"
+  ],
+  "forbidden_tools": [],
+  "expected_intent": "research",
+  "router": true,
+  "notes": "cross-venue trending list"
  }
 ]

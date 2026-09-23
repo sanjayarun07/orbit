@@ -29,7 +29,7 @@ from app.token_resolve import bitquery_evm_lookup, clear_winner, token_candidate
 from app.token_deepdive import (
     ANALYSIS_RULES, build_token_evidence, bundle_signals, coverage_rows, evidence_skips, extract_market_price, format_evidence_bundle,
 )
-from app import decision_records, handles, holder_snapshots, jobs, listed_asset, role_memory, snapshot_compare
+from app import decision_records, handles, holder_snapshots, jobs, listed_asset, role_memory, snapshot_compare, tequity
 from app.signals import Signal, Subject
 from app.source_cards import extract_source_cards
 from app.web_search import append_web_sources, is_crypto_trends_query, web_search
@@ -1807,6 +1807,16 @@ async def research_node(state: AgentState) -> dict:
         state = {**state, "request": request, "contextual_request": None,
                  "capabilities": sorted(set(state.get("capabilities") or []) | {"market_data", "derivatives"})}
         streaming.emit("status", text=f"Reading the tape for {asset}")
+    if tequity.enabled() and tequity.movers_matches(request):
+        # Venue movers come from the company's own feed, whatever the
+        # classifier called the ask ("which tokenized stocks are moving on
+        # hyperliquid" went to the web as equity research, 2026-09-23).
+        try:
+            card = await asyncio.to_thread(tequity.movers, request)
+            return {"answer": card, "trajectory": {"thought_0": "Venue movers from the internal Tequity feed.", "tool_name_0": "tequity_movers",
+                                                   "tool_args_0": {"request": request}, "observation_0": card}}
+        except Exception:
+            logger.warning("tequity movers unavailable; falling through to routing", exc_info=True)
     if _PERSONAL_ASK.search(request) and not _mentions_asset(request):
         holdings = _remembered_holdings(state)
         if holdings:
