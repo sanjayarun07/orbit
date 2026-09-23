@@ -55,7 +55,7 @@ def test_quotes_keep_marked_value_quoted_proceeds_and_minimum_apart(chain):
     assert full["route"] == ["Raydium", "Orca"] and full["slot"] == 449450578
     card = exit_monitor.render_card({"wallet": WALLET, "mint": MINT, "symbol": "BONK", **pos}, rows)
     assert "| 100% | 1,000,000 | $20.00 | **$19.70** | $19.60 | 1.50% | Raydium → Orca |" in card
-    assert "**1.5%** is the cost of getting out at this size" in card and "partial exits do not add up" in card
+    assert "**1.50% below**" in card and "partial exits do not add up" in card
     assert "Nothing here prepares or submits a trade" in card and "Quotes computed at slot 449450578" in card
 
 

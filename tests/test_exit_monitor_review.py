@@ -444,7 +444,8 @@ def test_the_card_never_reports_a_negative_cost_and_never_compares_the_entry_wit
         r["quoted_usdc"] = r["marked_value_usd"] * 1.004                                # the route pays slightly above the mark
     watched = asyncio.run(exit_monitor.watch("u1", WALLET, MINT, "BONK", pos, rows))
     card = exit_monitor.render_card({**watched, **pos}, rows, watched["entry"])          # what "watch" renders: no history yet
-    assert "no measurable cost of getting out at this size" in card and "is the cost" not in card
+    assert "**0.40% above**" in card and "no measurable cost" not in card
+    assert "excludes network fees" in card
     assert "Since you started watching" not in card
     hist = [{"taken_at": "2026-09-22T18:00:00+00:00", "quantity_raw": pos["quantity_raw"], "quotes": rows}, {"taken_at": "2026-09-22T17:00:00+00:00", "quantity_raw": pos["quantity_raw"], "quotes": rows}]
     later = exit_monitor.render_card({**watched, **pos}, rows, watched["entry"], hist)      # a later quote exists: the comparison shows

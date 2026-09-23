@@ -287,14 +287,11 @@ def render_card(position: dict, rows: list[dict], entry: dict | None = None, his
     full = full_exit(rows)
     if full and full.get("marked_value_usd"):
         gap = (full["marked_value_usd"] - full["quoted_usdc"]) / full["marked_value_usd"] * 100
-        if gap > 0.05:
-            lines += ["", f"Selling everything now would return **{_usd(full['quoted_usdc'])}** against a marked value of {_usd(full['marked_value_usd'])}: "
-                          f"**{gap:.1f}%** is the cost of getting out at this size ({full['price_impact_pct']:.2f}% price impact at {full['slippage_bps']} bps slippage)."]
-        else:
-            # The quote is at or above the marked value: there is no cost to
-            # report, and "-0.4% is the cost" is not a sentence (live, 2026-09-22).
-            lines += ["", f"Selling everything now would return **{_usd(full['quoted_usdc'])}**, at or above its marked value of {_usd(full['marked_value_usd'])}: "
-                          f"no measurable cost of getting out at this size ({full['price_impact_pct']:.2f}% price impact at {full['slippage_bps']} bps slippage)."]
+        relation = "below" if gap > 0 else "above" if gap < 0 else "equal to"
+        comparison = f"**{abs(gap):.2f}% {relation}**" if gap else "**equal to**"
+        lines += ["", f"The full-position exit is quoted at **{_usd(full['quoted_usdc'])}**, {comparison} the reference valuation of {_usd(full['marked_value_usd'])} "
+                      f"({full['price_impact_pct']:.2f}% price impact, {full['slippage_bps']} bps slippage tolerance). "
+                      "This comparison is not a total execution cost estimate and excludes network fees."]
     # The change since entry is shown once there is a later quote to compare;
     # at the moment of watching the entry IS this quote (live, 2026-09-22).
     if entry and full and history and len(history) > 1:

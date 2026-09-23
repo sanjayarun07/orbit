@@ -173,6 +173,22 @@ const SOLANA = { id: 792703809, name: "Solana", nativeSymbol: "SOL", vmType: "sv
 const BASE = { id: 8453, name: "Base", nativeSymbol: "ETH", vmType: "evm" };
 
 const CASES = {
+  async history_preserves_message_times() {
+    const { sandbox, setScriptVar } = load();
+    setScriptVar("sessionId", "timestamp-test");
+    const seen = [];
+    sandbox.addUserMessage = (text, ts) => seen.push({ role: "user", text, ts });
+    sandbox.addAgentMessage = () => ({});
+    sandbox.finishAgentMessage = (_el, data) => seen.push({ role: "assistant", ts: data.ts });
+    sandbox.fetch = async () => ({ ok: true, json: async () => ({ context: {}, messages: [
+      { role: "user", content: "old question", ts: 1700000000 },
+      { role: "assistant", content: "old answer", ts: 1700000060 },
+      { role: "user", content: "legacy question" },
+      { role: "assistant", content: "legacy answer" },
+    ] }) });
+    await sandbox.hydrateHistory();
+    return { loadError: sandbox.__loadError ?? null, seen };
+  },
   /** A detached job is watched; when it settles the conversation is refreshed. */
   async detached_job_refreshes_the_conversation() {
     const { dom, sandbox, setScriptVar } = load();
