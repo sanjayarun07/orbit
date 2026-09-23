@@ -52,7 +52,10 @@ OWN_WALLET_ACTIVITY = re.compile(
     r"|\b(?:recent|latest)\s+(?:transactions?|activity|transfers?)\s+(?:in|for|from)\s+(?:my|this|the\s+connected|the)\s+wallet\b",
     re.I,
 )
-WALLET_HEALTH = re.compile(r"\b(?:my|connected)\b.{0,30}\b(?:wallet health|wallet safety|approvals?|gas readiness)\b", re.I)
+# "Wallet health check" is the Home card's own wording: no possessive, and it
+# means the connected wallet (frozen wallet run, 2026-09-24: it went to the
+# plain portfolio read and promised coverage and fees it never showed).
+WALLET_HEALTH = re.compile(r"\b(?:my|connected)\b.{0,30}\b(?:wallet health|wallet safety|approvals?|gas readiness)\b|\bwallet\s+health(?:\s+check)?\b|\bhealth\s+check\b.{0,20}\bwallet\b", re.I)
 PORTFOLIO_SCENARIO = re.compile(r"\b(?:what if|scenario|stress test|drops?|falls?|rises?|increases?)\b.{0,80}\b(?:portfolio|wallet|SOL|token|market)\b|\b(?:portfolio|wallet|SOL|token|market)\b.{0,80}\b(?:drops?|falls?|rises?|increases?)\b", re.I)
 WALLET = re.compile(r"\b(?:wallet|address|portfolio|holdings?|holds?|holding|balances?|pnl|transactions?|leverage|debt|liquidation|counterparties)\b", re.I)
 # A perpetual-positions ask about a wallet: "open perps for 0x...", "my open

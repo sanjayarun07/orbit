@@ -2964,3 +2964,24 @@ pipeline showed two "Taken together" blocks: `composition.strip_synthesis` now s
 and keeps the lead (the gap sentence is a finding, not prose). The trust harness takes `--wallet <address>` (sent as
 the connected wallet on every turn; the tester's is the SOL+ANSEM wallet the user supplied) and `--include-skipped`
 (runs the cases that create notifications, watches and reminders; only with the user's approval, and clean up after).
+
+**Second frozen run, build 4c32ae39 (2026-09-24, `reports/trust-rerun-4c32ae39/`).** 96 turns: 82 pass, 12 partial,
+2 fail by the judge; after the read, five real defects (the previous frozen run had four, the moving-build reviews
+had 19 fails). Fixed in 69d0daa7: "September 24, 2025," withheld a correct summary (dates in words are stripped before
+the figure check, a trailing comma is not a figure); "last 24 days" was written up as 24 hours (the contract note names
+the window in days and asks for it by name); a stocks-by-volume ask was classed equity research and reached the web
+before the venue intercept (the intercept covers volume asks, with the volume tool as its fallback); the venue volume
+card carried no coverage statement over a ledger that started that morning (a Checked stamp and a Coverage line with
+the earliest tick and the hours covered, and the summary names the covered span); a dated comparison with no snapshot
+was summarised as "no changes between the dates" (the compound synthesis is told the cards are current data, and the
+synthesis rules say a property no card lists is unknown, never absent or supported, and current cards are never a
+change between dates).
+
+**The wallet run (2026-09-24, `reports/trust-rerun-4c32ae39-wallet*`).** The seventeen wallet and notification turns
+with the user's SOL+ANSEM wallet connected: exit quotes at three sizes, the watch, its rule and stop, reminders (both
+delivered to the inbox within 15 s), alerts, the task list, portfolio, scenario and the sell simulation all pass. Two
+defects, fixed: "send me a morning brief at 8am" with a paused brief created a second brief (one brief per account:
+asking again reschedules and resumes it, `tasks_nl`); and the Home card's own wording "Wallet health check" carried
+no possessive, so it went to the plain portfolio read and never showed the coverage and fee lines the card promises
+(`lexicon.WALLET_HEALTH` knows the bare phrase). Everything the run created was deleted afterwards. The harness backs
+off 25 s on the per-account chat limiter, which sub-second control turns trip.

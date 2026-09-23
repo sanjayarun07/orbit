@@ -137,3 +137,9 @@ def test_the_volume_card_states_what_the_ledger_covers_of_the_window():
     assert "**Checked**: 2026-09-24 19:00 UTC" in card
     full = tequity.render_volume_leaders("hyperliquid", rows, 7.0, stocks_only=True, covered_from=now - timedelta(days=7), window_start=now - timedelta(days=7), checked=now)
     assert "**Coverage**" not in full
+
+
+def test_the_home_cards_wallet_health_wording_routes_to_the_health_check():
+    from app.routing import lexicon
+    assert lexicon.WALLET_HEALTH.search("Wallet health check") and lexicon.WALLET_HEALTH.search("check my wallet health")
+    assert not lexicon.WALLET_HEALTH.search("Analyze my portfolio") and not lexicon.WALLET_HEALTH.search("is the protocol healthy")

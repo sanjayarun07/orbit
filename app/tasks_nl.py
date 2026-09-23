@@ -178,7 +178,19 @@ async def handle(message: str, user: dict, tz_offset_min: int = 0) -> str | None
     if m:
         h, mi = _clock(m.group("h"), m.group("m"), m.group("ap"), default=(8, 0))
         channel = task_scheduling.default_channel("email" if m.group("channel") else None)
-        task = await _create(user, "brief", {}, {"daily": f"{h:02d}:{mi:02d}"}, channel, tz_offset_min)
+        schedule = {"daily": f"{h:02d}:{mi:02d}"}
+        # One brief per account: asking again reschedules and resumes the one
+        # that exists (a paused brief plus a new active one, wallet run 2026-09-24).
+        existing = next((t for t in await tasks.list_tasks(user["id"]) if t["kind"] == "brief"), None)
+        if existing is not None:
+            try:
+                await tasks.update_task(existing["id"], user["id"], schedule=schedule, channel=channel,
+                                        next_run_at=tasks.next_run(schedule, existing.get("tz_offset_min") or tz_offset_min or 0))
+                task = await task_scheduling.update_task(existing["id"], user["id"], user=user, status="active")
+            except ServiceError as exc:
+                return f"I couldn't schedule that: {exc.detail}"
+            return f"Morning brief rescheduled **daily at {h:02d}:{mi:02d}** ({_where(channel)}), the one you already had. Next: {_when(task)}. It costs 1 credit per delivery."
+        task = await _create(user, "brief", {}, schedule, channel, tz_offset_min)
         return task if isinstance(task, str) else f"Morning brief scheduled **daily at {h:02d}:{mi:02d}** ({_where(channel)}). First one: {_when(task)}. It costs 1 credit per delivery."
     m = _ALERT.match(text)
     if m:

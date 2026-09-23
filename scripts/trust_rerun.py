@@ -105,13 +105,16 @@ async def run(cases: list[dict], out_dir: Path, wallet: str | None = None) -> No
             session = f"trust-{stamp}-{case['persona']}" + (f"-{case['id']}" if case.get("session") == "each" else "")
             t0 = time.time()
             try:
-                for attempt in (0, 1):
+                for attempt in range(4):
                     try:
                         resp = await asyncio.wait_for(execute_chat_turn(ChatRequest(message=case["prompt"], session_id=session, wallet_address=wallet), identity), timeout=170)
                         break
                     except Exception as exc:  # noqa: BLE001
-                        if attempt == 0 and "already updating this chat" in str(exc):
+                        if attempt < 3 and "already updating this chat" in str(exc):
                             await asyncio.sleep(12)          # the previous turn's lock is still expiring
+                            continue
+                        if attempt < 3 and "Too many chat requests" in str(exc):
+                            await asyncio.sleep(25)          # the per-account limiter: control turns answer in under a second and trip it (wallet run, 2026-09-24)
                             continue
                         raise
                 rec.update(status="ok", answer=resp.answer or "", intent=resp.intent, capabilities=list(resp.capabilities or []),
