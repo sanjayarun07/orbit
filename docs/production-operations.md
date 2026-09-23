@@ -2841,3 +2841,16 @@ deployment is in research mode. Jupiter Shield says it is Solana-only for an EVM
 top accounts are not beneficial owners, and no suitability verdicts ("reasonably diversified"). UI: a new chat is
 listed in Recents at send time with a client-generated id, so a reload mid-stream keeps the conversation; inbox
 bodies render markdown (service worker shell v12).
+
+**Home Explore and news review (2026-09-23): fixes.** Headlines carry an event `date` and the generator copies figures
+exactly as the source prints them; a headline tap ("What does this mean for the market: …") is answered in under 150
+words with the cards' first sources as links (`composition.word_limit` / `brief`). Burn and null addresses
+(`mobula_meme.is_burn_address`) are labelled as out of circulation, never as holders or pools, and the top-10 line
+states the burned share. "Best USDC yield" ranks single-asset pools first with an Exposure column; the yields tool
+declines Fed, rate-decision and equities contexts. Base gainers state their basis (CoinGecko's ecosystem category,
+global prices). The balances card ends with a concentration line; wallet health lists what it checked (gas
+available, coverage across both token programs, priced count) and flags a partial read. A trade-shaped ask the
+router cannot place gets the research-mode answer in a research deployment; the public config exposes
+`deployment_mode` and `execution_enabled`, and the Explore swap starters are hidden when execution is off (shell
+v13). "Recently / latest" knowledge questions lead with the web's dated answer, the knowledge base following as
+background; the knowledge prompt distinguishes "fully backed" from "over-collateralized".

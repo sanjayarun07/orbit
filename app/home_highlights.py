@@ -39,11 +39,14 @@ _NEWS_INSTRUCTIONS = (
     "Return ONLY a JSON object (no prose, no code fences): "
     '{"crypto":[{"headline":"","summary":"","source":""},{"headline":"","summary":"","source":""}],'
     '"stocks":[{"headline":"","summary":"","source":""},{"headline":"","summary":"","source":""}],'
-    '"memes":[{"headline":"","summary":"","source":""},{"headline":"","summary":"","source":""}]}. '
+    '"memes":[{"headline":"","summary":"","source":"","date":""},{"headline":"","summary":"","source":"","date":""}]}. '
     "Fill it with the two most market-moving crypto stories, the two most market-moving US stock-market "
     "stories, and the two biggest memecoin stories (a launch, a rug, a listing, a whale, a viral token on "
     "Solana, Base or BNB Chain) from your search results (latest available: prices, ETFs, regulation, earnings, the Fed). "
-    "Headline under 90 characters, summary one sentence with the key number, source a bare domain. "
+    "Headline under 90 characters, summary one sentence with the key number, source a bare domain, and a date "
+    "field (YYYY-MM-DD) for the day the event happened, not the day it was published. Copy every number exactly as "
+    "the source prints it, never rounded, recomputed or recalled from memory; if the source gives no number, give none "
+    "(a wrong index close or a mis-dated flow is worse than no figure, 2026-09-23). "
     "Never leave the arrays empty."
 )
 _NEWS_QUERY = "latest crypto market news, latest US stock market news, and latest memecoin news (pump.fun, Solana, Base, BNB Chain)"
@@ -68,7 +71,7 @@ def _parse_news(text: str) -> dict | None:
         for item in (data.get(key) or [])[:2]:
             if isinstance(item, dict) and item.get("headline") and not _PLACEHOLDER.search(str(item.get("headline")) + " " + str(item.get("summary") or "")):
                 items.append({
-                    "headline": str(item["headline"]).strip()[:120],
+                    "headline": str(item["headline"]).strip()[:120], **({"date": str(item["date"]).strip()[:10]} if item.get("date") else {}),
                     "summary": str(item.get("summary") or "").strip()[:200],
                     "source": str(item.get("source") or "").strip().lower()[:60],
                 })
@@ -96,7 +99,9 @@ def _news_cards() -> list[dict] | None:
         for index, item in enumerate(parsed.get(kind) or []):
             cards.append({
                 "id": f"{kind}-{index}", "kind": kind, "tone": tone if index == 0 else ("violet" if kind == "crypto" else "amber"),
-                "title": item["headline"], "summary": item["summary"], "source": item["source"],
+                "title": item["headline"], "summary": item["summary"], "source": item["source"], "date": item.get("date"),
+                # The tile's own words; a headline tap is answered briefly by the
+                # research node (composition.word_limit knows this prefix).
                 "prompt": (f"What does this mean for memecoins: {item['headline']}" if kind == "memes"
                            else f"What does this mean for the market: {item['headline']}"),
             })

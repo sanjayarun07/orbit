@@ -218,6 +218,8 @@ class CoinGeckoProvider:
         top = candidates[:10]
         label = "Losers" if losers else "Gainers"
         scope = f"on {chain.title()}" if chain else "market-wide (top 250 by market cap)"
+        basis = (f"CoinGecko's {chain.title()} ecosystem category (tokens associated with {chain.title()}; prices and volumes are global across venues, not trades on a {chain.title()} venue)"
+                 if chain else "CoinGecko's top 250 by market cap")
         if not top:
             return (
                 f"# {label} {scope}\n\nNo coins with at least $10K in 24h "
@@ -226,7 +228,7 @@ class CoinGeckoProvider:
             )
         lines = [
             f"# {label} {scope}",
-            f"**Data freshness**: {_utc()}",
+            f"**Data freshness**: {_utc()} · **Basis**: {basis}",
             "",
             "| Token | Price | 24h change | 24h volume |",
             "|---|---:|---:|---:|",
@@ -552,6 +554,10 @@ class DefiLlamaProvider:
         wants_stable = bool(re.search(r"\bstable(?:coin)?s?\b", request, re.I))
         # "without exposing me to another volatile token", "single-asset", "only USDC": one-asset pools only (UI run, 2026-09-23)
         wants_single = bool(re.search(r"\b(?:without\s+(?:exposing\s+me\s+to\s+)?(?:another|other|any|a)\s+(?:volatile\s+)?(?:token|asset|coin)s?|single[- ]asset|only\s+(?:usdc|usdt|dai|usde|stables?)|no\s+(?:il|impermanent\s+loss)|not\s+(?:an?\s+)?lp)\b", request, re.I))
+        # "best USDC yield" reads as the asset's own yield: single-asset pools rank
+        # first, LPs pairing it with a volatile token follow under their own
+        # heading (a 400% LP led "best USDC yield", live 2026-09-23).
+        wants_lp = bool(re.search(r"\b(?:lp|liquidity\s+pool|pairs?|farm\w*|pool\s+with)\b", request, re.I))
         rows = [p for p in pools if isinstance(p, dict) and p.get("apy") is not None]
         if wants_single:
             rows = [p for p in rows if str(p.get("exposure") or "").lower() == "single"]
@@ -568,16 +574,20 @@ class DefiLlamaProvider:
         liquid = [p for p in rows if float(p.get("tvlUsd") or 0) >= 1_000_000]
         rows = liquid or [p for p in rows if float(p.get("tvlUsd") or 0) >= 100_000]
         rows = [p for p in rows if 0 <= float(p.get("apy") or 0) <= 500]   # 4-digit APYs are dust pools or errors
-        selected = sorted(rows, key=lambda p: float(p.get("apy") or 0), reverse=True)[:8]
+        single_first = bool(symbols) and not wants_lp and not wants_single
+        selected = sorted(rows, key=lambda p: (0 if (single_first and str(p.get("exposure") or "").lower() == "single") else 1, -float(p.get("apy") or 0)))[:8]
         if not selected:
             raise RuntimeError("DeFiLlama has no yield pools matching that request")
         what = " ".join(x for x in [", ".join(sorted(symbols)) if symbols else "", f"on {chain.title()}" if chain else "", "stablecoin" if wants_stable else "", "single-asset only" if wants_single else ""] if x).strip()
-        lines = [f"# Yields{': ' + what if what else ''}", f"**Provider**: DeFiLlama · **Checked**: {_utc()} · pools ≥ $1M TVL, APY ≤ 500%", "",
-                 "| Pool | Project | Chain | APY | Base / reward | TVL | Notes |", "|---|---|---|---:|---:|---:|---|"]
+        lines = [f"# Yields{': ' + what if what else ''}", f"**Provider**: DeFiLlama · **Checked**: {_utc()} · pools ≥ $1M TVL, APY ≤ 500%", ""]
+        if single_first:
+            lines.append("Single-asset pools first (the asset alone, no impermanent loss); LP pools pairing it with another token follow and carry that token's price risk.")
+            lines.append("")
+        lines += ["| Pool | Project | Chain | Exposure | APY | Base / reward | TVL | Notes |", "|---|---|---|---|---:|---:|---:|---|"]
         for p in selected:
             notes = ", ".join(x for x in ["stablecoin" if p.get("stablecoin") else "", f"IL risk: {p.get('ilRisk')}" if p.get("ilRisk") and p.get("ilRisk") != "no" else "", f"{p.get('exposure')} exposure" if p.get("exposure") else ""] if x)
             base, reward = p.get("apyBase"), p.get("apyReward")
-            lines.append(f"| {p.get('symbol') or '—'} | {p.get('project') or '—'} | {p.get('chain') or '—'} | {float(p.get('apy') or 0):.2f}% | "
+            lines.append(f"| {p.get('symbol') or '—'} | {p.get('project') or '—'} | {p.get('chain') or '—'} | {'single-asset' if str(p.get('exposure') or '').lower() == 'single' else 'LP (multi-asset)'} | {float(p.get('apy') or 0):.2f}% | "
                          f"{(f'{float(base):.2f}%' if base is not None else '—')} / {(f'{float(reward):.2f}%' if reward is not None else '—')} | {_money(p.get('tvlUsd'))} | {notes or '—'} |")
         lines += ["", "APY = base + reward incentives; reward APY depends on token prices and can end. Source: [DeFiLlama yields](https://defillama.com/yields)"]
         return compact_tool_result("\n".join(lines))
@@ -594,7 +604,7 @@ class DefiLlamaProvider:
         router.register(ProviderTool(
             "defillama_yields", self.name, ("defi_data",), self.yields,
             matches=lambda request: bool(re.search(r"\b(?:apy|apr|yields?|yield farming|best (?:rate|return)s?|lending rates?|staking rates?|where (?:can|should) i (?:earn|lend|stake)|earn (?:on|with) (?:my )?[A-Za-z]+)\b", request, re.I))
-                and not re.search(r"\b(?:bond|treasury|t-bill|savings account|dividend)\b", request, re.I),
+                and not re.search(r"\b(?:bond|treasury|t-bill|savings account|dividend|fed|federal reserve|rate (?:hike|cut|decision)|equities|stocks?|wall street|nasdaq|s&p)\b", request, re.I),
             keywords=("yield", "apy", "apr", "lending", "staking", "pools"), quota_per_minute=settings.defillama_requests_per_minute,
             cache_ttl_seconds=600, priority=10,
             description="Best DeFi yields (APY) for an asset, chain or protocol from DefiLlama's pools, e.g. 'best USDC yield on Base' or 'stETH staking APY'",

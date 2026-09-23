@@ -261,7 +261,7 @@ def test_the_holders_card_shows_share_pnl_and_flags(monkeypatch):
 
     monkeypatch.setattr(mobula_meme, "_get", lambda path, params: HOLDERS)
     card = mobula_meme.token_holders(f"top holders of {FARTCOIN} on solana")
-    assert "**Top 10 wallets hold 14.06% of supply**" in card and "not necessarily distinct owners" in card
+    assert "**Top 10 positions hold 14.06% of supply**" in card and "not necessarily distinct owners" in card
     assert "| 1 | `9SLP…KpKS` | 10.43% | $16.46M | 0/0 | $16.46M | 2025-05-10 | — |" in card
     assert "| sniper | 1 |" in card and "| bundler | 1 |" in card
     assert "evidence, not proof of coordination" in card

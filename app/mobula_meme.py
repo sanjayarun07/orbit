@@ -112,7 +112,21 @@ def _short(address: str) -> str:
     return f"{address[:4]}…{address[-4:]}" if address and len(address) > 10 else (address or "—")
 
 
+_BURN_ADDRESSES = {"0x000000000000000000000000000000000000dead", "0x0000000000000000000000000000000000000000", "0x000000000000000000000000000000000000dEaD",
+                   "1nc1nerator11111111111111111111111111111111", "11111111111111111111111111111111", "So11111111111111111111111111111111111111112"}
+
+
+def is_burn_address(address: str | None) -> bool:
+    """A null or incinerator address: tokens sent there are out of circulation,
+    and it is neither a holder nor a pool whatever a provider labels it
+    (Mobula tagged 0x…dead a liquidityPool for PEPE, live 2026-09-23)."""
+    a = str(address or "")
+    return a.lower() in {x.lower() for x in _BURN_ADDRESSES} or a.lower().startswith("0x000000000000000000000000000000000000")
+
+
 def _labels_of(row: dict) -> list[str]:
+    if is_burn_address(row.get("walletAddress")):
+        return ["burn / null address (tokens out of circulation; not a holder, not a pool)"]
     raw = row.get("labels") or []
     out = []
     for label in raw:
@@ -139,6 +153,7 @@ def token_holders(request: str) -> str:
         evidence.unavailable("mobula_token_holders", subject_env, "no holder positions indexed", [evidence.source("mobula", "token/holder-positions")])
         raise NoData("Mobula has no holder positions for this token")
     rows.sort(key=lambda r: _num(r.get("percentageOfTotalSupply")), reverse=True)
+    burned = sum(_num(r.get("percentageOfTotalSupply")) for r in rows if is_burn_address(r.get("walletAddress")))
     top10 = sum(_num(r.get("percentageOfTotalSupply")) for r in rows[:10])
     env = evidence.complete("mobula_token_holders", subject_env,
                             {"positions_indexed": len(rows), "top10_pct_of_supply": round(top10, 2),
@@ -158,7 +173,8 @@ def token_holders(request: str) -> str:
         "# Token holders",
         f"**Provider**: Mobula · **Contract**: `{address}` · **Chain**: {chain} · **Checked**: {_stamp()}",
         "",
-        f"**Top 10 wallets hold {top10:.2f}% of supply** (of the {len(rows)} largest positions indexed, pools, exchanges and burn addresses included; "
+        f"**Top 10 positions hold {top10:.2f}% of supply**" + (f", of which {burned:.2f}% sits in burn/null addresses and is out of circulation" if burned else "")
+        + f" (of the {len(rows)} largest positions indexed, pools, exchanges and burn addresses included; "
         "the security profile's top-10 figure applies Mobula's own exclusions and can differ). "
         "Wallets are not necessarily distinct owners: one person can hold through many.",
         "",

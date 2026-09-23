@@ -477,7 +477,7 @@ def test_yields_tool_filters_by_asset_chain_and_size(monkeypatch):
     monkeypatch.setattr(ap, "_llama_pools", _pools)
     out = ap.DefiLlamaProvider().yields("best USDC yield on Base")
     rows = [line for line in out.splitlines() if line.startswith("| ") and "Project" not in line]
-    assert [r.split("|")[2].strip() for r in rows] == ["aerodrome-v1", "morpho-blue", "aave-v3"]    # by APY; dust pool and Solana excluded
+    assert [r.split("|")[2].strip() for r in rows] == ["morpho-blue", "aave-v3", "aerodrome-v1"]    # single-asset first, then by APY; dust pool and Solana excluded
     assert "Yields: USDC on Base" in out and "IL risk: yes" in out and "kamino" not in out
     stable = ap.DefiLlamaProvider().yields("safest stablecoin yields on Base")
     assert "aerodrome" not in stable and "morpho-blue" in stable

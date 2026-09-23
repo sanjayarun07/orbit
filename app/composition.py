@@ -129,6 +129,41 @@ def plan_asks(request: str) -> tuple[list[str], str]:
     return out, ("\n".join(x for x in (note, f"Instructions for the answer: {extra}" if extra else "") if x)).strip()
 
 
+_WORD_LIMIT = re.compile(r"\b(?:under|within|in|at\s+most|no\s+more\s+than|max(?:imum)?)\s+(\d{2,4})\s+words\b", re.I)
+_LINK = re.compile(r"\[([^\]]{3,80})\]\((https?://[^)\s]+)\)")
+
+
+_HEADLINE_TAP = re.compile(r"^\s*What does this mean for (?:the market|memecoins):", re.I)
+HEADLINE_TAP_WORDS = 150
+
+
+def word_limit(request: str) -> int | None:
+    """The word limit a request states ("answer in under 150 words"), or the
+    headline tap's own (a news tile wants a short read: 850-word answers under
+    a tile, live 2026-09-23), or None."""
+    m = _WORD_LIMIT.search(request or "")
+    if m:
+        return int(m.group(1))
+    return HEADLINE_TAP_WORDS if _HEADLINE_TAP.match(request or "") else None
+
+
+def brief(summary: str, cards: str, limit: int) -> str:
+    """The summary alone, cut to the limit, with the cards' first sources as
+    links: a headline tap wants a short read, not the evidence cards (live
+    2026-09-23: 850-word answers under a news tile)."""
+    words = (summary or "").split()
+    text = " ".join(words[:limit]) + (" …" if len(words) > limit else "")
+    links = []
+    for label, url in _LINK.findall(cards or ""):
+        if url not in [u for _, u in links]:
+            links.append((label.strip(), url))
+        if len(links) >= 5:
+            break
+    if links:
+        text += "\n\nSources: " + " · ".join(f"[{label}]({url})" for label, url in links)
+    return text
+
+
 def carry_subject(clauses: list[str], request: str) -> list[str]:
     """Clauses that name no asset of their own get the message's subject, an
     address or a ticker: "Investigate the launch of token <mint>. Show

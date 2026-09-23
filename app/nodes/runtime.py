@@ -107,7 +107,11 @@ class CompositeSynthesis(dspy.Signature):
     token is audited unless a card names an audit report or auditing firm;
     say "no audit report in the evidence" instead. If a card asks the user
     a question instead of answering, repeat the question; never pick a
-    subject the question did not name. Keep every figure's unit and meaning:
+    subject the question did not name. When the request states a word
+    limit, or opens with "What does this mean for the market:" (a headline
+    tap), answer in under 150 words, quote figures and dates exactly as the
+    source states them with the source named, and give no sector or stock
+    picks. Keep every figure's unit and meaning:
     a "24h price change" column is a PRICE move, never volume growth; dollar
     liquidity, volume or market cap are totals, never a price level; a value
     shown as $0.0000 is a rounded small price, not a near-zero price."""
@@ -209,7 +213,11 @@ class KnowledgeAnswer(dspy.Signature):
     Prefer the passage that matches the protocol version the user named; when
     passages describe different versions (e.g. v3 vs v4), say which is which.
     Write for a trader: concrete parameters, mechanics, and what they imply.
-    No investment advice."""
+    Describe backing as the passages state it: "fully backed by delta-neutral
+    positions" is not "over-collateralized" or "assets worth more than the
+    supply". A question about what happened "recently" or "latest" is
+    answered only from passages that carry a date; give that date, and say
+    that the knowledge base may lag newer events. No investment advice."""
 
     request: str = dspy.InputField()
     conversation_history: str = dspy.InputField(desc="Prior turns, oldest first; empty if none")

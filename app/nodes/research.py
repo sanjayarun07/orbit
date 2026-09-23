@@ -1624,6 +1624,9 @@ _KB_MISS = re.compile(r"^\s*NOT COVERED\b|\b(?:passages|knowledge base|provided 
                       r"|\bmissing from the (?:given |provided )?knowledge base\b|\bno (?:information|details?|mention) (?:about|on|of)\b[^.\n]{0,80}\bin the (?:provided |given )?passages", re.I)
 
 
+_RECENT_ASK = re.compile(r"\b(?:recently|recent|latest|newest|this\s+week|last\s+week|this\s+month|today|yesterday|currently|right\s+now|ongoing|upcoming|current)\b", re.I)
+
+
 def knowledge_missed(answer: str) -> bool:
     """True when the knowledge answer is really "the passages don't say"."""
     head = "\n".join((answer or "").strip().splitlines()[:3])
@@ -1658,6 +1661,17 @@ async def _synthesize_knowledge(request: str, passages: str, history: str, *, st
     to answer the question, the web does (a knowledge miss is never the
     answer the user reads)."""
     answer = await _knowledge_answer(request, passages, history, stream=stream)
+    if _RECENT_ASK.search(request):
+        # "recently", "latest", "this week": the knowledge base is a snapshot
+        # taken at ingestion and lags newer events (Lido's 2026-09-21 Snapshot
+        # vote was missing, live 2026-09-23). The web's dated answer leads;
+        # the passages follow as background, labelled as such.
+        from_web = await _knowledge_from_the_web(f"{request} -- the most recent events first, each with its date")
+        if from_web:
+            if stream:
+                streaming.emit("card", markdown=from_web, tool="perplexity_web_search")
+            background = "" if knowledge_missed(answer) else f"\n\n---\n\n**Background from the knowledge base** (as ingested; may predate the items above)\n\n{answer}"
+            return f"**Latest, from the web (dated)**\n\n{from_web}{background}"
     if not knowledge_missed(answer):
         return answer
     from_web = await _knowledge_from_the_web(request)
@@ -1891,6 +1905,11 @@ async def research_node(state: AgentState) -> dict:
                     extras[key] = part[key]
         cards, trajectory = composition.combine(parts)
         answer = await composition.synthesize(request if not ask_note else f"{request}\n{ask_note}", cards, trajectory)
+        limit = composition.word_limit(state["request"])
+        if limit and answer.startswith("**Taken together**"):
+            summary = composition.strip_synthesis(answer)
+            summary = answer[len("**Taken together**"):].split("\n\n---\n\n", 1)[0].strip()
+            answer = composition.brief(summary, cards, limit)
         result = {"answer": answer, "trajectory": trajectory or None, **extras}
     else:
         result = await _research_node(state, sink)
@@ -1905,6 +1924,14 @@ async def research_node(state: AgentState) -> dict:
             cards, combined = composition.combine([web_part, (composition.strip_synthesis(result["answer"]), trajectory)])
             answer = await composition.synthesize(request, cards, combined)
             result = {**result, "answer": answer, "trajectory": combined or None}
+    limit = composition.word_limit(state["request"])
+    if limit and result.get("answer") and not is_clarification(result.get("answer")) and not result.get("pending_token"):
+        # A headline tap or a stated word limit: prose is cut to the limit with
+        # the sources kept; a card (a table) is left whole.
+        answer = result["answer"]
+        summary = answer[len("**Taken together**"):].split("\n\n---\n\n", 1)[0].strip() if answer.startswith("**Taken together**") else answer
+        if "\n|" not in summary and len(summary.split()) > limit:
+            result = {**result, "answer": composition.brief(summary, answer, limit)}
     window = snapshot_compare.dated_ask(state["request"])
     if window and result.get("answer") and (result.get("compound_answered") or not is_clarification(result.get("answer"))):
         # A dated comparison is answered from the snapshot ledger or it says

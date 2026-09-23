@@ -199,8 +199,9 @@ async def portfolio_node(state: AgentState) -> dict:
         findings = "\n".join(
             f"- **{item['title']}:** {item['detail']}" for item in report["findings"]
         ) or "- No balance, pricing, concentration, or gas-readiness warning was detected."
+        checked = "\n".join(f"- {line}" for line in report.get("checked") or [])
         return {
-            "answer": f"**Wallet health: {report['status'].title()}**\n\n{findings}\n\nScope: {report['scope']}",
+            "answer": f"**Wallet health: {report['status'].title()}**\n\n{findings}\n\n**Checked**\n{checked}\n\nScope: {report['scope']}",
             "trajectory": {"thought_0": "Compute wallet health deterministically from the current portfolio snapshot.", "tool_name_0": "portfolio_snapshot", "tool_args_0": {"wallet_address": state["wallet_address"]}, "observation_0": report},
         }
     if "portfolio_scenario" in capabilities:

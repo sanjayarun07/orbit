@@ -705,6 +705,8 @@ async def public_config():
         and not settings.privy_client_id.startswith("<")
     )
     return {
+        "deployment_mode": deployment.deployment_mode(),
+        "execution_enabled": deployment.execution_enabled(),
         "privy": {
             "enabled": privy_enabled,
             "app_id": settings.privy_app_id if privy_enabled else None,

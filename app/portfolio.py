@@ -189,6 +189,12 @@ def render_card(snapshot: dict, limit: int = 20) -> str | None:
         mint = h["mint"]
         name = h["symbol"] if h.get("symbol") and h["symbol"] != "UNKNOWN" else f"{mint[:4]}…{mint[-4:]}"
         lines.append(f"| {name}{'' if h.get('verified') else ' ⚠'} | {h['amount']:,.4f} | {_usd(h.get('usd_price'))} | {_usd(h['usd_value'])} | {share} |")
+    shares = sorted([(h.get("allocation_pct") or 0, h["symbol"] if h.get("symbol") and h["symbol"] != "UNKNOWN" else h["mint"][:4] + "…") for h in priced]
+                    + ([(sol["allocation_pct"], "SOL")] if sol.get("allocation_pct") is not None else []), reverse=True)
+    if shares:
+        top2 = sum(s for s, _ in shares[:2])
+        lines += ["", f"Concentration: largest holding {shares[0][1]} at {shares[0][0]:.1f}% of priced value; top two {top2:.1f}%; "
+                      f"{len(shares)} priced asset(s). A share is a fact about this snapshot, not a verdict; what it means depends on the assets and their exit depth."]
     if len(priced) > limit:
         lines.append(f"| … {len(priced) - limit} more priced holdings | | | | |")
     notes = []

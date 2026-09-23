@@ -36,7 +36,7 @@ from .intent_router import route_capabilities, plan_execution_route, default_cap
 from .instruments import equity_instruments
 from .model import speech_classifier
 from .semantic import SpeechUnderstanding, embedding_router
-from app import product_actions, snapshot_compare
+from app import deployment, product_actions, snapshot_compare
 from .speech import CONDITIONAL_ORDER_ANSWER, has_competing_speech, is_conditional_order, is_parameter_fragment
 from .trade_parser import extract_cross_chain_draft
 from app.clarify import is_clarification, is_market_text
@@ -123,6 +123,14 @@ def _desk_wanted(update: dict, metadata: dict, request: str) -> bool:
         if word not in _ADVICE_STOP:
             return True
     return bool(lx.ADDRESS.search(request or ""))
+
+
+RESEARCH_MODE_ANSWER = (
+    "This deployment runs in research mode: no swap, bridge or order is prepared or signed here, so there is no quote to review. "
+    "What works: `what would happen if I sold 0.05 SOL for USDC` (a read-only Jupiter quote of the outcome), `exit analysis for X` "
+    "(what your position would fetch at 25/50/100%), `compare buying $500, $2,000 and $5,000 of X` (entry and reverse-exit quotes), "
+    "and price alerts. Trading opens when the deployment is switched to execution mode."
+)
 
 
 def _clarify_route(method: str) -> dict:
@@ -366,5 +374,14 @@ async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> d
     metadata["routing_backend"] = settings.routing_backend
     metadata["decided_by"] = decided_by.get()
     logging.getLogger("orbit.routing").info("intent_decision %s", json.dumps(metadata, sort_keys=True))
+    if (update.get("clarification") and not deployment.execution_enabled()
+            and (lx.TRADE.search(request) or lx.IMPERATIVE_MOVE.search(request))
+            and not re.search(r"\?|\b(?:should|would|could|can|shall|do|does)\s+i\b|\bwhat\s+(?:if|would)\b|\bexplain\b|\bhow\s+(?:do|does|to|much)\b|\bsimulat\w*\b", request, re.I)):
+        # A trade-shaped ask the router could not place, in a research
+        # deployment: the answer is the deployment's, not "which token did you
+        # mean" (live 2026-09-23: "Start a cross-chain swap"). Routed trades
+        # keep their route; the plan path refuses them with the same words.
+        update["clarification"] = RESEARCH_MODE_ANSWER
+        metadata["reason"] = "research_mode"
     update["routing_decision"] = metadata
     return update

@@ -20,7 +20,16 @@ def wallet_health(snapshot: dict) -> dict:
                                    "and on exit depth, which this check does not measure (say `exit analysis for X` for a live quote)."})
     if snapshot.get("unpriced_holdings"):
         findings.append({"severity": "warning", "title": "Unpriced holdings", "detail": f"{snapshot['unpriced_holdings']} holding(s) could not be valued and are excluded from allocation calculations."})
+    if snapshot.get("unread_programs"):
+        findings.append({"severity": "warning", "title": "Partial read", "detail": f"The {', '.join(snapshot['unread_programs'])} accounts could not be read; holdings there are missing from this check."})
+    # What was checked, with its numbers, so a clean bill of health shows its evidence (2026-09-23)
+    checked = [
+        f"Gas: {float(sol.get('amount') or 0):.4f} SOL available; about 0.005 SOL covers typical transaction fees (a swap's network fee is quoted with the swap).",
+        f"Coverage: {len(holdings)} SPL holding(s) read across both token programs" + ("" if not snapshot.get("unread_programs") else " (one program unread)")
+        + f", {sum(1 for h in holdings if h.get('usd_value') is not None)} priced.",
+    ]
     return {
+        "checked": checked,
         "wallet": snapshot.get("wallet"),
         "status": "attention" if any(item["severity"] == "warning" for item in findings) else "healthy",
         "findings": findings,

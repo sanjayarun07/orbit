@@ -901,7 +901,14 @@ const CAPABILITIES=[
   ["Remind me in 3 hours to check SOL","Reminders run in the background"],
   ["Show my tasks","Manage reminders, alerts, and briefs"]]]];
 function renderCapabilities(){const host=$("#homeCapabilities");if(!host)return;
-  host.innerHTML=`<div class="cap-head"><h2>Start with a question</h2><p>Choose an example to begin.</p></div>`+CAPABILITIES.map(([group,icon,items])=>`<div class="cap-group"><h3>${icon}${escapeHtml(group)}</h3><div class="cap-grid">${items.map(([q,d])=>`<button class="cap-item" type="button" data-q="${escapeHtml(q)}"><span class="cap-q">${escapeHtml(q==="Set my risk charter"?"Set trade preferences":q)}</span><small>${escapeHtml(d)}</small></button>`).join("")}</div></div>`).join("");}
+  // A research deployment cannot review a quote: the swap starters are not
+  // offered there (live run 2026-09-23: the card promised a quote, the turn refused).
+  const needsExecution=q=>/^(?:swap |start a cross-chain swap)/i.test(q);
+  // First render runs before the config bindings below are initialised (a `let`
+  // in its temporal dead zone throws): read them defensively.
+  const researchOnly=(()=>{try{return executionConfigLoaded&&!executionEnabled;}catch{return false;}})();
+  const visible=items=>researchOnly?items.filter(([q])=>!needsExecution(q)):items;
+  host.innerHTML=`<div class="cap-head"><h2>Start with a question</h2><p>Choose an example to begin.</p></div>`+CAPABILITIES.map(([group,icon,items])=>`<div class="cap-group"><h3>${icon}${escapeHtml(group)}</h3><div class="cap-grid">${visible(items).map(([q,d])=>`<button class="cap-item" type="button" data-q="${escapeHtml(q)}"><span class="cap-q">${escapeHtml(q==="Set my risk charter"?"Set trade preferences":q)}</span><small>${escapeHtml(d)}</small></button>`).join("")}</div></div>`).join("");}
 document.addEventListener("click",event=>{const item=event.target.closest(".cap-item");if(!item)return;const q=item.dataset.q;
   if(q==="Set my risk charter"){openCharterDialog();return;}
   if(q==="Analyze my portfolio"){analyzePortfolio();return;}
@@ -1223,7 +1230,7 @@ let closedBeta=null;
 // Closed beta: no prices, no purchase controls anywhere. The plans dialog
 // becomes a short note about the beta plan instead of a checkout.
 function applyClosedBeta(cfg){closedBeta=cfg?.accounts?.closed_beta?{credits:cfg.accounts.closed_beta_monthly_credits}:null;const hide=Boolean(closedBeta);for(const id of ["plansBtn","buyCreditsBtn","changePlanBtn","billingPortalBtn"]){const el=$("#"+id);if(el)el.hidden=hide||el.hidden&&id==="billingPortalBtn";}const chip=$("#creditsChip");if(chip)chip.title=hide?"Closed beta: your plan is free. Click for details.":"View your plan and credit balance.";}
-async function loadX402Config(){try{const res=await fetch("/config/public");if(!res.ok)throw new Error("config unavailable");const cfg=await res.json();applyClosedBeta(cfg);x402Config=cfg.x402||null;executionEnabled=cfg.deployment?.execution_enabled===true;executionConfigLoaded=true;}catch{x402Config=null;executionEnabled=false;executionConfigLoaded=false;}syncPayChip();}
+async function loadX402Config(){try{const res=await fetch("/config/public");if(!res.ok)throw new Error("config unavailable");const cfg=await res.json();applyClosedBeta(cfg);x402Config=cfg.x402||null;executionEnabled=cfg.execution_enabled===true||cfg.deployment?.execution_enabled===true;executionConfigLoaded=true;}catch{x402Config=null;executionEnabled=false;executionConfigLoaded=false;}syncPayChip();try{renderCapabilities();}catch{}}
 async function syncPayChip(){const chip=$("#payChip");if(!x402Config?.enabled){chip.hidden=true;return;}chip.hidden=false;const ready=await (window.OrbitX402?.hasEvmWallet?.()??Promise.resolve(false));chip.classList.toggle("ready",ready);$("#payChipText").textContent=`${x402Config.price}/message · ${ready?"pays from your wallet":"connect an EVM wallet to pay"}`;chip.title=`This Orbit charges ${x402Config.price} per message via x402 (USDC on ${x402Config.network}). ${ready?"Each message is paid from your connected wallet.":"Connect Coinbase Wallet, Privy or WalletConnect to pay."}`;}
 async function chatFetch(url,init){
   init={...init,headers:{...(init?.headers||{}),"X-Orbit-Device":deviceId}};
