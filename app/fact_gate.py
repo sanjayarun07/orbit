@@ -104,7 +104,9 @@ def prose_of(answer: str) -> str:
     return text
 
 
-_DATETIME = re.compile(r"\b(?:19|20)\d{2}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?\b|\b\d{1,2}:\d{2}(?::\d{2})?\b")
+_DATETIME = re.compile(r"\b(?:19|20)\d{2}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?\b|\b\d{1,2}:\d{2}(?::\d{2})?\b"
+                       r"|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:,\s*(?:19|20)\d{2})?\b"        # "September 24, 2025" is a date, not 24 and 2025
+                       r"|\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?(?:\s+(?:19|20)\d{2})?\b", re.I)
 
 
 def _cumulative(facts: list[Fact]) -> set[str]:
@@ -134,7 +136,7 @@ def unsupported_figures(answer: str, facts: list[Fact], evidence_text: str = "")
             known.add(_sig(n))
     out: list[str] = []
     for m in _FIGURE.finditer(_DATETIME.sub(" ", prose_of(answer))):
-        token = m.group(0).strip()
+        token = m.group(0).strip().rstrip(",.")           # "2025," is the year 2025 (a withheld summary over that comma, 2026-09-24)
         n = _parse(token)
         if n is None or _YEARLIKE.match(token) or (abs(n) <= 12 and "%" not in token and "$" not in token and not token[-1:].lower() in "kmb"):
             continue

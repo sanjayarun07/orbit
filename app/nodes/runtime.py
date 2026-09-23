@@ -110,9 +110,14 @@ class CompositeSynthesis(dspy.Signature):
     conditions the evidence shows and the risks it shows. Verification,
     Shield or organic-score checks are NOT an audit: never write that a
     token is audited unless a card names an audit report or auditing firm;
-    say "no audit report in the evidence" instead. If a card asks the user
-    a question instead of answering, repeat the question; never pick a
-    subject the question did not name. When the request states a word
+    say "no audit report in the evidence" instead. A property no card
+    lists is unknown: never write that an extension, feature, authority,
+    label or audit is absent, supported or "not reported" unless a card
+    says so; say "not in the evidence". A request that asks to compare
+    dates when the cards are current data only describes the current data
+    as current, never as a change or as "no change" between those dates.
+    If a card asks the user a question instead of answering, repeat the
+    question; never pick a subject the question did not name. When the request states a word
     limit, or opens with "What does this mean for the market:" (a headline
     tap), answer in under 150 words, quote figures and dates exactly as the
     source states them with the source named, and give no sector or stock

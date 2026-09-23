@@ -117,3 +117,23 @@ def test_an_ask_naming_three_dimensions_of_one_token_is_a_deep_dive():
     assert token_deepdive.names_dimensions("Who are the top holders of PEPE?") == 1
     assert token_deepdive.names_dimensions("Find BONK pools on Solana with at least $1000000 liquidity") == 1
     assert token_deepdive.names_dimensions("How's the crypto market today?") == 0
+
+
+def test_a_year_followed_by_a_comma_is_a_year_and_a_window_is_named_in_days():
+    assert fact_gate.unsupported_figures("Since September 24, 2025, nothing moved.", [], "") == []
+    from app.contracts import plan_by_rules
+    c = plan_by_rules("Show the biggest movers on Hyperliquid in the last 24 days.")
+    note = evidence_pipeline._contract_note(c, fact_gate.GateResult(ok=True), [], None)
+    assert "window asked: 24 days" in note
+
+
+def test_the_volume_card_states_what_the_ledger_covers_of_the_window():
+    from datetime import datetime, timedelta, timezone
+    from app import tequity
+    now = datetime(2026, 9, 24, 19, 0, tzinfo=timezone.utc)
+    rows = [{"symbol": "TSLA/USDC", "is_stock": True, "mean_volume": 1e6, "ticks": 68, "high": 2.0, "low": 1.0}]
+    card = tequity.render_volume_leaders("hyperliquid", rows, 7.0, stocks_only=True, covered_from=now - timedelta(hours=6), window_start=now - timedelta(days=7), checked=now)
+    assert "**Coverage**: the ledger's earliest tick in this window is 2026-09-24 13:00 UTC, later than the period asked" in card and "6.0 hours of it" in card
+    assert "**Checked**: 2026-09-24 19:00 UTC" in card
+    full = tequity.render_volume_leaders("hyperliquid", rows, 7.0, stocks_only=True, covered_from=now - timedelta(days=7), window_start=now - timedelta(days=7), checked=now)
+    assert "**Coverage**" not in full

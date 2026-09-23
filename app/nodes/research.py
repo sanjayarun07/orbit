@@ -1827,7 +1827,7 @@ async def research_node(state: AgentState) -> dict:
         state = {**state, "request": request, "contextual_request": None,
                  "capabilities": sorted(set(state.get("capabilities") or []) | {"market_data", "derivatives"})}
         streaming.emit("status", text=f"Reading the tape for {asset}")
-    if tequity.enabled() and (tequity.period_movers_matches(request) or tequity.movers_matches(request)):
+    if tequity.enabled() and (tequity.period_movers_matches(request) or tequity.movers_matches(request) or tequity.volume_leaders_matches(request)):
         # Venue movers come from the company's own feed, whatever the
         # classifier called the ask ("which tokenized stocks are moving on
         # hyperliquid" went to the web as equity research, 2026-09-23). With
@@ -1842,8 +1842,9 @@ async def research_node(state: AgentState) -> dict:
             if piped is not None:
                 return piped
         try:
-            card = await asyncio.to_thread(tequity.period_movers if periodic else tequity.movers, request)
-            name = "tequity_period_movers" if periodic else "tequity_movers"
+            by_volume = tequity.volume_leaders_matches(request) and not tequity.movers_matches(request)
+            card = await asyncio.to_thread(tequity.volume_leaders if by_volume else tequity.period_movers if periodic else tequity.movers, request)
+            name = "tequity_volume_leaders" if by_volume else "tequity_period_movers" if periodic else "tequity_movers"
             return {"answer": card, "trajectory": {"thought_0": "Venue movers from the internal Tequity feed.", "tool_name_0": name,
                                                    "tool_args_0": {"request": request}, "observation_0": card}}
         except Exception:
@@ -1917,6 +1918,13 @@ async def research_node(state: AgentState) -> dict:
                 if part.get(key) and key not in extras:
                     extras[key] = part[key]
         cards, trajectory = composition.combine(parts)
+        if snapshot_compare.dated_ask(state["request"]):
+            # The dated comparison itself comes from the snapshot ledger (the
+            # lead written below); the cards are current data and the summary
+            # must say so ("no changes between September 21 and 22" was
+            # written from today's cards, frozen trust run 2026-09-24).
+            ask_note = (ask_note + "\n" if ask_note else "") + ("The cards are current data, not the dates asked: describe them as current, "
+                                                                "never as a change or as no change between those dates; the saved-snapshot comparison is stated separately.")
         answer = await composition.synthesize(request if not ask_note else f"{request}\n{ask_note}", cards, trajectory)
         limit = composition.word_limit(state["request"])
         if limit and answer.startswith("**Taken together**"):

@@ -412,10 +412,21 @@ def render_period_movers(venue: str, out: dict, start: datetime, *, stocks_only:
     return "\n".join(lines)
 
 
-def render_volume_leaders(venue: str, rows: list[dict], days: float, *, stocks_only: bool | None, hours: float | None = None) -> str:
+def _span_words(seconds: float) -> str:
+    hours = seconds / 3600
+    return f"{hours:.1f} hours" if hours < 48 else f"{hours / 24:.1f} days"
+
+
+def render_volume_leaders(venue: str, rows: list[dict], days: float, *, stocks_only: bool | None, hours: float | None = None,
+                          covered_from=None, window_start=None, checked=None) -> str:
     span = f"last {hours:g} hour{'s' if hours != 1 else ''}" if hours is not None and hours < 48 else f"last {days:g} day{'s' if days != 1 else ''}"
+    checked = checked or datetime.now(timezone.utc)
     lines = [f"# {'Tokenized stocks' if stocks_only is True else 'Crypto pairs' if stocks_only is False else 'Pairs'} by traded volume on {venue.title()}, {span}",
-             "**Provider**: Tequity tick ledger · mean of the feed's 24h quote volume across stored ticks", "",
+             f"**Provider**: Tequity tick ledger · mean of the feed's 24h quote volume across stored ticks · **Checked**: {_fmt_when(checked)}", ""]
+    if covered_from is not None and window_start is not None and covered_from > window_start + timedelta(minutes=10):
+        lines += [f"**Coverage**: the ledger's earliest tick in this window is {_fmt_when(covered_from)}, later than the period asked ({_fmt_when(window_start)}); "
+                  f"the means below cover {_span_words((checked - covered_from).total_seconds())} of it, not the whole period.", ""]
+    lines += [
              "| # | Pair | Type | Mean 24h quote volume | Ticks | Price high / low |", "|---:|---|---|---:|---:|---:|"]
     for i, r in enumerate(rows, start=1):
         lines.append(f"| {i} | {r['symbol']} | {'stock' if r.get('is_stock') else 'crypto'} | {_money(r.get('mean_volume'))} | {r.get('ticks')} | {_price(r.get('high'))} / {_price(r.get('low'))} |")
@@ -616,14 +627,22 @@ def volume_leaders(request: str) -> str:
     # The window as asked, down to a quarter hour ("two hours" was six, live 2026-09-23)
     days = max(0.01, (datetime.now(timezone.utc) - start).total_seconds() / 86400) if start else 7.0
     stocks_only = stock_filter(request)
+    now = datetime.now(timezone.utc)
+    window_start = start or now - timedelta(days=7)
     cards = []
     for venue in venues:
         rows = _sync(tequity_ledger.volume_leaders(venue, days, stocks_only=bool(stocks_only)))
         if stocks_only is False:
             rows = [r for r in rows if not r.get("is_stock")]
-        evidence.complete("tequity_volume_leaders", {"kind": "venue", "id": venue, "chain": None, "symbol": None}, {"pairs": len(rows), "days": days},
-                          [{"provider": "tequity_ledger", "endpoint": "tequity_ticks", "as_of": _fmt_when(datetime.now(timezone.utc))}])
-        cards.append(render_volume_leaders(venue, rows, round(days, 2), stocks_only=stocks_only, hours=(datetime.now(timezone.utc) - start).total_seconds() / 3600 if start else None))
+        # What the ledger actually covers of the window asked: "this week" over
+        # a ledger that started this morning is a few hours of means, and the
+        # card says so (frozen trust run, 2026-09-24: "over the last 7 days").
+        first = _sync(tequity_ledger.first_tick_from(f"equities:movers:{venue}", window_start))
+        covered_from = first[0].get("taken_at") if first else None
+        evidence.complete("tequity_volume_leaders", {"kind": "venue", "id": venue, "chain": None, "symbol": None}, {"pairs": len(rows), "days": days, "covered_from": str(covered_from)},
+                          [{"provider": "tequity_ledger", "endpoint": "tequity_ticks", "as_of": _fmt_when(now)}])
+        cards.append(render_volume_leaders(venue, rows, round(days, 2), stocks_only=stocks_only, hours=(now - start).total_seconds() / 3600 if start else None,
+                                           covered_from=covered_from, window_start=window_start, checked=now))
     return compact_tool_result("\n\n".join(cards))
 
 
