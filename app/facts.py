@@ -163,6 +163,27 @@ def facts_from_card(tool: str, markdown: str, kind_hint: str | None = None) -> l
     return out
 
 
+def facts_from_search(found: dict, tool: str = "perplexity_web_search") -> list[Fact]:
+    """Facts from a structured web search: one `source` fact per numbered
+    source (url, date) and one `event` fact per dated paragraph, each carrying
+    the markers [n] it cites so a claim traces to its source."""
+    out: list[Fact] = []
+    by_n = {s.get("n"): s for s in found.get("sources") or []}
+    for s in found.get("sources") or []:
+        out.append(Fact(kind="source", subject=s.get("title") or s.get("url") or "", source=tool, event_date=s.get("date"),
+                        attrs={"url": s.get("url"), "n": s.get("n"), "date": s.get("date")}))
+    for para in re.split(r"\n\s*\n", found.get("text") or ""):
+        text = para.strip()
+        if len(text) < 30 or text.startswith("#"):
+            continue
+        dates = [d for d in (m.group(1) or m.group(2) or m.group(3) for m in _DATE.finditer(text)) if d]
+        cites = [int(n) for n in re.findall(r"\[(\d{1,2})\]", text)]
+        urls = [by_n[n]["url"] for n in cites if n in by_n and by_n[n].get("url")]
+        out.append(Fact(kind="event", subject=text[:120], source=tool, event_date=dates[0] if dates else None,
+                        attrs={"dated": bool(dates), "text": text[:600], "cites": cites, "urls": urls, "traced": bool(urls)}))
+    return out
+
+
 def event_date_of(fact: Fact) -> datetime | None:
     raw = fact.event_date
     if not raw:

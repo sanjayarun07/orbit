@@ -86,6 +86,27 @@ def _extract_text(payload: dict[str, Any]) -> str:
     return "\n\n".join(parts).strip()
 
 
+def _extract_source_records(payload: Any) -> list[dict]:
+    """Every source the Agent API returned, with its date when it carries one:
+    {title, url, date}. The order is the order of first appearance, which is
+    the order inline markers [n] refer to when the model numbered them."""
+    out: list[dict] = []
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            url = value.get("url")
+            if isinstance(url, str) and url.startswith(("http://", "https://")) and all(o["url"] != url for o in out):
+                date = next((str(value[k])[:10] for k in ("date", "published_date", "published_at", "last_updated", "publishedAt") if value.get(k)), None)
+                out.append({"title": str(value.get("title") or value.get("name") or url), "url": url, "date": date})
+            for item in value.values():
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+    visit(payload)
+    return out
+
+
 def _extract_sources(payload: Any) -> list[tuple[str, str]]:
     sources: list[tuple[str, str]] = []
 
@@ -189,6 +210,47 @@ def _invoke(tool_type: str, prompt: str, instructions: str) -> str:
         with _condition:
             _inflight.discard(key)
             _condition.notify_all()
+
+
+def perplexity_search_with_sources(query: str, *, recency_days: int | None = None) -> dict:
+    """Web search that keeps claim-to-source links: the answer text with its
+    inline [n] markers intact, and the numbered sources with url and date.
+    For the contract pipeline's discovery step (review, 2026-09-23: the plain
+    adapter condenses the answer and strips the markers, so a claim cannot be
+    traced to the source that supports it). Cached like the plain call."""
+    if not settings.perplexity_api_key:
+        raise RuntimeError("PERPLEXITY_API_KEY is not configured")
+    instructions = ("Answer with dated facts; after each claim put the number of the source that supports it in square brackets, [1], [2]; "
+                    "keep exact figures and dates as the sources print them; distinguish the day an event happened from the day it was reported."
+                    + (f" Prefer sources from the last {recency_days} days." if recency_days else ""))
+    increment("perplexity_web_search_calls")
+    effective_cost = _costs()["web_search"]
+    increment("perplexity_estimated_cost_microusd", round(effective_cost * 1_000_000))
+    if not charge_and_check(effective_cost):
+        increment("perplexity_budget_skips")
+        raise RuntimeError("Per-turn data budget reached")
+    today = datetime.now().astimezone().date().isoformat()
+    with httpx.Client(timeout=settings.perplexity_timeout_seconds) as client:
+        response = client.post(settings.perplexity_agent_url, headers={"Authorization": f"Bearer {settings.perplexity_api_key}", "Content-Type": "application/json"},
+                               json={"model": settings.perplexity_model, "input": query, "tools": [{"type": "web_search"}],
+                                     "instructions": f"Today is {today}. You must use the supplied web_search tool. {instructions}", "max_output_tokens": 2200})
+        response.raise_for_status()
+        payload = response.json()
+    text = _extract_text(payload)
+    if not text:
+        raise RuntimeError("Perplexity returned no answer text")
+    sources = _extract_source_records(payload)
+    for n, s in enumerate(sources, start=1):
+        s["n"] = n
+    return {"text": text, "sources": sources}
+
+
+def render_search_card(query: str, found: dict, title: str = "From the web (dated, with sources)") -> str:
+    lines = [f"# {title}", f"**Provider**: Perplexity web search · **Query**: {query[:120]}", "", found["text"].strip(), ""]
+    if found.get("sources"):
+        lines.append("Sources:")
+        lines += [f"[{s['n']}] [{s['title'][:80]}]({s['url']})" + (f" · {s['date']}" if s.get("date") else "") for s in found["sources"][:10]]
+    return "\n".join(lines)
 
 
 def perplexity_web_search(query: str) -> str:

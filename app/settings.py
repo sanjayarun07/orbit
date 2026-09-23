@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # the whole answer. None uses the primary model.
     planner_model: str | None = None
     contract_pipeline_enabled: bool = True     # market rankings, holders, recent events and yields go through the contract pipeline
+    # Behind a flag until the episode comparison says it wins: open-ended
+    # research (not exact on-chain state) starts with a dated, source-linked
+    # web read, then targeted tools, then the evidence check.
+    discovery_first_research: bool = False
     intent_classifier_cache_entries: int = 512
     # MCP server (app/mcp_server.py) mounted at /mcp for Claude / ChatGPT / any
     # MCP host. When MCP_API_KEY is set, /mcp requires `Authorization: Bearer`.

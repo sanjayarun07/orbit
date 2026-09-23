@@ -2880,3 +2880,13 @@ Rank-and-accept is replaced, for four kinds of ask, by plan → gather → prove
 - **Episodes** (`evals/episodes/`, `scripts/episode_eval.py`, `tests/test_episodes.py`): recorded tool outputs
   replayed through the pipeline; a goal is the end state (tools that ran and must not, scope satisfied, gate,
   facts, must/must-not say). pass^k after τ-bench; CI runs every episode twice, `--k 5` locally.
+
+**Evaluate first, then Perplexity-first selectively (2026-09-23).** Twenty recorded research episodes (`evals/episodes/cases.json`)
+cover rankings, holders, recent events and yields with paraphrases and unsupported-scope cases. `scripts/episode_eval.py
+--live --k 5 --out <file>` runs each prompt through the real research node and records pass^k, latency, LLM calls and
+estimated Perplexity cost; `--set discovery_first_research=true` turns on the flagged variant; `--compare a.json b.json`
+prints them side by side. Under the flag, open-ended research (`contracts.is_open_research`: a why/how/who question with
+no exact on-chain state in it) becomes an `open_research` contract: a structured web read first
+(`perplexity_tools.perplexity_search_with_sources`, inline [n] markers kept, numbered sources with url and date), then
+up to two router-planned tools, then the fact gate requiring a linked source. Exact state (addresses, wallets, holders,
+quotes, prices, yields) never goes web-first. The flag stays off until the comparison says it wins.

@@ -39,6 +39,8 @@ def _fixture(value: str) -> str:
 
 
 class ReplayRouter:
+    replay = True
+
     def __init__(self, fixtures: dict[str, str]):
         self.outputs = {k: _fixture(v) for k, v in fixtures.items()}
         self.calls: list[str] = []
@@ -76,36 +78,9 @@ def run_episode(episode: dict) -> dict:
         evidence_pipeline.get_provider_router, evidence_pipeline.composition.synthesize, runtime.planner_available, evidence_pipeline.settings.contract_pipeline_enabled = saved
     ms = (time.time() - t0) * 1000
     goal = episode.get("goal") or {}
-    failures: list[str] = []
-    if goal.get("pipeline") == "legacy":
-        if out is not None:
-            failures.append("expected the legacy path, the pipeline answered")
-        return {"id": episode["id"], "ok": not failures, "failures": failures, "ms": ms, "tools": router.calls}
-    if out is None:
-        return {"id": episode["id"], "ok": False, "failures": ["pipeline returned None"], "ms": ms, "tools": router.calls}
-    answer = out.get("answer") or ""
-    gate = out.get("gate") or {}
-    if goal.get("tools_any") and not any(t in router.calls for t in goal["tools_any"]):
-        failures.append(f"none of {goal['tools_any']} ran (ran {router.calls})")
-    for t in goal.get("tools_none") or []:
-        if t in router.calls:
-            failures.append(f"{t} must not run")
-    if goal.get("tools_first") and (not router.calls or router.calls[0] != goal["tools_first"]):
-        failures.append(f"first tool was {router.calls[:1]}, expected {goal['tools_first']}")
-    if "scope_satisfied" in goal and gate.get("scope_satisfied") != goal["scope_satisfied"]:
-        failures.append(f"scope_satisfied={gate.get('scope_satisfied')}, expected {goal['scope_satisfied']}")
-    if "gate_ok" in goal and bool(gate.get("ok")) != goal["gate_ok"]:
-        failures.append(f"gate ok={gate.get('ok')}, expected {goal['gate_ok']} ({gate.get('missing')})")
-    for kind, n in (goal.get("facts_min") or {}).items():
-        have = sum(1 for f in out.get("facts") or [] if f.startswith(kind + ":"))
-        if have < n:
-            failures.append(f"{have} {kind} facts, need {n}")
-    for text in goal.get("must_contain") or []:
-        if text not in answer:
-            failures.append(f"missing text: {text!r}")
-    for text in goal.get("must_not_contain") or []:
-        if text in answer:
-            failures.append(f"forbidden text present: {text!r}")
+    if goal.get("pipeline") == "legacy" and out is None:
+        return {"id": episode["id"], "ok": True, "failures": [], "ms": ms, "tools": router.calls}
+    failures = _judge(episode, out, router.calls)
     fa = goal.get("fact_attr")
     if fa:
         from app import facts as facts_mod
@@ -119,28 +94,121 @@ def run_episode(episode: dict) -> dict:
     return {"id": episode["id"], "ok": not failures, "failures": failures, "ms": ms, "tools": router.calls}
 
 
+def _judge(episode: dict, out: dict | None, calls: list[str], answer_override: str | None = None) -> list[str]:
+    """The goal checks shared by replay and live runs."""
+    goal = episode.get("goal") or {}
+    failures: list[str] = []
+    if goal.get("pipeline") == "legacy":
+        if out is not None and out.get("pipeline") == "contract":
+            failures.append("expected the legacy path, the pipeline answered")
+        return failures
+    if out is None:
+        return ["no answer"]
+    answer = answer_override if answer_override is not None else (out.get("answer") or "")
+    gate = out.get("gate") or {}
+    if goal.get("tools_any") and not any(t in calls for t in goal["tools_any"]):
+        failures.append(f"none of {goal['tools_any']} ran (ran {calls})")
+    for t in goal.get("tools_none") or []:
+        if t in calls:
+            failures.append(f"{t} must not run")
+    if goal.get("tools_first") and (not calls or calls[0] != goal["tools_first"]):
+        failures.append(f"first tool was {calls[:1]}, expected {goal['tools_first']}")
+    if "scope_satisfied" in goal and gate.get("scope_satisfied") != goal["scope_satisfied"]:
+        failures.append(f"scope_satisfied={gate.get('scope_satisfied')}, expected {goal['scope_satisfied']}")
+    if "gate_ok" in goal and bool(gate.get("ok")) != goal["gate_ok"]:
+        failures.append(f"gate ok={gate.get('ok')}, expected {goal['gate_ok']} ({gate.get('missing')})")
+    for kind, n in (goal.get("facts_min") or {}).items():
+        have = sum(1 for f in out.get("facts") or [] if f.startswith(kind + ":"))
+        if have < n:
+            failures.append(f"{have} {kind} facts, need {n}")
+    for text in goal.get("must_contain") or []:
+        if text not in answer:
+            failures.append(f"missing text: {text!r}")
+    for text in goal.get("must_contain_any") or []:
+        if not any(t in answer for t in (text if isinstance(text, list) else [text])):
+            failures.append(f"missing any of: {text!r}")
+    for text in goal.get("must_not_contain") or []:
+        if text in answer:
+            failures.append(f"forbidden text present: {text!r}")
+    return failures
+
+
+def run_live(episode: dict) -> dict:
+    """The prompt through the real research node with real providers and the
+    model: latency and the metric counters (LLM calls, Perplexity calls,
+    estimated Perplexity cost) beside the same goal judgement. A live goal
+    must be provider-independent: tools that ran, scope, gate, structural text."""
+    from app import metrics
+    from app.nodes import research
+    from app.settings import settings
+
+    before = metrics.snapshot()
+    t0 = time.time()
+    state = {"request": episode["prompt"], "contextual_request": None, "history": "", "session_context": {}, "chains": [],
+             "capabilities": episode.get("capabilities") or ["market_data", "token_discovery", "token_security", "defi_data", "web_research", "knowledge"],
+             "routing_decision": {"intent": "research"}}
+    try:
+        out = asyncio.run(research.research_node(state))
+    except Exception as exc:  # noqa: BLE001
+        out = {"answer": f"ERROR {exc!r}", "trajectory": None}
+    ms = (time.time() - t0) * 1000
+    after = metrics.snapshot()
+    delta = {k: after.get(k, 0) - before.get(k, 0) for k in set(after) | set(before) if after.get(k, 0) != before.get(k, 0)}
+    trajectory = out.get("trajectory") or {}
+    calls = [v for k, v in trajectory.items() if k.startswith("tool_name")]
+    failures = _judge(episode, out, calls)
+    return {"id": episode["id"], "ok": not failures, "failures": failures, "ms": ms, "tools": calls,
+            "llm_calls": delta.get("llm_calls", 0), "perplexity_calls": sum(v for k, v in delta.items() if k.startswith("perplexity_") and k.endswith("_calls")),
+            "perplexity_cost_usd": delta.get("perplexity_estimated_cost_microusd", 0) / 1e6, "pipeline": out.get("pipeline", "legacy"),
+            "answer_head": (out.get("answer") or "")[:240]}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--k", type=int, default=3)
     ap.add_argument("--only", default=None)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--live", action="store_true", help="run each prompt through the real research node (providers, model); records latency and cost")
+    ap.add_argument("--set", action="append", default=[], help="settings override for the run, e.g. --set discovery_first_research=true")
+    ap.add_argument("--compare", nargs=2, metavar=("A.json", "B.json"), help="print a per-episode comparison of two saved reports")
+    ap.add_argument("--kinds", default=None, help="comma-separated contract kinds to include")
     args = ap.parse_args()
+    if args.compare:
+        a, b = (json.load(open(f)) for f in args.compare)
+        ra, rb = {e["id"]: e for e in a["episodes"]}, {e["id"]: e for e in b["episodes"]}
+        print(f"{'episode':32} {'A pass^k':8} {'B pass^k':8} {'A ms':>8} {'B ms':>8} {'A llm':>5} {'B llm':>5} {'A $':>7} {'B $':>7}")
+        for eid in ra:
+            x, y = ra[eid], rb.get(eid, {})
+            print(f"{eid:32} {str(x.get('pass_k')):8} {str(y.get('pass_k')):8} {x.get('ms_mean', 0):8.0f} {y.get('ms_mean', 0):8.0f} {x.get('llm_calls', 0):5.1f} {y.get('llm_calls', 0):5.1f} {x.get('cost_usd', 0):7.3f} {y.get('cost_usd', 0):7.3f}")
+        return 0
+    if args.set:
+        from app.settings import settings
+        for item in args.set:
+            key, _, value = item.partition("=")
+            current = getattr(settings, key)
+            setattr(settings, key, (value.lower() in ("1", "true", "yes")) if isinstance(current, bool) else type(current)(value) if current is not None else value)
     episodes = json.load(open(CASES))["episodes"]
     if args.only:
         episodes = [e for e in episodes if e["id"] == args.only]
+    if args.kinds:
+        wanted = set(args.kinds.split(","))
+        episodes = [e for e in episodes if e.get("kind") in wanted]
     report, passed_k, wrong = [], 0, 0
     for episode in episodes:
-        runs = [run_episode(episode) for _ in range(args.k)]
+        runs = [(run_live if args.live else run_episode)(episode) for _ in range(args.k)]
         ok_k = all(r["ok"] for r in runs)
         passed_k += ok_k
         wrong += (not ok_k)
-        report.append({"id": episode["id"], "pass_k": ok_k, "pass_1": runs[0]["ok"], "failures": sorted({f for r in runs for f in r["failures"]}),
-                       "ms_mean": sum(r["ms"] for r in runs) / len(runs), "tools": runs[0]["tools"]})
-        print(f"{episode['id']:32} {'PASS' if ok_k else 'FAIL':4}  {report[-1]['ms_mean']:6.0f} ms  {runs[0]['tools']}" + ("" if ok_k else "  " + " | ".join(report[-1]["failures"])[:200]))
-    print(f"\nepisodes {len(episodes)} · pass^{args.k} {passed_k}/{len(episodes)} · wrong-answer rate {wrong / max(1, len(episodes)):.0%}")
+        report.append({"id": episode["id"], "pass_k": ok_k, "pass_1": runs[0]["ok"], "passes": sum(r["ok"] for r in runs), "failures": sorted({f for r in runs for f in r["failures"]}),
+                       "ms_mean": sum(r["ms"] for r in runs) / len(runs), "tools": runs[0]["tools"],
+                       "llm_calls": sum(r.get("llm_calls", 0) for r in runs) / len(runs), "perplexity_calls": sum(r.get("perplexity_calls", 0) for r in runs) / len(runs),
+                       "cost_usd": sum(r.get("perplexity_cost_usd", 0) for r in runs) / len(runs), "pipeline": runs[0].get("pipeline"), "answer_head": runs[0].get("answer_head")})
+        print(f"{episode['id']:32} {'PASS' if ok_k else 'FAIL':4} {report[-1]['passes']}/{args.k} {report[-1]['ms_mean']:7.0f} ms  {runs[0]['tools'][:3]}" + ("" if ok_k else "  " + " | ".join(report[-1]["failures"])[:220]))
+    print(f"\nepisodes {len(episodes)} · pass^{args.k} {passed_k}/{len(episodes)} · wrong-answer rate {wrong / max(1, len(episodes)):.0%}"
+          + (f" · mean {sum(r['ms_mean'] for r in report) / max(1, len(report)):.0f} ms · mean LLM calls {sum(r['llm_calls'] for r in report) / max(1, len(report)):.1f} · mean web cost ${sum(r['cost_usd'] for r in report) / max(1, len(report)):.3f}" if args.live else ""))
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-        json.dump({"k": args.k, "episodes": report, "at": datetime.now(timezone.utc).isoformat()}, open(args.out, "w"), indent=1)
+        json.dump({"k": args.k, "live": args.live, "settings": args.set, "episodes": report, "at": datetime.now(timezone.utc).isoformat()}, open(args.out, "w"), indent=1)
     return 0 if passed_k == len(episodes) else 1
 
 

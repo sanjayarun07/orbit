@@ -28,6 +28,8 @@ LIDO_WEB = "Lido's Snapshot vote on expense optimization and stETH buyback param
 
 
 class FakeRouter:
+    replay = True
+
     def __init__(self, outputs: dict[str, str]):
         self.outputs = outputs
         self.calls: list[str] = []
@@ -146,3 +148,28 @@ def test_a_recently_question_leads_with_discovery_and_needs_a_dated_recent_event
 def test_a_non_contract_ask_is_left_to_the_legacy_path():
     out, router = _run({}, "price of BONK")
     assert out is None and router.calls == []
+
+
+def test_a_structured_search_keeps_claim_to_source_links():
+    found = {"text": "Lido's Snapshot vote opened on 2026-09-21 [1]. The BORG vote concluded 2025-01-14 [2].",
+             "sources": [{"n": 1, "title": "research.lido.fi", "url": "https://research.lido.fi/t/x", "date": "2026-09-21"}, {"n": 2, "title": "docs", "url": "https://docs.lido.fi", "date": None}]}
+    rows = facts.facts_from_search(found)
+    sources = [f for f in rows if f.kind == "source"]
+    events = [f for f in rows if f.kind == "event"]
+    assert len(sources) == 2 and sources[0].attrs["url"] == "https://research.lido.fi/t/x" and sources[0].event_date == "2026-09-21"
+    assert events[0].attrs["cites"] == [1, 2] and events[0].attrs["traced"] and events[0].event_date == "2026-09-21"
+    from app import perplexity_tools
+    card = perplexity_tools.render_search_card("q", found)
+    assert "[1] [research.lido.fi](https://research.lido.fi/t/x) · 2026-09-21" in card and "opened on 2026-09-21 [1]" in card
+
+
+def test_open_research_is_taken_only_behind_the_flag(monkeypatch):
+    assert plan_by_rules("Who are the investors backing EigenLayer?").kind == "open_research"
+    assert plan_by_rules("Why is SOL moving today?").kind == "open_research"
+    assert plan_by_rules("what is the price of BONK").kind == "other"
+    monkeypatch.setattr(evidence_pipeline.settings, "discovery_first_research", False)
+    out, router = _run({"perplexity_web_search": LIDO_WEB}, "Who are the investors backing EigenLayer?")
+    assert out is None
+    monkeypatch.setattr(evidence_pipeline.settings, "discovery_first_research", True)
+    out, router = _run({"perplexity_web_search": LIDO_WEB}, "Who are the investors backing EigenLayer?")
+    assert out is not None and router.calls[0] == "perplexity_web_search" and out["contract"]["kind"] == "open_research"

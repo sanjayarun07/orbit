@@ -29,10 +29,21 @@ from app.routing import lexicon
 
 logger = logging.getLogger(__name__)
 
-Kind = Literal["market_ranking", "holders", "recent_events", "yields", "other"]
+Kind = Literal["market_ranking", "holders", "recent_events", "yields", "open_research", "other"]
 Scope = Literal["venue_trades", "global", "on_chain", "any"]
 
 CONTRACT_KINDS: tuple[str, ...] = ("market_ranking", "holders", "recent_events", "yields")
+OPEN_RESEARCH_KIND = "open_research"
+# Exact state the web must never answer first: an address, a wallet, a quote, a price now, an exit, a position.
+_EXACT_STATE = re.compile(r"(?<![A-Za-z0-9])(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])|\b(?:wallet|balance|balances|portfolio|position|exit|quote|swap|bridge|price\s+of|price\s+now|current\s+price|how\s+much\s+is|holders?|liquidity\s+of|tvl\s+of|apy|yield)\b", re.I)
+_OPEN_RESEARCH = re.compile(r"\b(?:why|how|what|who|which|explain|compare|analy[sz]e|diligence|competitors?|investors?|backers?|revenue|risks?|outlook|history|background|roadmap|tokenomics|governance|research|deep\s+dive|overview)\b", re.I)
+
+
+def is_open_research(request: str) -> bool:
+    """Open-ended research the web may lead: a question about a project, a
+    move, a narrative or a mechanism, with no exact on-chain state in it."""
+    text = request or ""
+    return bool(_OPEN_RESEARCH.search(text)) and not _EXACT_STATE.search(text) and len(text.split()) >= 3
 
 
 class Subject(BaseModel):
@@ -191,7 +202,8 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
         filters["min_liquidity_usd"] = value
     limit = int(_LIMIT.search(text).group(1)) if _LIMIT.search(text) else 10
     window = _window_hours(text)
-    if _RANKING.search(text) and not _HOLDERS.search(text):
+    explanation = bool(re.match(r"\s*(?:why|what(?:'s| is)\s+(?:driving|behind|moving))\b", text, re.I))
+    if _RANKING.search(text) and not _HOLDERS.search(text) and not explanation:
         metric = "volume" if re.search(r"\b(?:most\s+traded|by\s+volume|volume\s+leaders?|top\s+volume)\b", text, re.I) else "price_change"
         scope: Scope = "any"
         if chain or venue:
@@ -212,6 +224,10 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
         return QuestionContract(kind="recent_events", subject=Subject(kind="topic", symbol=symbol, name=None, chain=chain), scope="any", metric="events",
                                 window_hours=window or 24 * 30, freshness_seconds=3 * 86400, evidence_order="discovery_first",
                                 required_facts=["event"], confidence=0.5, planner="rules")
+    if is_open_research(text):
+        return QuestionContract(kind="open_research", subject=Subject(kind="topic", symbol=symbol, chain=chain), scope="any", metric="events",
+                                window_hours=window, freshness_seconds=7 * 86400, evidence_order="discovery_first",
+                                required_facts=["source"], confidence=0.5, planner="rules")
     return QuestionContract(kind="other", planner="rules", confidence=0.3)
 
 

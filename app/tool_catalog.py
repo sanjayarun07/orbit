@@ -541,8 +541,9 @@ CONTRACT_COVERAGE: dict[str, dict] = {
     "bitquery_token_top_holders": {"kinds": {"holders"}, "scope": "on_chain", "chains": _ALL_EVM | {"solana"}, "metrics": {"holders"}, "windows": None, "fresh": 3600},
     "goldrush_token_top_holders": {"kinds": {"holders"}, "scope": "on_chain", "chains": _ALL_EVM, "metrics": {"holders"}, "windows": None, "fresh": 3600},
     "defillama_yields": {"kinds": {"yields"}, "scope": "global", "chains": _ALL_EVM | {"solana", "sui", "aptos", "tron", "hyperliquid"}, "metrics": {"apy"}, "windows": None, "fresh": 3600},
-    "perplexity_web_search": {"kinds": {"recent_events"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 3 * 86400, "discovery": True},
-    "knowledge_base_search": {"kinds": {"recent_events"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": None, "background": True},
+    "perplexity_web_search": {"kinds": {"recent_events", "open_research"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 3 * 86400, "discovery": True},
+    "knowledge_base_search": {"kinds": {"recent_events", "open_research"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": None, "background": True},
+    "openai_web_search": {"kinds": {"recent_events", "open_research"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 3 * 86400, "discovery": True},
     "tradingview_news": {"kinds": {"recent_events"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 86400, "discovery": True},
     "exchange_listing_announcements": {"kinds": {"recent_events"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 86400, "discovery": True},
 }

@@ -15,8 +15,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
-from app import composition, contracts, evidence, fact_gate, facts as facts_mod, streaming, tool_catalog
+from app import composition, contracts, evidence, fact_gate, facts as facts_mod, perplexity_tools, streaming, tool_catalog
 from app.provider_registry import get_provider_router
 from app.settings import settings
 
@@ -28,8 +29,9 @@ MAX_TOOLS = 3
 def _contract_note(contract: contracts.QuestionContract, gate: fact_gate.GateResult, fact_rows: list[facts_mod.Fact], scope_note: str | None) -> str:
     lines = [f"Question contract: {contract.label()} · metric {contract.metric or '-'} · scope {contract.scope} · window {contract.window_hours or '-'}h · filters {contract.filters or '{}'}",
              f"Accepted facts: {len(fact_rows)} ({', '.join(sorted({f.kind for f in fact_rows})) or 'none'}).",
-             "Instructions for the answer: state only figures present in the cards; name the source and its time for each; "
-             "if the cards do not satisfy the contract, say exactly what is missing in the first sentence, and never fill it from memory."]
+             "Instructions for the answer: state only figures present in the cards; name the source and its time for each; keep the [n] "
+             "source markers next to the claims they support when the cards carry them; if the cards do not satisfy the contract, say exactly "
+             "what is missing in the first sentence, and never fill it from memory."]
     if scope_note:
         lines.append(f"Scope: {scope_note}")
     if gate.missing:
@@ -47,7 +49,19 @@ def _near_tools(contract: contracts.QuestionContract, ranked: list[tuple[str, st
     return [name for name, reason in ranked if reason != "eligible" and tool_catalog.eligible(name, relaxed)[0]]
 
 
-async def _invoke(router, name: str, request: str, chains: tuple[str, ...]):
+async def _invoke(router, name: str, request: str, chains: tuple[str, ...], contract=None):
+    """One tool. The web discovery tool runs through the structured search so
+    claims keep their [n] markers and numbered, dated sources; everything
+    else through the router (quota, cache, breaker as usual)."""
+    if name == "perplexity_web_search" and contract is not None and perplexity_tools.perplexity_available() and not getattr(router, "replay", False):
+        try:
+            days = int((contract.window_hours or 24 * 30) / 24) or 1 if contract.kind in ("recent_events", "open_research") else None
+            found = await asyncio.to_thread(perplexity_tools.perplexity_search_with_sources, request, recency_days=days)
+            card = perplexity_tools.render_search_card(request, found)
+            result = SimpleNamespace(output=card, tool=name, provider="perplexity", structured=found)
+            return result
+        except Exception:
+            logger.info("structured web search failed; plain call", exc_info=True)
     try:
         return await asyncio.to_thread(router.invoke, name, request, chains)
     except KeyError:
@@ -57,13 +71,22 @@ async def _invoke(router, name: str, request: str, chains: tuple[str, ...]):
         return None
 
 
+def _facts_of(result, kind: str) -> list:
+    found = getattr(result, "structured", None)
+    if found:
+        return facts_mod.facts_from_search(found, result.tool)
+    return facts_mod.facts_from_card(result.tool, result.output, kind)
+
+
 async def answer(state: dict, request: str, chains: tuple[str, ...], *, context: str = "") -> dict | None:
     """The contract-pipeline answer, or None when the ask is not one of the
     four kinds (the legacy path answers it)."""
     if not settings.contract_pipeline_enabled:
         return None
     contract = await contracts.plan(request, context)
-    if contract.kind not in contracts.CONTRACT_KINDS:
+    if contract.kind == contracts.OPEN_RESEARCH_KIND and not settings.discovery_first_research:
+        return None
+    if contract.kind not in contracts.CONTRACT_KINDS and contract.kind != contracts.OPEN_RESEARCH_KIND:
         return None
     if contract.ambiguity:
         return {"answer": contract.ambiguity, "trajectory": None, "contract": contract.model_dump(), "pipeline": "contract"}
@@ -81,7 +104,16 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         spec = getattr(tool, "spec", None)
         return (spec.fit(request) if spec else 0.0) + float(getattr(tool, "priority", 0.0)) / 100.0 + (1.0 if tool.matches(request) else 0.0)
     state_tools.sort(key=rank, reverse=True)
-    if contract.evidence_order == "discovery_first":
+    if contract.kind == contracts.OPEN_RESEARCH_KIND:
+        # Web first, then up to two targeted tools the router would plan for
+        # this ask (holders, security, market data), then the check.
+        planned = []
+        try:
+            planned = [t.name for t in await asyncio.to_thread(router.plan_across, request, ("market_data", "token_security", "token_discovery", "defi_data", "knowledge"), chains, 2)]
+        except Exception:
+            logger.info("open research: router plan failed", exc_info=True)
+        chosen = discovery_tools[:1] + [n for n in planned if n not in discovery_tools][:2]
+    elif contract.evidence_order == "discovery_first":
         chosen = discovery_tools[:1] + state_tools[:1] + background_tools[:1]
     else:
         # One state source, plus a second only when it covers different ground
@@ -108,23 +140,23 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         scope_note = (f"the ask needs {contract.scope.replace('_', ' ')}; the only source available is {chosen[0]} whose scope is {cov_scope.replace('_', ' ')} "
                       f"-- shown as the nearest verifiable ranking, not as the ask itself")
     streaming.emit("status", text=f"Contract: {contract.label()} · tools: {', '.join(chosen)}")
-    results = await asyncio.gather(*(_invoke(router, name, request, chains) for name in chosen))
+    results = await asyncio.gather(*(_invoke(router, name, request, chains, contract) for name in chosen))
     parts, fact_rows = [], []
     for name, result in zip(chosen, results):
         if result is None or not result.output:
             continue
         streaming.emit("card", markdown=result.output, tool=result.tool)
         parts.append((result.output, {"tool_name_0": result.tool, "tool_args_0": {"request": request}, "observation_0": result.output}))
-        fact_rows.extend(facts_mod.facts_from_card(result.tool, result.output, contract.kind))
+        fact_rows.extend(_facts_of(result, contract.kind))
     gate = fact_gate.check(contract, fact_rows, scope_satisfied=scope_satisfied)
     if not gate.ok and gate.missing and discovery_tools and not any(n in chosen for n in discovery_tools):
         # One repair: a discovery tool for the gap the state tools left.
         repair = discovery_tools[0]
-        result = await _invoke(router, repair, f"{request} -- {'; '.join(gate.missing)}", chains)
+        result = await _invoke(router, repair, f"{request} -- {'; '.join(gate.missing)}", chains, contract)
         if result is not None and result.output:
             streaming.emit("card", markdown=result.output, tool=result.tool)
             parts.append((result.output, {"tool_name_0": result.tool, "tool_args_0": {"request": request}, "observation_0": result.output}))
-            fact_rows.extend(facts_mod.facts_from_card(result.tool, result.output, contract.kind))
+            fact_rows.extend(_facts_of(result, contract.kind))
             gate = fact_gate.check(contract, fact_rows, scope_satisfied=scope_satisfied)
             chosen = chosen + [repair]
     if not parts:

@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from app.contracts import QuestionContract
 from app.facts import Fact, event_date_of
 
-_MIN_ROWS = {"ranking_row": 3, "holder_row": 5, "yield_row": 1, "event": 1}
+_MIN_ROWS = {"ranking_row": 3, "holder_row": 5, "yield_row": 1, "event": 1, "source": 1}
 _FIGURE = re.compile(r"(?<![\w.])[+\-]?\$?\d[\d,]*(?:\.\d+)?\s*(?:%|[kKmMbB]\b|[xX]\b)?")
 _YEARLIKE = re.compile(r"^(?:19|20)\d{2}$")
 
@@ -141,7 +141,7 @@ def check(contract: QuestionContract, facts: list[Fact], answer: str | None = No
                 continue
             rows = recent
         if len(rows) < need:
-            what = {"ranking_row": "enough ranked rows for the asked scope", "holder_row": "holder positions", "yield_row": "a matching yield pool", "event": "an event"}.get(required, required)
+            what = {"ranking_row": "enough ranked rows for the asked scope", "holder_row": "holder positions", "yield_row": "a matching yield pool", "event": "an event", "source": "a dated, linked source"}.get(required, required)
             qualifier = ""
             if contract.filters.get("single_asset") and required == "yield_row":
                 qualifier = " that is single-asset"

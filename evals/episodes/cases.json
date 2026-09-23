@@ -1,41 +1,347 @@
 {
-  "note": "Episodes: a prompt, recorded tool outputs (fixtures/<name>.md or inline), and a goal state. Run with scripts/episode_eval.py; CI replays them at k=2 (tests/test_episodes.py). A goal is about the end state, not the prose: which tools ran, which facts the answer rests on, what it must say or must not claim.",
-  "episodes": [
-    {"id": "base-gainers-24h", "prompt": "top gainers on Base in the last 24h", "kind": "market_ranking",
-     "fixtures": {"coingecko_gainers_losers": "base_gainers.md"},
-     "goal": {"tools_any": ["coingecko_gainers_losers"], "scope_satisfied": false, "must_contain": ["could not be verified", "AERO"], "must_not_contain": ["Base-venue", "trades on Base show"]}},
-    {"id": "hl-stocks-moving", "prompt": "which tokenized stocks are moving on hyperliquid", "kind": "market_ranking",
-     "fixtures": {"tequity_movers": "hl_movers.md"},
-     "goal": {"tools_any": ["tequity_movers"], "scope_satisfied": true, "must_contain": ["TSLA"], "must_not_contain": ["could not be verified"]}},
-    {"id": "hl-gainers-no-stocks", "prompt": "Hyperliquid gainers excluding stocks", "kind": "market_ranking",
-     "fixtures": {"tequity_movers": "hl_movers_crypto.md"},
-     "goal": {"tools_any": ["tequity_movers"], "gate_ok": true, "must_not_contain": ["TSLA/USDC"]}},
-    {"id": "aster-volume-2h", "prompt": "most traded on aster in the last 2 hours", "kind": "market_ranking",
-     "fixtures": {"tequity_volume_leaders": "aster_volume.md"},
-     "goal": {"tools_any": ["tequity_volume_leaders"], "tools_none": ["coingecko_top_volume", "tequity_movers"], "must_contain": ["last 2 hours"]}},
-    {"id": "hl-movers-week", "prompt": "biggest movers on hyperliquid this week", "kind": "market_ranking",
-     "fixtures": {"tequity_period_movers": "hl_period.md"},
-     "goal": {"tools_any": ["tequity_period_movers"], "tools_none": ["tequity_movers"]}},
-    {"id": "pepe-holders", "prompt": "Who are the top holders of PEPE?", "kind": "holders",
-     "fixtures": {"mobula_token_holders": "pepe_holders.md"},
-     "goal": {"tools_any": ["mobula_token_holders"], "gate_ok": true, "facts_min": {"holder_row": 5}, "fact_attr": {"kind": "holder_row", "subject_contains": "dEaD", "attr": "class", "equals": "burn"}, "must_not_contain": ["dEaD` is a liquidity pool"]}},
-    {"id": "usdc-base-single", "prompt": "Find USDC yield on Base without exposing me to another volatile token", "kind": "yields",
-     "fixtures": {"defillama_yields": "usdc_yields.md"},
-     "goal": {"tools_any": ["defillama_yields"], "gate_ok": true, "facts_min": {"yield_row": 1}}},
-    {"id": "usdc-base-best", "prompt": "Best USDC yield on Base", "kind": "yields",
-     "fixtures": {"defillama_yields": "usdc_yields.md"},
-     "goal": {"tools_any": ["defillama_yields"], "gate_ok": true, "must_contain": ["single-asset"]}},
-    {"id": "lido-recent-vote", "prompt": "What did the Lido community vote on recently?", "kind": "recent_events",
-     "fixtures": {"perplexity_web_search": "lido_web.md", "knowledge_base_search": "lido_kb.md"},
-     "goal": {"tools_first": "perplexity_web_search", "gate_ok": true, "must_contain": ["2026-09-21"]}},
-    {"id": "lido-stale-kb-only", "prompt": "What did the Lido community vote on recently?", "kind": "recent_events",
-     "fixtures": {"knowledge_base_search": "lido_kb.md"},
-     "goal": {"gate_ok": false, "must_contain": ["Not established: an event inside the last 30 days"]}},
-    {"id": "solana-gainers-7d-unsupported", "prompt": "top gainers on solana over the last 7 days", "kind": "market_ranking",
-     "fixtures": {},
-     "goal": {"tools_none": ["coingecko_gainers_losers"], "must_contain": ["No source I have covers this exactly"]}},
-    {"id": "price-bonk-legacy", "prompt": "price of BONK", "kind": "other",
-     "fixtures": {},
-     "goal": {"pipeline": "legacy"}}
-  ]
+ "note": "Episodes: a prompt, recorded tool outputs (fixtures/<name>.md or inline), and a goal state. Run with scripts/episode_eval.py; CI replays them at k=2 (tests/test_episodes.py). A goal is about the end state, not the prose: which tools ran, which facts the answer rests on, what it must say or must not claim.",
+ "episodes": [
+  {
+   "id": "base-gainers-24h",
+   "prompt": "top gainers on Base in the last 24h",
+   "kind": "market_ranking",
+   "fixtures": {
+    "coingecko_gainers_losers": "base_gainers.md"
+   },
+   "goal": {
+    "tools_any": [
+     "coingecko_gainers_losers"
+    ],
+    "scope_satisfied": false,
+    "must_contain": [
+     "could not be verified",
+     "AERO"
+    ],
+    "must_not_contain": [
+     "Base-venue",
+     "trades on Base show"
+    ]
+   }
+  },
+  {
+   "id": "hl-stocks-moving",
+   "prompt": "which tokenized stocks are moving on hyperliquid",
+   "kind": "market_ranking",
+   "fixtures": {
+    "tequity_movers": "hl_movers.md"
+   },
+   "goal": {
+    "tools_any": [
+     "tequity_movers"
+    ],
+    "scope_satisfied": true,
+    "must_contain": [
+     "TSLA"
+    ],
+    "must_not_contain": [
+     "could not be verified"
+    ]
+   }
+  },
+  {
+   "id": "hl-gainers-no-stocks",
+   "prompt": "Hyperliquid gainers excluding stocks",
+   "kind": "market_ranking",
+   "fixtures": {
+    "tequity_movers": "hl_movers_crypto.md"
+   },
+   "goal": {
+    "tools_any": [
+     "tequity_movers"
+    ],
+    "gate_ok": true,
+    "must_not_contain": [
+     "TSLA/USDC"
+    ]
+   }
+  },
+  {
+   "id": "aster-volume-2h",
+   "prompt": "most traded on aster in the last 2 hours",
+   "kind": "market_ranking",
+   "fixtures": {
+    "tequity_volume_leaders": "aster_volume.md"
+   },
+   "goal": {
+    "tools_any": [
+     "tequity_volume_leaders"
+    ],
+    "tools_none": [
+     "coingecko_top_volume",
+     "tequity_movers"
+    ],
+    "must_contain": [
+     "last 2 hours"
+    ]
+   }
+  },
+  {
+   "id": "hl-movers-week",
+   "prompt": "biggest movers on hyperliquid this week",
+   "kind": "market_ranking",
+   "fixtures": {
+    "tequity_period_movers": "hl_period.md"
+   },
+   "goal": {
+    "tools_any": [
+     "tequity_period_movers"
+    ],
+    "tools_none": [
+     "tequity_movers"
+    ]
+   }
+  },
+  {
+   "id": "pepe-holders",
+   "prompt": "Who are the top holders of PEPE?",
+   "kind": "holders",
+   "fixtures": {
+    "mobula_token_holders": "pepe_holders.md"
+   },
+   "goal": {
+    "tools_any": [
+     "mobula_token_holders"
+    ],
+    "gate_ok": true,
+    "facts_min": {
+     "holder_row": 5
+    },
+    "fact_attr": {
+     "kind": "holder_row",
+     "subject_contains": "dEaD",
+     "attr": "class",
+     "equals": "burn"
+    },
+    "must_not_contain": [
+     "dEaD` is a liquidity pool"
+    ]
+   }
+  },
+  {
+   "id": "usdc-base-single",
+   "prompt": "Find USDC yield on Base without exposing me to another volatile token",
+   "kind": "yields",
+   "fixtures": {
+    "defillama_yields": "usdc_yields.md"
+   },
+   "goal": {
+    "tools_any": [
+     "defillama_yields"
+    ],
+    "gate_ok": true,
+    "facts_min": {
+     "yield_row": 1
+    }
+   }
+  },
+  {
+   "id": "usdc-base-best",
+   "prompt": "Best USDC yield on Base",
+   "kind": "yields",
+   "fixtures": {
+    "defillama_yields": "usdc_yields.md"
+   },
+   "goal": {
+    "tools_any": [
+     "defillama_yields"
+    ],
+    "gate_ok": true,
+    "must_contain": [
+     "single-asset"
+    ]
+   }
+  },
+  {
+   "id": "lido-recent-vote",
+   "prompt": "What did the Lido community vote on recently?",
+   "kind": "recent_events",
+   "fixtures": {
+    "perplexity_web_search": "lido_web.md",
+    "knowledge_base_search": "lido_kb.md"
+   },
+   "goal": {
+    "tools_first": "perplexity_web_search",
+    "gate_ok": true,
+    "must_contain": [
+     "2026-09-21"
+    ]
+   }
+  },
+  {
+   "id": "lido-stale-kb-only",
+   "prompt": "What did the Lido community vote on recently?",
+   "kind": "recent_events",
+   "fixtures": {
+    "knowledge_base_search": "lido_kb.md"
+   },
+   "goal": {
+    "gate_ok": false,
+    "must_contain": [
+     "Not established: an event inside the last 30 days"
+    ]
+   }
+  },
+  {
+   "id": "solana-gainers-7d-unsupported",
+   "prompt": "top gainers on solana over the last 7 days",
+   "kind": "market_ranking",
+   "fixtures": {},
+   "goal": {
+    "tools_none": [
+     "coingecko_gainers_losers"
+    ],
+    "must_contain": [
+     "No source I have covers this exactly"
+    ]
+   }
+  },
+  {
+   "id": "price-bonk-legacy",
+   "prompt": "price of BONK",
+   "kind": "other",
+   "fixtures": {},
+   "goal": {
+    "pipeline": "legacy"
+   }
+  },
+  {
+   "id": "base-gainers-paraphrase",
+   "prompt": "Which Base tokens went up the most today?",
+   "kind": "market_ranking",
+   "fixtures": {
+    "coingecko_gainers_losers": "base_gainers.md"
+   },
+   "goal": {
+    "tools_any": [
+     "coingecko_gainers_losers"
+    ],
+    "scope_satisfied": false,
+    "must_contain": [
+     "could not be verified"
+    ]
+   }
+  },
+  {
+   "id": "base-ecosystem-explicit",
+   "prompt": "tokens in the Base ecosystem up the most today",
+   "kind": "market_ranking",
+   "fixtures": {
+    "coingecko_gainers_losers": "base_gainers.md"
+   },
+   "goal": {
+    "tools_any": [
+     "coingecko_gainers_losers"
+    ],
+    "scope_satisfied": true,
+    "must_not_contain": [
+     "could not be verified"
+    ]
+   }
+  },
+  {
+   "id": "aster-losers-today",
+   "prompt": "biggest losers on aster today",
+   "kind": "market_ranking",
+   "fixtures": {
+    "tequity_movers": "aster_losers.md"
+   },
+   "goal": {
+    "tools_any": [
+     "tequity_movers"
+    ],
+    "gate_ok": true,
+    "must_not_contain": [
+     "could not be verified"
+    ]
+   }
+  },
+  {
+   "id": "hl-volume-week",
+   "prompt": "most traded on hyperliquid this week",
+   "kind": "market_ranking",
+   "fixtures": {
+    "tequity_volume_leaders": "hl_volume_week.md"
+   },
+   "goal": {
+    "tools_any": [
+     "tequity_volume_leaders"
+    ],
+    "tools_none": [
+     "coingecko_top_volume"
+    ],
+    "gate_ok": true
+   }
+  },
+  {
+   "id": "bonk-holders-solana",
+   "prompt": "top holders of BONK on solana",
+   "kind": "holders",
+   "fixtures": {
+    "mobula_token_holders": "bonk_holders.md"
+   },
+   "goal": {
+    "tools_any": [
+     "mobula_token_holders",
+     "solana_rpc_token_top_holders"
+    ],
+    "gate_ok": true,
+    "facts_min": {
+     "holder_row": 5
+    }
+   }
+  },
+  {
+   "id": "steth-apy",
+   "prompt": "what APY does stETH pay",
+   "kind": "yields",
+   "fixtures": {
+    "defillama_yields": "steth_yield.md"
+   },
+   "goal": {
+    "tools_any": [
+     "defillama_yields"
+    ],
+    "gate_ok": true
+   }
+  },
+  {
+   "id": "aave-hacked-recently",
+   "prompt": "has Aave been hacked recently?",
+   "kind": "recent_events",
+   "fixtures": {
+    "perplexity_web_search": "aave_incidents.md",
+    "knowledge_base_search": "aave_kb.md"
+   },
+   "goal": {
+    "tools_first": "perplexity_web_search",
+    "must_contain_any": [
+     [
+      "2026-09",
+      "September 2026",
+      "Not established"
+     ]
+    ]
+   }
+  },
+  {
+   "id": "eigen-news-week",
+   "prompt": "EigenLayer news this week",
+   "kind": "recent_events",
+   "fixtures": {
+    "perplexity_web_search": "eigen_news.md"
+   },
+   "goal": {
+    "tools_first": "perplexity_web_search",
+    "gate_ok": true,
+    "must_contain": [
+     "2026-09-2"
+    ]
+   }
+  }
+ ]
 }
