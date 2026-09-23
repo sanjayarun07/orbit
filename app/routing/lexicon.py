@@ -75,7 +75,7 @@ TOKEN = re.compile(r"\b(?:tokens?|coins?|mints?|contracts?|memecoins?|meme\s+coi
 # check <mint>" reached the portfolio because the detector knew only
 # "token/coin/contract/mint").
 TOKEN_SHAPED = re.compile(r"\b(?:trades?|holders?|volume|price|liquidity|pairs?|chart|market\s*cap|supply)\s+(?:of|for)\b"
-                          r"|\b(?:holders?|insiders?|snip\w+|bundl\w+|whales?|concentration|distribution|top\s*\d+|liquidity|lp|rug\w*|honeypot|deployer|dev)\b", re.I)
+                          r"|\b(?:holders?|insiders?|snip\w+|bundl\w+|whales?|concentration|distribution|top\s*\d+|liquidity|lp|rug\w*|honeypot|deployer|dev|(?:first|early)\s+buyers?|buyers?)\b", re.I)
 # THE security vocabulary. Every layer that recognises a token-security ask --
 # the Layer-1 rule, the research node's intercept, the tool matchers and the
 # catalog's "security" dimension -- reads this one pattern. Six hand-kept

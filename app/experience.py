@@ -304,8 +304,17 @@ def advance_session_context(
         context["focus"] = focus.model_dump()
     elif intent in {"research", "portfolio"}:
         # A new explicit topic with no resolved entity must not inherit the
-        # prior token/wallet merely because it shares the same chat.
-        context["focus"] = None
+        # prior token/wallet merely because it shares the same chat -- but a
+        # follow-up that names nothing of its own ("Build bull, base and bear
+        # cases", "How concentrated are customers?") continues the subject
+        # (UI run, 2026-09-23). A named topic (EigenLayer) becomes the focus.
+        from app.routing.subject_probe import continues_subject, subject_of
+
+        topic = subject_of(request)
+        if topic:
+            context["focus"] = {"kind": "topic", "label": topic, "address": None, "chain": None, "confidence": 0.6, "source": "request"}
+        elif not continues_subject(request):
+            context["focus"] = None
     if is_trade_cancellation(request):
         context["active_workflow"] = None
     elif intent_lock:

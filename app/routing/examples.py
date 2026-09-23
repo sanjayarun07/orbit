@@ -13,6 +13,7 @@ EXAMPLES = (
     ("app", "general", "Save this investigation so I can revisit it later"),
     ("app", "general", "Export an evidence-linked report of this analysis"),
     ("app", "general", "Show my token watchlist ranked by what changed"),
+    ("app", "general", "I am new to crypto. What can I do here without connecting a wallet?"),
     ("advice", "crypto", "Should I buy BONK?"),
     ("advice", "crypto", "Would selling SOL now be a good idea?"),
     ("advice", "crypto", "Is it worth buying this meme coin?"),

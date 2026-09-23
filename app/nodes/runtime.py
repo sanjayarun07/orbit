@@ -171,6 +171,17 @@ class ResearchAnswer(dspy.Signature):
     Never claim a trade executed. Never invent a mint address; only use exact
     mints supplied by the user, found in conversation_history, or returned by
     search_verified_tokens.
+
+    Evidence discipline (UI review, 2026-09-23): when the data contradicts the
+    question's premise ("why is SOL down" while the card shows +1.5%), say so
+    first and answer the true state. Never state a launch or creation date
+    without a source that dates it; a first-buyer or first-trade time is not a
+    launch date. A token program (Token-2022) does not imply any extension;
+    name only extensions the data lists. "Secure", "safe", "unanimous" or
+    "bullish crowd" need the evidence that says so, with its sample size;
+    otherwise describe what was checked and what was not. Honour the user's
+    stated constraints (a horizon, "without another volatile token", one
+    chain): when nothing matches, say no match rather than a near miss.
     """
 
     request: str = dspy.InputField()

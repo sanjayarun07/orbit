@@ -43,8 +43,39 @@ _STOP = {w.upper() for w in (
     "I A OK US UK EU AI ETF ETFS IPO CEO CFO SEC FED GDP CPI DEX CEX NFT APY APR TVL ATH USD USDT USDC BUY SELL LONG SHORT HOLD RSI MACD "
     "Solana Ethereum Base Bitcoin Arbitrum Polygon Avalanche Twitter Google Please Audit Report Token Tokens Coin Coins Crypto Stock Stocks Price "
     "What Whats How Is Are Can Could Should Would Will Do Does Did Tell Show Give Which Why When Where Who The An My Our Your It Its This That These "
-    "Any Latest Best Top Compare Explain Check Find List Get Swap Trade Market Markets News Today Now Research Analyze Analyse Deep Dive Hi Hello Hey Thanks Ok Okay Yes No"
+    "Any Latest Best Top Compare Explain Check Find List Get Swap Trade Market Markets News Today Now Research Analyze Analyse Deep Dive Hi Hello Hey Thanks Ok Okay Yes No "
+    # market jargon that is written in capitals (UI run 2026-09-23: CLMM and DLMM became tokens)
+    "CLMM DLMM AMM PDA PDAS LP LPS DAO KYC ICO IDO FDV MCAP OTC PNL ROI OI RWA L1 L2 EVM SPL ERC EUR KOL KOLS MEV TWAP VWAP LTV FAQ API MCP OTC PNL"
 ).split()}
+
+# A capitalised word that opens a sentence and is followed by a determiner,
+# a pronoun or "token" is the sentence's verb, not a name: "Save this
+# investigation", "Separate token price movement", "Show my watchlist" all
+# reached the web as SAVE / SEPARATE / MY (UI run, 2026-09-23). A ticker
+# opening a sentence ("Bonk price?", "ANSEM holders") is still a subject.
+_SENTENCE_START = re.compile(r"(?:^|[.!?:;]\s+)([A-Z][a-z][A-Za-z0-9]{1,20})\s+([a-z]+)\b")
+_INSTRUCTION_NEXT = {"this", "that", "these", "those", "the", "a", "an", "my", "me", "our", "your", "all", "each", "every", "it", "them",
+                     "token", "tokens", "coin", "coins", "investigation", "report", "everything", "anything"}
+
+
+# English imperatives and pronouns that open a sentence: "Build bull, base and
+# bear cases", "Mark database-only claims", "Handle pools", "You showed" all
+# reached the web as BUILD / MARK / Handle.fi / YOU (UI run, 2026-09-23).
+_IMPERATIVES = {w.lower() for w in (
+    "build mark handle treat separate save export show list give tell explain compare confirm include exclude inspect prepare revisit "
+    "distinguish require use name say link rank sort filter summarize summarise describe outline draft write create make add remove "
+    "keep drop ignore skip focus start stop continue run check verify audit review assess evaluate estimate calculate compute count "
+    "map trace follow track watch monitor alert notify remind send email open close set update change fix note flag label classify "
+    "identify detect determine decide recommend suggest propose argue defend attack challenge test try do does did go come look see read "
+    "consider assume suppose imagine pretend act behave answer reply respond ask question clarify elaborate expand shorten simplify "
+    "translate convert format render print display present report document record log store fetch pull get take put place hold "
+    "you we they he she i it this that these those there here "
+    "were was am be been being has have had may might must shall let please"
+).split()}
+
+
+def _is_sentence_starter(word: str, next_word: str) -> bool:
+    return word.lower() in _IMPERATIVES or next_word in _INSTRUCTION_NEXT
 _INSTRUCTIONS = (
     "You identify what a name refers to in the context of markets, crypto and finance. Return ONLY strict JSON: "
     '{"kind": "token|protocol|equity|person|company|concept|other", "name": "...", "symbol": "... or null", "chain": "solana|ethereum|base|arbitrum|bsc|polygon|avalanche|other or null", '
@@ -53,18 +84,45 @@ _INSTRUCTIONS = (
 )
 
 
-# A capitalised word that opens a sentence and is followed by a determiner,
-# a pronoun or "token" is the sentence's verb, not a name: "Save this
-# investigation", "Separate token price movement", "Show my watchlist" all
-# reached the web as SAVE / SEPARATE / MY (UI run, 2026-09-23). A ticker
-# opening a sentence ("Bonk price?", "ANSEM holders") is still a subject.
-_SENTENCE_START = re.compile(r"(?:^|[.!?]\s+)([A-Z][a-z][A-Za-z0-9]{1,20})\s+([a-z]+)\b")
-_INSTRUCTION_NEXT = {"this", "that", "these", "those", "the", "a", "an", "my", "me", "our", "your", "all", "each", "every", "it", "them",
-                     "token", "tokens", "coin", "coins", "investigation", "report", "everything", "anything"}
-
-
 def sentence_starters(request: str) -> set[str]:
-    return {m.group(1) for m in _SENTENCE_START.finditer(request or "") if m.group(2) in _INSTRUCTION_NEXT}
+    return {m.group(1) for m in _SENTENCE_START.finditer(request or "") if _is_sentence_starter(m.group(1), m.group(2))}
+
+
+# A follow-up continues the subject when it talks about the analysis (buys,
+# holders, cases, claims, funding rounds…) and does not open a new market-
+# wide topic (trending, gainers, the market today).
+_CONTINUES = re.compile(
+    r"\b(?:buys?|bought|sells?|sold|price|prices|volume|liquidity|holders?|holdings?|supply|deployer|launch\w*|bundl\w+|snip\w+|evidence|snapshots?|claims?|"
+    r"conclusions?|cases?|bull|bear|thesis|risks?|memo|diligence|funding|rounds?|revenue|fees|tvl|tokens?|protocol|chain|wallets?|exit|quotes?|"
+    r"concentrat\w+|customers|operators|dependencies|incidents?|security|audit|metrics?|changes?|compare|comparison|valuation|exposure|ownership|"
+    r"investors?|competitors?|adoption|unlocks?|sentiment|mint|contract|extensions?|program|pools?|lp|depth|slippage|sources?|timestamps?|data|"
+    r"report|table|its|checks?|verify|verified|proven|inferred|disputed|unsupported|assumptions?|questions?)\b", re.I)
+_NEW_TOPIC = re.compile(
+    r"\b(?:trending|gainers|losers|movers|narratives?|metas?|market\s+(?:today|now|overview|update|brief)|crypto\s+market|new\s+(?:launches|pairs|tokens|listings)|"
+    r"what'?s\s+(?:hot|trending|launching|new)|how\s+is\s+the\s+market|top\s+\d+\s+(?:coins|tokens)|fear\s+and\s+greed)\b", re.I)
+
+
+def continues_subject(request: str) -> bool:
+    """Whether a message that names nothing of its own reads as a follow-up
+    on the conversation's subject rather than a new topic or small talk."""
+    text = request or ""
+    if len(text.split()) < 3 or has_own_subject(text) or _NEW_TOPIC.search(text):
+        return False
+    return bool(_CONTINUES.search(text))
+
+
+def opens_new_topic(request: str) -> bool:
+    return bool(_NEW_TOPIC.search(request or ""))
+
+
+def has_own_subject(request: str) -> bool:
+    """Whether the message names something of its own: an address, a $ticker,
+    or a word the probe would look up. A follow-up without one continues the
+    conversation's subject."""
+    text = request or ""
+    if re.search(r"(?<![A-Za-z0-9])(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])", text):
+        return True
+    return subject_of(text) is not None
 
 
 def subject_of(request: str) -> str | None:

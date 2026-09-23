@@ -26,6 +26,8 @@ _LAUNCHPAD_CHAIN = {
     "pump.fun": "solana", "pumpfun": "solana", "pump fun": "solana",
     "letsbonk": "solana", "bonk.fun": "solana", "bonkfun": "solana",
     "moonshot": "solana",
+    # chain names DEX Screener spells differently ("BNB Smart Chain" returned every chain, UI run 2026-09-23)
+    "bnb smart chain": "bsc", "binance smart chain": "bsc", "bnb chain": "bsc", "bnb": "bsc", "binance chain": "bsc",
 }
 
 

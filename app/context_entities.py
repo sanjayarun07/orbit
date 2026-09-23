@@ -292,4 +292,17 @@ def resolve_contextual_request(
         if reference is not None:
             chain = f" on {reference.chain}" if reference.chain else ""
             return f"{request}\nResolved from conversation context: wallet {reference.address}{chain}."
+    # A follow-up that names nothing of its own continues the conversation's
+    # subject: "Were early buys bundled or sniped?" after an ANSEM turn is
+    # about ANSEM; "Build bull, base and bear cases" after EigenLayer is about
+    # EigenLayer (UI run, 2026-09-23: they became new questions or new assets).
+    from app.routing.subject_probe import continues_subject
+
+    if focus.get("label") and continues_subject(request):
+        if focus.get("kind") == "token" and focus.get("address"):
+            chain = f" on {focus['chain']}" if focus.get("chain") else ""
+            return f"{request}\nResolved from canonical session context: token {focus_label}{' mint ' + focus['address'] if focus_label else focus['address']}{chain}."
+        if focus.get("kind") == "topic":
+            return (f"{request}\nResolved from conversation context: this continues the discussion about {focus['label']} "
+                    "(the subject of the previous turns: a protocol, company or topic, not a token symbol to look up).")
     return request

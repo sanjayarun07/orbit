@@ -12,19 +12,20 @@ from __future__ import annotations
 import re
 
 from app import exit_monitor
+from app.settings import settings
 from app.jupiter import jupiter, normalize_mint
 
 _TOKEN = r"(\$?[A-Za-z][A-Za-z0-9._-]{1,15}|[1-9A-HJ-NP-Za-km-z]{32,44})"      # unnamed: the ask pattern uses it several times
 _WATCH = re.compile(rf"^\s*(?:please\s+)?(?:watch|monitor|track)\s+my\s+(?:exit|position)\s+(?:on|for|in)\s+{_TOKEN}\s*[.!?]?\s*$", re.I)
 _STOP = re.compile(rf"^\s*(?:stop|cancel|end)\s+(?:watching|monitoring|tracking)\s+(?:my\s+)?(?:exit|position)\s+(?:on|for|in)\s+{_TOKEN}\s*[.!?]?\s*$", re.I)
-_ASK = re.compile(rf"^\s*(?:(?:exit\s+analysis|exit\s+check)\s+(?:for|on)\s+{_TOKEN}|can\s+i\s+(?:still\s+)?(?:exit|get\s+out\s+of)\s+(?:my\s+)?{_TOKEN}(?:\s+position)?"
-                  rf"|how(?:'s|\s+is)\s+my\s+exit\s+(?:on|for|in)\s+{_TOKEN}|what\s+would\s+(?:a\s+)?(?:full|25%|50%|half|100%)?\s*exit\s+(?:of|from)\s+(?:my\s+)?{_TOKEN}\s+(?:return|get\s+me))\s*[?.!]?\s*$", re.I)
+_ASK = re.compile(rf"^\s*(?:(?:exit\s+analysis|exit\s+check)\s+(?:for|on)\s+{_TOKEN}|can\s+i\s+(?:still\s+)?(?:exit|get\s+out\s+of)\s+(?:my\s+)?{_TOKEN}(?:\s+position)?(?:\s+(?:in|from|with)\s+(?:the|my)\s+connected\s+wallet)?"
+                  rf"|how(?:'s|\s+is)\s+my\s+exit\s+(?:on|for|in)\s+{_TOKEN}|what\s+would\s+(?:a\s+)?(?:full|25%|50%|half|100%)?\s*exit\s+(?:of|from)\s+(?:my\s+)?{_TOKEN}\s+(?:return|get\s+me))\s*[?.!]?(?:\s.*)?$", re.I | re.S)
 _LIST = re.compile(r"^\s*(?:show|list|what\s+are)\s+(?:me\s+)?my\s+(?:exits|watched\s+positions|exit\s+monitors)\s*\??\s*$", re.I)
 # "tell me when the discount on my full-position exit quote exceeds 5%",
 # "alert me when my BONK exit drops 10%", "email me when my exit on WIF falls 15%"
 _THRESHOLD = re.compile(
     r"^\s*(?P<verb>tell|alert|notify|email|warn)\s+me\s+(?:when|if)\s+(?:the\s+)?(?P<what>discount\s+(?:on|of)\s+)?my\s+(?:full[- ]position\s+)?"
-    rf"(?:(?P<before>{_TOKEN})\s+)?exit(?:\s+quote)?(?:\s+(?:on|for|in)\s+(?P<after>{_TOKEN}))?\s+(?:exceeds|is\s+(?:more|higher|greater)\s+than|goes\s+(?:above|over|past)|widens\s+(?:past|beyond)|drops|falls|declines|deteriorates)(?:\s+by|\s+more\s+than|\s+over)?\s+(?P<pct>\d+(?:\.\d+)?)\s*%\s*[.!?]?\s*$", re.I)
+    rf"(?:(?P<before>{_TOKEN})\s+)?exit(?:\s+quote)?(?:\s+(?:on|for|in)\s+(?P<after>{_TOKEN}))?\s+(?:exceeds|is\s+(?:more|higher|greater)\s+than|goes\s+(?:above|over|past)|widens\s+(?:past|beyond)|drops|falls|declines|deteriorates)(?:\s+by|\s+more\s+than|\s+over)?\s+(?P<pct>\d+(?:\.\d+)?)\s*%\s*[.!?]?(?:\s.*)?$", re.I | re.S)
 _CHANNEL = re.compile(r"^\s*(?:(?:email|send)\s+me\s+my\s+exit\s+alerts(?:\s+by\s+email)?|(?:send\s+)?(?:my\s+)?exit\s+alerts\s+(?:by|via|to)\s+(?P<channel>email|inbox|app))\s*[.!?]?\s*$", re.I)
 # "compare buying $500, $2,000 and $5,000 of BONK", "size check BONK at $1000", "what would $250 of WIF cost to enter and exit"
 # The command may carry the chain and trailing instructions: "compare buying
@@ -129,8 +130,14 @@ def _amounts(text: str) -> list[float]:
     return out[:5]
 
 
+def _clean(token: str | None) -> str | None:
+    """A ticker as typed, without the $ and the sentence's punctuation
+    ("ANSEM." was looked up with its full stop, UI run 2026-09-23)."""
+    return token.lstrip("$").strip(".,!?;:") if token else token
+
+
 def _token_of(m: re.Match) -> str:
-    return next(g for g in m.groups() if g).lstrip("$")
+    return _clean(next(g for g in m.groups() if g))
 
 
 _resolved: dict[str, tuple[float, tuple]] = {}
@@ -195,7 +202,7 @@ async def handle(message: str, user: dict | None, wallet: str | None) -> str | N
     if m:
         pct = float(m.group("pct"))
         kind = "discount_pct" if m.group("what") else "drop_pct"
-        token = m.group("before") or m.group("after")
+        token = _clean(m.group("before") or m.group("after"))
         if token and token.lower() in ("full", "position", "quote"):
             token = None
         rows = [p for p in await exit_monitor.list_for(user["id"]) if p["status"] == "active"]
@@ -216,7 +223,11 @@ async def handle(message: str, user: dict | None, wallet: str | None) -> str | N
         what = "the discount to the reference price exceeds" if kind == "discount_pct" else "a full exit is quoted"
         tail = f" {pct:g}%" if kind == "discount_pct" else f" {pct:g}% lower than the baseline"
         names = ", ".join(p.get("symbol") or p["mint"][:6] for p in rows)
-        return f"Set: you will be told when {what}{tail} for {names}" + (", by email as well as here." if rules.get("channel") == "email" else ".")
+        trigger = (f"Trigger: every {settings.exit_monitor_interval_minutes} minutes Jupiter is asked for a full-position sell quote at your exact size; "
+                   + ("the discount is 1 − quoted proceeds ÷ marked value at the reference price, and the alert fires when it is at or above your rule"
+                      if kind == "discount_pct" else "the alert fires when the quoted proceeds are at or below the baseline quote minus your rule")
+                   + f", at most once per {settings.exit_alert_cooldown_hours:g} hours, into your inbox. It never sells and never places an order.")
+        return f"Set: you will be told when {what}{tail} for {names}" + (", by email as well as here." if rules.get("channel") == "email" else ".") + "\n\n" + trigger
     m = _CHANNEL.match(text)
     if m:
         channel = "email" if (m.group("channel") or "email").lower() == "email" else "inapp"
@@ -243,7 +254,7 @@ async def handle(message: str, user: dict | None, wallet: str | None) -> str | N
         return "\n\n---\n\n".join([await _since_entry(p) for p in (mine or rows)])
     m = _SIZES.match(text)
     if m:
-        token = m.group("t1") or m.group("t2") or m.group("t3")
+        token = _clean(m.group("t1") or m.group("t2") or m.group("t3"))
         amounts = _amounts(m.group("amounts") or m.group("amounts2") or m.group("amounts3") or "")
         if not token or not amounts:
             return "Name the token and the dollar amounts, for example: `compare buying $500, $2,000 and $5,000 of BONK`."

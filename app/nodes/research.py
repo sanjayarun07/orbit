@@ -727,7 +727,9 @@ def _detect_wallet_request(request: str) -> tuple[str, str | None] | None:
         lowered,
     )
     token_subject = re.search(r"\b(?:token|coin|contract|mint|memecoin|meme coin|erc-?20)\b", lowered) or lexicon.TOKEN_SHAPED.search(request)
-    explicit_wallet = re.search(r"\b(?:wallet|portfolio|balances?|pnl|transactions?|counterparties)\b", lowered)
+    # "transactions" alone is not a wallet word: "latest transactions and first
+    # buyers for <mint>" is the token's tape, not the mint's inbox (2026-09-23).
+    explicit_wallet = re.search(r"\b(?:wallet|portfolio|balances?|pnl|counterparties)\b", lowered)
     if not (address_match and wallet_lookup and (not token_subject or explicit_wallet)):
         return None
     address = address_match.group(1) or address_match.group(2)
@@ -873,7 +875,8 @@ _NAMED_STOP = {"THE", "A", "AN", "MY", "THIS", "THAT", "IT", "SOME", "TOP", "NEW
                "ANY", "YOUR", "MEME", "NATIVE", "UTILITY", "GOVERNANCE", "WRAPPED", "BASE", "ETHEREUM", "BSC", "BEST", "WHICH", "WHAT", "EACH", "EVERY", "OTHER", "SAME",
                "OWN", "REAL", "FAKE", "ONE", "FIRST", "LATEST", "CURRENT", "GIVE", "SHOW", "GET", "FULL", "MORE", "ABOUT", "FOR", "WITH", "AND", "OF", "TO", "IN", "ON"}
 _SYMBOL_LIKE = re.compile(r"(?<![A-Za-z0-9$])\$?[A-Z][A-Z0-9]{1,9}(?![A-Za-z0-9])")
-_SYMBOL_STOP = {"I", "A", "OK", "ETF", "ETFS", "USD", "USDT", "USDC", "AI", "DEFI", "NFT", "NFTS", "DEX", "CEX", "TVL", "APY", "APR", "ATH", "ATL", "OI", "RSI", "MACD", "EMA", "SMA", "US", "UK", "EU", "SEC", "FED", "CPI", "L1", "L2"}
+_SYMBOL_STOP = {"I", "A", "OK", "ETF", "ETFS", "USD", "USDT", "USDC", "AI", "DEFI", "NFT", "NFTS", "DEX", "CEX", "TVL", "APY", "APR", "ATH", "ATL", "OI", "RSI", "MACD", "EMA", "SMA", "US", "UK", "EU", "SEC", "FED", "CPI", "L1", "L2",
+                "CLMM", "DLMM", "AMM", "PDA", "PDAS", "LP", "LPS", "DAO", "KYC", "ICO", "IDO", "FDV", "MCAP", "OTC", "PNL", "ROI", "RWA", "EVM", "SPL", "ERC", "KOL", "KOLS", "MEV", "TWAP", "VWAP", "LTV", "API", "MCP"}
 
 
 # A question that wants a token's data: with one of these words, a bare
@@ -2185,7 +2188,8 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     eligible_capabilities = eligible_capabilities + backstop
     # A one-letter name ("is M safe?") matches many tokens: ask, never search.
     if not resolution.chain and not address_match and not subject_probe.subject_of(request):
-        single = re.search(r"(?<![A-Za-z0-9$])\$?([A-Z])(?![A-Za-z0-9])", request)
+        # Asset intent required: "I am new to crypto" is not a question about token I (UI run, 2026-09-23).
+        single = re.search(r"(?<![A-Za-z0-9$])\$([A-Z])(?![A-Za-z0-9])", request) or (re.search(r"(?<![A-Za-z0-9$])([A-Z])(?![A-Za-z0-9])", request) if _DATA_ASK.search(request) else None)
         if single:
             return {"answer": (f"Which token is **{single.group(1)}**? A one-letter ticker matches many tokens. Name it with its full name, "
                                "a $ticker or its contract address and the chain, and I'll pull the data."), "trajectory": None}

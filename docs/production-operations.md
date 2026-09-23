@@ -2379,3 +2379,34 @@ retried every tick until the provider accepts it (the inbox row and the cooldown
   counts print "—" (unknown, not zero); a note explains Mobula's PnL basis.
 - **Price alerts are validated at the boundary.** `tasks.validate_spec` requires a symbol, `<`/`>` and a finite
   positive price on create and on spec updates; the form's "-1" now returns 400.
+
+## Funded UI review fixes (2026-09-23, 48 persona cases)
+
+- **Follow-ups keep the subject.** `subject_probe.subject_of` treats a capitalised sentence opener as grammar when it
+  is an English imperative, auxiliary or pronoun (Build, Mark, Handle, You, Were…) or is followed by a determiner or
+  "token"; CLMM/DLMM/AMM/PDA and other jargon are never symbols. A message that names nothing of its own and talks
+  about the analysis (`subject_probe.continues_subject`) is bound to the session focus: a token ("Resolved from
+  canonical session context: token X mint … on chain") or a topic ("this continues the discussion about
+  EigenLayer"); `advance_session_context` keeps the focus on such follow-ups, records a named topic as the focus,
+  and clears it only for a message with its own subject or a market-wide ask (trending, gainers, the market today).
+- **One-letter tickers need asset intent.** "I am new to crypto" no longer asks which token I is.
+- **Product questions.** "What can I do here without connecting a wallet" is the `app` act and gets the plain
+  capability answer (`product_actions.WHAT_CAN`).
+- **Conditional orders.** "If SOL drops below $100, automatically buy 2 SOL" is answered before any rule with
+  `speech.CONDITIONAL_ORDER_ANSWER` (no automatic orders exist; the price alert and exit watch do). Questions
+  ("should I buy if it dips?") stay advice.
+- **Token vs wallet roles.** A Solana address with token words (token, mint, first/early buyers, bundle, snipe,
+  holders, deployer, launch) is never read as a wallet's history: the Helius matcher declines and the wallet
+  detector's `TOKEN_SHAPED` vocabulary now includes buyers.
+- **Exit controls.** Tickers are stripped of sentence punctuation ("ANSEM."); the exit ask accepts "in the
+  connected wallet" and trailing sentences; the threshold reply explains the trigger (cadence, comparison,
+  cooldown, never sells).
+- **Constraints before ranking.** DeFiLlama yields honour "without another volatile token / single-asset / only
+  USDC" (pool `exposure == single`); protocol TVL matches the named protocol only; "BNB Smart Chain" scopes
+  discovery to bsc.
+- **Evidence discipline in prompts.** ResearchAnswer and the deep-dive rules: correct a contradicted premise
+  first; no launch date without a dating source; a token program implies no extensions; "secure", "safe",
+  "unanimous" need the evidence and its sample; honour stated constraints or say no match. Wallet health states
+  concentration as a fact and says liquidity is not measured.
+- **Polish.** Plan copy says 300 credits; `show my tasks` cites a real task number; "Name it X" and "in-app inbox
+  only / by email" become the reminder's title and channel.

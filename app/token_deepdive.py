@@ -51,6 +51,10 @@ _UNLOCK_TTL = 3600.0
 # that silently corrupts a token verdict.
 ANALYSIS_RULES = (
     "Grounding rules — apply strictly, never violate:\n"
+    "- Never write 'secure', 'safe' or 'unanimously bullish': say which checks passed, which were "
+    "not run, and the sample behind any crowd read. Sources are records and links, not tool names.\n"
+    "- Never state a launch or creation date without a source that dates it; a first-buyer time is "
+    "not a launch date. A token program does not imply extensions.\n"
     "- Use only figures present in the evidence bundle below; never reconstruct a "
     "current metric, price, or event from prior knowledge. State a gap; do not fill it.\n"
     "- Holder lists include pools, exchanges, and treasury/program addresses — they "

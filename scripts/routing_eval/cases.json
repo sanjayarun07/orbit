@@ -1446,5 +1446,14 @@
   "expected_intent": "general",
   "router": false,
   "notes": "app action"
+ },
+ {
+  "id": "app-what-can-i-do",
+  "query": "I am new to crypto. What can I do here without connecting a wallet? Explain in plain language.",
+  "expected_tools": [],
+  "forbidden_tools": [],
+  "expected_intent": "general",
+  "router": false,
+  "notes": "about the product, not a web question; I is not a token (funded UI run 2026-09-23)"
  }
 ]

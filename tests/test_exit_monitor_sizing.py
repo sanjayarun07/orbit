@@ -115,9 +115,9 @@ def test_thresholds_and_channels_are_set_by_chat(chain):
     assert asyncio.run(exit_controls.handle("tell me when the discount on my full-position exit quote exceeds 5%", user, WALLET)).startswith("You are not watching any exits yet")
     _watch()
     reply = asyncio.run(exit_controls.handle("tell me when the discount on my full-position exit quote exceeds 5%", user, WALLET))
-    assert reply == "Set: you will be told when the discount to the reference price exceeds 5% for BONK."
+    assert reply.startswith("Set: you will be told when the discount to the reference price exceeds 5% for BONK.")
     reply = asyncio.run(exit_controls.handle("email me when my BONK exit drops 10%", user, WALLET))
-    assert reply == "Set: you will be told when a full exit is quoted 10% lower than the baseline for BONK, by email as well as here."
+    assert reply.startswith("Set: you will be told when a full exit is quoted 10% lower than the baseline for BONK, by email as well as here.")
     rules = asyncio.run(exit_monitor.list_for("u1"))[0]["rules"]
     assert rules == {"discount_pct": 5.0, "drop_pct": 10.0, "channel": "email"}
     assert asyncio.run(exit_controls.handle("exit alerts to inbox", user, WALLET)) == "Exit alerts for 1 position(s) will stay in the app."

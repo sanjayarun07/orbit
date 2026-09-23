@@ -36,7 +36,8 @@ from .intent_router import route_capabilities, plan_execution_route, default_cap
 from .instruments import equity_instruments
 from .model import speech_classifier
 from .semantic import SpeechUnderstanding, embedding_router
-from .speech import has_competing_speech, is_parameter_fragment
+from app import product_actions
+from .speech import CONDITIONAL_ORDER_ANSWER, has_competing_speech, is_conditional_order, is_parameter_fragment
 from .trade_parser import extract_cross_chain_draft
 from app.clarify import is_clarification, is_market_text
 
@@ -269,6 +270,16 @@ async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> d
     request = state["request"]
     contextual = state.get("contextual_request") or request
     controlled = is_trade_cancellation(request) or is_trade_confirmation(request)
+    if not controlled and product_actions.is_product_question(request):
+        # "What can I do here without connecting a wallet": about this product,
+        # answered deterministically; the classifier read it as explain and the
+        # web described marketplaces (funded UI run, 2026-09-23).
+        return {"intent": "general", "capabilities": [], "chains": [], "route_source": "rules",
+                "routing_decision": {"method": "rules", "reason": "product_question", "speech_act": "app"}}
+    if not controlled and is_conditional_order(request):
+        # "If SOL drops below $100, automatically buy 2 SOL": there is no
+        # such order here, and no rule or model should turn it into one.
+        return {**_clarify_route("rules"), "clarification": CONDITIONAL_ORDER_ANSWER, "routing_decision": {"method": "rules", "reason": "conditional_order"}}
     candidate = route_capabilities(request if controlled else contextual)
     active = (state.get("session_context") or {}).get("active_workflow") or {}
     action = state.get("quick_action") or {}

@@ -15,6 +15,16 @@ _SAVE = re.compile(r"\b(?:save|bookmark|keep|pin|revisit|store)\b", re.I)
 _EXPORT = re.compile(r"\b(?:export|download|pdf|csv|report|share)\b", re.I)
 _WATCHLIST = re.compile(r"\b(?:watch\s*list|watchlist|ranked|tracked\s+tokens|my\s+tokens)\b", re.I)
 _ALERTS = re.compile(r"\b(?:alerts?|notif\w+|remind\w*|email\s+me|tell\s+me\s+when)\b", re.I)
+_WHAT_CAN = re.compile(r"\b(?:what\s+can\s+(?:i|you)\s+do|what\s+do\s+you\s+(?:do|support|offer)|how\s+do\s+i\s+use|how\s+does\s+this\s+work|new\s+to\s+crypto|without\s+(?:connecting\s+)?(?:a\s+)?wallet|getting\s+started|where\s+do\s+i\s+start)\b", re.I)
+
+WHAT_CAN = ("**What you can do here without connecting a wallet.** Ask about any token, protocol or market in plain words: a price, what is "
+            "trending, whether a token looks safe, who holds it, the news behind a move, how something in DeFi works. Answers come with the "
+            "data cards they are built from, and every conversation is kept under Recents.\n\n"
+            "**With a public wallet address** (paste it; no signing, no control given), you can see its holdings, value and health, quote what "
+            "a position would fetch if sold, and watch an exit for deterioration.\n\n"
+            "**What never happens on its own:** no trade is placed, no funds move, nothing is signed. Trades are only ever prepared for your "
+            "review and signed by you in your own wallet; here that is off in research mode. Start with `how is the crypto market today` or "
+            "`what does TVL mean`.")
 
 SAVED = ("**Saving.** Every conversation is kept automatically under Recents in the sidebar: rename, pin or archive it from its menu, "
          "and reopen it later with its answers and cards intact. There is no separate \"save investigation\" action to take.")
@@ -34,6 +44,12 @@ GENERIC = ("This reads as a request to the app rather than a market look-up. Wha
            "wallet or protocol to research.")
 
 
+def is_product_question(request: str) -> bool:
+    """A question about what this product does or how to use it."""
+    text = request or ""
+    return bool(_WHAT_CAN.search(text)) and not re.search(r"\b(?:price|holders?|liquidity|volume|market\s+cap|tvl)\b", text, re.I)
+
+
 def answer(request: str) -> str:
     text = request or ""
     parts = []
@@ -45,6 +61,8 @@ def answer(request: str) -> str:
         parts.append(WATCHLIST)
     if _ALERTS.search(text) and not _WATCHLIST.search(text):
         parts.append(ALERTS)
+    if _WHAT_CAN.search(text) and not parts:
+        return WHAT_CAN
     if not parts:
         return GENERIC
     return "\n\n".join(dict.fromkeys(parts)) + "\n\nNothing was saved, exported or changed by this message."
