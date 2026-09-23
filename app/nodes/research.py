@@ -29,7 +29,7 @@ from app.token_resolve import bitquery_evm_lookup, clear_winner, token_candidate
 from app.token_deepdive import (
     ANALYSIS_RULES, build_token_evidence, bundle_signals, coverage_rows, evidence_skips, extract_market_price, format_evidence_bundle,
 )
-from app import decision_records, evidence_pipeline, handles, holder_snapshots, jobs, listed_asset, role_memory, snapshot_compare, tequity
+from app import contracts, decision_records, evidence_pipeline, handles, holder_snapshots, jobs, listed_asset, role_memory, snapshot_compare, tequity
 from app.signals import Signal, Subject
 from app.source_cards import extract_source_cards
 from app.web_search import append_web_sources, is_crypto_trends_query, web_search
@@ -1910,6 +1910,12 @@ async def research_node(state: AgentState) -> dict:
         # clarification when another clause answered (it read as one and
         # dropped the comparison lead, 2026-09-23).
         extras["compound_answered"] = any(part.get("answer") and not is_clarification(part.get("answer")) for part in results)
+        if not extras["compound_answered"] and any(part.get("answer") for part in results):
+            # Every clause came back as a question to the user: one question,
+            # asked once, never "Taken together" over two copies of "which
+            # token?" (frozen trust run, 2026-09-24).
+            first = next(part for part in results if part.get("answer"))
+            return {**first, **{k: v for k, v in extras.items() if k != "compound_answered"}}
         for clause, part in zip(clauses, results):
             if part.get("answer") and not (part.get("trajectory") or {}).get("tool_name_0", "").startswith("_"):
                 streaming.emit("card", markdown=part["answer"], tool=(part.get("trajectory") or {}).get("tool_name_0"))
@@ -2144,6 +2150,14 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
             request = f"{request} {focus['address']}" + (f" on {focus['chain']}" if focus.get("chain") else "")
             if focus.get("chain"):
                 state = {**state, "chains": [focus["chain"]]}
+        elif settings.contract_pipeline_enabled and contracts.is_open_research(request):
+            # No token anywhere and a question about what a safety concept
+            # means ("Jupiter says verified and no mint authority: does that
+            # mean I cannot get rugged?"): open research, never "which token?"
+            # (frozen trust run, 2026-09-24).
+            piped = await evidence_pipeline.answer(state, request, tuple(state.get("chains") or ()))
+            if piped is not None:
+                return piped
         else:
             return {
                 "answer": ("Which token should I check? Paste its contract address (or mint) and the chain it is on, "

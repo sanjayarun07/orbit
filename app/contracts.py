@@ -29,14 +29,18 @@ from app.routing import lexicon
 
 logger = logging.getLogger(__name__)
 
-Kind = Literal["market_ranking", "holders", "recent_events", "yields", "open_research", "other"]
+Kind = Literal["market_ranking", "holders", "recent_events", "yields", "open_research", "portfolio", "transaction_intent", "other"]
+# Kinds the nodes answer themselves and the gate then proves (the pipeline
+# does not route them): the connected wallet's holdings, and a swap intent.
+PROVED_KINDS: tuple[str, ...] = ("portfolio", "transaction_intent")
 Scope = Literal["venue_trades", "global", "on_chain", "any"]
 
 CONTRACT_KINDS: tuple[str, ...] = ("market_ranking", "holders", "recent_events", "yields")
 OPEN_RESEARCH_KIND = "open_research"
 # Exact state the web must never answer first: an address, a wallet, a quote, a price now, an exit, a position.
 _EXACT_STATE = re.compile(r"(?<![A-Za-z0-9])(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])|\b(?:wallet|balance|balances|portfolio|position|exit|quote|swap|bridge|price\s+of|price\s+now|current\s+price|how\s+much\s+is|holders?|liquidity\s+of|tvl\s+of|apy|yield)\b", re.I)
-_OPEN_RESEARCH = re.compile(r"\b(?:why|how|what|who|which|explain|compare|analy[sz]e|diligence|competitors?|investors?|backers?|revenue|risks?|outlook|history|background|roadmap|tokenomics|governance|research|deep\s+dive|overview)\b", re.I)
+_OPEN_RESEARCH = re.compile(r"\b(?:why|how|what|who|which|explain|compare|analy[sz]e|diligence|competitors?|investors?|backers?|revenue|risks?|outlook|history|background|roadmap|tokenomics|governance|research|deep\s+dive|overview|"
+                            r"mean(?:s|ing)?|guarantee[sd]?|impl(?:y|ies)|does\s+that)\b", re.I)     # "does that mean I cannot get rugged?" asks what a concept means, not for a token check (2026-09-24)
 
 
 def is_open_research(request: str) -> bool:
@@ -47,7 +51,7 @@ def is_open_research(request: str) -> bool:
 
 
 class Subject(BaseModel):
-    kind: Literal["token", "protocol", "chain", "venue", "market", "topic", "none"] = "none"
+    kind: Literal["token", "protocol", "chain", "venue", "market", "topic", "wallet", "none"] = "none"
     id: str | None = None                      # address or mint when known
     symbol: str | None = None
     name: str | None = None
@@ -131,6 +135,19 @@ _LOSERS = re.compile(r"\b(?:losers?|dumping|down\s+the\s+most|worst|laggards?)\b
 # "pairs for PEPE", "where does WIF trade" -- state read from the DEX
 # aggregators, never from the web.
 _POOL_LISTING = re.compile(r"\b(?:pools?|pairs?|liquidity\s+pools?|markets?\s+for|where\s+does\s+\S+\s+trade)\b", re.I)
+# The connected wallet's own holdings, in the user's words and in the Home
+# cards' words ("Analyze my portfolio", "Wallet health check", "What if my
+# portfolio drops 20%?"): a portfolio contract, proved against the wallet's card.
+_PORTFOLIO_ASK = re.compile(r"\b(?:my|connected)\b.{0,30}\b(?:portfolio|wallet|holdings?|balances?|allocation|positions?|assets?|health)\b"
+                            r"|\bwallet\s+health(?:\s+check)?\b|\banaly[sz]e\s+(?:my\s+)?portfolio\b", re.I)
+# A swap, sell, buy or bridge with an amount or a pair: a transaction intent,
+# quoted for the exact size or refused with the exact reason, never a
+# guess ("Start a cross-chain swap" got a generic clarification, 2026-09-23).
+_TRANSACTION = re.compile(r"\b(?:swap(?:ped|ping)?|sell(?:ing)?|sold|buy(?:ing)?|bought|bridg(?:e|ed|ing)|convert(?:ed|ing)?|exchang(?:e|ed|ing))\b.{0,60}\b(?:\d+(?:\.\d+)?\s*[A-Za-z$][A-Za-z0-9]{1,9}|[A-Z]{2,10}\s+(?:to|into|for)\s+[A-Z]{2,10})"
+                          r"|\b(?:start|begin|prepare|quote)\s+(?:a\s+|an\s+|the\s+)?(?:cross[- ]chain\s+)?(?:swap|bridge|trade|quote)\b|\bquote\s+me\b"
+                          r"|\bexit\b.{0,40}\bposition\b|\bexit\s+(?:quotes?|analysis)\b", re.I)
+_EXIT_ASK = re.compile(r"\bexit\b.{0,40}\bposition\b|\bexit\s+(?:quotes?|analysis)\b", re.I)
+_EXPLANATION_ASK = re.compile(r"^\s*(?:how\s+(?:does|do|is|to)|what\s+is|what\s+are|explain|why)\b", re.I)
 _TRADES_ON = re.compile(r"\b(?:trades?|trading|traded|volume|pairs?|pools?|dex(?:es)?)\s+on\b|\bon[- ]venue\b|\bvenue\b", re.I)
 _ECOSYSTEM = re.compile(r"\becosystem\b|\bassociated\s+with\b|\bglobal\b", re.I)
 _WINDOW = re.compile(r"\b(?:last|past|previous)\s+(\d+)\s*(h(?:ours?)?|d(?:ays?)?|w(?:eeks?)?)\b|\b(\d+)\s*(h|d|w)\b|\b(24\s*h(?:ours)?|this\s+week|past\s+week|last\s+week|today|this\s+morning|this\s+month|7d|30d)\b", re.I)
@@ -212,6 +229,29 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
     limit = int(_LIMIT.search(text).group(1)) if _LIMIT.search(text) else 10
     window = _window_hours(text)
     explanation = bool(re.match(r"\s*(?:why|what(?:'s| is)\s+(?:driving|behind|moving))\b", text, re.I))
+    if _TRANSACTION.search(text) and not _EXPLANATION_ASK.search(text) and (not _PORTFOLIO_ASK.search(text) or _EXIT_ASK.search(text)):
+        # The fields the message evidences, and the ones a quote still needs.
+        # "quote me 1 SOL to USDC" and "if I sold 0.05 SOL for USDC" are swap
+        # intents in other words; an exit ask takes its size from the wallet.
+        from app.routing.trade_parser import parse_execution_draft
+        normalised = re.sub(r"\bquote\s+me\b", "swap", re.sub(r"\b(?:sold|sell(?:ing)?)\b", "sell", text, flags=re.I), flags=re.I)
+        draft = parse_execution_draft(normalised, (chain,) if chain else ())
+        if draft.destination_chain is None and draft.source_chain is not None and not re.search(r"\b(?:cross[- ]chain|bridge)\b", text, re.I):
+            import dataclasses
+            draft = dataclasses.replace(draft, destination_chain=draft.source_chain)          # a same-chain swap names one chain
+        missing = () if _EXIT_ASK.search(text) else draft.missing()
+        words = {"amount": "the amount", "input_token": "the token to sell", "output_token": "the token to buy", "source_chain": "the chain", "destination_chain": "the destination chain"}
+        ambiguity = None
+        if missing:
+            need = [words[m] for m in missing if not (m == "destination_chain" and "source_chain" in missing)]
+            ambiguity = "To quote this I need " + ", ".join(need[:-1]) + (" and " if len(need) > 1 else "") + need[-1] + ". Nothing is prepared until then."
+        return QuestionContract(kind="transaction_intent", subject=Subject(kind="token", symbol=(draft.input_token or draft.output_token or symbol or "").upper() or None, chain=draft.source_chain or chain),
+                                scope="on_chain", metric="quote", unit="usd", filters={k: v for k, v in draft.as_dict().items() if v is not None},
+                                freshness_seconds=120, evidence_order="state_first", required_facts=["quote_row"], ambiguity=ambiguity, confidence=0.7, planner="rules")
+    if _PORTFOLIO_ASK.search(text) and not _HOLDERS.search(text) and not _TRANSACTION.search(text):
+        return QuestionContract(kind="portfolio", subject=Subject(kind="wallet", chain=chain), scope="on_chain", metric="holdings", unit="usd",
+                                filters={"scenario_pct": float(m2.group(1))} if (m2 := re.search(r"(?:drops?|falls?|rises?|up|down|gains?|loses?)\s+(?:by\s+)?([+-]?\d+(?:\.\d+)?)\s*%", text, re.I)) else {},
+                                freshness_seconds=3600, evidence_order="state_first", required_facts=["holding_row"], confidence=0.7, planner="rules")
     if _POOL_LISTING.search(text) and (symbol or address) and not _HOLDERS.search(text) and not _YIELDS.search(text.split(".")[0]):
         # "Find BONK pools on Solana with at least $1,000,000 liquidity": the
         # token's pools by liquidity, exact on-chain state (the frozen trust

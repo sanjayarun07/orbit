@@ -96,6 +96,36 @@ def _facts_of(result, kind: str) -> list:
     return rows
 
 
+def prove(contract: contracts.QuestionContract, answer_text: str, cards: list[str], *, wallet: str | None = None, extra_evidence: str = "") -> dict:
+    """The gate over an answer a node wrote itself (the connected wallet's
+    holdings, a swap quote): facts read from the node's own cards, the
+    requirement checked, the prose's figures traced to the cards, and the
+    written part withheld when a figure traces to nothing. Returns the
+    fields a contract answer carries; the caller merges them into its result."""
+    if wallet and contract.subject.id is None:
+        contract = contract.model_copy(update={"subject": contract.subject.model_copy(update={"id": wallet})})
+    evidence_text = "\n\n---\n\n".join(c for c in cards if c)
+    fact_rows = []
+    for card in cards:
+        fact_rows.extend(facts_mod.facts_from_card("node_card", card, contract.kind))
+    fetched = datetime.now(timezone.utc).isoformat()
+    for f in fact_rows:
+        if not f.observed_at:
+            f.observed_at = fetched                                  # the node fetched these live in this turn
+    # `extra_evidence` is data the node fetched but does not show as a card (the
+    # snapshot's exact figures behind a rounded table); it supports the prose
+    # and is never displayed.
+    gate = fact_gate.check(contract, fact_rows, answer_text, evidence_text=evidence_text + ("\n\n" + extra_evidence if extra_evidence else ""))
+    text = answer_text
+    if gate.unsupported:
+        text = ("**I withheld the written summary: it stated figures no card carries (" + ", ".join(gate.unsupported) +
+                "). The cards below are the evidence as fetched.**\n\n---\n\n" + evidence_text)
+    lead = gate.gap_sentence(contract)
+    if lead and not text.startswith("**"):
+        text = f"**{lead}**\n\n{text}"
+    return {"answer": text, "contract": contract.model_dump(), "gate": gate.model_dump(), "facts": [f.label() for f in fact_rows[:40]], "pipeline": "contract"}
+
+
 async def answer(state: dict, request: str, chains: tuple[str, ...], *, context: str = "") -> dict | None:
     """The contract-pipeline answer, or None when the ask is not one of the
     four kinds (the legacy path answers it)."""

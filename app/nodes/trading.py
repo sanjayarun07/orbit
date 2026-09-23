@@ -46,8 +46,21 @@ _NO_WALLET_ANSWER = (
 
 @trace(name="trade_planner", as_type="agent")
 async def trade_planner_node(state: AgentState) -> dict:
+    # The transaction contract names what a quote needs before anything is
+    # prepared: "Start a cross-chain swap" asks for the amount, the tokens and
+    # the chains by name, never a generic "token, company or topic?"
+    # clarification (Home review, 2026-09-23). In research mode the refusal
+    # names the swap the contract read.
+    from app import contracts
+    from app.settings import settings as _settings
+    contract = contracts.plan_by_rules(state["request"]) if _settings.contract_pipeline_enabled else None
+    if contract is not None and contract.kind == "transaction_intent" and contract.ambiguity:
+        note = "" if deployment.execution_enabled() else " This deployment is in research mode: even with those, I can only research the route, not prepare a swap."
+        return {"answer": contract.ambiguity + note, "trajectory": None, "cross_chain_swap": None, "contract": contract.model_dump(), "pipeline": "contract"}
     if not deployment.execution_enabled():
-        return _research_mode_answer("this one")
+        f = (contract.filters if contract is not None else {}) or {}
+        what = (f"{f.get('amount')} {f.get('input_token')} to {f.get('output_token')}" + (f" on {f.get('source_chain')}" if f.get("source_chain") else "")) if f.get("input_token") and f.get("output_token") else "this one"
+        return {**_research_mode_answer(what), **({"contract": contract.model_dump(), "pipeline": "contract"} if contract is not None else {})}
     if not state.get("wallet_address"):
         return {"answer": _NO_WALLET_ANSWER, "trajectory": None, "pending_wallet_request": state["request"]}
     if state.get("execution_provider") is None and "chain" in state.get("missing_fields", []):

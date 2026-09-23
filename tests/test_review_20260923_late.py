@@ -173,3 +173,57 @@ def test_the_knowledge_card_names_the_question_terms_no_passage_covers():
     assert tool._uncovered_terms(hits, "How does Aave V3's E-mode change the liquidation threshold?", plan) == ["e-mode"]
     covered = [SimpleNamespace(document_title="E-mode", chunk=SimpleNamespace(heading="", content="E-mode raises the liquidation threshold."), protocol_name="Aave")]
     assert tool._uncovered_terms(covered, "How does Aave V3's E-mode change the liquidation threshold?", plan) == []
+
+
+def test_a_headline_whose_figure_no_source_carries_never_becomes_a_tile(monkeypatch):
+    from app import home_highlights, perplexity_tools
+    reads = {"Nasdaq closes at record 27,243.24": {"text": "The Nasdaq Composite closed at a record 27,244.28 on September 22.", "sources": [{"n": 1, "title": "t", "url": "https://x", "date": "2026-09-22"}]},
+             "Bitcoin ETFs draw $998.95M in a day": {"text": "US spot Bitcoin ETFs took in $998.95 million on Monday.", "sources": [{"n": 1, "title": "t", "url": "https://y", "date": "2026-09-21"}]}}
+    monkeypatch.setattr(perplexity_tools, "perplexity_search_with_sources", lambda headline, recency_days=None: reads[headline])
+    parsed = {"stocks": [{"headline": "Nasdaq closes at record 27,243.24", "summary": "AI shares led.", "source": "nasdaq.com"}],
+              "crypto": [{"headline": "Bitcoin ETFs draw $998.95M in a day", "summary": "Largest inflow since October.", "source": "decrypt.co"}]}
+    out = home_highlights._verified(parsed)
+    assert out["stocks"] == [] and out["crypto"][0]["verified"] and out["crypto"][0]["date"] == "2026-09-21"
+
+
+def test_portfolio_and_transaction_intents_are_contracts_the_gate_proves():
+    from app import contracts, evidence_pipeline, facts
+    W = "3aHLqHsvw3gPxnq1fVEYG6P3pCcxkGo3ETSkQGE4KZkS"
+    for prompt, kind in (("Analyze my portfolio", "portfolio"), ("Wallet health check", "portfolio"), ("What if my portfolio drops 20%?", "portfolio"),
+                         ("Swap 0.01 SOL to USDC on Solana with 50 bps slippage", "transaction_intent"), ("What would happen if I sold 0.05 SOL for USDC?", "transaction_intent"),
+                         ("quote me 1 SOL to USDC", "transaction_intent"), ("Start a cross-chain swap", "transaction_intent"), ("how does bridging work", "open_research")):
+        assert contracts.plan_by_rules(prompt).kind == kind, prompt
+    start = contracts.plan_by_rules("Start a cross-chain swap")
+    assert start.ambiguity.startswith("To quote this I need the chain, the amount, the token to sell and the token to buy")
+    assert contracts.plan_by_rules("Swap 0.01 SOL to USDC on Solana with 50 bps slippage").ambiguity is None
+    assert contracts.plan_by_rules("What if my portfolio drops 20%?").filters == {"scenario_pct": 20.0}
+    exit_ask = contracts.plan_by_rules("Can I exit my ANSEM position in the connected wallet? Show 25%, 50% and 100% quotes to USDC.")
+    assert exit_ask.kind == "transaction_intent" and exit_ask.ambiguity is None
+    card = ("# Wallet token balances — 3aHLqH…KZkS\n**Provider**: Orbit · **Priced total**: $10.22 (2 priced, 0 without a Jupiter price)\n\n"
+            "| Token | Balance | Price | USD Value | Share |\n|---|---:|---:|---:|---:|\n| SOL | 0.0732 | $114.38 | $8.37 | 81.9% |\n| ANSEM | 11.5222 | $0.16 | $1.86 | 18.1% |\n")
+    c = contracts.plan_by_rules("Analyze my portfolio")
+    good = evidence_pipeline.prove(c, "You hold $10.22: SOL $8.37 (81.9%) and ANSEM $1.86 (18.1%).", [card], wallet=W)
+    assert good["gate"]["ok"] and good["pipeline"] == "contract"
+    other = evidence_pipeline.prove(c, "You hold $10.22.", [card.replace("3aHLqH…KZkS", "0x6982…1933")], wallet=W)
+    assert not other["gate"]["ok"] and other["gate"]["missing"][0].startswith("holdings of the wallet asked")
+    bad = evidence_pipeline.prove(c, "You hold $12.50 and are reasonably diversified.", [card], wallet=W)
+    assert bad["gate"]["unsupported"] == ["$12.50"] and bad["answer"].startswith("**I withheld the written summary")
+    sim = "**This is a simulation only.**\n\nSelling **0.05 SOL** ($5.73) would get you approximately **5.72737 USDC** ($5.73) at the current Jupiter quote, with an estimated **0.00% price impact**."
+    rows = facts.facts_from_card("sol_balance", sim, "transaction_intent")
+    assert rows and rows[0].kind == "quote_row" and rows[0].attrs["output_token"] == "USDC" and rows[0].value == 5.73
+
+
+def test_a_rounded_prose_figure_is_supported_by_the_exact_one():
+    rows = [facts.Fact(kind="holding_row", subject="SOL", value=8.37, unit="usd", source="x", attrs={"share_pct": 82.3})]
+    assert fact_gate.unsupported_figures("SOL is 82% of the wallet, about $8 of $10.", rows, "Priced total: $10.19") == []
+    assert fact_gate.unsupported_figures("SOL is 79% of the wallet.", rows, "Priced total: $10.19") == ["79%"]
+    assert fact_gate.unsupported_figures("You would get 5.7 USDC.", [], "approximately 5.72737 USDC") == []
+    assert fact_gate.unsupported_figures("You would get $6 for it.", [], "approximately 5.72737 USDC ($5.72)") == []
+    assert fact_gate.unsupported_figures("You would get $7 for it.", [], "approximately 5.72737 USDC ($5.72)") == ["$7"]
+
+
+def test_a_question_about_what_a_safety_concept_means_is_open_research():
+    from app import contracts
+    assert contracts.is_open_research("Jupiter says verified and there is no mint authority. Does that mean I cannot lose money or get rugged?")
+    assert contracts.plan_by_rules("Jupiter says verified and there is no mint authority. Does that mean I cannot lose money or get rugged?").kind == "open_research"
+    assert not contracts.is_open_research("is 9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump safe")

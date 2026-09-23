@@ -38,7 +38,7 @@ async def _perp_positions(wallet: str, request: str) -> dict:
 
 
 @trace(name="portfolio", as_type="agent")
-async def portfolio_node(state: AgentState) -> dict:
+async def _portfolio_node(state: AgentState) -> dict:
     handle = handles.social_handle(_effective_request(state))
     if handle:
         # A handle names someone else's wallet, which Orbit cannot resolve;
@@ -288,3 +288,41 @@ async def portfolio_node(state: AgentState) -> dict:
         conversation_history=state.get("history", ""),
     )
     return {"answer": _sanitize_react_answer(result.answer), "trajectory": getattr(result, "trajectory", None)}
+
+
+async def portfolio_node(state: AgentState) -> dict:
+    """The portfolio answer, then the proof: a portfolio contract
+    (app/contracts.plan_by_rules) checked against the node's own cards --
+    the holdings shown are the wallet asked about, the prose's figures trace
+    to the card, a figure that traces to nothing withholds the prose. The
+    same gate every contract answer passes, for the kind the node answers
+    itself (2026-09-24)."""
+    result = await _portfolio_node(state)
+    from app.settings import settings as _settings
+    if not _settings.contract_pipeline_enabled or not result.get("answer") or result.get("pending_wallet_request") or not state.get("wallet_address"):
+        return result
+    from app import contracts, evidence_pipeline
+    contract = contracts.plan_by_rules(_effective_request(state))
+    if contract.kind != "portfolio":
+        return result
+    trajectory = result.get("trajectory") or {}
+    cards = []
+    for key, value in trajectory.items():
+        if not key.startswith("observation"):
+            continue
+        if isinstance(value, str) and "|" in value:
+            cards.append(value)
+        elif isinstance(value, dict) and ("holdings" in value or "sol" in value):
+            # The branch recorded the snapshot itself; the proof reads the
+            # card the user sees, rendered from it (a correct analysis was
+            # withheld against "Completed." on the first live run, 2026-09-24).
+            from app.portfolio import render_card
+            rendered = render_card(value)
+            if rendered:
+                cards.append(rendered.replace("# Wallet token balances", f"# Wallet token balances — {state['wallet_address'][:6]}…{state['wallet_address'][-4:]}", 1))
+    if not cards:
+        return result                                          # nothing to prove against; never withhold without a card
+    import json
+    exact = json.dumps([v for k, v in trajectory.items() if k.startswith("observation") and isinstance(v, dict)], default=str)
+    proved = evidence_pipeline.prove(contract, result["answer"], cards, wallet=state["wallet_address"], extra_evidence=exact)
+    return {**result, **proved}

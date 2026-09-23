@@ -153,6 +153,19 @@ def facts_from_card(tool: str, markdown: str, kind_hint: str | None = None) -> l
                 out.append(Fact(kind="yield_row", subject=symbol.strip("`"), value=apy, unit="pct", source=tool, observed_at=when,
                                 attrs={"project": _first(row, "project"), "chain": _first(row, "chain"), "exposure": "lp" if is_lp else "single",
                                        "tvl_usd": parse_number(_first(row, "tvl") or "")[0]}))
+            elif kind_hint == "portfolio" or ("balance" in keys and ("value" in keys or "share" in keys)):
+                # A wallet's holdings card: Token | Balance | Price | USD Value | Share.
+                value, _ = parse_number(_first(row, "usd value", "value") or "")
+                out.append(Fact(kind="holding_row", subject=(_first(row, "token", "asset", "symbol") or "").replace("⚠", "").strip("` "), value=value, unit="usd", source=tool,
+                                observed_at=when, attrs={"balance": parse_number(_first(row, "balance", "amount") or "")[0], "price": parse_number(_first(row, "price") or "")[0],
+                                                         "share_pct": parse_number(_first(row, "share", "allocation") or "")[0]}))
+            elif kind_hint == "transaction_intent" or any(k in keys for k in ("quoted proceeds", "minimum out", "expected output", "output amount")):
+                # An exit or swap quote card: Exit | Tokens | Marked value | Quoted proceeds | Minimum out | Price impact | Route.
+                proceeds, _ = parse_number(_first(row, "quoted proceeds", "expected output", "output amount", "output") or "")
+                out.append(Fact(kind="quote_row", subject=(_first(row, "exit", "size", "sell", "pair") or "").strip("` "), value=proceeds, unit="usd", source=tool,
+                                observed_at=when, attrs={"minimum_out": parse_number(_first(row, "minimum out", "minimum") or "")[0],
+                                                         "impact_pct": parse_number(_first(row, "impact") or "")[0], "route": _first(row, "route"),
+                                                         "tokens": parse_number(_first(row, "tokens", "amount") or "")[0]}))
             elif kind_hint == "market_ranking" or any(k in keys for k in ("change", "volume")):
                 change, _ = parse_number(_first(row, "change") or "")
                 volume, _ = parse_number(_first(row, "volume") or "")
@@ -162,6 +175,14 @@ def facts_from_card(tool: str, markdown: str, kind_hint: str | None = None) -> l
                                 attrs={"volume_usd": volume, "liquidity_usd": parse_number(_first(row, "liquidity", "liq") or "")[0],
                                        "price": parse_number(_first(row, "price") or "")[0], "type": (_first(row, "type") or "").lower() or None,
                                        "venue": _first(row, "venue", "dex", "chain"), "rank": parse_number(_first(row, "#") or "")[0]}))
+    if kind_hint == "transaction_intent" and not out:
+        # A simulation written as prose: "would get you approximately **5.72737 USDC** ($5.73) ... **0.00% price impact**".
+        m = re.search(r"approximately\s+\**([0-9][0-9,]*\.?[0-9]*)\s*([A-Za-z]{2,10})\**(?:\s*\(\$([0-9][0-9,]*\.?[0-9]*)\))?", markdown or "")
+        if m:
+            impact = re.search(r"([0-9]+(?:\.[0-9]+)?)%\s*price\s+impact", markdown or "", re.I)
+            out.append(Fact(kind="quote_row", subject="simulation", value=parse_number(m.group(3) or m.group(1))[0], unit="usd" if m.group(3) else m.group(2).upper(),
+                            source=tool, observed_at=when, attrs={"output_amount": parse_number(m.group(1))[0], "output_token": m.group(2).upper(),
+                                                                  "impact_pct": float(impact.group(1)) if impact else None}))
     if kind_hint == "recent_events" and not out:
         for para in re.split(r"\n\s*\n", markdown or ""):
             text = para.strip()

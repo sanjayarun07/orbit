@@ -19,8 +19,9 @@ from pydantic import BaseModel, Field
 from app.contracts import QuestionContract
 from app.facts import Fact, event_date_of
 
-_MIN_ROWS = {"ranking_row": 3, "holder_row": 5, "yield_row": 1, "event": 1, "source": 1}
-_DEFAULT_REQUIRED = {"market_ranking": ["ranking_row"], "holders": ["holder_row"], "yields": ["yield_row"], "recent_events": ["event"], "open_research": ["source"]}
+_MIN_ROWS = {"ranking_row": 3, "holder_row": 5, "yield_row": 1, "event": 1, "source": 1, "holding_row": 1, "quote_row": 1}
+_DEFAULT_REQUIRED = {"market_ranking": ["ranking_row"], "holders": ["holder_row"], "yields": ["yield_row"], "recent_events": ["event"], "open_research": ["source"],
+                     "portfolio": ["holding_row"], "transaction_intent": ["quote_row"]}
 _AHEAD_SLACK = timedelta(hours=36)     # a date one calendar day ahead can be today in another timezone; October is not "recent" in September
 _FIGURE = re.compile(r"(?<![\w.])[+\-]?\$?\d[\d,]*(?:\.\d+)?\s*(?:%|[kKmMbB]\b|[xX]\b|(?:thousand|million|billion|mn|bn|trillion)\b)?", re.I)
 _WORD_MULT = {"thousand": 1e3, "million": 1e6, "mn": 1e6, "billion": 1e9, "bn": 1e9, "trillion": 1e12}
@@ -130,19 +131,71 @@ def unsupported_figures(answer: str, facts: list[Fact], evidence_text: str = "")
     """Figures in the prose that neither a fact, the evidence cards, nor a
     running total of the facts carries. Dates and clock times are not figures."""
     known = _numbers_in_facts(facts) | _cumulative(facts)
+    values: list[float] = []
+    for f in facts:
+        if isinstance(f.value, (int, float)) and not isinstance(f.value, bool):
+            values.append(float(f.value))
+        for v in (f.attrs or {}).values():
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                values.append(float(v))
     for m in _FIGURE.finditer(_DATETIME.sub(" ", evidence_text or "")):
         n = _parse(m.group(0))
         if n is not None:
             known.add(_sig(n))
+            values.append(n)
     out: list[str] = []
     for m in _FIGURE.finditer(_DATETIME.sub(" ", prose_of(answer))):
         token = m.group(0).strip().rstrip(",.")           # "2025," is the year 2025 (a withheld summary over that comma, 2026-09-24)
         n = _parse(token)
         if n is None or _YEARLIKE.match(token) or (abs(n) <= 12 and "%" not in token and "$" not in token and not token[-1:].lower() in "kmb"):
             continue
-        if _sig(n) not in known and token not in out:
+        if _sig(n) in known or _rounds_to(n, token, values):
+            continue
+        if token not in out:
             out.append(token)
     return out[:8]
+
+
+def _rounds_to(n: float, token: str, values: list[float]) -> bool:
+    """Whether a known figure rounds to the prose figure at the prose's own
+    precision: "82%" for a card's 82.3%, "$10" for $10.19, "5.7 USDC" for
+    5.72737 (a correct portfolio summary was withheld over 82%, 2026-09-24).
+    A rounding never widens more than the written digits allow."""
+    core = re.sub(r"[^0-9.]", "", token)
+    decimals = len(core.split(".")[1]) if "." in core else 0
+    scale = {"k": 1e3, "m": 1e6, "b": 1e9}.get(token[-1:].lower(), 1.0) if token[-1:].lower() in "kmb" else 1.0
+    for v in values:
+        if v == 0:
+            continue
+        if round(v / scale, decimals) == round(n / scale, decimals) and abs(v - n) <= abs(n) * 0.02 + scale * 0.5 * 10 ** -decimals:
+            return True
+    return False
+
+
+def _numeric_core(token: str) -> str:
+    return re.sub(r"[^0-9.]", "", token).strip(".")
+
+
+def missing_exact_figures(claim: str, evidence_text: str) -> list[str]:
+    """Figures in a claim that the evidence does not carry at the same value:
+    for a headline, "27,243.24" is not "27,244.28" even though the tolerant
+    signature the answer check uses calls them the same (the Home strip,
+    2026-09-23), while "$87,000" is "$87K" and "$998.95 million" is
+    "$998.95M". Dates, times and years are not figures."""
+    values = set()
+    for m in _FIGURE.finditer(_DATETIME.sub(" ", evidence_text or "")):
+        n = _parse(m.group(0))
+        if n is not None:
+            values.add(round(n, 6))
+    out: list[str] = []
+    for m in _FIGURE.finditer(_DATETIME.sub(" ", claim or "")):
+        token = m.group(0).strip().rstrip(",.")
+        n = _parse(token)
+        if n is None or _YEARLIKE.match(token) or (abs(n) < 10 and "%" not in token and "$" not in token and not token[-1:].lower() in "kmb"):
+            continue
+        if round(n, 6) not in values and token not in out:
+            out.append(token)
+    return out
 
 
 def check(contract: QuestionContract, facts: list[Fact], answer: str | None = None, *, scope_satisfied: bool = True, now: datetime | None = None,
@@ -180,6 +233,15 @@ def check(contract: QuestionContract, facts: list[Fact], answer: str | None = No
     # means (second review: a model contract with an empty list passed with
     # zero facts).
     required_facts = list(contract.required_facts or []) or list(_DEFAULT_REQUIRED.get(contract.kind, ["source"]))
+    if contract.kind == "portfolio" and contract.subject.id and evidence_text:
+        # The holdings shown must be the wallet asked about: a token contract
+        # in the conversation's focus was once read as "the wallet".
+        wallet = contract.subject.id
+        short = f"{wallet[:6]}…{wallet[-4:]}"
+        if wallet not in evidence_text and short not in evidence_text and f"{wallet[:4]}…{wallet[-4:]}" not in evidence_text:
+            result.missing.append("holdings of the wallet asked (the card is for another address)")
+            result.ok = False
+            by_kind.pop("holding_row", None)
     for required in required_facts:
         rows = by_kind.get(required, [])
         need = _MIN_ROWS.get(required, 1)

@@ -2993,3 +2993,25 @@ question through the open-research contract. The knowledge card ranks passages b
 (`knowledge.tool._rank_hits`), renders its sources as links, and when no passage mentions a term the question named
 (`_uncovered_terms`, the entity's name aside) it says so at the top ("Not in these passages: e-mode") so the answer
 states the gap instead of answering from passages about fees.
+
+**Headlines through the claim check, and two more contract kinds (2026-09-24).** A Home headline becomes a tile only
+after a dated, sourced read of the headline itself (`home_highlights._verified`): every figure in the headline and its
+summary must be printed exactly in that read's text (`fact_gate.missing_exact_figures`; the answer check's tolerant
+signature would have let 27,243.24 stand for 27,244.28), a tile that fails is dropped and logged, and the read's
+first dated source fills a missing date. Two contract kinds the nodes answer themselves and the gate then proves
+(`contracts.PROVED_KINDS`, `evidence_pipeline.prove`): `portfolio` (the connected wallet's holdings, health, scenario;
+the holdings shown must be the wallet asked, the prose's figures trace to the card or to the snapshot's exact numbers
+behind it, a figure that traces to nothing withholds the prose; `nodes/portfolio.portfolio_node` wraps the node) and
+`transaction_intent` (a swap, sell, buy, bridge or exit with an amount or a pair; the fields the message evidences come
+from the execution draft parser, `ambiguity` names exactly what a quote still needs, and in research mode the refusal
+names the swap it read; `nodes/trading.trade_planner_node`). The claim check also accepts a prose figure that a known
+figure rounds to at the prose's own precision (`fact_gate._rounds_to`: 82% for 82.3%, $10 for $10.19), since a
+correct summary was withheld over that. Knowledge: a targeted ingest of the Home-card protocols' docs (aave-v3, lido,
+ethena-usde, kamino-lend, jupiter-perpetual-exchange, eigencloud, morpho-blue, pendle-v2) ran on 2026-09-24
+(`reports/kb-ingest-2026-09-24.log`) so "not in these passages" becomes an answer for those. A tile's summary whose
+figures the read does not carry is replaced by the read's first real sentence; the headline itself must verify or
+the tile is dropped. Two more from the third frozen run: a question about what a safety concept means ("Jupiter says
+verified and no mint authority: does that mean I cannot get rugged?") is open research, never "which token?"
+(`contracts._OPEN_RESEARCH` knows mean/guarantee/does-that; the no-token security branch hands it to the contract),
+and a compound ask whose every clause came back as a question returns that question once, never a synthesis over
+two copies of it.

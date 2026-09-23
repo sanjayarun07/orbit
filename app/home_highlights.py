@@ -79,6 +79,50 @@ def _parse_news(text: str) -> dict | None:
     return out if (out.get("crypto") or out.get("stocks") or out.get("memes")) else None
 
 
+def _verified(parsed: dict) -> dict:
+    """Every headline's figures checked against a dated, sourced read of the
+    headline itself before it becomes a tile: a headline whose figure no
+    source text carries is dropped (a Nasdaq close was off by one point and
+    an ETF flow was dated a day late on the Home strip, 2026-09-23). The
+    same claim check the contract pipeline runs on an answer, applied to the
+    tile's own words; the read's first dated source fills a missing date."""
+    from app import fact_gate
+    from app.perplexity_tools import perplexity_search_with_sources
+    out: dict = {}
+    for kind, items in parsed.items():
+        kept = []
+        for item in items:
+            try:
+                found = perplexity_search_with_sources(item["headline"], recency_days=3)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("home highlights: verification read failed for %r (%s); tile kept unverified", item["headline"][:60], str(exc)[:80])
+                kept.append(item)
+                continue
+            text = found.get("text") or ""
+            # The headline's own figures must be printed at the same value in the
+            # read (a close off by one point is a wrong close); the summary's
+            # secondary figures pass the tolerant check the answers use.
+            unsupported = fact_gate.missing_exact_figures(item["headline"], text)
+            if unsupported:
+                logger.warning("home highlights: dropped %r: figures %s not in its sources", item["headline"][:80], unsupported)
+                continue
+            loose = fact_gate.unsupported_figures(item.get("summary") or "", [], text)
+            if loose:
+                # The headline stands; its one-sentence summary carried figures
+                # the read does not, so the read's own first sentence replaces it.
+                plain = re.sub(r"\*\*|\[\d{1,2}\]", "", text.strip())
+                sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+(?=[A-Z])", plain) if len(s.strip()) >= 40]
+                first = next((s for s in sentences if not re.match(r"(?:That|This)\s+(?:statement|claim|headline)\b", s)), None)
+                logger.info("home highlights: summary of %r replaced (figures %s not in its sources)", item["headline"][:60], loose)
+                item = {**item, "summary": (first or "")[:200]}
+            dated = [s for s in found.get("sources") or [] if s.get("date")]
+            if not item.get("date") and dated:
+                item = {**item, "date": dated[0]["date"][:10]}
+            kept.append({**item, "verified": True})
+        out[kind] = kept
+    return out
+
+
 def _news_cards() -> list[dict] | None:
     if not perplexity_available():
         return None
@@ -94,12 +138,13 @@ def _news_cards() -> list[dict] | None:
     if not parsed:
         logger.warning("home highlights: news answer was not the expected JSON")
         return None
+    parsed = _verified(parsed)
     cards: list[dict] = []
     for kind, tone in (("crypto", "teal"), ("stocks", "blue"), ("memes", "violet")):
         for index, item in enumerate(parsed.get(kind) or []):
             cards.append({
                 "id": f"{kind}-{index}", "kind": kind, "tone": tone if index == 0 else ("violet" if kind == "crypto" else "amber"),
-                "title": item["headline"], "summary": item["summary"], "source": item["source"], "date": item.get("date"),
+                "title": item["headline"], "summary": item["summary"], "source": item["source"], "date": item.get("date"), "verified": bool(item.get("verified")),
                 # The tile's own words; a headline tap is answered briefly by the
                 # research node (composition.word_limit knows this prefix).
                 "prompt": (f"What does this mean for memecoins: {item['headline']}" if kind == "memes"
