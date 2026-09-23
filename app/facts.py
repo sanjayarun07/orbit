@@ -188,6 +188,13 @@ def event_date_of(fact: Fact) -> datetime | None:
     raw = fact.event_date
     if not raw:
         return None
+    try:
+        from app.snapshot_compare import dates_in
+        found = dates_in(raw)
+        if found:
+            return found[0]
+    except Exception:
+        pass
     for fmt in ("%Y-%m-%d", "%B %d, %Y", "%b %d, %Y", "%B %d %Y", "%b %d %Y", "%d %B %Y", "%d %b %Y"):
         try:
             return datetime.strptime(raw.replace("Sept", "Sep").replace(".", ""), fmt).replace(tzinfo=timezone.utc)

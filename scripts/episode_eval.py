@@ -134,6 +134,9 @@ def _judge(episode: dict, out: dict | None, calls: list[str], answer_override: s
     return failures
 
 
+_LOOP = asyncio.new_event_loop()
+
+
 def run_live(episode: dict) -> dict:
     """The prompt through the real research node with real providers and the
     model: latency and the metric counters (LLM calls, Perplexity calls,
@@ -156,13 +159,20 @@ def run_live(episode: dict) -> dict:
     pipeline_mod.answer = capturing
     from app.nodes import research as research_mod
     research_mod.evidence_pipeline.answer = capturing
+    from app import tequity
+    from app.provider_registry import get_provider_router
+    router = get_provider_router()
+    try:
+        router._cache.clear()                      # every run is a real run: no served-from-cache tool results
+    except Exception:
+        pass
     before = metrics.snapshot()
     t0 = time.time()
+    loop = _LOOP                                   # one loop for the whole live session: the Postgres pool binds to the loop that created it
+    asyncio.set_event_loop(loop)
+    tequity.set_loop(loop)                         # ledger reads from tool threads land on this loop
     try:
-        starter = getattr(call_budget, "start_turn", None) or getattr(call_budget, "begin_turn", None) or getattr(call_budget, "reset", None)
-        if starter:
-            starter()
-        run = asyncio.run(graph.run_agent(episode["prompt"], "", "", {}))
+        run = loop.run_until_complete(graph.run_agent(episode["prompt"], "", "", {}))
         out = {"answer": getattr(run, "answer", "") or "", "trajectory": getattr(run, "trajectory", None), **captured}
     except Exception as exc:  # noqa: BLE001
         out = {"answer": f"ERROR {exc!r}", "trajectory": None}
@@ -170,6 +180,7 @@ def run_live(episode: dict) -> dict:
         pipeline_mod.answer = original
         research_mod.evidence_pipeline.answer = original
     ms = (time.time() - t0) * 1000
+    time.sleep(3.0)                                # providers' per-second budgets (Mobula: 1 rps on the free plan)
     after = metrics.snapshot()
     delta = {k: after.get(k, 0) - before.get(k, 0) for k in set(after) | set(before) if after.get(k, 0) != before.get(k, 0)}
     trajectory = out.get("trajectory") or {}
@@ -213,6 +224,8 @@ def main() -> int:
         episodes = [e for e in episodes if e.get("kind") in wanted]
     if not args.live:
         episodes = [e for e in episodes if not e.get("live_only")]
+    else:
+        episodes = [e for e in episodes if not e.get("replay_only")]
     report, passed_k, wrong = [], 0, 0
     for episode in episodes:
         runs = [(run_live if args.live else run_episode)(episode) for _ in range(args.k)]

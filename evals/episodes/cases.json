@@ -184,7 +184,8 @@
     "must_contain": [
      "Not established: an event inside the last 30 days"
     ]
-   }
+   },
+   "replay_only": true
   },
   {
    "id": "solana-gainers-7d-unsupported",
