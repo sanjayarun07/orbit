@@ -33,6 +33,14 @@ async def get_token_accounts(wallet_address: str) -> dict:
     )
 
 
+TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+
+
+async def get_token_accounts_2022(wallet_address: str) -> dict:
+    """Parsed Token-2022 accounts for a wallet (pump.fun-era mints live here)."""
+    return await rpc("getTokenAccountsByOwner", [wallet_address, {"programId": TOKEN_2022_PROGRAM}, {"encoding": "jsonParsed", "commitment": "confirmed"}])
+
+
 async def simulate_transaction(transaction_base64: str) -> dict:
     """Simulate a serialized transaction without signature verification."""
     result = await rpc(

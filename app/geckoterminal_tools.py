@@ -64,7 +64,13 @@ def _money(value: Any) -> str:
         return f"${number / 1_000_000:.1f}M"
     if abs(number) >= 1_000:
         return f"${number / 1_000:.1f}K"
-    return f"${number:,.4f}" if abs(number) < 1 else f"${number:,.2f}"
+    if abs(number) >= 1:
+        return f"${number:,.2f}"
+    if number == 0:
+        return "$0"
+    import math
+    decimals = 3 - math.floor(math.log10(abs(number)))                # four significant figures, plain decimals: $0.0000063, not $0.0000
+    return f"${number:.{min(decimals, 12)}f}"
 
 
 def _age(created: str | None) -> str:
@@ -98,7 +104,7 @@ def geckoterminal_pools(request: str) -> str:
         f"# {heading}",
         f"**Data freshness**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · GeckoTerminal",
         "",
-        "| Pool | Price | 24h volume | Liquidity | 24h change | Age |",
+        "| Pool | Price | 24h volume | Liquidity | 24h price change | Age |",
         "|---|---:|---:|---:|---:|---:|",
     ]
     for pool in pools[:12]:
@@ -121,6 +127,7 @@ def geckoterminal_pools(request: str) -> str:
         "",
         f"Source: [GeckoTerminal {kind.replace('_', ' ')}]({_BASE}/networks/{network}/{kind})",
         "",
+        "\"24h price change\" is the pool's base-token price move over 24 hours, not a change in volume. "
         "New/trending pools are often low-liquidity and volatile. Verify liquidity, holder "
         "concentration, and contract metadata before trading.",
     ])

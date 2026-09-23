@@ -49,7 +49,13 @@ def _money(value: Any) -> str:
         return f"${number / 1_000_000:.1f}M"
     if abs(number) >= 1_000:
         return f"${number / 1_000:.1f}K"
-    return f"${number:,.4f}" if abs(number) < 1 else f"${number:,.2f}"
+    if abs(number) >= 1:
+        return f"${number:,.2f}"
+    if number == 0:
+        return "$0"
+    import math
+    decimals = 3 - math.floor(math.log10(abs(number)))                # four significant figures, plain decimals: $0.0000063, not $0.0000
+    return f"${number:.{min(decimals, 12)}f}"
 
 
 def _chain(request: str) -> str | None:
@@ -126,7 +132,7 @@ def dexscreener_boosted_tokens(request: str) -> str:
         f"# Trending tokens{scope}",
         f"**Data freshness**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · currently boosted on DEX Screener",
         "",
-        "| Token | Chain | Price | 24h volume | Liquidity | 24h change |",
+        "| Token | Chain | Price | 24h volume | Liquidity | 24h price change |",
         "|---|---|---:|---:|---:|---:|",
     ]
     for item in rows:
@@ -273,15 +279,15 @@ def dexscreener_pair_search(request: str) -> str:
         "# DEX pair results",
         f"**Data freshness**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         "",
-        "| Pair | Chain / DEX | Price | 24h volume | Liquidity | 24h change |",
-        "|---|---|---:|---:|---:|---:|",
+        "| Pair | Chain / DEX | Priced token | Price | 24h volume | Liquidity | 24h price change |",
+        "|---|---|---|---:|---:|---:|---:|",
     ]
     for pair in pairs:
         base = (pair.get("baseToken") or {}).get("symbol") or "?"
         quote = (pair.get("quoteToken") or {}).get("symbol") or "?"
         change = (pair.get("priceChange") or {}).get("h24")
         lines.append(
-            f"| [{base}/{quote}]({pair.get('url') or '#'}) | {pair.get('chainId') or '?'} / {pair.get('dexId') or '?'} | "
+            f"| [{base}/{quote}]({pair.get('url') or '#'}) | {pair.get('chainId') or '?'} / {pair.get('dexId') or '?'} | {base} | "
             f"{_money(pair.get('priceUsd'))} | {_money((pair.get('volume') or {}).get('h24'))} | "
             f"{_money((pair.get('liquidity') or {}).get('usd'))} | {f'{float(change):+.1f}%' if change is not None else '—'} |"
         )
@@ -292,6 +298,8 @@ def dexscreener_pair_search(request: str) -> str:
         raise RuntimeError(f"DEX Screener found no liquid pairs for {subject!r}")
     lines.extend([
         "",
+        "Price is the priced token's (the first in the pair) in USD; a row where your token is the second name prices the other token. "
+        "\"24h price change\" is a price move, not volume growth. "
         "Search results can include duplicate symbols and unofficial contracts. Verify chain and contract address before trading.",
     ])
     return compact_tool_result("\n".join(lines))
@@ -309,12 +317,13 @@ def dexscreener_token_pairs(request: str) -> str:
 
 def dexscreener_pair_search_from_pairs(pairs: list[dict]) -> str:
     pairs = _rank_pairs(pairs)
-    lines = ["# Token liquidity venues", "", "| Pair | Chain / DEX | Price | 24h volume | Liquidity |", "|---|---|---:|---:|---:|"]
+    lines = ["# Token liquidity venues", "", "| Pair | Chain / DEX | Priced token | Price | 24h volume | Liquidity |", "|---|---|---|---:|---:|---:|"]
     for pair in pairs:
         base = (pair.get("baseToken") or {}).get("symbol") or "?"
         quote = (pair.get("quoteToken") or {}).get("symbol") or "?"
         lines.append(
-            f"| [{base}/{quote}]({pair.get('url') or '#'}) | {pair.get('chainId') or '?'} / {pair.get('dexId') or '?'} | "
+            f"| [{base}/{quote}]({pair.get('url') or '#'}) | {pair.get('chainId') or '?'} / {pair.get('dexId') or '?'} | {base} | "
             f"{_money(pair.get('priceUsd'))} | {_money((pair.get('volume') or {}).get('h24'))} | {_money((pair.get('liquidity') or {}).get('usd'))} |"
         )
+    lines += ["", "Price is the priced token's (the first in the pair) in USD; a row where the requested token is the second name prices the other token."]
     return compact_tool_result("\n".join(lines))

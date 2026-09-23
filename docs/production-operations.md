@@ -2360,3 +2360,22 @@ named token groups so a mint with digits is the token; `what changed since I ent
 wallet's watch (else every watch, each on its own), reads the holding against the baseline's quantity, and says
 when the wallet no longer holds the token; a rejected alert email leaves `last_alert.email_pending` set and is
 retried every tick until the provider accepts it (the inbox row and the cooldown stand meanwhile).
+
+## Complete UI review fixes (2026-09-23)
+
+- **Portfolio reads both token programs.** `solana_rpc.get_all_token_accounts` returns legacy and Token-2022
+  accounts plus the programs whose read failed; `build_portfolio_snapshot` marks `partial` and `unread_programs`,
+  and the portfolio node says "Snapshot partial … not an empty wallet" instead of "no SPL token holdings". The
+  tester's wallet (ANSEM under Token-2022) now agrees between the portfolio and the exit analysis; SOL exposure
+  uses the full denominator.
+- **Units survive synthesis.** The desk thesis and the composite synthesis carry explicit rules: dollar
+  liquidity/volume/market cap are never a support or invalidation price; a level needs a price figure in the
+  data; a catalyst needs a dated event; unverified identity caps conviction at 4/10; "24h price change" is a
+  price move, never volume growth. The GeckoTerminal and DEX Screener columns now say "24h price change".
+- **Small prices and the priced token.** `_money` prints four significant figures below $1 ($0.000006300, never
+  $0.0000); pair tables carry a "Priced token" column and a note that a row where the requested token is the
+  second name prices the other token.
+- **Holder table semantics.** "First token trade" and "Wallet funded" are separate columns; absent buy/sell
+  counts print "—" (unknown, not zero); a note explains Mobula's PnL basis.
+- **Price alerts are validated at the boundary.** `tasks.validate_spec` requires a symbol, `<`/`>` and a finite
+  positive price on create and on spec updates; the form's "-1" now returns 400.

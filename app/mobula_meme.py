@@ -162,15 +162,19 @@ def token_holders(request: str) -> str:
         "the security profile's top-10 figure applies Mobula's own exclusions and can differ). "
         "Wallets are not necessarily distinct owners: one person can hold through many.",
         "",
-        "| # | Wallet | Share | Value | Buys/Sells | Unrealized PnL | First trade | Labels |",
-        "|---:|---|---:|---:|---:|---:|---|---|",
+        "| # | Wallet | Share | Value | Buys/Sells | Unrealized PnL | First token trade | Wallet funded | Labels |",
+        "|---:|---|---:|---:|---:|---:|---|---|---|",
     ]
     for index, row in enumerate(rows[:15], start=1):
         labels = ", ".join(_labels_of(row)[:3]) or "—"
+        counts = "/".join("—" if row.get(k) is None else str(row.get(k)) for k in ("buys", "sells"))   # absent is unknown, never zero
         lines.append(
             f"| {index} | `{_short(row.get('walletAddress'))}` | {_num(row.get('percentageOfTotalSupply')):.2f}% | "
-            f"{_usd(row.get('tokenAmountUSD'))} | {row.get('buys', 0)}/{row.get('sells', 0)} | "
-            f"{_usd(row.get('unrealizedPnlUSD'))} | {_when(row.get('firstTradeAt') or row.get('walletFundAt'))} | {labels} |")
+            f"{_usd(row.get('tokenAmountUSD'))} | {counts} | "
+            f"{_usd(row.get('unrealizedPnlUSD'))} | {_when(row.get('firstTradeAt'))} | {_when(row.get('walletFundAt'))} | {labels} |")
+    lines += ["", "\"—\" in Buys/Sells means Mobula returned no count, not zero trades. \"First token trade\" is this token; \"Wallet funded\" is the wallet's "
+                  "first funding, which can predate the token. Unrealized PnL is Mobula's, on its own cost basis; a PnL equal to the position's value "
+                  "means no cost basis was found, not a free position."]
     if flagged:
         lines += ["", "## Flagged wallets", "| Label | Wallets |", "|---|---:|"]
         lines += [f"| {label} | {count} |" for label, count in sorted(flagged.items(), key=lambda kv: -kv[1])[:8]]
