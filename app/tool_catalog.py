@@ -536,6 +536,8 @@ CONTRACT_COVERAGE: dict[str, dict] = {
     "coingecko_top_volume": {"kinds": {"market_ranking"}, "scope": "global", "chains": _ALL_EVM | {"solana", "sui"}, "metrics": {"volume"}, "windows": (12.0, 24.0), "fresh": 120},
     "dexscreener_boosted_tokens": {"kinds": {"market_ranking"}, "scope": "venue_trades", "chains": _ALL_EVM | {"solana", "sui", "robinhood"}, "venues": {"dexscreener", "pump.fun"}, "metrics": {"boosts"}, "windows": (12.0, 24.0), "fresh": 300},
     "geckoterminal_pools": {"kinds": {"market_ranking"}, "scope": "venue_trades", "chains": _ALL_EVM | {"solana"}, "venues": {"dexscreener", "pump.fun"}, "metrics": {"volume", "new_listings"}, "windows": (12.0, 24.0), "fresh": 120},
+    # One token's pairs across DEXes with liquidity, volume and 24h change per pool: the state source for "BONK pools with at least $1M liquidity".
+    "dexscreener_token_pairs": {"kinds": {"market_ranking"}, "scope": "venue_trades", "chains": _ALL_EVM | {"solana", "sui"}, "venues": {"dexscreener"}, "metrics": {"liquidity", "volume", "price_change"}, "windows": (12.0, 24.0), "fresh": 120, "subject": "token"},
     "tequity_movers": {"kinds": {"market_ranking"}, "scope": "venue_trades", "venues": {"aster", "hyperliquid"}, "chains": set(), "metrics": {"price_change"}, "windows": (12.0, 24.0), "fresh": 120},
     "tequity_period_movers": {"kinds": {"market_ranking"}, "scope": "venue_trades", "venues": {"aster", "hyperliquid"}, "chains": set(), "metrics": {"price_change"}, "windows": (0.5, 720.0), "fresh": 600},
     "tequity_volume_leaders": {"kinds": {"market_ranking"}, "scope": "venue_trades", "venues": {"aster", "hyperliquid"}, "chains": set(), "metrics": {"volume"}, "windows": (0.25, 720.0), "fresh": 600},
@@ -561,6 +563,9 @@ def eligible(tool_name: str, contract) -> tuple[bool, str]:
         return False, "no contract coverage declared"
     if contract.kind not in cov["kinds"]:
         return False, f"serves {', '.join(sorted(cov['kinds']))}, not {contract.kind}"
+    if cov.get("subject") == "token" and not (contract.subject.kind == "token" and (contract.subject.symbol or contract.subject.id)):
+        # A per-token source (one token's pairs) cannot serve a chain-wide or venue-wide ask.
+        return False, "reads one named token, no token in the ask"
     if contract.metric and cov["metrics"] and contract.metric not in cov["metrics"]:
         return False, f"metric {contract.metric} not in {', '.join(sorted(cov['metrics']))}"
     if contract.scope == "venue_trades" and cov["scope"] not in ("venue_trades", "on_chain"):

@@ -127,6 +127,10 @@ _HOLDERS = re.compile(r"\b(?:holders?|holding|concentration|who\s+(?:holds|owns)
 _YIELDS = re.compile(r"\b(?:yields?|apy|apr|earn|lending\s+rates?|staking\s+rates?|farm\w*)\b", re.I)
 _EVENTS = re.compile(r"\b(?:news|headlines?|vote[ds]?|voting|proposal|governance|recently|latest|what\s+happened|announce\w*|launch(?:ed|es)?|hack(?:ed|s)?|exploit\w*|incidents?|this\s+week|today)\b", re.I)
 _LOSERS = re.compile(r"\b(?:losers?|dumping|down\s+the\s+most|worst|laggards?)\b", re.I)
+# A token's pools or pairs, listed: "BONK pools with at least $1M liquidity",
+# "pairs for PEPE", "where does WIF trade" -- state read from the DEX
+# aggregators, never from the web.
+_POOL_LISTING = re.compile(r"\b(?:pools?|pairs?|liquidity\s+pools?|markets?\s+for|where\s+does\s+\S+\s+trade)\b", re.I)
 _TRADES_ON = re.compile(r"\b(?:trades?|trading|traded|volume|pairs?|pools?|dex(?:es)?)\s+on\b|\bon[- ]venue\b|\bvenue\b", re.I)
 _ECOSYSTEM = re.compile(r"\becosystem\b|\bassociated\s+with\b|\bglobal\b", re.I)
 _WINDOW = re.compile(r"\b(?:last|past|previous)\s+(\d+)\s*(h(?:ours?)?|d(?:ays?)?|w(?:eeks?)?)\b|\b(\d+)\s*(h|d|w)\b|\b(24\s*h(?:ours)?|this\s+week|past\s+week|last\s+week|today|this\s+morning|this\s+month|7d|30d)\b", re.I)
@@ -208,6 +212,15 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
     limit = int(_LIMIT.search(text).group(1)) if _LIMIT.search(text) else 10
     window = _window_hours(text)
     explanation = bool(re.match(r"\s*(?:why|what(?:'s| is)\s+(?:driving|behind|moving))\b", text, re.I))
+    if _POOL_LISTING.search(text) and (symbol or address) and not _HOLDERS.search(text) and not _YIELDS.search(text.split(".")[0]):
+        # "Find BONK pools on Solana with at least $1,000,000 liquidity": the
+        # token's pools by liquidity, exact on-chain state (the frozen trust
+        # run, 2026-09-23, sent it to the web and repeated a $239.5M pool
+        # from a tracker page).
+        return QuestionContract(kind="market_ranking", subject=Subject(kind="token", id=address.group(1) if address else None, symbol=symbol, chain=chain),
+                                venue=venue, scope="venue_trades", metric="liquidity", unit="usd", window_hours=window or 24.0, direction="top",
+                                limit=limit, filters=filters, freshness_seconds=3600, evidence_order="state_first",
+                                required_facts=["ranking_row"], confidence=0.6, planner="rules")
     if _RANKING.search(text) and not _HOLDERS.search(text) and not explanation:
         metric = "volume" if re.search(r"\b(?:most\s+traded|by\s+volume|volume\s+leaders?|top\s+volume)\b", text, re.I) else "price_change"
         scope: Scope = "any"

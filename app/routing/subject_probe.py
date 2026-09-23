@@ -104,11 +104,17 @@ _NEW_TOPIC = re.compile(
     r"what'?s\s+(?:hot|trending|launching|new)|how\s+is\s+the\s+market|top\s+\d+\s+(?:coins|tokens)|fear\s+and\s+greed)\b", re.I)
 
 
+# "Can I see a wallet without giving you control?", "is any token safe?": an
+# indefinite noun is a generic subject, not the conversation's asset (the
+# frozen trust run, 2026-09-23, carried a PEPE contract into a wallet read).
+_INDEFINITE = re.compile(r"\b(?:a|an|any|some|every)\s+(?:wallet|address|token|coin|contract|portfolio|protocol|chain|position|account|exchange)\b", re.I)
+
+
 def continues_subject(request: str) -> bool:
     """Whether a message that names nothing of its own reads as a follow-up
     on the conversation's subject rather than a new topic or small talk."""
     text = request or ""
-    if len(text.split()) < 3 or has_own_subject(text) or _NEW_TOPIC.search(text):
+    if len(text.split()) < 3 or has_own_subject(text) or _NEW_TOPIC.search(text) or _INDEFINITE.search(text):
         return False
     return bool(_CONTINUES.search(text))
 

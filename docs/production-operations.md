@@ -2923,3 +2923,21 @@ Two more things the post-fix open-research run exposed: an "explain" act about a
 node and was answered from the model's memory with no source, so the general node now hands a crypto explain that
 `contracts.is_open_research` accepts to the contract pipeline; and DSPy's disk cache served a two-hour-old general
 answer in 13 ms as five "attempts", so live episode runs set `cache=False` on every LM.
+
+**The frozen trust re-run (2026-09-23, `reports/trust-rerun-7343e407/`, `scripts/trust_rerun.py`, `scripts/trust_judge.py`).**
+The reviewers' two case sets (the 94-case persona run and the Home Explore cards) re-run on one build through the real
+chat turn (`execution_policy.execute_chat_turn`) as the tester account, one session per persona, model caches off;
+88 turns ran, 10 that create notifications were skipped. Read by hand after a model judge's first pass: four real
+defects against the prior reviews' 19 fails and 32 partials on the moving build. All four fixed the same evening,
+each generic: the answer gate now checks and web-searches with the request that carries the conversation's resolved
+subject ("Who controls the supply?" after an ANSEM turn was judged off-subject on the bare text and replaced by a web
+reply that could not know the token); an indefinite noun ("a wallet", "any token") is a generic subject, never the
+conversation's asset (a PEPE contract was read as a wallet); two product answers, how a wallet is read without control
+and what a failed quote means (written from `exit_monitor._route_error`: unavailable is never zero, "no route" only when
+the provider says so, nothing retries a trade); and a token's pools with a liquidity floor is a `market_ranking`
+contract with metric `liquidity` served by `dexscreener_token_pairs`, whose coverage declares `"subject": "token"` so a
+per-token source is never eligible for a chain-wide ask (it had gone to the web and repeated a $239.5M pool from a
+tracker page). Both headline errors from the Home review are gone in the answers. Still open: a five-dimension
+evidence ask runs one dimension; a compound answer led by the pipeline shows two "Taken together" blocks;
+wallet-connected turns need a wallet in the harness. Re-run: `.venv/bin/python scripts/trust_rerun.py --out
+reports/trust-rerun-<sha>` then `scripts/trust_judge.py <dir>`, and read every fail and partial.

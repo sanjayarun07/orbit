@@ -68,6 +68,48 @@ GENERIC = ("This reads as a request to the app rather than a market look-up. Wha
            "wallet or protocol to research.")
 
 
+# "Can I see a wallet without giving you control of it?": a question about how
+# this product reads wallets, not a wallet to read (frozen trust run,
+# 2026-09-23: it fetched the portfolio of the token contract in focus).
+_WALLET_VIEW = re.compile(r"\b(?:see|view|look\s+at|read|check|analy[sz]e|track)\b.{0,40}\b(?:a|any|someone'?s?|another|an?\s+public)\s+(?:wallet|address|portfolio)\b.{0,60}"
+                          r"\b(?:without\s+(?:giving|granting|handing|connecting|signing|control|access|approv\w+)|read[- ]only|just\s+(?:the\s+)?address|public\s+address|no\s+(?:control|signing|access))\b"
+                          r"|\b(?:read[- ]only|view[- ]only)\s+(?:wallet|address|portfolio|mode)\b", re.I)
+WALLET_VIEW = ("**Yes: a wallet can be read from its public address alone.** Paste the address (Solana or EVM) and Orbit reads what is public "
+               "on-chain: holdings and their value, open positions, recent transfers, health checks and what a position would fetch if sold. "
+               "Nothing is connected, nothing is signed, and no access or control is given; the address is read the way a block explorer "
+               "reads it.\n\n"
+               "**Connecting a wallet is different.** It is only needed to sign a transaction yourself, and only when execution is on; even "
+               "then Orbit never holds a key, and every transaction is shown for review in your own wallet before you sign.\n\n"
+               "Try: paste an address followed by `what does it hold`.")
+
+
+# "What happens if the quote provider times out or there is no route? Does
+# your system treat either as zero holdings or authorize a retry trade?": a
+# question about this product's behaviour, answered from what the code does
+# (app/exit_monitor._route_error), not with the policy card (frozen trust
+# run, 2026-09-23).
+_QUOTE_FAILS = re.compile(r"\b(?:quote|route|routing|price)\s+(?:provider|source|api|feed)?\s*(?:times?\s+out|timeout|fails?|failure|unavailable|down|errors?)\b|\bno\s+route\b", re.I)
+_SYSTEM_BEHAVIOUR = re.compile(r"\b(?:what\s+happens|what\s+do\s+you\s+do|does\s+(?:your|the|this)\s+(?:system|app|bot|orbit)|do\s+you\s+(?:treat|retry|re-?try|authori[sz]e|assume)|"
+                               r"treat(?:ed|s)?\s+(?:it|that|either|this|as)|as\s+zero|zero\s+holdings|retry\s+trade|authori[sz]e\s+a\s+retry|in\s+that\s+case)\b", re.I)
+
+
+def _asks_quote_failure_behaviour(text: str) -> bool:
+    return bool(_QUOTE_FAILS.search(text) and _SYSTEM_BEHAVIOUR.search(text))
+
+
+QUOTE_FAILURE = ("**A failed quote is unknown, never zero, and never a trade.**\n\n"
+                 "- **Timeout, dropped connection, provider outage or rate limit**: the quote is recorded as *unavailable* with the reason "
+                 "(\"quote unavailable (timeout)\", \"quote provider outage\"). Holdings are untouched: the last known quantity stands, "
+                 "the gap is recorded, and no alert fires on unavailable data.\n"
+                 "- **No route**: only when the quote provider itself says so (Jupiter's COULD_NOT_FIND_ANY_ROUTE). For an exit watch that "
+                 "is the exit-risk alert in its plainest form: \"a full exit was quoted at X and cannot be quoted now\", with the smaller "
+                 "sizes that still quote.\n"
+                 "- **Missing chain read**: not a zero and not a position; the card says the chain could not be read.\n\n"
+                 "Nothing retries a trade. A quote is read-only; a swap is only ever prepared for your review and signed by you in your own "
+                 "wallet, and a quote older than its validity window is replaced by a fresh one, never re-used. In research mode no swap is "
+                 "prepared at all.")
+
+
 def matches(request: str) -> bool:
     """Whether a specific product answer exists for this request. The
     classifier's `app` label stands only then; otherwise the ask is research
@@ -79,7 +121,7 @@ def is_product_question(request: str) -> bool:
     """A question about what this product does or how to use it, or about one
     of its own concepts (an exit watch, marked value against sale proceeds)."""
     text = request or ""
-    if _FIND_CHAT.search(text) or _EXIT_WATCH_MEANING.search(text) or _MARKED_VS_PROCEEDS.search(text):
+    if _FIND_CHAT.search(text) or _EXIT_WATCH_MEANING.search(text) or _MARKED_VS_PROCEEDS.search(text) or _WALLET_VIEW.search(text) or _asks_quote_failure_behaviour(text):
         return True
     return bool(_WHAT_CAN.search(text)) and not re.search(r"\b(?:price|holders?|liquidity|volume|market\s+cap|tvl)\b", text, re.I)
 
@@ -101,6 +143,10 @@ def answer(request: str) -> str:
         return EXIT_WATCH
     if _MARKED_VS_PROCEEDS.search(text):
         return MARKED_VS_PROCEEDS
+    if _WALLET_VIEW.search(text):
+        return WALLET_VIEW
+    if _asks_quote_failure_behaviour(text):
+        return QUOTE_FAILURE
     if _WHAT_CAN.search(text) and not parts:
         return WHAT_CAN
     if not parts:

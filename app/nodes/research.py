@@ -1953,7 +1953,12 @@ async def research_node(state: AgentState) -> dict:
     if result.get("pipeline") != "contract":
         # The contract pipeline already proved or stated its coverage; the
         # topical gate must not replace an honest gap with web prose.
-        result = await answer_gate.gate(state["request"], result)
+        # The check and its web fallback read the request with the subject the
+        # conversation resolved ("Who controls the supply?" after an ANSEM
+        # turn is about ANSEM): judged on the bare text, a correct holders
+        # answer was called off-subject and replaced by a web reply that
+        # could not know the token (frozen trust run, 2026-09-23).
+        result = await answer_gate.gate(_effective_request(state), result)
     limit = composition.word_limit(state["request"])
     if limit and result.get("answer") and not is_clarification(result.get("answer")) and not result.get("pending_token"):
         # After the gate, so the judge reads the whole answer and a web
