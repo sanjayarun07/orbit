@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("episode_eval", ROOT / "scripts" / "episode_eval.py")
 episode_eval = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(episode_eval)
-EPISODES = json.load(open(ROOT / "evals" / "episodes" / "cases.json"))["episodes"]
+EPISODES = [e for e in json.load(open(ROOT / "evals" / "episodes" / "cases.json"))["episodes"] if not e.get("live_only")]
 
 
 @pytest.mark.parametrize("episode", EPISODES, ids=[e["id"] for e in EPISODES])

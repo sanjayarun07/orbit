@@ -342,6 +342,109 @@
      "2026-09-2"
     ]
    }
+  },
+  {
+   "id": "open-why-sol-moving",
+   "prompt": "Why is SOL moving today?",
+   "kind": "open_research",
+   "live_only": true,
+   "goal": {
+    "must_contain_any": [
+     [
+      "[1]",
+      "Sources:",
+      "Source:",
+      "per "
+     ]
+    ],
+    "must_not_contain": [
+     "Which token should I check",
+     "could not find"
+    ]
+   }
+  },
+  {
+   "id": "open-eigen-investors",
+   "prompt": "Who are the investors backing EigenLayer?",
+   "kind": "open_research",
+   "live_only": true,
+   "goal": {
+    "must_contain_any": [
+     [
+      "a16z",
+      "Andreessen",
+      "Polychain",
+      "Blockchain Capital",
+      "Coinbase Ventures"
+     ]
+    ],
+    "must_contain_any_2": [
+     [
+      "[1]",
+      "Sources:",
+      "Source:"
+     ]
+    ],
+    "must_not_contain": [
+     "Which token should I check"
+    ]
+   }
+  },
+  {
+   "id": "open-bonk-risks",
+   "prompt": "What are the risks of buying BONK?",
+   "kind": "open_research",
+   "live_only": true,
+   "goal": {
+    "must_contain_any": [
+     [
+      "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+      "BONK"
+     ]
+    ],
+    "must_not_contain": [
+     "Which token should I check",
+     "no exploits have ever"
+    ]
+   }
+  },
+  {
+   "id": "open-aave-emode",
+   "prompt": "How does Aave V3's E-mode change the liquidation threshold?",
+   "kind": "open_research",
+   "live_only": true,
+   "goal": {
+    "must_contain_any": [
+     [
+      "liquidation threshold",
+      "Liquidation threshold"
+     ]
+    ],
+    "must_contain_any_2": [
+     [
+      "[1]",
+      "Sources",
+      "Source"
+     ]
+    ]
+   }
+  },
+  {
+   "id": "open-jup-week",
+   "prompt": "What happened with JUP this week?",
+   "kind": "open_research",
+   "live_only": true,
+   "goal": {
+    "must_contain_any": [
+     [
+      "2026-09",
+      "September"
+     ]
+    ],
+    "must_not_contain": [
+     "Which token should I check"
+    ]
+   }
   }
  ]
 }

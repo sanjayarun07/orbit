@@ -1834,6 +1834,13 @@ async def research_node(state: AgentState) -> dict:
         # a period ("this week", "since this morning") they come from the
         # tick ledger, measured between stored ticks.
         periodic = tequity.period_movers_matches(request)
+        if settings.contract_pipeline_enabled:
+            # The contract pipeline reaches the same feed through eligibility and
+            # adds the gate; the intercept only guarantees the venue ask never
+            # drifts to the web when the classifier misreads it.
+            piped = await evidence_pipeline.answer(state, request, tuple(state.get("chains") or ()))
+            if piped is not None:
+                return piped
         try:
             card = await asyncio.to_thread(tequity.period_movers if periodic else tequity.movers, request)
             name = "tequity_period_movers" if periodic else "tequity_movers"

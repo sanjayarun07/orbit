@@ -124,9 +124,10 @@ def _judge(episode: dict, out: dict | None, calls: list[str], answer_override: s
     for text in goal.get("must_contain") or []:
         if text not in answer:
             failures.append(f"missing text: {text!r}")
-    for text in goal.get("must_contain_any") or []:
-        if not any(t in answer for t in (text if isinstance(text, list) else [text])):
-            failures.append(f"missing any of: {text!r}")
+    for key in ("must_contain_any", "must_contain_any_2"):
+        for text in goal.get(key) or []:
+            if not any(t in answer for t in (text if isinstance(text, list) else [text])):
+                failures.append(f"missing any of: {text!r}")
     for text in goal.get("must_not_contain") or []:
         if text in answer:
             failures.append(f"forbidden text present: {text!r}")
@@ -138,19 +139,36 @@ def run_live(episode: dict) -> dict:
     model: latency and the metric counters (LLM calls, Perplexity calls,
     estimated Perplexity cost) beside the same goal judgement. A live goal
     must be provider-independent: tools that ran, scope, gate, structural text."""
-    from app import metrics
-    from app.nodes import research
+    from app import call_budget, evidence_pipeline as pipeline_mod, graph, metrics
     from app.settings import settings
 
+    # The same path a chat turn takes (routing included), with the semantic
+    # answer cache off so every run is a real run, and a fresh per-turn budget.
+    settings.provider_semantic_cache_threshold = 1.01
+    captured: dict = {}
+    original = pipeline_mod.answer
+
+    async def capturing(state, request, chains, *, context=""):
+        out = await original(state, request, chains, context=context)
+        if out is not None:
+            captured.update(out)
+        return out
+    pipeline_mod.answer = capturing
+    from app.nodes import research as research_mod
+    research_mod.evidence_pipeline.answer = capturing
     before = metrics.snapshot()
     t0 = time.time()
-    state = {"request": episode["prompt"], "contextual_request": None, "history": "", "session_context": {}, "chains": [],
-             "capabilities": episode.get("capabilities") or ["market_data", "token_discovery", "token_security", "defi_data", "web_research", "knowledge"],
-             "routing_decision": {"intent": "research"}}
     try:
-        out = asyncio.run(research.research_node(state))
+        starter = getattr(call_budget, "start_turn", None) or getattr(call_budget, "begin_turn", None) or getattr(call_budget, "reset", None)
+        if starter:
+            starter()
+        run = asyncio.run(graph.run_agent(episode["prompt"], "", "", {}))
+        out = {"answer": getattr(run, "answer", "") or "", "trajectory": getattr(run, "trajectory", None), **captured}
     except Exception as exc:  # noqa: BLE001
         out = {"answer": f"ERROR {exc!r}", "trajectory": None}
+    finally:
+        pipeline_mod.answer = original
+        research_mod.evidence_pipeline.answer = original
     ms = (time.time() - t0) * 1000
     after = metrics.snapshot()
     delta = {k: after.get(k, 0) - before.get(k, 0) for k in set(after) | set(before) if after.get(k, 0) != before.get(k, 0)}
@@ -193,6 +211,8 @@ def main() -> int:
     if args.kinds:
         wanted = set(args.kinds.split(","))
         episodes = [e for e in episodes if e.get("kind") in wanted]
+    if not args.live:
+        episodes = [e for e in episodes if not e.get("live_only")]
     report, passed_k, wrong = [], 0, 0
     for episode in episodes:
         runs = [(run_live if args.live else run_episode)(episode) for _ in range(args.k)]

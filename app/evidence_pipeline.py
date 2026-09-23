@@ -62,13 +62,18 @@ async def _invoke(router, name: str, request: str, chains: tuple[str, ...], cont
             return result
         except Exception:
             logger.info("structured web search failed; plain call", exc_info=True)
-    try:
-        return await asyncio.to_thread(router.invoke, name, request, chains)
-    except KeyError:
-        return None
-    except Exception:
-        logger.info("contract tool %s failed", name, exc_info=True)
-        return None
+    for attempt in (0, 1):
+        try:
+            result = await asyncio.to_thread(router.invoke, name, request, chains)
+        except KeyError:
+            return None
+        except Exception:
+            logger.info("contract tool %s failed", name, exc_info=True)
+            result = None
+        if result is not None or getattr(router, "replay", False):
+            return result
+        await asyncio.sleep(1.5)                                          # a provider's per-second budget: one pause, one retry
+    return None
 
 
 def _facts_of(result, kind: str) -> list:
