@@ -323,6 +323,11 @@ class Settings(BaseSettings):
     # stats. Not a secret; wss only (ws:// is rejected upstream).
     tequity_enabled: bool = True
     tequity_ws_url: str | None = "wss://tequity-dn.i5.xyz/ws"
+    # The tick ledger (app/tequity_ledger.py): one row per pair per tick,
+    # recorded by the lease holder every interval; rows older than the
+    # retention are pruned daily. 0 disables recording.
+    tequity_record_interval_seconds: int = 300
+    tequity_retention_days: int = 30
     bitquery_api_key: str | None = None
     bitquery_graphql_url: str = "https://streaming.bitquery.io/eap"
     bitquery_requests_per_minute: int = 30

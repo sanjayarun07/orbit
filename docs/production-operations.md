@@ -2776,3 +2776,11 @@ the explicit note that links are never `web_app` buttons.
 Verified after the pass: 1,774 tests pass, 47 of them covering the bot;
 `scripts/check_secrets.py` clean over 441 files; the inline UI JavaScript
 parses.
+**Tick ledger (`app/tequity_ledger.py`, 2026-09-23).** The lease holder (Redis key `tequity_ledger:leader`)
+records one row per pair per tick into `tequity_ticks` every `TEQUITY_RECORD_INTERVAL_SECONDS` (300; 0 disables),
+for the two movers channels and the trending list (rank kept), stamped with one `taken_at` per tick and the feed's
+server time. About 250k rows a day at 858 pairs; rows older than `TEQUITY_RETENTION_DAYS` (30) are pruned daily.
+Reads: `history(venue, symbol, since, until)`, `tick_at(channel, moment)`, `movers_between(venue, start, end)` (change
+from stored prices, not the feed's 24h figure), `volume_leaders(venue, days)`, `status()`. The worker is
+`tequity_ledger` in the startup task map. Nothing reads the ledger in a user-facing tool yet; the wire-only use
+cases (since-this-morning movers, weekly leaders, movers alerts) build on it.

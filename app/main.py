@@ -86,7 +86,7 @@ from app.plans import get_plan
 from app.provider_registry import get_provider_router, save_provider_overrides
 from app.db import get_pg_pool, get_redis
 from app.settings import settings
-from app import tequity
+from app import tequity, tequity_ledger
 from pydantic import BaseModel, Field
 
 from app import decision_records, execution_policy, exit_monitor, holder_snapshots, jobs, polymarket_odds, sentiment_analyst, token_unlocks, turn_log, user_memory
@@ -151,6 +151,7 @@ async def lifespan(_app: FastAPI):
         # not hold up the app's readiness, and a failed claim is logged.
         asyncio.create_task(telegram_bot.claim_webhook())
     tequity_worker = asyncio.create_task(tequity.worker())
+    tequity_ledger_worker = asyncio.create_task(tequity_ledger.worker())
     # The holder snapshot ledger records tracked meme tokens in the
     # background; history only exists from the day recording starts.
     snapshot_worker = asyncio.create_task(holder_snapshots.worker())
@@ -159,7 +160,7 @@ async def lifespan(_app: FastAPI):
     _workers.update({
         "jobs": jobs_worker,
         "reconciliation": reconciliation, "relay_reconciliation": relay_reconciliation,
-        "tool_outcomes": outcomes_refresh, "tasks": task_worker, "knowledge_ingest": kb_worker, "tequity": tequity_worker,
+        "tool_outcomes": outcomes_refresh, "tasks": task_worker, "knowledge_ingest": kb_worker, "tequity": tequity_worker, "tequity_ledger": tequity_ledger_worker,
         "holder_snapshots": snapshot_worker,
     })
     try:
@@ -172,11 +173,12 @@ async def lifespan(_app: FastAPI):
         task_worker.cancel()
         kb_worker.cancel()
         tequity_worker.cancel()
+        tequity_ledger_worker.cancel()
         kb_warm.cancel()
         snapshot_worker.cancel()
         kb_tool.set_loop(None)
         sentiment_analyst.set_loop(None)
-        await asyncio.gather(reconciliation, relay_reconciliation, outcomes_refresh, task_worker, kb_worker, tequity_worker, kb_warm, snapshot_worker, discovery, return_exceptions=True)
+        await asyncio.gather(reconciliation, relay_reconciliation, outcomes_refresh, task_worker, kb_worker, tequity_worker, tequity_ledger_worker, kb_warm, snapshot_worker, discovery, return_exceptions=True)
         drained = await execution_policy.drain_background()
         drained += await holder_snapshots.drain_background()
         if drained:
