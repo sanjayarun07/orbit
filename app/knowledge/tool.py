@@ -124,6 +124,34 @@ def _on_topic(hits, plan) -> bool:
     return False
 
 
+_PASSAGE_CHARS = 700
+_PASSAGES_CHARS = 3500
+
+
+def _compact_passages(context: str) -> str:
+    """The numbered passages, each cut at a sentence boundary to a readable
+    length, the whole block bounded: the card is read on a phone under the
+    answer, not only by the model."""
+    out, used = [], 0
+    for block in re.split(r"\n\s*\n", context or ""):
+        block = block.strip()
+        if not block:
+            continue
+        head, _, body = block.partition("\n")
+        body = " ".join(body.split())
+        if len(body) > _PASSAGE_CHARS:
+            cut = body[:_PASSAGE_CHARS]
+            end = max(cut.rfind(". "), cut.rfind("? "), cut.rfind("! "))
+            body = (cut[:end + 1] if end > _PASSAGE_CHARS // 2 else cut.rsplit(" ", 1)[0]) + " …"
+        passage = f"**{head}**\n{body}"
+        if used + len(passage) > _PASSAGES_CHARS and out:
+            out.append("_Further passages omitted; the sources list them._")
+            break
+        out.append(passage)
+        used += len(passage)
+    return "\n\n".join(out)
+
+
 def knowledge_base_search(request: str) -> str:
     """Retrieve passages with citations for a protocol / concept question."""
     hits, plan = _run(_search_with_resolver(request))
@@ -133,13 +161,18 @@ def knowledge_base_search(request: str) -> str:
         raise RuntimeError("No indexed knowledge matched this question")
     context, citations = build_context(hits)
     entities = ", ".join(f"{r.entity.canonical_name} ({r.entity.entity_type}, {r.confidence:.2f})" for r in plan.entities[:6]) or "none resolved"
+    # The card is what the user sees as well as what the model reads: the
+    # passages, each cut to a readable length, and the sources -- never an
+    # instruction to the model (UI review, 2026-09-23: "Answer from these
+    # passages…" and pages of raw text showed under a short answer). The
+    # citing rule lives in the synthesis prompts.
+    passages = _compact_passages(context)
     lines = [
         "# Knowledge base",
         f"**Provider**: Dopamint knowledge service · **Entities**: {entities}" + (f" · **Graph**: {len(plan.graph_expanded)} related" if plan.graph_expanded else ""),
         "",
-        "Answer from these passages and cite them as [n]. Do not add facts that are not in them; say what is missing.",
-        "",
-        context,
+        "## Passages",
+        passages,
         "",
         "## Sources",
         *[f"[{c['n']}] {c['protocol'] + ' · ' if c['protocol'] else ''}{c['title']}{' › ' + c['heading'] if c['heading'] else ''} — {c['url']} ({'/'.join(c['sources'])})" for c in citations],

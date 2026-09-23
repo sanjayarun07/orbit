@@ -77,10 +77,21 @@ async def _invoke(router, name: str, request: str, chains: tuple[str, ...], cont
 
 
 def _facts_of(result, kind: str) -> list:
+    """The facts a tool's result carries. A fact read live from a state
+    source that stamps no time is as fresh as the call that just fetched it,
+    so it gets the fetch time; a passage from the knowledge base or a source
+    with no date stays undated, and the gate treats undated as not current."""
     found = getattr(result, "structured", None)
     if found:
         return facts_mod.facts_from_search(found, result.tool)
-    return facts_mod.facts_from_card(result.tool, result.output, kind)
+    rows = facts_mod.facts_from_card(result.tool, result.output, kind)
+    cov = tool_catalog.CONTRACT_COVERAGE.get(result.tool) or {}
+    if not cov.get("discovery") and not cov.get("background"):
+        fetched = datetime.now(timezone.utc).isoformat()
+        for f in rows:
+            if not f.observed_at:
+                f.observed_at = fetched
+    return rows
 
 
 async def answer(state: dict, request: str, chains: tuple[str, ...], *, context: str = "") -> dict | None:
@@ -184,10 +195,15 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
             if len(again.unsupported) < len(final.unsupported):
                 synthesized, final = rewritten, again
     answer_text = synthesized
+    if final.unsupported:
+        # Still untraceable after the rewrite: the written summary is withheld,
+        # never shown with a warning under it (second review, 2026-09-23). The
+        # cards are the evidence as fetched; the reader gets those and the
+        # reason, and the gate stays failed.
+        answer_text = ("**I withheld the written summary: it stated figures no source card carries (" + ", ".join(final.unsupported) +
+                       "). The cards below are the evidence as fetched; ask for one figure and I will read it from a card.**\n\n---\n\n" + cards)
     if lead:
         answer_text = f"**{lead}**\n\n{answer_text}"
-    if final.unsupported:
-        answer_text += "\n\n_Figures in the summary I could not trace to a source card: " + ", ".join(final.unsupported) + "._"
     evidence.keep(evidence.Evidence(tool="contract_pipeline", status="complete" if final.ok else "partial",
                                     subject={"kind": contract.subject.kind, "id": contract.subject.id, "chain": contract.subject.chain, "symbol": contract.subject.symbol},
                                     data={"contract": contract.model_dump(), "facts": len(fact_rows), "tools": chosen, "scope_satisfied": scope_satisfied},

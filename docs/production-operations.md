@@ -2941,3 +2941,17 @@ tracker page). Both headline errors from the Home review are gone in the answers
 evidence ask runs one dimension; a compound answer led by the pipeline shows two "Taken together" blocks;
 wallet-connected turns need a wallet in the harness. Re-run: `.venv/bin/python scripts/trust_rerun.py --out
 reports/trust-rerun-<sha>` then `scripts/trust_judge.py <dir>`, and read every fail and partial.
+
+**Late review and UI review (2026-09-23 night), seven findings, all closed.** Gate: a fact with no observation time under
+a freshness contract is not current (the pipeline stamps facts read live from a state source with the fetch time, so
+only knowledge-base passages and undated sources are set aside); a `source` fact counts only when dated; a contract
+with an empty `required_facts` requires what its kind means (`fact_gate._DEFAULT_REQUIRED`); an event dated after now
+plus 36 hours is upcoming, not recent. Pipeline: when untraceable figures survive the one rewrite, the written summary is
+withheld and the cards are delivered with the reason, never prose under a warning; the claim check reads "$52.4 million"
+as the card's "$52.4M" (the first live run withheld a correct Lido summary over that spelling). UI: the search card
+lists every source the text cites, whatever its number, plus the first ten (an answer cited [11] and [13] under a list
+cut at ten); the knowledge card shows numbered passages cut at a sentence and its sources, never the instruction to
+the model; an address inside a source URL is never a wallet (`context_entities._plain` strips links); a brief cut ends
+at a sentence, and the general node applies the same headline-tap cut as the research node (`composition.cut_to_limit`;
+a tap classed as an explanation ran 600 words); the Home card for Base gainers is labelled as the Base-ecosystem list
+with global prices. Service-worker shell v14.

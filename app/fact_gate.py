@@ -20,7 +20,10 @@ from app.contracts import QuestionContract
 from app.facts import Fact, event_date_of
 
 _MIN_ROWS = {"ranking_row": 3, "holder_row": 5, "yield_row": 1, "event": 1, "source": 1}
-_FIGURE = re.compile(r"(?<![\w.])[+\-]?\$?\d[\d,]*(?:\.\d+)?\s*(?:%|[kKmMbB]\b|[xX]\b)?")
+_DEFAULT_REQUIRED = {"market_ranking": ["ranking_row"], "holders": ["holder_row"], "yields": ["yield_row"], "recent_events": ["event"], "open_research": ["source"]}
+_AHEAD_SLACK = timedelta(hours=36)     # a date one calendar day ahead can be today in another timezone; October is not "recent" in September
+_FIGURE = re.compile(r"(?<![\w.])[+\-]?\$?\d[\d,]*(?:\.\d+)?\s*(?:%|[kKmMbB]\b|[xX]\b|(?:thousand|million|billion|mn|bn|trillion)\b)?", re.I)
+_WORD_MULT = {"thousand": 1e3, "million": 1e6, "mn": 1e6, "billion": 1e9, "bn": 1e9, "trillion": 1e12}
 _YEARLIKE = re.compile(r"^(?:19|20)\d{2}$")
 
 
@@ -69,7 +72,13 @@ def _numbers_in_facts(facts: list[Fact]) -> set[str]:
 def _parse(token: str) -> float | None:
     text = token.strip().replace(",", "").replace("$", "").replace(" ", "")
     mult = 1.0
-    if text and text[-1] in "kKmMbB%xX":
+    word = re.search(r"(thousand|million|billion|trillion|mn|bn)$", text, re.I)
+    if word:
+        # "$52.4 million" in the prose is the card's "$52.4M" (a withheld
+        # summary over that spelling, live 2026-09-23).
+        mult = _WORD_MULT[word.group(1).lower()]
+        text = text[:word.start()]
+    elif text and text[-1] in "kKmMbB%xX":
         mult = {"k": 1e3, "m": 1e6, "b": 1e9}.get(text[-1].lower(), 1.0)
         text = text[:-1]
     try:
@@ -140,23 +149,40 @@ def check(contract: QuestionContract, facts: list[Fact], answer: str | None = No
     result = GateResult(ok=True, scope_satisfied=scope_satisfied)
     # A fact older than the freshness the contract asks for is named and set
     # aside: it satisfies nothing (review 2026-09-23: stale evidence passed
-    # the gate as ok). A fact with no stated time is taken as current.
+    # the gate as ok). A fact with no stated time under a freshness contract
+    # is not known to be current and satisfies nothing either (second review:
+    # an undated fact passed as current); the pipeline stamps every fact it
+    # fetched live with the fetch time, so only unstamped, undated material
+    # (a knowledge-base passage, a source with no date) is set aside.
     by_kind: dict[str, list[Fact]] = {}
     for f in facts:
-        if contract.freshness_seconds and f.observed_at:
-            try:
-                age = (now - datetime.fromisoformat(f.observed_at)).total_seconds()
-            except ValueError:
-                age = None
+        if contract.freshness_seconds:
+            age = None
+            if f.observed_at:
+                try:
+                    age = (now - datetime.fromisoformat(f.observed_at)).total_seconds()
+                except ValueError:
+                    age = None
+            if age is None and f.kind not in ("event", "source"):
+                label = f"{f.source} (no observation time stated)"
+                if label not in result.stale:
+                    result.stale.append(label)
+                continue
             if age is not None and age > contract.freshness_seconds:
                 label = f"{f.source} ({age / 60:.0f} min old)"
                 if label not in result.stale:
                     result.stale.append(label)
                 continue
         by_kind.setdefault(f.kind, []).append(f)
-    for required in contract.required_facts or []:
+    # A contract that names no required facts still requires what its kind
+    # means (second review: a model contract with an empty list passed with
+    # zero facts).
+    required_facts = list(contract.required_facts or []) or list(_DEFAULT_REQUIRED.get(contract.kind, ["source"]))
+    for required in required_facts:
         rows = by_kind.get(required, [])
         need = _MIN_ROWS.get(required, 1)
+        if required == "source":
+            rows = [r for r in rows if r.event_date or r.attrs.get("date")]          # a source without a date is not the dated, linked source the contract asks for
         if contract.kind == "market_ranking" and required == "ranking_row":
             # A filter is met only by a row that states the property: a row
             # with no type column does not establish a tokenized stock, and a
@@ -173,13 +199,19 @@ def check(contract: QuestionContract, facts: list[Fact], answer: str | None = No
         if contract.kind == "recent_events" and required == "event":
             window = timedelta(hours=contract.window_hours or 24 * 30)
             dated = [r for r in rows if event_date_of(r) is not None]
-            recent = [r for r in dated if now - event_date_of(r) <= window]
+            # Recent means inside the window and not in the future: an event
+            # dated October 1 passed a September 23 "last 24 hours" contract
+            # (second review, 2026-09-23). A day ahead is allowed for timezones.
+            recent = [r for r in dated if -_AHEAD_SLACK <= now - event_date_of(r) <= window]
+            upcoming = [r for r in dated if now - event_date_of(r) < -_AHEAD_SLACK]
             if not dated:
                 result.missing.append("a dated event (the sources gave no event date)")
                 result.ok = False
                 continue
             if not recent:
-                result.missing.append(f"an event inside the last {window.days} days (the newest dated event is {max(event_date_of(r) for r in dated).date()})")
+                past = [event_date_of(r) for r in dated if now - event_date_of(r) >= -_AHEAD_SLACK]
+                detail = (f"the newest past event is {max(past).date()}" if past else "every dated event is in the future") + (f"; {len(upcoming)} upcoming" if upcoming and past else "")
+                result.missing.append(f"an event inside the last {window.days} days ({detail})")
                 result.ok = False
                 continue
             rows = recent

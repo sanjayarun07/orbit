@@ -163,6 +163,10 @@ async def general_node(state: AgentState) -> dict:
         if contracts.is_open_research(request):
             piped = await evidence_pipeline.answer(state, request, ())
             if piped is not None:
+                from app import composition
+                from app.clarify import is_clarification
+                if piped.get("answer") and not is_clarification(piped["answer"]):
+                    piped = {**piped, "answer": composition.cut_to_limit(request, piped["answer"])}
                 return piped
     result = await runtime.answer(
         runtime.general_agent, request=state["request"], conversation_history=state.get("history", "")

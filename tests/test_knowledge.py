@@ -170,7 +170,7 @@ def test_router_tool_matches_knowledge_asks_not_live_numbers():
     assert not kb_tool.matches("Aave TVL today?")            # live number -> DefiLlama tool
     assert not kb_tool.matches("what is a liquidity pool?")  # nothing in the registry
     card = kb_tool.knowledge_base_search("How does the Aave health factor work?")
-    assert card.startswith("# Knowledge base") and "[1] Aave" in card and "docs.aave.com/liquidations" in card and "cite them as [n]" in card
+    assert card.startswith("# Knowledge base") and "[1] Aave" in card and "docs.aave.com/liquidations" in card
 
 
 def test_run_source_uses_connector_interface_and_records_state():

@@ -85,7 +85,7 @@ def test_research_node_prefers_the_knowledge_capability_and_keeps_it_as_a_backst
 def test_knowledge_tool_card_cites_sources_for_the_synthesizer():
     card = kb_tool.knowledge_base_search("How does Aave V3's E-mode change the liquidation threshold?")
     assert card.startswith("# Knowledge base") and "[1]" in card and "## Sources" in card and "docs.aave.com/liquidations" in card
-    assert "cite them as [n]" in card
+    assert "Answer from these passages" not in card and "## Passages" in card      # the card is read by the user too (UI review, 2026-09-23)
 
 
 def test_knowledge_turn_is_metered_as_a_tool_call():

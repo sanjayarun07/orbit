@@ -135,8 +135,14 @@ class WalletReference:
     chain: str | None
 
 
+_URL = re.compile(r"https?://\S+")
+
+
 def _plain(text: str) -> str:
-    return text.replace("`", "").replace("*", "")
+    """Markdown emphasis and links removed: an address inside a source URL
+    (etherscan.io/address/0x…) is a link, not a wallet the conversation named
+    (UI review, 2026-09-23: a "wallet" chip appeared from a citation)."""
+    return _URL.sub(" ", text.replace("`", "").replace("*", ""))
 
 
 def _valid_address(value: str) -> bool:

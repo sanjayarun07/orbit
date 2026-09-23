@@ -147,6 +147,18 @@ def word_limit(request: str) -> int | None:
     return HEADLINE_TAP_WORDS if _HEADLINE_TAP.match(request or "") else None
 
 
+def cut_to_limit(request: str, answer: str) -> str:
+    """The answer cut to the request's word limit (a stated one or a headline
+    tap's), the way the research node does it; the same cut for an answer
+    that came from another node (a headline tap classed as an explanation
+    reached the general node and ran 600 words, UI review 2026-09-23)."""
+    limit = word_limit(request)
+    if not limit or not answer:
+        return answer
+    summary = answer[len("**Taken together**"):].split("\n\n---\n\n", 1)[0].strip() if answer.startswith("**Taken together**") else answer
+    return brief(summary, answer, limit) if len(summary.split()) > limit else answer
+
+
 def brief(summary: str, cards: str, limit: int) -> str:
     """The summary cut to the limit at paragraph boundaries (a table or a list
     is one block, kept whole or dropped, never split), with the cards' first
@@ -158,9 +170,16 @@ def brief(summary: str, cards: str, limit: int) -> str:
         n = len(block.split())
         if kept and used + n > limit:
             break
-        if not kept and n > limit:                                         # one long paragraph: cut it at the limit
-            block = " ".join(block.split()[:limit]) + " …"
-            n = limit
+        if not kept and n > limit:
+            # One long paragraph: cut at the last sentence end before the
+            # limit, never mid-sentence ("…but do …" under a headline, UI
+            # review 2026-09-23); a paragraph with no sentence end in reach
+            # is cut at the limit.
+            words = block.split()
+            head = " ".join(words[:limit])
+            end = max(head.rfind(". "), head.rfind("? "), head.rfind("! "), head.rfind(".\n"))
+            block = (head[:end + 1] if end > len(head) // 3 else head + " …")
+            n = len(block.split())
         kept.append(block); used += n
     text = "\n\n".join(kept) + ("" if len(kept) == len(blocks) else "\n\n…")
     links = []

@@ -10,6 +10,7 @@ from collections import OrderedDict
 from datetime import datetime
 import hashlib
 import json
+import re
 from threading import Condition
 import time
 from typing import Any
@@ -246,10 +247,16 @@ def perplexity_search_with_sources(query: str, *, recency_days: int | None = Non
 
 
 def render_search_card(query: str, found: dict, title: str = "From the web (dated, with sources)") -> str:
-    lines = [f"# {title}", f"**Provider**: Perplexity web search · **Query**: {query[:120]}", "", found["text"].strip(), ""]
+    text = found["text"].strip()
+    lines = [f"# {title}", f"**Provider**: Perplexity web search · **Query**: {query[:120]}", "", text, ""]
     if found.get("sources"):
+        # Every source the text cites is listed, whatever its number, plus the
+        # first ten: an answer cited [11] and [13] under a list cut at ten (UI
+        # review, 2026-09-23).
+        cited = {int(n) for n in re.findall(r"\[(\d{1,2})\]", text)}
+        shown = [s for i, s in enumerate(found["sources"]) if i < 10 or s.get("n") in cited][:20]
         lines.append("Sources:")
-        lines += [f"[{s['n']}] [{s['title'][:80]}]({s['url']})" + (f" · {s['date']}" if s.get("date") else "") for s in found["sources"][:10]]
+        lines += [f"[{s['n']}] [{s['title'][:80]}]({s['url']})" + (f" · {s['date']}" if s.get("date") else "") for s in shown]
     return "\n".join(lines)
 
 

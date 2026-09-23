@@ -125,7 +125,7 @@ def test_the_gate_requires_facts_that_match_the_contract():
     g = fact_gate.check(c, facts.facts_from_card("perplexity_web_search", LIDO_WEB, "recent_events"), now=NOW)
     assert g.ok
     g = fact_gate.check(c, facts.facts_from_card("knowledge_base_search", "The BORG foundation vote concluded on 2025-01-14 with 98% support.", "recent_events"), now=NOW)
-    assert not g.ok and g.missing[0].startswith("an event inside the last 30 days (the newest dated event is 2025-01-14)")
+    assert not g.ok and g.missing[0].startswith("an event inside the last 30 days (the newest past event is 2025-01-14)")
 
 
 def test_unsupported_figures_are_named():
@@ -200,13 +200,13 @@ def test_a_filter_is_met_only_by_rows_that_state_the_property():
     # A global ranking with no type column does not establish tokenized stocks;
     # a row with no liquidity figure does not establish a liquidity floor.
     c = plan_by_rules("which tokenized stocks are moving on hyperliquid")
-    untyped = [facts.Fact(kind="ranking_row", subject=f"T{i}", value=1.0, unit="pct", source="x", attrs={"type": None}) for i in range(5)]
+    untyped = [facts.Fact(kind="ranking_row", subject=f"T{i}", value=1.0, unit="pct", source="x", observed_at=NOW.isoformat(), attrs={"type": None}) for i in range(5)]
     g = fact_gate.check(c, untyped, now=NOW)
     assert not g.ok and g.missing == ["enough ranked rows for the asked scope that are tokenized stocks (0 of 5)"] or g.missing[0].endswith("that are tokenized stocks (0 of 3)")
     typed = [r.model_copy(update={"attrs": {"type": "stock"}}) for r in untyped]
     assert fact_gate.check(c, typed, now=NOW).ok
     c = plan_by_rules("top pools on Solana by volume with at least $1,000,000 liquidity")
-    by_volume = [facts.Fact(kind="ranking_row", subject=f"P{i}", value=1.0, unit="pct", source="x", attrs={"volume_usd": 5_000_000.0}) for i in range(5)]
+    by_volume = [facts.Fact(kind="ranking_row", subject=f"P{i}", value=1.0, unit="pct", source="x", observed_at=NOW.isoformat(), attrs={"volume_usd": 5_000_000.0}) for i in range(5)]
     assert not fact_gate.check(c, by_volume, now=NOW).ok
     with_liq = [r.model_copy(update={"attrs": {"volume_usd": 5_000_000.0, "liquidity_usd": 2_000_000.0}}) for r in by_volume]
     assert fact_gate.check(c, with_liq, now=NOW).ok
