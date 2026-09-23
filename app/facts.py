@@ -159,7 +159,8 @@ def facts_from_card(tool: str, markdown: str, kind_hint: str | None = None) -> l
                 symbol = _first(row, "pair", "token", "symbol", "pool", "coin") or ""
                 symbol = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", symbol).strip("`")
                 out.append(Fact(kind="ranking_row", subject=symbol, value=change, unit="pct", source=tool, observed_at=when,
-                                attrs={"volume_usd": volume, "price": parse_number(_first(row, "price") or "")[0], "type": (_first(row, "type") or "").lower() or None,
+                                attrs={"volume_usd": volume, "liquidity_usd": parse_number(_first(row, "liquidity", "liq") or "")[0],
+                                       "price": parse_number(_first(row, "price") or "")[0], "type": (_first(row, "type") or "").lower() or None,
                                        "venue": _first(row, "venue", "dex", "chain"), "rank": parse_number(_first(row, "#") or "")[0]}))
     if kind_hint == "recent_events" and not out:
         for para in re.split(r"\n\s*\n", markdown or ""):

@@ -235,13 +235,17 @@ def get(version: int, path: str, params: dict, timeout: float | None = None, *, 
         with httpx.Client(timeout=timeout or settings.provider_request_timeout_seconds) as client:
             response = client.get(url(version, path), params=params, headers={"Authorization": settings.mobula_api_key})
             status = int(getattr(response, "status_code", 200) or 200)
-            if status == 429 and not response.headers.get("Retry-After") and not background:
+            if status == 429 and not response.headers.get("Retry-After") and not background \
+                    and _bucket.take(0.0) and _shared.take(background=False):
                 # Mobula's "Max usage reached" 429 comes without Retry-After
                 # and clears within a second (live probe, 2026-09-23: 429,
                 # then 200 0.4 s later, at 2 requests a second on a 30 rps
                 # plan). One short retry for a user's call before the whole
-                # deployment is paused for the cooldown.
+                # deployment is paused for the cooldown. The retry is a
+                # request like any other: it takes its own budget token (no
+                # token, no retry) and counts in `mobula_requests`.
                 time.sleep(RETRY_ONCE_SECONDS)
+                increment("mobula_requests")
                 increment("mobula_retries")
                 response = client.get(url(version, path), params=params, headers={"Authorization": settings.mobula_api_key})
                 status = int(getattr(response, "status_code", 200) or 200)

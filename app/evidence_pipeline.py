@@ -172,7 +172,17 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
     note = _contract_note(contract, gate, fact_rows, scope_note)
     synthesized = await composition.synthesize(f"{request}\n{note}", cards, trajectory)
     lead = gate.gap_sentence(contract)
-    final = fact_gate.check(contract, fact_rows, synthesized, scope_satisfied=scope_satisfied)
+    final = fact_gate.check(contract, fact_rows, synthesized, scope_satisfied=scope_satisfied, evidence_text=cards)
+    if final.unsupported:
+        # The claim check found figures no fact carries: one rewrite without
+        # them, then the check again; whatever remains is named under the answer.
+        redo = (f"{request}\n{note}\nDo not state these figures, no fact card carries them: {', '.join(final.unsupported)}. "
+                "State only figures that appear in the cards, or describe without the number.")
+        rewritten = await composition.synthesize(redo, cards, trajectory)
+        if rewritten:
+            again = fact_gate.check(contract, fact_rows, rewritten, scope_satisfied=scope_satisfied, evidence_text=cards)
+            if len(again.unsupported) < len(final.unsupported):
+                synthesized, final = rewritten, again
     answer_text = synthesized
     if lead:
         answer_text = f"**{lead}**\n\n{answer_text}"

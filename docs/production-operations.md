@@ -2893,11 +2893,13 @@ quotes, prices, yields) never goes web-first.
 
 **The comparison (2026-09-23, `reports/episodes-live-2026-09-23/`, 24 live episodes × 5, baseline vs the flag).** The
 flag touches only `open_research` contracts, and every other kind was identical under both settings (same tools, same
-pass^5; latency differences there are provider noise). On the five open-research episodes it took pass^5 from 3/5 to
-5/5: "Who are the investors backing EigenLayer?" and "How does Aave V3's E-mode change the liquidation threshold?" were
-answered from the knowledge base alone with no source under the baseline, and with a dated, linked web read under the
-flag, for about +8 s and +$0.004 per answer. So `DISCOVERY_FIRST_RESEARCH` now defaults on; set it `false` to return
-open research to the legacy path. The run also found three defects that were not about the flag, all fixed the same day:
+pass^5; latency differences there are provider noise). On the five open-research episodes the measured pass^5 went from
+3/5 to 4/5: "Who are the investors backing EigenLayer?" and "How does Aave V3's E-mode change the liquidation threshold?"
+were answered from the knowledge base alone with no source under the baseline, and with a dated, linked web read under
+the flag, for about +8 s and +$0.004 per answer; the one episode the flag "lost" (why SOL is moving) took the legacy
+why-moving card under both settings and failed on a trim bug fixed after the run. So `DISCOVERY_FIRST_RESEARCH` now
+defaults on; set it `false` to return open research to the legacy path. A post-fix pass^5 of the five open-research
+episodes is recorded in the report (`open_research_postfix2.json`); it is a separate measurement, not the comparison. The run also found three defects that were not about the flag, all fixed the same day:
 a ranking ask ("Which Base tokens went up the most today?") was read as a move statement about a coin called WENT (the
 statement's subject must now be a listed ticker, `symbol_registry`); a ledger card's baseline tick was read as its age
 (a card's observed time is the latest stamp on its provider line); and the why-moving card's 1,800-character trim cut
@@ -2907,3 +2909,17 @@ live only on Mobula 429s. Even on the 30 rps plan Mobula answers a header-less `
 that clears by the next call, and the client's 20 s deployment-wide cooldown made one such answer fail the whole
 turn; a user's call now retries once after a second (`mobula_client.RETRY_ONCE_SECONDS`) before the cooldown,
 background calls never retry, and both holder episodes then pass 5/5.
+
+**Review of the comparison commits (2026-09-23, later).** Four findings, all closed. A venue typed a letter off is
+still the venue only for a name long enough that a slip cannot be a word: "after", "faster" and "master" had reached the
+Aster tools, so `tequity.fuzzy_venue` matches a short name exactly and fuzzes only names of eight letters or more.
+The fact gate's semantics were tightened: a fact older than the contract's freshness satisfies nothing (it is named
+under the answer, and the requirement it would have met is reported missing); a stocks-only or minimum-liquidity filter
+is met only by a row that states the property (a type column, a liquidity figure, which ranking facts now carry);
+and a figure in the prose that neither a fact, the evidence cards, nor a running total of the facts carries fails the
+gate, after which the pipeline re-synthesizes once without it and names whatever remains. Dates and clock times are
+not figures. The Mobula retry takes its own budget token (no token, no retry) and counts in `mobula_requests`.
+Two more things the post-fix open-research run exposed: an "explain" act about a crypto subject went to the general
+node and was answered from the model's memory with no source, so the general node now hands a crypto explain that
+`contracts.is_open_research` accepts to the contract pipeline; and DSPy's disk cache served a two-hour-old general
+answer in 13 ms as five "attempts", so live episode runs set `cache=False` on every LM.

@@ -53,9 +53,11 @@ class Settings(BaseSettings):
     # Open-ended research (not exact on-chain state) starts with a dated,
     # source-linked web read, then targeted tools, then the evidence check.
     # On since the live comparison of 2026-09-23 (reports/episodes-live-2026-09-23):
-    # it only touches open_research contracts, where it took pass^5 from 3/5 to
-    # 5/5 (answers from the knowledge base alone carried no sources) for about
-    # +8 s and +$0.004 per answer; every other kind was identical under both.
+    # it only touches open_research contracts, where the measured pass^5 went
+    # from 3/5 to 4/5 (two answers from the knowledge base alone carried no
+    # source; the one loss was a trim bug in the why-moving card, fixed after
+    # the run) for about +8 s and +$0.004 per answer; every other kind was
+    # identical under both settings.
     discovery_first_research: bool = True
     intent_classifier_cache_entries: int = 512
     # MCP server (app/mcp_server.py) mounted at /mcp for Claude / ChatGPT / any

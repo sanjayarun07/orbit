@@ -709,3 +709,32 @@ def test_background_takes_only_from_a_half_full_bucket(monkeypatch):
     assert not _mobula_client.background_ok()
     _REAL_CLIENT_GET(2, "/token/trades", {})               # a user still gets one
     assert len(sent) == 4
+
+
+def test_the_retry_is_a_request_like_any_other(monkeypatch):
+    """Review 2026-09-23: the retry sent a second HTTP request on one budget
+    token. It now takes its own token (no token, no retry) and counts."""
+    from app.settings import settings as _s
+    from app import metrics
+    monkeypatch.setattr(_s, "mobula_api_key", "test-key")
+    monkeypatch.setattr(_s, "mobula_requests_per_minute", 60)
+    monkeypatch.setattr(_s, "mobula_burst", 1)
+    monkeypatch.setattr(_mobula_client, "MAX_WAIT_SECONDS", 0.05)
+    monkeypatch.setattr(_mobula_client, "RETRY_ONCE_SECONDS", 0.0)
+    _mobula_client.reset_for_test()
+    sent = []
+    _fake_http(monkeypatch, status=429, sent=sent)
+    before = metrics.snapshot().get("mobula_requests", 0)
+    with pytest.raises(_mobula_client.httpx.HTTPStatusError):
+        _REAL_CLIENT_GET(2, "/token/holder-positions", {})
+    assert len(sent) == 1 and _mobula_client.cooling(), "a burst of one leaves no token for a retry"
+    assert metrics.snapshot().get("mobula_requests", 0) - before == 1
+    _mobula_client.reset_for_test()
+    monkeypatch.setattr(_s, "mobula_burst", 2)
+    _mobula_client.reset_for_test()
+    sent.clear()
+    before = metrics.snapshot().get("mobula_requests", 0)
+    with pytest.raises(_mobula_client.httpx.HTTPStatusError):
+        _REAL_CLIENT_GET(2, "/token/holder-positions", {})
+    assert len(sent) == 2 and metrics.snapshot().get("mobula_requests", 0) - before == 2
+    _mobula_client.reset_for_test()

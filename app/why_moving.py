@@ -185,8 +185,19 @@ async def _crypto_market_detail(identity: dict) -> str | None:
 
 
 async def _news(query: str) -> str | None:
+    """The reported reasons with their sources kept: the structured search
+    (inline [n] markers, numbered dated sources) first, so a claim on the
+    card can be traced; the plain search only when that fails. The plain
+    adapter strips markers and adds a Sources block only when it has one,
+    so a why-moving card could carry no source at all (live, 2026-09-23)."""
     if not perplexity_tools.perplexity_available():
         return None
+    try:
+        found = await asyncio.to_thread(perplexity_tools.perplexity_search_with_sources, query, recency_days=3)
+        card = perplexity_tools.render_search_card(query, found)
+        return card.split("\n", 1)[1] if card.startswith("# ") else card      # the card's own heading sits under this card's section
+    except Exception:
+        logger.debug("why_moving: structured news lookup failed; plain call", exc_info=True)
     try:
         return await asyncio.to_thread(perplexity_tools.perplexity_web_search, query)
     except Exception:

@@ -52,3 +52,12 @@ def test_the_why_moving_narrative_keeps_its_sources_when_cut():
     cut = why_moving._trim(news, 600)
     assert cut.endswith("Sources:\n[1] https://example.com/a\n[2] https://example.com/b") and "…" in cut and len(cut) < len(news)
     assert why_moving._trim("short\n\nSources:\n[1] x", 600) == "short\n\nSources:\n[1] x" and why_moving._trim("plain", 5) == "plain"
+
+
+def test_a_short_venue_name_is_matched_exactly_only():
+    # "after", "faster" and "master" reached the Aster tools (review 2026-09-23).
+    from app import contracts
+    assert [tequity.fuzzy_venue(w) for w in ("after", "faster", "master")] == [None, None, None]
+    assert tequity.fuzzy_venue("aster") == "aster" and tequity.fuzzy_venue("hyperloquid") == "hyperliquid"
+    assert contracts.plan_by_rules("top crypto gainers after the crash").venue is None
+    assert not tequity.quote_matches("BTC price after crash") and tequity.quote_matches("chk hyperloquid btc price")

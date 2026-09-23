@@ -95,10 +95,36 @@ def prose_of(answer: str) -> str:
     return text
 
 
-def unsupported_figures(answer: str, facts: list[Fact]) -> list[str]:
-    known = _numbers_in_facts(facts)
+_DATETIME = re.compile(r"\b(?:19|20)\d{2}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?\b|\b\d{1,2}:\d{2}(?::\d{2})?\b")
+
+
+def _cumulative(facts: list[Fact]) -> set[str]:
+    """Signatures of the running totals of each fact kind's values, in the
+    order given: "the top 10 holders control 35.34%" is arithmetic on the
+    holder rows, not a figure from nowhere."""
+    sigs: set[str] = set()
+    by_kind: dict[str, list[float]] = {}
+    for f in facts:
+        if isinstance(f.value, (int, float)) and not isinstance(f.value, bool):
+            by_kind.setdefault(f.kind, []).append(float(f.value))
+    for values in by_kind.values():
+        total = 0.0
+        for v in values:
+            total += v
+            sigs.add(_sig(total))
+    return sigs
+
+
+def unsupported_figures(answer: str, facts: list[Fact], evidence_text: str = "") -> list[str]:
+    """Figures in the prose that neither a fact, the evidence cards, nor a
+    running total of the facts carries. Dates and clock times are not figures."""
+    known = _numbers_in_facts(facts) | _cumulative(facts)
+    for m in _FIGURE.finditer(_DATETIME.sub(" ", evidence_text or "")):
+        n = _parse(m.group(0))
+        if n is not None:
+            known.add(_sig(n))
     out: list[str] = []
-    for m in _FIGURE.finditer(prose_of(answer)):
+    for m in _FIGURE.finditer(_DATETIME.sub(" ", prose_of(answer))):
         token = m.group(0).strip()
         n = _parse(token)
         if n is None or _YEARLIKE.match(token) or (abs(n) <= 12 and "%" not in token and "$" not in token and not token[-1:].lower() in "kmb"):
@@ -108,23 +134,40 @@ def unsupported_figures(answer: str, facts: list[Fact]) -> list[str]:
     return out[:8]
 
 
-def check(contract: QuestionContract, facts: list[Fact], answer: str | None = None, *, scope_satisfied: bool = True, now: datetime | None = None) -> GateResult:
+def check(contract: QuestionContract, facts: list[Fact], answer: str | None = None, *, scope_satisfied: bool = True, now: datetime | None = None,
+          evidence_text: str = "") -> GateResult:
     now = now or datetime.now(timezone.utc)
     result = GateResult(ok=True, scope_satisfied=scope_satisfied)
+    # A fact older than the freshness the contract asks for is named and set
+    # aside: it satisfies nothing (review 2026-09-23: stale evidence passed
+    # the gate as ok). A fact with no stated time is taken as current.
     by_kind: dict[str, list[Fact]] = {}
     for f in facts:
+        if contract.freshness_seconds and f.observed_at:
+            try:
+                age = (now - datetime.fromisoformat(f.observed_at)).total_seconds()
+            except ValueError:
+                age = None
+            if age is not None and age > contract.freshness_seconds:
+                label = f"{f.source} ({age / 60:.0f} min old)"
+                if label not in result.stale:
+                    result.stale.append(label)
+                continue
         by_kind.setdefault(f.kind, []).append(f)
     for required in contract.required_facts or []:
         rows = by_kind.get(required, [])
         need = _MIN_ROWS.get(required, 1)
         if contract.kind == "market_ranking" and required == "ranking_row":
+            # A filter is met only by a row that states the property: a row
+            # with no type column does not establish a tokenized stock, and a
+            # row with no liquidity figure does not establish a liquidity floor.
             if contract.filters.get("stocks_only"):
-                rows = [r for r in rows if r.attrs.get("type") in (None, "stock")]
+                rows = [r for r in rows if r.attrs.get("type") == "stock"]
             if contract.filters.get("crypto_only"):
-                rows = [r for r in rows if r.attrs.get("type") != "stock"]
+                rows = [r for r in rows if r.attrs.get("type") != "stock"]     # a global crypto ranking has no type column and no stocks
             if contract.filters.get("min_liquidity_usd"):
                 floor = float(contract.filters["min_liquidity_usd"])
-                rows = [r for r in rows if r.attrs.get("volume_usd") is None or r.attrs["volume_usd"] >= floor]
+                rows = [r for r in rows if r.attrs.get("liquidity_usd") is not None and r.attrs["liquidity_usd"] >= floor]
         if contract.kind == "yields" and required == "yield_row" and contract.filters.get("single_asset"):
             rows = [r for r in rows if r.attrs.get("exposure") == "single"]
         if contract.kind == "recent_events" and required == "event":
@@ -149,18 +192,12 @@ def check(contract: QuestionContract, facts: list[Fact], answer: str | None = No
                 qualifier = " that are tokenized stocks"
             result.missing.append(f"{what}{qualifier} ({len(rows)} of {need})")
             result.ok = False
-    if contract.freshness_seconds:
-        for f in facts:
-            if f.observed_at:
-                try:
-                    seen = datetime.fromisoformat(f.observed_at)
-                except ValueError:
-                    continue
-                age = (now - seen).total_seconds()
-                if age > contract.freshness_seconds and f.source not in {s for s in result.stale}:
-                    result.stale.append(f"{f.source} ({age / 60:.0f} min old)")
     if answer:
-        result.unsupported = unsupported_figures(answer, facts)
+        # A figure the prose states that no fact carries fails the gate: the
+        # pipeline re-synthesizes once without it, then names what remains.
+        result.unsupported = unsupported_figures(answer, facts, evidence_text)
+        if result.unsupported:
+            result.ok = False
     if not scope_satisfied:
         result.ok = False
     return result

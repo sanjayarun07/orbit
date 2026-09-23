@@ -1,7 +1,7 @@
 """The question contract, hard eligibility, typed facts, the fact gate and
 the pipeline that joins them (2026-09-23). No network: a fake router."""
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 STAMP = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -182,3 +182,69 @@ def test_open_research_is_taken_only_behind_the_flag(monkeypatch):
     monkeypatch.setattr(evidence_pipeline.settings, "discovery_first_research", True)
     out, router = _run({"perplexity_web_search": LIDO_WEB}, "Who are the investors backing EigenLayer?")
     assert out is not None and router.calls[0] == "perplexity_web_search" and out["contract"]["kind"] == "open_research"
+
+
+def test_stale_facts_satisfy_nothing_and_are_named():
+    # Review 2026-09-23: stale evidence passed the gate as ok.
+    c = plan_by_rules("top gainers on Hyperliquid in the last 24h")
+    assert c.freshness_seconds
+    old = (NOW - timedelta(seconds=c.freshness_seconds + 600)).isoformat()
+    rows = [facts.Fact(kind="ranking_row", subject=f"T{i}/USDC", value=float(i), unit="pct", source="tequity_movers", observed_at=old, attrs={}) for i in range(5)]
+    g = fact_gate.check(c, rows, now=NOW)
+    assert not g.ok and g.stale == ["tequity_movers (70 min old)"] and g.missing == ["enough ranked rows for the asked scope (0 of 3)"]
+    fresh = [r.model_copy(update={"observed_at": NOW.isoformat()}) for r in rows]
+    assert fact_gate.check(c, fresh, now=NOW).ok
+
+
+def test_a_filter_is_met_only_by_rows_that_state_the_property():
+    # A global ranking with no type column does not establish tokenized stocks;
+    # a row with no liquidity figure does not establish a liquidity floor.
+    c = plan_by_rules("which tokenized stocks are moving on hyperliquid")
+    untyped = [facts.Fact(kind="ranking_row", subject=f"T{i}", value=1.0, unit="pct", source="x", attrs={"type": None}) for i in range(5)]
+    g = fact_gate.check(c, untyped, now=NOW)
+    assert not g.ok and g.missing == ["enough ranked rows for the asked scope that are tokenized stocks (0 of 5)"] or g.missing[0].endswith("that are tokenized stocks (0 of 3)")
+    typed = [r.model_copy(update={"attrs": {"type": "stock"}}) for r in untyped]
+    assert fact_gate.check(c, typed, now=NOW).ok
+    c = plan_by_rules("top pools on Solana by volume with at least $1,000,000 liquidity")
+    by_volume = [facts.Fact(kind="ranking_row", subject=f"P{i}", value=1.0, unit="pct", source="x", attrs={"volume_usd": 5_000_000.0}) for i in range(5)]
+    assert not fact_gate.check(c, by_volume, now=NOW).ok
+    with_liq = [r.model_copy(update={"attrs": {"volume_usd": 5_000_000.0, "liquidity_usd": 2_000_000.0}}) for r in by_volume]
+    assert fact_gate.check(c, with_liq, now=NOW).ok
+    card = "| # | Pool | Volume 24h | Liquidity |\n|---|---|---|---|\n| 1 | BONK/SOL | $5.0M | $2.0M |\n"
+    assert facts.facts_from_card("geckoterminal_pools", card, "market_ranking")[0].attrs["liquidity_usd"] == 2_000_000.0
+
+
+def test_an_untraceable_figure_fails_the_gate_but_cards_totals_and_times_do_not():
+    c = plan_by_rules("Who are the top holders of PEPE?")
+    rows = facts.facts_from_card("mobula_token_holders", PEPE_HOLDERS, "holders")
+    total = sum(r.value for r in rows)
+    ok_text = f"The top {len(rows)} holders control {total:.2f}% as of 14:37 UTC on 2026-09-23; the largest holds {rows[0].value}%."
+    assert fact_gate.check(c, rows, ok_text, now=NOW, evidence_text=PEPE_HOLDERS).ok
+    g = fact_gate.check(c, rows, "The largest holder controls 41.7% of supply.", now=NOW, evidence_text=PEPE_HOLDERS)
+    assert not g.ok and g.unsupported == ["41.7%"]
+    assert fact_gate.check(c, rows, "Mobula lists 50 positions.", now=NOW, evidence_text=PEPE_HOLDERS + "\n50 positions read").ok
+
+
+def test_an_explain_about_a_protocol_takes_the_open_research_contract(monkeypatch):
+    # "How does Aave V3's E-mode change the liquidation threshold?" was an
+    # "explain" act answered from the model's memory with no source (live,
+    # 2026-09-23). The general node hands a crypto explain to the contract.
+    from app.nodes import general
+    seen = []
+
+    async def fake_answer(state, request, chains, *, context=""):
+        seen.append(request)
+        return {"answer": "From the web [1]\n\nSources:\n[1] https://docs.aave.com", "trajectory": None, "pipeline": "contract"}
+    monkeypatch.setattr(evidence_pipeline, "answer", fake_answer)
+    monkeypatch.setattr(evidence_pipeline.settings, "contract_pipeline_enabled", True)
+    state = {"request": "How does Aave V3's E-mode change the liquidation threshold?", "routing_decision": {"speech_act": "explain", "domain": "crypto"}, "session_context": {}}
+    out = asyncio.run(general.general_node(state))
+    assert out["pipeline"] == "contract" and seen == [state["request"]]
+    called = []
+
+    async def no_lm(*a, **k):
+        called.append(1)
+        return SimpleNamespace(answer="hi")
+    monkeypatch.setattr(general.runtime, "answer", no_lm)
+    out = asyncio.run(general.general_node({"request": "thanks, that helps", "routing_decision": {"speech_act": "explain", "domain": "general"}, "session_context": {}}))
+    assert out["answer"] == "hi" and called and len(seen) == 1, "chit-chat never reaches the contract"

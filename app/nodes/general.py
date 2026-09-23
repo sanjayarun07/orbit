@@ -152,6 +152,18 @@ async def general_node(state: AgentState) -> dict:
             ),
             "trajectory": None,
         }
+    if settings.contract_pipeline_enabled and (state.get("routing_decision") or {}).get("domain") == "crypto":
+        # An "explain" about a protocol or token is open research, not chit-chat:
+        # "How does Aave V3's E-mode change the liquidation threshold?" was
+        # answered from the model's memory with no source (live, 2026-09-23).
+        # The same contract the research node uses: a dated, linked web read
+        # first, then the check. Anything the contract does not cover (a
+        # concept with no subject) still gets the lightweight reply below.
+        from app import contracts, evidence_pipeline
+        if contracts.is_open_research(request):
+            piped = await evidence_pipeline.answer(state, request, ())
+            if piped is not None:
+                return piped
     result = await runtime.answer(
         runtime.general_agent, request=state["request"], conversation_history=state.get("history", "")
     )

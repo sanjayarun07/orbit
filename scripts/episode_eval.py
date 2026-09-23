@@ -150,6 +150,10 @@ def run_live(episode: dict) -> dict:
     # The same path a chat turn takes (routing included), with the semantic
     # answer cache off so every run is a real run, and a fresh per-turn budget.
     settings.provider_semantic_cache_threshold = 1.01
+    from app.nodes import runtime as runtime_mod
+    for lm in (runtime_mod._primary_lm, runtime_mod._intent_lm, runtime_mod._synthesis_lm, runtime_mod._planner_lm, getattr(runtime_mod, "_fallback_lm", None)):
+        if lm is not None:
+            lm.cache = False                       # DSPy's disk cache served a two-hour-old general answer in 13 ms as five "attempts" (2026-09-23)
     captured: dict = {}
     original = pipeline_mod.answer
 

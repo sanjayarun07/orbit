@@ -194,16 +194,23 @@ _TRENDING_WORDS = re.compile(r"\b(?:trending|hot|what'?s\s+moving|momentum)\b", 
 _VENUE_NAMES = ("hyperliquid", "aster")
 
 
+_FUZZY_MIN_NAME = 8     # a near miss of a name this long ("hyperloquid") is not another word; "after" is not Aster
+
+
 def fuzzy_venue(word: str) -> str | None:
-    """A venue name typed a letter or two off ("hyperloquid"), or None. Only
-    words long enough that a near miss cannot be another word."""
+    """A venue name typed a letter or two off ("hyperloquid"), or None. A
+    short venue name is matched exactly only: a one-letter slip of "aster"
+    is an ordinary word ("after", "faster", "master" all reached the Aster
+    tools, review 2026-09-23)."""
     import difflib
     w = (word or "").lower()
     if w in ("hl",):
         return "hyperliquid"
+    if w in _VENUE_NAMES:
+        return w
     if len(w) < 5:
         return None
-    hit = difflib.get_close_matches(w, _VENUE_NAMES, n=1, cutoff=0.8)
+    hit = difflib.get_close_matches(w, [v for v in _VENUE_NAMES if len(v) >= _FUZZY_MIN_NAME], n=1, cutoff=0.8)
     return hit[0] if hit else None
 
 
