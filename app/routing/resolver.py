@@ -36,7 +36,7 @@ from .intent_router import route_capabilities, plan_execution_route, default_cap
 from .instruments import equity_instruments
 from .model import speech_classifier
 from .semantic import SpeechUnderstanding, embedding_router
-from app import product_actions
+from app import product_actions, snapshot_compare
 from .speech import CONDITIONAL_ORDER_ANSWER, has_competing_speech, is_conditional_order, is_parameter_fragment
 from .trade_parser import extract_cross_chain_draft
 from app.clarify import is_clarification, is_market_text
@@ -208,6 +208,10 @@ async def _model_first(request: str, candidate: CapabilityRoute | None, call_lm,
             return route_fields(candidate, source), {**meta, "method": "rules", "reason": f"model_unavailable:{hint}"}
         update, emeta = await _embedding_fallback(request, embedding_factory)
         return update, {**meta, **emeta, "rules_hint": hint, "model_unavailable": True}
+    if understanding.speech_act == "app" and not product_actions.matches(request):
+        # No product answer exists for it: the model's "app" is a misread of a
+        # word like "saved" or "report"; the ask is research.
+        understanding = understanding.model_copy(update={"speech_act": "research"})
     meta.update(confidence=understanding.confidence, speech_act=understanding.speech_act,
                 domain=understanding.domain, explicit_action=understanding.explicit_action)
     uncertain = understanding.speech_act == "abstain" or understanding.confidence < settings.intent_model_confidence_threshold
@@ -276,6 +280,12 @@ async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> d
         # web described marketplaces (funded UI run, 2026-09-23).
         return {"intent": "general", "capabilities": [], "chains": [], "route_source": "rules",
                 "routing_decision": {"method": "rules", "reason": "product_question", "speech_act": "app"}}
+    if not controlled and snapshot_compare.dated_ask(request):
+        # A comparison between dates is research on the snapshot ledger,
+        # whatever else the sentence says ("using saved snapshots" read as an
+        # app action; "September" read as an asset, live run 2026-09-23).
+        return {"intent": "research", "capabilities": ["token_discovery", "market_data", "token_security"], "chains": list(extract_chains(request)),
+                "route_source": "rules", "routing_decision": {"method": "rules", "reason": "dated_comparison", "speech_act": "research"}}
     if not controlled and is_conditional_order(request):
         # "If SOL drops below $100, automatically buy 2 SOL": there is no
         # such order here, and no rule or model should turn it into one.

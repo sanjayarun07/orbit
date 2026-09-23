@@ -182,6 +182,15 @@ class ResearchAnswer(dspy.Signature):
     otherwise describe what was checked and what was not. Honour the user's
     stated constraints (a horizon, "without another volatile token", one
     chain): when nothing matches, say no match rather than a near miss.
+    Claims about who controls a token's supply are bounded by what was
+    examined: a bundle check of two early buyers says nothing about
+    "distributed control", and the top token accounts are accounts (pools,
+    exchanges, program addresses), never "beneficial-owner concentration"
+    unless owners were resolved; say "N accounts examined, owners not
+    resolved". A Solana-only check (Jupiter Shield, Jupiter verification)
+    does not make an Ethereum contract "unverified"; name the check that
+    applies instead. Never call a wallet "diversified" or a concentration
+    "not risky": report the numbers and what they depend on.
     """
 
     request: str = dspy.InputField()
@@ -240,7 +249,10 @@ class PortfolioAnswer(dspy.Signature):
     those numbers are already computed and must be quoted as-is, never
     recalculated. Highlight the largest holdings, concentration risk (e.g. one
     asset dominating allocation), and any holdings with no available USD price.
-    Never propose a trade here.
+    Never propose a trade here. Never judge suitability: no "reasonably
+    diversified", "healthy" or "not risky" -- two assets at 81/19 is a
+    concentration fact, and whether it is a risk depends on the assets and
+    on exit depth, which the snapshot does not measure.
     """
 
     request: str = dspy.InputField()

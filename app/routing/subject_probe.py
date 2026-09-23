@@ -45,7 +45,9 @@ _STOP = {w.upper() for w in (
     "What Whats How Is Are Can Could Should Would Will Do Does Did Tell Show Give Which Why When Where Who The An My Our Your It Its This That These "
     "Any Latest Best Top Compare Explain Check Find List Get Swap Trade Market Markets News Today Now Research Analyze Analyse Deep Dive Hi Hello Hey Thanks Ok Okay Yes No "
     # market jargon that is written in capitals (UI run 2026-09-23: CLMM and DLMM became tokens)
-    "CLMM DLMM AMM PDA PDAS LP LPS DAO KYC ICO IDO FDV MCAP OTC PNL ROI OI RWA L1 L2 EVM SPL ERC EUR KOL KOLS MEV TWAP VWAP LTV FAQ API MCP OTC PNL"
+    "CLMM DLMM AMM PDA PDAS LP LPS DAO KYC ICO IDO FDV MCAP OTC PNL ROI OI RWA L1 L2 EVM SPL ERC EUR KOL KOLS MEV TWAP VWAP LTV FAQ API MCP OTC PNL "
+    "January February March April May June July August September October November December Jan Feb Mar Apr Jun Jul Aug Sep Sept Oct Nov Dec "
+    "Monday Tuesday Wednesday Thursday Friday Saturday Sunday Q1 Q2 Q3 Q4 UTC EST PST"
 ).split()}
 
 # A capitalised word that opens a sentence and is followed by a determiner,

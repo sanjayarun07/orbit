@@ -76,7 +76,14 @@ def search_verified_tokens(query: str) -> list[dict]:
 
 
 def token_safety_warnings(mint: str) -> dict:
-    """Get Jupiter Shield warnings for one exact Solana token mint."""
+    """Get Jupiter Shield warnings for one exact Solana token mint. An EVM
+    contract is outside Shield's scope: say so rather than return an empty
+    result that reads as "unverified" (live run 2026-09-23: PEPE on Ethereum)."""
+    if str(mint).startswith("0x"):
+        return {"mint": mint, "out_of_scope": True,
+                "note": "Jupiter Shield and Jupiter verification cover Solana mints only. This is an Ethereum-style contract; "
+                        "its verification status must come from an EVM source (Etherscan verification, the project's own listing, CoinGecko's "
+                        "contract for the asset). No Solana check was run and none applies."}
     return _run(jupiter.shield([mint]))
 
 

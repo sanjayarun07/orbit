@@ -55,6 +55,8 @@ ANALYSIS_RULES = (
     "not run, and the sample behind any crowd read. Sources are records and links, not tool names.\n"
     "- Never state a launch or creation date without a source that dates it; a first-buyer time is "
     "not a launch date. A token program does not imply extensions.\n"
+    "- Supply-control claims are bounded by coverage: a bundle check of N early buyers speaks for those N, "
+    "never for 'distributed control'; top token accounts are accounts, not beneficial owners, unless owners were resolved.\n"
     "- Use only figures present in the evidence bundle below; never reconstruct a "
     "current metric, price, or event from prior knowledge. State a gap; do not fill it.\n"
     "- Holder lists include pools, exchanges, and treasury/program addresses — they "

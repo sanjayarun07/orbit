@@ -1304,6 +1304,11 @@ async function recoverTurn(session,text,view,{interval=3000,limit=120000}={}){co
 async function sendMessage(text,quickAction=null,extra={},retryTyping=null) {
   if (busy || !text.trim()) return;retireQuickActions();chatTurnEpoch++;retirePendingTradeCards();busy=true; sendBtn.disabled=true;
   const typing=retryTyping||(addUserMessage(text),addTyping());
+  // A conversation exists from the moment it is sent, not from the moment
+  // it answers: a reload while streaming used to lose the turn from Recents
+  // (live run, 2026-09-23). A new chat gets its id here and is listed at once.
+  if(!sessionId&&!retryTyping){try{sessionId=(crypto.randomUUID?crypto.randomUUID():`s-${Date.now()}-${Math.random().toString(36).slice(2,10)}`);}catch{sessionId=`s-${Date.now()}`;}}
+  if(sessionId&&!retryTyping){try{updateChat(sessionId,text);}catch{}}
   const requestSession=sessionId || undefined;
   try { const payload={message:text,tz_offset_min:-new Date().getTimezoneOffset(),wallet_address:walletInput.value.trim() || null,session_id:requestSession,context_revision:(requestSession&&sessionRevision!=null)?sessionRevision:null,quick_action:quickAction,...extra};let streamed=await streamChat(payload,typing);
     if(streamed?.interrupted){const recovered=requestSession?await recoverTurn(requestSession,text,streamed.view):null;
@@ -1843,7 +1848,7 @@ function describeAgent(ua){ua=ua||"";const browser=/Edg\//.test(ua)?"Edge":/Chro
 const TZ=-new Date().getTimezoneOffset();
 function fmtLocal(iso){if(!iso)return "—";const d=new Date(iso);return d.toLocaleString([],{weekday:"short",day:"numeric",month:"short",hour:"numeric",minute:"2-digit"});}
 async function refreshInboxBadge(){if(!account?.authenticated){$("#inboxBtn").hidden=true;return;}try{const d=await (await fetch("/me/inbox")).json();const n=Number(d.unread||0);$("#inboxBtn").hidden=false;$("#inboxBadgeTop").hidden=!n;$("#inboxBadgeTop").textContent=n>99?"99+":String(n);$("#inboxBadge").hidden=!n;$("#inboxBadge").textContent=String(n);}catch{}}
-async function loadInbox(){const list=$("#inboxList");try{const d=await (await fetch("/me/inbox")).json();list.innerHTML=(d.items||[]).length?d.items.map(i=>`<div class="inbox-item ${i.read_at?"":"unread"}"><b>${escapeHtml(i.title)}</b><span class="body">${renderInline?escapeHtml(i.body):escapeHtml(i.body)}</span><span class="inline-note">${escapeHtml(fmtLocal(i.created_at))} · ${escapeHtml(i.kind)}</span></div>`).join(""):'<div class="field-help">Your alerts, reminders, and briefs will appear here.</div>';refreshInboxBadge();}catch{list.innerHTML='<div class="field-help">Inbox unavailable.</div>';}}
+async function loadInbox(){const list=$("#inboxList");try{const d=await (await fetch("/me/inbox")).json();list.innerHTML=(d.items||[]).length?d.items.map(i=>`<div class="inbox-item ${i.read_at?"":"unread"}"><b>${escapeHtml(i.title)}</b><span class="body">${renderMarkdownHtml(i.body)}</span><span class="inline-note">${escapeHtml(fmtLocal(i.created_at))} · ${escapeHtml(i.kind)}</span></div>`).join(""):'<div class="field-help">Your alerts, reminders, and briefs will appear here.</div>';refreshInboxBadge();}catch{list.innerHTML='<div class="field-help">Inbox unavailable.</div>';}}
 $("#inboxReadAllBtn").addEventListener("click",async()=>{await fetch("/me/inbox/read",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});loadInbox();});
 $("#inboxBtn").addEventListener("click",()=>openSettings("tasks"));
 async function loadTasks(){const list=$("#tasksList");try{const d=await (await fetch("/me/tasks")).json();$("#tasksLimit").textContent=`· ${d.tasks.filter(t=>t.status==="active").length}/${d.limit} active`;

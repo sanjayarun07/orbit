@@ -755,7 +755,12 @@ async def public_config():
 async def home_highlights_cards():
     """Today's crypto and stock-market highlights for the welcome tiles.
     Cached server-side; anonymous, since the welcome screen is."""
-    return await asyncio.to_thread(home_highlights.get_highlights)
+    cards = await asyncio.to_thread(home_highlights.get_highlights)
+    if not deployment.execution_enabled():
+        # A research deployment cannot review a quote: the swap starter would
+        # promise what the next turn refuses (live run, 2026-09-23).
+        cards = {**cards, "cards": [c for c in cards.get("cards", []) if c.get("action") not in ("relay", "swap")]}
+    return cards
 
 
 @app.get("/calendar")

@@ -2830,3 +2830,14 @@ snapshot only. Leadership fails closed when Redis is configured but unavailable 
 <date>" in the future rolls back a year. A subject-less clause carries the lead clause's asset and constraints even
 when a ticker was already added. The SQL stock ranking filters on `is_stock` before it limits. The sample-bucket
 guard is two-sided (a backfilled earlier tick is not the current bucket).
+
+**Recorded live run (2026-09-23): fixes.** Feed asks honour every venue named ("across Aster and Hyperliquid", "hyperliquid
+vs aster": one list per venue, never merged), "excluding stocks / crypto only" (`tequity.stock_filter`), and hour
+windows for volume ("last 2 hours" is two hours). Month and weekday names are never subjects. Product concepts get
+product answers before any model: reopening a conversation, what an exit watch is and is not (quoted proceeds, not a
+price level; not a stop-loss), and portfolio value against sale proceeds. The home swap starter is dropped when the
+deployment is in research mode. Jupiter Shield says it is Solana-only for an EVM contract instead of reading as
+"unverified". Research, deep-dive and portfolio prompts: supply-control claims are bounded by what was examined,
+top accounts are not beneficial owners, and no suitability verdicts ("reasonably diversified"). UI: a new chat is
+listed in Recents at send time with a client-generated id, so a reload mid-stream keeps the conversation; inbox
+bodies render markdown (service worker shell v12).

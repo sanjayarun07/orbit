@@ -182,6 +182,8 @@ def _sync(coro):
 # ----------------------------------------------------------------------------
 
 _DEX = re.compile(r"\b(aster|hyperliquid|hl)\b", re.I)
+_BOTH = re.compile(r"\b(?:across|both|either|all)\b.{0,30}\b(?:venues?|dexes|exchanges|aster|hyperliquid)\b|\baster\b.{0,20}\b(?:and|vs\.?|versus)\b.{0,20}\bhyperliquid\b|\bhyperliquid\b.{0,20}\b(?:and|vs\.?|versus)\b.{0,20}\baster\b", re.I)
+_NO_STOCKS = re.compile(r"\b(?:excluding|exclude|without|no|not|ignore|skip|minus)\s+(?:the\s+)?(?:tokeni[sz]ed\s+)?(?:stocks?|equit(?:y|ies)|shares?)\b|\bcrypto\s+only\b|\bonly\s+crypto\b", re.I)
 _MOVERS_WORDS = re.compile(r"\b(?:movers?|gainers?|losers?|top\s+(?:stocks?|tokens?|pairs?|perps?)|biggest\s+(?:moves?|winners?|losers?)|"
                            r"most\s+(?:active|traded)|pumping|dumping|up\s+the\s+most|down\s+the\s+most|leaders?|laggards?)\b", re.I)
 _STOCK_WORDS = re.compile(r"\b(?:stocks?|equit(?:y|ies)|tokeni[sz]ed\s+(?:stocks?|equities|shares)|shares?|xstocks?)\b", re.I)
@@ -197,9 +199,32 @@ def _dex_of(request: str) -> str | None:
     return "hyperliquid" if word in ("hyperliquid", "hl") else "aster"
 
 
+def venues_of(request: str) -> list[str]:
+    """Every venue an ask names, in order; both when it says across, both,
+    or names the two (live run 2026-09-23: "across Aster and Hyperliquid"
+    answered with Aster alone)."""
+    text = request or ""
+    found = []
+    for m in _DEX.finditer(text):
+        v = "hyperliquid" if m.group(1).lower() in ("hyperliquid", "hl") else "aster"
+        if v not in found:
+            found.append(v)
+    if _BOTH.search(text) and len(found) < 2:
+        found = ["aster", "hyperliquid"]
+    return found
+
+
+def stock_filter(request: str) -> bool | None:
+    """True for stocks only, False for crypto only ("excluding stocks"), None for all."""
+    text = request or ""
+    if _NO_STOCKS.search(text):
+        return False
+    return True if _STOCK_WORDS.search(text) else None
+
+
 def movers_matches(request: str) -> bool:
     text = request or ""
-    dex = _dex_of(text)
+    dex = _dex_of(text) or (venues_of(text) or [None])[0]
     if not dex or _VOLUME_WORDS.search(text):
         return False
     if re.search(r"\b(?:positions?|balances?|margin|liquidation|funding|open\s+interest|my\b)", text, re.I):
@@ -222,7 +247,7 @@ _PERIOD = re.compile(
     r"\b(?:since\s+this\s+morning|this\s+morning|today|this\s+week|past\s+week|last\s+week|last\s+24\s*h(?:ours)?|past\s+24\s*h(?:ours)?|"
     r"(?:over|in|during|for)?\s*the\s+(?:last|past)\s+(?P<n>\d+)\s*(?P<u>hours?|h|days?|d|weeks?|w)|(?:last|past)\s+(?P<n2>\d+)\s*(?P<u2>hours?|h|days?|d|weeks?|w)|"
     r"since\s+(?P<since>[A-Za-z]{3,9}\.?\s+\d{1,2}(?:,?\s+\d{4})?|\d{4}-\d{2}-\d{2}|yesterday))\b", re.I)
-_VOLUME_WORDS = re.compile(r"\b(?:most\s+traded|volume\s+leaders?|highest\s+volume|by\s+volume|most\s+volume|biggest\s+volume)\b", re.I)
+_VOLUME_WORDS = re.compile(r"\b(?:most\s+traded|volume\s+leaders?|highest\s+volume|by\s+(?:traded\s+|quote\s+)?volume|most\s+volume|biggest\s+volume|volume\s+rank\w*|rank\w*\s+by\s+volume|top\s+volume)\b", re.I)
 _HISTORY_WORDS = re.compile(r"\b(?:how\s+(?:has|did|is)|moved|moving|move|change[ds]?|performance|performed|done|doing|trend|history)\b", re.I)
 
 
@@ -295,7 +320,7 @@ def period_movers_matches(request: str) -> bool:
 
 def volume_leaders_matches(request: str) -> bool:
     text = request or ""
-    return bool(_dex_of(text) and _VOLUME_WORDS.search(text) and not re.search(r"\b(?:positions?|balances?|margin|my)\b", text, re.I))
+    return bool(venues_of(text) and _VOLUME_WORDS.search(text) and not re.search(r"\b(?:positions?|balances?|margin|my)\b", text, re.I))
 
 
 def _fmt_when(when) -> str:
@@ -342,8 +367,9 @@ def render_period_movers(venue: str, out: dict, start: datetime, *, stocks_only:
     return "\n".join(lines)
 
 
-def render_volume_leaders(venue: str, rows: list[dict], days: float, *, stocks_only: bool) -> str:
-    lines = [f"# {'Tokenized stocks' if stocks_only else 'Pairs'} by traded volume on {venue.title()}, last {days:g} day{'s' if days != 1 else ''}",
+def render_volume_leaders(venue: str, rows: list[dict], days: float, *, stocks_only: bool | None, hours: float | None = None) -> str:
+    span = f"last {hours:g} hour{'s' if hours != 1 else ''}" if hours is not None and hours < 48 else f"last {days:g} day{'s' if days != 1 else ''}"
+    lines = [f"# {'Tokenized stocks' if stocks_only is True else 'Crypto pairs' if stocks_only is False else 'Pairs'} by traded volume on {venue.title()}, {span}",
              "**Provider**: Tequity tick ledger · mean of the feed's 24h quote volume across stored ticks", "",
              "| # | Pair | Type | Mean 24h quote volume | Ticks | Price high / low |", "|---:|---|---|---:|---:|---:|"]
     for i, r in enumerate(rows, start=1):
@@ -398,17 +424,19 @@ def _pct(v) -> str:
         return "—"
 
 
-def render_movers(dex: str, snap: dict, *, stocks_only: bool, losers: bool, limit: int = 15) -> str:
+def render_movers(dex: str, snap: dict, *, stocks_only: bool | None, losers: bool, limit: int = 15) -> str:
     payload = snap["data"].get("data") or {}
     rows = [r for r in payload.get("tokens") or [] if isinstance(r, dict)]
-    if stocks_only:
+    if stocks_only is True:
         rows = [r for r in rows if r.get("is_stock")]
+    elif stocks_only is False:
+        rows = [r for r in rows if not r.get("is_stock")]
     rows = [r for r in rows if r.get("price_change_percent") is not None]
     rows.sort(key=lambda r: float(r.get("price_change_percent") or 0), reverse=not losers)
     top = rows[:limit]
-    what = ("Tokenized stocks" if stocks_only else "Pairs") + (" down the most" if losers else " up the most")
+    what = ("Tokenized stocks" if stocks_only is True else "Crypto pairs" if stocks_only is False else "Pairs") + (" down the most" if losers else " up the most")
     lines = [f"# {what} on {dex.title()} ({payload.get('range') or '1d'})",
-             f"**Provider**: Tequity (internal feed) · **Snapshot**: {_stamp(snap)} · {len(rows)} {'stocks' if stocks_only else 'pairs'} of {payload.get('count') or len(payload.get('tokens') or [])} listed",
+             f"**Provider**: Tequity (internal feed) · **Snapshot**: {_stamp(snap)} · {len(rows)} {'stocks' if stocks_only is True else 'crypto pairs' if stocks_only is False else 'pairs'} of {payload.get('count') or len(payload.get('tokens') or [])} listed",
              "", "| # | Pair | Type | Last price | 24h price change | 24h quote volume |", "|---:|---|---|---:|---:|---:|"]
     for i, r in enumerate(top, start=1):
         kind = "stock" if r.get("is_stock") else ("perp" if dex == "hyperliquid" else "token")
@@ -420,14 +448,16 @@ def render_movers(dex: str, snap: dict, *, stocks_only: bool, losers: bool, limi
     return "\n".join(lines)
 
 
-def render_trending(snap: dict, *, stocks_only: bool, dex: str | None, limit: int = 15) -> str:
+def render_trending(snap: dict, *, stocks_only: bool | None, dex: str | None, limit: int = 15) -> str:
     rows = [r for r in snap["data"].get("trending") or [] if isinstance(r, dict)]
     if dex:
         rows = [r for r in rows if str(r.get("dex") or "").lower() == dex]
-    if stocks_only:
+    if stocks_only is True:
         rows = [r for r in rows if r.get("is_stock")]
+    elif stocks_only is False:
+        rows = [r for r in rows if not r.get("is_stock")]
     top = rows[:limit]
-    lines = [f"# Trending {'tokenized stocks' if stocks_only else 'pairs'}{' on ' + dex.title() if dex else ' across Aster and Hyperliquid'}",
+    lines = [f"# Trending {'tokenized stocks' if stocks_only is True else 'crypto pairs' if stocks_only is False else 'pairs'}{' on ' + dex.title() if dex else ' across Aster and Hyperliquid'}",
              f"**Provider**: Tequity (internal feed) · **Snapshot**: {_stamp(snap)} · {len(rows)} in the feed's trending list",
              "", "| # | Pair | Venue | Type | Last price | 24h price change | 24h quote volume |", "|---:|---|---|---|---:|---:|---:|"]
     for i, r in enumerate(top, start=1):
@@ -457,18 +487,28 @@ def render_news(snap: dict, limit: int = 10) -> str:
 # ----------------------------------------------------------------------------
 
 def movers(request: str) -> str:
-    dex = _dex_of(request) or "hyperliquid"
-    channel = MOVERS[dex]
-    snap = _sync(snapshot(channel))
-    if not snap:
-        raise _unavailable("tequity_movers", channel, f"{dex} movers")
-    stocks_only = bool(_STOCK_WORDS.search(request or ""))
+    venues = venues_of(request) or ["hyperliquid"]
+    stocks_only = stock_filter(request)
     losers = bool(_LOSERS.search(request or ""))
-    rows = (snap["data"].get("data") or {}).get("tokens") or []
-    evidence.complete("tequity_movers", {"kind": "venue", "id": dex, "chain": None, "symbol": None},
-                      {"pairs": len(rows), "stocks": sum(1 for r in rows if isinstance(r, dict) and r.get("is_stock")), "range": (snap["data"].get("data") or {}).get("range")},
-                      [{"provider": "tequity", "endpoint": channel, "as_of": _stamp(snap)}])
-    return compact_tool_result(render_movers(dex, snap, stocks_only=stocks_only, losers=losers))
+    cards, missing = [], []
+    for dex in venues:
+        channel = MOVERS[dex]
+        snap = _sync(snapshot(channel))
+        if not snap:
+            missing.append(dex)
+            continue
+        rows = (snap["data"].get("data") or {}).get("tokens") or []
+        evidence.complete("tequity_movers", {"kind": "venue", "id": dex, "chain": None, "symbol": None},
+                          {"pairs": len(rows), "stocks": sum(1 for r in rows if isinstance(r, dict) and r.get("is_stock")), "range": (snap["data"].get("data") or {}).get("range")},
+                          [{"provider": "tequity", "endpoint": channel, "as_of": _stamp(snap)}])
+        cards.append(render_movers(dex, snap, stocks_only=stocks_only, losers=losers, limit=10 if len(venues) > 1 else 15))
+    if not cards:
+        raise _unavailable("tequity_movers", MOVERS[venues[0]], f"{venues[0]} movers")
+    if missing:
+        cards.append(f"_{', '.join(v.title() for v in missing)}: no current snapshot from the feed; that venue is not shown, not empty._")
+    if len(venues) > 1:
+        cards.append("Each venue is its own list from its own snapshot; the two are not merged or ranked against each other.")
+    return compact_tool_result("\n\n".join(cards))
 
 
 def trending(request: str) -> str:
@@ -479,7 +519,8 @@ def trending(request: str) -> str:
     evidence.complete("tequity_trending", {"kind": "venue", "id": "aster+hyperliquid", "chain": None, "symbol": None},
                       {"pairs": len(rows), "stocks": sum(1 for r in rows if isinstance(r, dict) and r.get("is_stock"))},
                       [{"provider": "tequity", "endpoint": TRENDING, "as_of": _stamp(snap)}])
-    return compact_tool_result(render_trending(snap, stocks_only=bool(_STOCK_WORDS.search(request or "")), dex=_dex_of(request)))
+    venues = venues_of(request)
+    return compact_tool_result(render_trending(snap, stocks_only=stock_filter(request), dex=venues[0] if len(venues) == 1 else None))
 
 
 def news(request: str) -> str:
@@ -525,14 +566,20 @@ def period_movers(request: str) -> str:
 def volume_leaders(request: str) -> str:
     from app import tequity_ledger
 
-    venue = _dex_of(request) or "hyperliquid"
+    venues = venues_of(request) or ["hyperliquid"]
     start = period_start(request)
-    days = max(0.25, (datetime.now(timezone.utc) - start).total_seconds() / 86400) if start else 7.0
-    stocks_only = bool(_STOCK_WORDS.search(request or ""))
-    rows = _sync(tequity_ledger.volume_leaders(venue, days, stocks_only=stocks_only))
-    evidence.complete("tequity_volume_leaders", {"kind": "venue", "id": venue, "chain": None, "symbol": None}, {"pairs": len(rows), "days": days},
-                      [{"provider": "tequity_ledger", "endpoint": "tequity_ticks", "as_of": _fmt_when(datetime.now(timezone.utc))}])
-    return compact_tool_result(render_volume_leaders(venue, rows, round(days, 2), stocks_only=stocks_only))
+    # The window as asked, down to a quarter hour ("two hours" was six, live 2026-09-23)
+    days = max(0.01, (datetime.now(timezone.utc) - start).total_seconds() / 86400) if start else 7.0
+    stocks_only = stock_filter(request)
+    cards = []
+    for venue in venues:
+        rows = _sync(tequity_ledger.volume_leaders(venue, days, stocks_only=bool(stocks_only)))
+        if stocks_only is False:
+            rows = [r for r in rows if not r.get("is_stock")]
+        evidence.complete("tequity_volume_leaders", {"kind": "venue", "id": venue, "chain": None, "symbol": None}, {"pairs": len(rows), "days": days},
+                          [{"provider": "tequity_ledger", "endpoint": "tequity_ticks", "as_of": _fmt_when(datetime.now(timezone.utc))}])
+        cards.append(render_volume_leaders(venue, rows, round(days, 2), stocks_only=stocks_only, hours=(datetime.now(timezone.utc) - start).total_seconds() / 3600 if start else None))
+    return compact_tool_result("\n\n".join(cards))
 
 
 class TequityProvider:
