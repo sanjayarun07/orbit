@@ -191,7 +191,12 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
             planned = [t.name for t in await asyncio.to_thread(router.plan_across, request, ("market_data", "token_security", "token_discovery", "defi_data", "knowledge"), chains, 2)]
         except Exception:
             logger.info("open research: router plan failed", exc_info=True)
-        chosen = discovery_tools[:1] + [n for n in planned if n not in discovery_tools][:2]
+        # A concept question that names no token, protocol or topic ("how
+        # else can we tie a dual token to the main token") gets the web and
+        # the knowledge base only: a token tool would read a word in it as a
+        # ticker (a DEX pair table for "DUAL", live 2026-09-24).
+        named_subject = bool(contract.subject.symbol or contract.subject.id or contract.subject.name)
+        chosen = discovery_tools[:1] + [n for n in planned if n not in discovery_tools and (named_subject or n == "knowledge_base_search")][:2]
     elif contract.evidence_order == "discovery_first":
         chosen = discovery_tools[:1] + state_tools[:1] + background_tools[:1]
     else:

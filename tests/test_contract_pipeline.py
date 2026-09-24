@@ -258,3 +258,23 @@ def test_the_next_eligible_source_answers_when_the_chosen_one_returns_nothing():
     assert any(name in router.calls for name in ("solana_rpc_token_top_holders", "bitquery_token_top_holders"))
     assert "returned nothing usable" not in (out.get("answer") or "")
     assert "7oU9nR9V" in (out.get("answer") or "")
+
+
+def test_a_concept_question_with_no_named_subject_plans_no_token_tools(monkeypatch):
+    # "apart from staking how else can we tie dual token to the main token" ran the DEX pair search for "DUAL" (live, 2026-09-24).
+    from app import contracts
+    request = "apart from staking how else can we tie dual token to the main token"
+    contract = plan_by_rules(request)
+    assert contract.kind == "open_research" and not (contract.subject.symbol or contract.subject.id or contract.subject.name)
+    monkeypatch.setattr(evidence_pipeline.settings, "discovery_first_research", True)
+    web = "# From the web (dated, with sources)\n**Query**: q\n\nBurn-to-mint ties them. [1]\n\nSources:\n[1] [Primer](https://x) · 2026-09-09"
+    router = FakeRouter({"perplexity_web_search": web, "dexscreener_pair_search": "# DEX pair results\n| DUAL/WETH |"})
+    router.plan_across = lambda request, caps, chains, n: [SimpleNamespace(name="dexscreener_pair_search"), SimpleNamespace(name="knowledge_base_search")]
+    saved = evidence_pipeline.get_provider_router
+    evidence_pipeline.get_provider_router = lambda: router
+    try:
+        out = asyncio.run(evidence_pipeline.answer({}, request, ()))
+    finally:
+        evidence_pipeline.get_provider_router = saved
+    assert "dexscreener_pair_search" not in router.calls
+    assert "DUAL" not in (out.get("answer") or "")

@@ -3175,3 +3175,9 @@ now resolves only when written as a name -- capitalised, `$`-prefixed, or as the
 its sentence, on every index (name, alias, external id, ticker); the curated set `knowledge/entities._COMMON_WORDS`
 grows as collisions are seen (`is_common_word`, `spelled_as_name`; `tests/test_knowledge_common_words.py`). A system
 dictionary was tried and dropped: "lido" and "spark" are English words too, and those are names however written.
+
+Live, 2026-09-24: "apart from staking how else can we tie dual token to the main token" carried a DEX pair table for
+"DUAL" under a correct web answer. Two mechanisms: a concept question that names no token, protocol or topic plans no
+token tools in the open-research branch -- the web and the knowledge base only (`evidence_pipeline.answer`,
+`named_subject`); and a lowercase adjective before "token" ("dual", "main", "native", "reward") is a description, never
+the name the pair search looks up (`dexscreener_tools._DESCRIPTORS`).

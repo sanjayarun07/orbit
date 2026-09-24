@@ -259,7 +259,11 @@ def _rank_pairs(pairs: list[dict], limit: int = 10) -> list[dict]:
 
 
 _DESCRIPTORS = {"the", "a", "an", "this", "that", "meme", "memecoin", "defi", "ai", "gaming", "utility", "governance", "new", "any", "some", "which",
-                "what", "your", "my", "our", "their", "each", "every", "solana", "base", "ethereum", "mean", "meant", "i"}
+                "what", "your", "my", "our", "their", "each", "every", "solana", "base", "ethereum", "mean", "meant", "i",
+                # "dual token", "main token", "native token": adjectives, not names (live, 2026-09-24: a pair table for DUAL)
+                "dual", "main", "second", "secondary", "primary", "native", "reward", "rewards", "payment", "stable", "wrapped", "liquid", "synthetic",
+                "points", "fee", "fees", "gas", "vote", "voting", "staking", "staked", "bridged", "farm", "lp", "single", "one", "two", "other", "another",
+                "same", "first", "last", "best", "top", "good", "bad", "real", "fake", "dead", "old", "hot", "cheap", "small", "big", "large"}
 
 
 def dexscreener_pair_search(request: str) -> str:
