@@ -18,7 +18,7 @@ def _research_progress(trajectory: dict) -> dict | None:
             continue
         verdict = item.get("verdict")
         provenance = item.get("provenance")
-        if verdict not in {"qualifies", "related_but_different", "not_established"} or provenance not in {"page", "reader", "unreadable"}:
+        if verdict not in {"qualifies", "related_but_different", "not_established"} or provenance not in {"page", "reader", "unreadable", "uninspected"}:
             continue
         name = item.get("name")
         url = item.get("url")

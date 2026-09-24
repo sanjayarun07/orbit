@@ -3335,3 +3335,6 @@ a snippet can no longer support what the page did not establish, and a failed ca
 reader resolves once and connects to the checked address with SNI and Host set (`url_reader.resolve_public`,
 `_get_pinned`), per redirect hop, and the fallback reader never sees a rejected URL; page reads and follow-up searches
 are recorded calls, so the public provider-call count is complete.
+
+Review of f603a871 (2026-09-25): a candidate the page budget leaves unread is `not_established` with provenance
+`uninspected`, so the gate covers it; the label check works per clause, not per sentence.

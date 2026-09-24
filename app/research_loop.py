@@ -385,7 +385,8 @@ async def run(state: dict, request: str, contract: contracts.QuestionContract, r
     return {"answer": synthesized, "trajectory": trajectory, "contract": contract.model_dump(), "gate": final.model_dump(), "pipeline": "research_loop"}
 
 
-_LABELLED = re.compile(r"not established|different design|does not qualify|not a match|not verified|not confirmed|related but|no first-party|cannot be confirmed|not documented|unverified", re.I)
+_LABELLED = re.compile(r"not established|different design|does not qualify|not a match|not verified|not confirmed|related but|no first-party|cannot be confirmed"
+                       r"|not documented|unverified|receipt(?:s| token| design)?|wrapped|non-transferable|external collateral|does not meet|fails the|not the same mechanism|differs", re.I)
 
 
 def unlabelled_names(summary: str, verdicts: list[dict]) -> list[str]:
@@ -400,8 +401,10 @@ def unlabelled_names(summary: str, verdicts: list[dict]) -> list[str]:
         name = v.get("name") or ""
         if not name:
             continue
-        for sentence in re.split(r"(?<=[.!?])\s+|\n+", prose):
-            if name.lower() in sentence.lower() and not _LABELLED.search(sentence):
+        # Per clause, not per sentence: "Nova Labs is an exact match, but Aave
+        # is not established" labels Aave only (review of f603a871).
+        for clause in re.split(r"(?<=[.!?])\s+|\n+|[;:,]\s+|\s+(?:while|whereas|although|though|however)\s+", prose, flags=re.I):     # a comma already splits ", but"; "related but a different design" stays one clause
+            if name.lower() in clause.lower() and not _LABELLED.search(clause):
                 out.append(name)
                 break
     return out
@@ -544,15 +547,22 @@ async def _inspect_candidates(question: str, constraints: str, cards: str, runti
                 logger.info("research loop: candidate URL not in the cited sources, looked up instead: %s", chosen[:120])
             named_only.append(name)                     # no cited URL for it: its page comes from a first-party search's results
     initial_cap = max(1, limit - 2)                     # room for follow-up reads inside the same page budget
+    listed_all = [(n, u) for n, u in candidates] + [(n, "") for n in named_only]
     candidates = candidates[:initial_cap]
     for name in named_only[: max(0, initial_cap - len(candidates))]:
         url = await asyncio.to_thread(first_party_url, name, conditions)
         calls.append(f"first_party_search (perplexity_web_search): {name}")
         if url:
             candidates.append((name, url))
+    # A candidate the budget leaves unread is not established, explicitly:
+    # the gate then covers a claim about it (review of f603a871).
+    inspected_names = {n for n, _ in candidates}
+    uninspected = [{"name": n, "url": u, "verdict": "not_established", "provenance": "uninspected", "fetched_at": "",
+                    "conditions_met": "none", "conditions_failed": "none", "quote": "none", "note": "not inspected: page budget reached; a search lead, not verified evidence"}
+                   for n, u in listed_all if n not in inspected_names]
     if not candidates:
         logger.info("research loop: no candidates listed from the cards")
-        return [], calls
+        return uninspected, calls
     streaming.emit("status", text=f"Reading {len(candidates)} cited page{'s' if len(candidates) != 1 else ''} to check the candidates")
 
     async def check(name: str, url: str) -> dict:
@@ -596,6 +606,7 @@ async def _inspect_candidates(question: str, constraints: str, cards: str, runti
         replaced = await asyncio.gather(*(follow_up(v) for v in unresolved))
         by_name = {r["name"]: r for r in replaced}
         verdicts = [by_name.get(v["name"], v) for v in verdicts]
+    verdicts = verdicts + uninspected
     logger.info("research loop: inspected %d candidates: %s", len(verdicts), [(v["name"], v["verdict"], v.get("provenance")) for v in verdicts])
     return verdicts, calls
 
@@ -634,7 +645,7 @@ def _with_trail(answer: str, made: list[str], skipped: list[str], verdicts: list
         why = {"qualifies": "qualifies: " + (v.get("conditions_met") or ""), "related_but_different": "related but a different design: " + (v.get("conditions_failed") or ""),
                "not_established": "not established by its page" + (f" ({v['note']})" if v.get("note") else "")}[v["verdict"]]
         quote = f' -- "{v["quote"]}"' if v.get("quote") and v["quote"].lower() != "none" else ""
-        prov = {"page": "page read", "reader": "search-index view, weaker provenance", "unreadable": "page unreadable"}.get(v.get("provenance"), "")
+        prov = {"page": "page read", "reader": "search-index view, weaker provenance", "unreadable": "page unreadable", "uninspected": "not inspected"}.get(v.get("provenance"), "")
         when = f", {v['fetched_at']}" if v.get("fetched_at") else ""
         lines.append(f"- {v['name']} ({v['url']}; {prov}{when}): {why}{quote}")
     head, sep, tail = answer.partition("\n\n---\n\n")

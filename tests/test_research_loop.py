@@ -576,3 +576,58 @@ def test_a_failed_candidate_listing_withholds_the_summary(loop):
         evidence_pipeline.get_provider_router = saved
     assert "I withheld the written summary: the candidate check could not run" in out["answer"]
     assert out["trajectory"]["research_loop"]["withheld"] == "candidate check failed"
+
+
+def test_a_disclaimer_covers_only_its_own_clause():
+    verdicts = [{"name": "Nova Labs", "verdict": "not_established"}, {"name": "Aave", "verdict": "related_but_different"}]
+    assert research_loop.unlabelled_names("Nova Labs is an exact match, but Aave is not established.", verdicts) == ["Nova Labs"]
+    assert research_loop.unlabelled_names("Nova Labs and Aave are not established by their pages.", verdicts) == []
+    assert research_loop.unlabelled_names("Aave is a receipt design; Nova Labs qualifies.", verdicts) == ["Nova Labs"]
+
+
+def test_candidates_the_budget_leaves_unread_are_not_established(loop):
+    from app.nodes import runtime
+    reads = []
+    loop.setattr(research_loop, "read_page", lambda url: (reads.append(url) or {"url": url, "title": "t", "text": "Depositors receive aTokens.", "provenance": "page", "fetched_at": "replay"}))
+    loop.setattr(research_loop, "first_party_url", lambda name, conditions: None)
+    loop.setattr(research_loop.settings, "research_loop_inspect_pages", 3, raising=False)      # one initial read, two follow-ups reserved
+    cards = WEB2 + "\n[3] [Nova docs](https://docs.nova.example) · 2026-09-01\n[4] [Kaizen docs](https://docs.kaizen.example) · 2026-09-01"
+
+    async def fake(program, **kw):
+        fields = set(kw)
+        if "catalog" in fields and "request" in fields:
+            return SimpleNamespace(subject="Venice", question="q", constraints="own token as collateral", required_facts="named projects", capabilities="web_discovery", queries="web_discovery: q1")
+        if "calls_made" in fields:
+            return SimpleNamespace(missing="none", next_call="stop", reason="test")
+        if "evidence" in fields and "answer" not in fields:
+            return SimpleNamespace(candidates="Aave | https://docs.aave.com\nNova | https://docs.nova.example\nKaizen | https://docs.kaizen.example")
+        if "page" in fields:
+            return SimpleNamespace(verdict="related_but_different", conditions_met="none", conditions_failed="own token as collateral", quote="aTokens")
+        if "answer" in fields:
+            return SimpleNamespace(supported="Nova, Kaizen", related_but_different="Aave", not_established="none")      # the snippets convinced it
+        return SimpleNamespace()
+
+    async def synth(request, cards, trajectory, advice=False, research=False):
+        return f"**Taken together**\n\nNova and Kaizen are matches; Aave is a receipt design, not a match.\n\n---\n\n{cards}"
+
+    loop.setattr(evidence_pipeline.composition, "synthesize", synth)
+    loop.setattr(research_loop.composition, "synthesize", synth)
+
+    class Router(FakeRouter):
+        replay = False
+    loop.setattr(runtime, "_call_research_lm", fake)
+    loop.setattr(runtime, "_call_research_loop_lm", fake)
+    router = Router({"perplexity_web_search": cards})
+    router.plan_across = lambda request, caps, chains, n: []
+    saved = evidence_pipeline.get_provider_router
+    evidence_pipeline.get_provider_router = lambda: router
+    try:
+        out = asyncio.run(evidence_pipeline.answer({}, "which other projects follow lock collateral → mint a tradable second token", ()))
+    finally:
+        evidence_pipeline.get_provider_router = saved
+    verdicts = {v["name"]: v for v in out["trajectory"]["research_loop"]["verdicts"]}
+    assert reads == ["https://docs.aave.com"]
+    assert verdicts["Nova"]["provenance"] == "uninspected" and verdicts["Nova"]["verdict"] == "not_established"
+    assert verdicts["Kaizen"]["provenance"] == "uninspected"
+    assert "I withheld the written summary" in out["answer"]                 # Nova and Kaizen were presented as matches without a page verdict
+    assert "Nova (https://docs.nova.example; not inspected): not established by its page (not inspected: page budget reached" in out["answer"]
