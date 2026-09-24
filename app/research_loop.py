@@ -338,8 +338,17 @@ async def run(state: dict, request: str, contract: contracts.QuestionContract, r
     # candidates the cards name are checked against the conditions from
     # their cited pages, not from the search snippet that mentioned them.
     t_inspect = time.monotonic()
-    verdicts = await _inspect_candidates(question, constraints, cards, runtime, router)
+    verdicts, inspect_calls = await _inspect_candidates(question, constraints, cards, runtime, router)
+    made.extend(inspect_calls)                          # every page read and follow-up search counts as a provider call
     timings["inspect"] = round(time.monotonic() - t_inspect, 1)
+    if verdicts is None:
+        # The candidate check could not run: nothing named can be verified, so no written summary (review of 0b360f9e).
+        timings["total"] = round(time.monotonic() - started, 1)
+        withheld = _with_trail(_withheld("the candidate check could not run, so no named example is verified", cards), made, skipped, [], timings)
+        trajectory = dict(trajectory or {})
+        trajectory["research_loop"] = {"subject": getattr(plan, "subject", ""), "question": question, "constraints": constraints, "required_facts": required,
+                                       "calls": made, "skipped": skipped, "verdicts": [], "timings": timings, "withheld": "candidate check failed"}
+        return {"answer": withheld, "trajectory": trajectory, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "research_loop"}
     if verdicts:
         note += "\nCandidates checked against the conditions from their cited pages (state these verdicts, never upgrade one): " + "; ".join(
             f"{v['name']}: {v['verdict']}" + (f" ({v['conditions_failed']})" if v["verdict"] == "related_but_different" and v.get("conditions_failed") not in (None, "", "none") else "")
@@ -365,7 +374,7 @@ async def run(state: dict, request: str, contract: contracts.QuestionContract, r
         synthesized = (f"**I withheld the written summary: it stated {what}. The cards below are the evidence as fetched; ask for one figure and I will read it from a card.**\n\n---\n\n{cards}")
     else:
         t_support = time.monotonic()
-        synthesized = await _verify_examples(question, synthesized, cards, request, note, trajectory, runtime)
+        synthesized = await _verify_examples(question, synthesized, cards, request, note, trajectory, runtime, verdicts)
         timings["support"] = round(time.monotonic() - t_support, 1)
     timings["total"] = round(time.monotonic() - started, 1)
     synthesized = _with_trail(synthesized, made, skipped, verdicts, timings)
@@ -376,24 +385,52 @@ async def run(state: dict, request: str, contract: contracts.QuestionContract, r
     return {"answer": synthesized, "trajectory": trajectory, "contract": contract.model_dump(), "gate": final.model_dump(), "pipeline": "research_loop"}
 
 
-async def _verify_examples(question: str, synthesized: str, cards: str, request: str, note: str, trajectory: dict, runtime) -> str:
+_LABELLED = re.compile(r"not established|different design|does not qualify|not a match|not verified|not confirmed|related but|no first-party|cannot be confirmed|not documented|unverified", re.I)
+
+
+def unlabelled_names(summary: str, verdicts: list[dict]) -> list[str]:
+    """Names whose page verdict is not "qualifies" and which the summary
+    mentions in a sentence that does not say so: the page verdicts are the
+    hard gate, whatever the search snippet said (review of 0b360f9e)."""
+    prose = summary.split("\n\n---\n\n", 1)[0]
+    out = []
+    for v in verdicts:
+        if v.get("verdict") == "qualifies":
+            continue
+        name = v.get("name") or ""
+        if not name:
+            continue
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", prose):
+            if name.lower() in sentence.lower() and not _LABELLED.search(sentence):
+                out.append(name)
+                break
+    return out
+
+
+async def _verify_examples(question: str, synthesized: str, cards: str, request: str, note: str, trajectory: dict, runtime, verdicts: list[dict] | None = None) -> str:
     """The central promise: a name the cited evidence does not establish never
-    stands as a claim. The support check runs; a name it flags is removed or
-    relabelled by one rewrite, checked again; whatever still fails, or a check
-    that cannot run, withholds the written summary (review, 2026-09-24: a
-    warning had been appended under the original claim)."""
-    checked = await _support_check(question, synthesized, cards, runtime)
+    stands as a claim. The page verdicts gate first, deterministically: a
+    name whose page did not establish the mechanism may appear only in a
+    sentence that says so. Then the support check runs over the cards and
+    the verdicts; a name either flags is removed or relabelled by one
+    rewrite, checked again; whatever still fails, or a check that cannot
+    run, withholds the written summary."""
+    verdicts = verdicts or []
+    gated = unlabelled_names(synthesized, verdicts)
+    checked = await _support_check(question, synthesized, cards, runtime, verdicts)
     if checked is None:
         return _withheld("the example check could not run, so no named example is verified", cards)
     related, missing = checked
+    if gated:
+        missing = ", ".join(x for x in [missing, *gated] if x)
     if not related and not missing:
         return synthesized
     redo = (f"{request}\n{note}\nThe cited sources do not establish these names as examples of the mechanism -- "
             + (f"related but a different design: {related}; " if related else "") + (f"not established: {missing}; " if missing else "")
             + "state each of them only as such, or leave it out; never present it as a match.")
     rewritten = await composition.synthesize(redo, cards, trajectory, research=True)
-    if rewritten:
-        again = await _support_check(question, rewritten, cards, runtime)
+    if rewritten and not unlabelled_names(rewritten, verdicts):
+        again = await _support_check(question, rewritten, cards, runtime, verdicts)
         if again is not None and not again[0] and not again[1]:
             return rewritten
     return _withheld("it presented as examples names the cited sources do not establish (" + ", ".join(x for x in (related, missing) if x) + ")", cards)
@@ -404,11 +441,16 @@ def _withheld(reason: str, cards: str) -> str:
             f"and how each candidate fared.**\n\n---\n\n{cards}")
 
 
-async def _support_check(question: str, synthesized: str, cards: str, runtime) -> tuple[str, str] | None:
+async def _support_check(question: str, synthesized: str, cards: str, runtime, verdicts: list[dict] | None = None) -> tuple[str, str] | None:
     """(related-but-different names, not-established names), each '' when
-    none; None when the check could not run."""
+    none; None when the check could not run. The page verdicts lead the
+    evidence the check reads: a page verdict outranks a search snippet."""
+    evidence = _compact(cards)
+    if verdicts:
+        evidence = ("Page verdicts (each candidate's own cited page checked against the conditions; a page verdict outranks any search snippet): "
+                    + "; ".join(f"{v['name']}: {v['verdict']}" for v in verdicts) + "\n\n" + evidence)
     try:
-        support = await asyncio.wait_for(runtime._call_research_loop_lm(_support_program, question=question, answer=synthesized[:6000], evidence=_compact(cards)), timeout=60)
+        support = await asyncio.wait_for(runtime._call_research_loop_lm(_support_program, question=question, answer=synthesized[:6000], evidence=evidence), timeout=60)
     except Exception:
         logger.info("research loop: example support check failed", exc_info=True)
         return None
@@ -450,6 +492,8 @@ def read_page(url: str) -> dict:
     from datetime import datetime, timezone
     from app import perplexity_tools, url_reader
     fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    if url_reader.resolve_public(url) is None:
+        return {"url": url, "title": "", "text": "", "provenance": "unreadable", "fetched_at": fetched_at, "note": "not a public destination"}
     got = url_reader.fetch(url)
     if got:
         title, text = got
@@ -464,18 +508,22 @@ def read_page(url: str) -> dict:
     return {"url": url, "title": "", "text": "", "provenance": "unreadable", "fetched_at": fetched_at}
 
 
-async def _inspect_candidates(question: str, constraints: str, cards: str, runtime, router) -> list[dict]:
+async def _inspect_candidates(question: str, constraints: str, cards: str, runtime, router) -> tuple[list[dict] | None, list[str]]:
     """Read the cited page of each candidate the cards name and check it
-    against the conditions; bounded by `research_loop_inspect_pages`."""
+    against the conditions; bounded by `research_loop_inspect_pages`.
+    (verdicts, the calls made): verdicts is None when the candidate listing
+    could not run, which withholds the answer; [] when the cards discuss no
+    candidate."""
+    calls: list[str] = []
     limit = int(getattr(settings, "research_loop_inspect_pages", 4) or 0)
     if limit <= 0 or not cards.strip():
-        return []
+        return [], calls
     conditions = constraints if constraints and constraints.lower() != "none" else question
     try:
         listed = await asyncio.wait_for(runtime._call_research_loop_lm(_candidates_program, question=question, evidence=_compact(cards)), timeout=45)
     except Exception:
         logger.info("research loop: candidate listing failed", exc_info=True)
-        return []
+        return None, calls
     # The safety boundary on what is read: a URL the evidence cards cite, or
     # one a first-party search returned; never a URL the model wrote on its
     # own (review, 2026-09-24). The reader refuses non-public destinations.
@@ -499,11 +547,12 @@ async def _inspect_candidates(question: str, constraints: str, cards: str, runti
     candidates = candidates[:initial_cap]
     for name in named_only[: max(0, initial_cap - len(candidates))]:
         url = await asyncio.to_thread(first_party_url, name, conditions)
+        calls.append(f"first_party_search (perplexity_web_search): {name}")
         if url:
             candidates.append((name, url))
     if not candidates:
         logger.info("research loop: no candidates listed from the cards")
-        return []
+        return [], calls
     streaming.emit("status", text=f"Reading {len(candidates)} cited page{'s' if len(candidates) != 1 else ''} to check the candidates")
 
     async def check(name: str, url: str) -> dict:
@@ -513,8 +562,9 @@ async def _inspect_candidates(question: str, constraints: str, cards: str, runti
         except Exception as exc:
             page = {"url": url, "title": "", "text": "", "provenance": "unreadable", "fetched_at": "", "note": type(exc).__name__}
         base.update(provenance=page["provenance"], title=page.get("title", ""), fetched_at=page.get("fetched_at", ""))
+        calls.append(f"page_read ({'url_reader' if page['provenance'] == 'page' else 'perplexity_fetch_url' if page['provenance'] == 'reader' else 'unreadable'}): {url}")
         if page["provenance"] == "unreadable" or not page.get("text"):
-            return {**base, "verdict": "not_established", "note": "page unreadable: a search lead, not verified evidence"}
+            return {**base, "verdict": "not_established", "note": page.get("note") or "page unreadable: a search lead, not verified evidence"}
         try:
             result = await asyncio.wait_for(runtime._call_research_loop_lm(_check_program, question=question, conditions=conditions, candidate=name, page=page["text"][:6000]), timeout=45)
         except Exception as exc:
@@ -536,6 +586,7 @@ async def _inspect_candidates(question: str, constraints: str, cards: str, runti
 
         async def follow_up(v: dict) -> dict:
             url = await asyncio.to_thread(first_party_url, v["name"], conditions)
+            calls.append(f"first_party_search (perplexity_web_search): {v['name']}")
             if not url or url == v["url"]:
                 return v
             again = await check(v["name"], url)
@@ -546,7 +597,7 @@ async def _inspect_candidates(question: str, constraints: str, cards: str, runti
         by_name = {r["name"]: r for r in replaced}
         verdicts = [by_name.get(v["name"], v) for v in verdicts]
     logger.info("research loop: inspected %d candidates: %s", len(verdicts), [(v["name"], v["verdict"], v.get("provenance")) for v in verdicts])
-    return verdicts
+    return verdicts, calls
 
 
 def first_party_url(name: str, conditions: str) -> str | None:

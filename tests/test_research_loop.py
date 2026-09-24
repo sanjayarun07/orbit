@@ -372,31 +372,49 @@ def test_the_reader_refuses_private_and_local_destinations():
     assert url_reader.public_destination("https://docs.synthetix.io/staking")
 
 
-def test_a_redirect_to_a_private_destination_is_refused(monkeypatch):
-    import httpx
+def test_a_fetch_connects_to_the_address_that_passed_the_check(monkeypatch):
     from app import url_reader
+    connected = []
 
-    class Response:
-        def __init__(self, status, headers=None, text=""):
-            self.status_code, self.headers, self.text = status, headers or {}, text
-            self.is_redirect = status in (301, 302, 303, 307, 308)
+    def resolve(url):
+        return ("public.example", 443, "203.0.113.7", "https") if "public.example" in url else None
 
-    class Client:
-        def __init__(self, *a, **k):
-            self.seen = []
-        def __enter__(self):
-            return self
-        def __exit__(self, *a):
-            return False
-        def get(self, url):
-            self.seen.append(url)
-            if "public.example" in url:
-                return Response(302, {"location": "http://127.0.0.1/secret"})
-            raise AssertionError(f"must not fetch {url}")
+    def get(url, host, port, address, scheme):
+        connected.append((host, address))
+        return 200, {"content-type": "text/html; charset=utf-8"}, "<html><title>t</title><body>" + "<p>Stakers lock SNX as collateral to mint sUSD.</p>" * 40 + "</body></html>"
 
-    monkeypatch.setattr(url_reader, "public_destination", lambda url: "127.0.0.1" not in url)
-    monkeypatch.setattr(httpx, "Client", Client)
+    monkeypatch.setattr(url_reader, "resolve_public", resolve)
+    monkeypatch.setattr(url_reader, "_get_pinned", get)
+    got = url_reader.fetch("https://public.example/page")
+    assert got and got[0] == "t" and "lock SNX" in got[1]
+    assert connected == [("public.example", "203.0.113.7")]          # the request went to the checked address, no second lookup
+
+
+def test_a_redirect_to_a_private_destination_is_refused(monkeypatch):
+    from app import url_reader
+    seen = []
+
+    def resolve(url):
+        return ("public.example", 443, "203.0.113.7", "https") if "public.example" in url else None
+
+    def get(url, host, port, address, scheme):
+        seen.append(url)
+        return 302, {"location": "http://127.0.0.1/secret"}, ""
+
+    monkeypatch.setattr(url_reader, "resolve_public", resolve)
+    monkeypatch.setattr(url_reader, "_get_pinned", get)
     assert url_reader.fetch("https://public.example/page") is None
+    assert seen == ["https://public.example/page"]                  # the private hop was never requested
+
+
+def test_the_reader_fallback_never_gets_a_rejected_url(monkeypatch):
+    from app import perplexity_tools, url_reader
+    monkeypatch.setattr(url_reader, "resolve_public", lambda url: None)
+    monkeypatch.setattr(url_reader, "fetch", lambda url: None)
+    monkeypatch.setattr(perplexity_tools, "perplexity_available", lambda: True)
+    monkeypatch.setattr(perplexity_tools, "perplexity_fetch_url", lambda url: (_ for _ in ()).throw(AssertionError("fallback must not run")))
+    page = research_loop.read_page("http://169.254.169.254/latest")
+    assert page["provenance"] == "unreadable" and page["note"] == "not a public destination"
 
 
 def test_only_cited_urls_are_read_and_the_page_budget_holds(loop):
@@ -482,3 +500,79 @@ def test_the_conversation_lock_outlives_a_research_turn(monkeypatch):
     monkeypatch.setattr(sessions.settings, "research_loop_enabled", False, raising=False)
     asyncio.run(sessions.acquire_session_turn("s2"))
     assert seen["timeout"] == 135
+
+
+
+def test_a_page_verdict_gates_the_summary_whatever_the_snippet_said(loop):
+    # The search snippet says Nova Labs qualifies; its page did not establish it; the support model, reading snippets, sees no problem.
+    from app.nodes import runtime
+    loop.setattr(research_loop, "read_page", lambda url: {"url": url, "title": "Nova", "text": "Nova Labs announces ASTRA. Details will follow.", "provenance": "page", "fetched_at": "replay"})
+    loop.setattr(research_loop.settings, "research_loop_inspect_pages", 4, raising=False)
+    snippet = ("# From the web (dated, with sources)\n**Query**: q\n\nNova Labs locks NOVA to mint tradable ASTRA credits. [1]\n\n"
+               "Sources:\n[1] [Nova Labs blog](https://novalabs.example/blog) · 2026-09-10")
+
+    async def fake(program, **kw):
+        fields = set(kw)
+        if "catalog" in fields and "request" in fields:
+            return SimpleNamespace(subject="Venice", question="q", constraints="own token as collateral; second token tradable", required_facts="named projects", capabilities="web_discovery", queries="web_discovery: q1")
+        if "calls_made" in fields:
+            return SimpleNamespace(missing="none", next_call="stop", reason="test")
+        if "evidence" in fields and "answer" not in fields:
+            return SimpleNamespace(candidates="Nova Labs | https://novalabs.example/blog")
+        if "page" in fields:
+            return SimpleNamespace(verdict="not_established", conditions_met="none", conditions_failed="none", quote="none")
+        if "answer" in fields:
+            return SimpleNamespace(supported="Nova Labs", related_but_different="none", not_established="none")      # the snippet convinced it
+        return SimpleNamespace()
+
+    async def synth(request, cards, trajectory, advice=False, research=False):
+        return f"**Taken together**\n\nNova Labs locks NOVA to mint tradable ASTRA, a match.\n\n---\n\n{cards}"     # the rewrite does not relabel it either
+
+    loop.setattr(evidence_pipeline.composition, "synthesize", synth)
+    loop.setattr(research_loop.composition, "synthesize", synth)
+
+    class Router(FakeRouter):
+        replay = False
+    loop.setattr(runtime, "_call_research_lm", fake)
+    loop.setattr(runtime, "_call_research_loop_lm", fake)
+    router = Router({"perplexity_web_search": snippet})
+    router.plan_across = lambda request, caps, chains, n: []
+    saved = evidence_pipeline.get_provider_router
+    evidence_pipeline.get_provider_router = lambda: router
+    try:
+        out = asyncio.run(evidence_pipeline.answer({}, "which other projects follow lock collateral → mint a tradable second token", ()))
+    finally:
+        evidence_pipeline.get_provider_router = saved
+    assert "I withheld the written summary" in out["answer"] and "Nova Labs" in out["answer"]
+    assert research_loop.unlabelled_names("Nova Labs is related but a different design.", [{"name": "Nova Labs", "verdict": "not_established"}]) == []
+    assert any(c.startswith("page_read (url_reader): https://novalabs.example/blog") for c in out["trajectory"]["research_loop"]["calls"])
+
+
+def test_a_failed_candidate_listing_withholds_the_summary(loop):
+    from app.nodes import runtime
+    loop.setattr(research_loop.settings, "research_loop_inspect_pages", 4, raising=False)
+
+    async def fake(program, **kw):
+        fields = set(kw)
+        if "catalog" in fields and "request" in fields:
+            return SimpleNamespace(subject="Venice", question="q", constraints="none", required_facts="named projects", capabilities="web_discovery", queries="web_discovery: q1")
+        if "calls_made" in fields:
+            return SimpleNamespace(missing="none", next_call="stop", reason="test")
+        if "evidence" in fields and "answer" not in fields:
+            raise RuntimeError("model down")
+        raise AssertionError("nothing runs after the listing fails")
+
+    class Router(FakeRouter):
+        replay = False
+    loop.setattr(runtime, "_call_research_lm", fake)
+    loop.setattr(runtime, "_call_research_loop_lm", fake)
+    router = Router({"perplexity_web_search": WEB2})
+    router.plan_across = lambda request, caps, chains, n: []
+    saved = evidence_pipeline.get_provider_router
+    evidence_pipeline.get_provider_router = lambda: router
+    try:
+        out = asyncio.run(evidence_pipeline.answer({}, "which other projects follow lock collateral → mint a tradable second token", ()))
+    finally:
+        evidence_pipeline.get_provider_router = saved
+    assert "I withheld the written summary: the candidate check could not run" in out["answer"]
+    assert out["trajectory"]["research_loop"]["withheld"] == "candidate check failed"

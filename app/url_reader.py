@@ -91,60 +91,101 @@ def extract_text(html: str) -> tuple[str, str]:
 
 
 _MAX_REDIRECTS = 5
+_MAX_BYTES = 2_000_000
 
 
-def public_destination(url: str) -> bool:
-    """Whether a URL points at a public web host: http(s), a hostname that
-    resolves only to public addresses -- never loopback, private, link-local
-    (the cloud metadata range), multicast or reserved space. Checked on
-    every hop of a redirect (review of the research loop, 2026-09-24: a
-    model-chosen URL was fetched with redirects followed blindly)."""
+def resolve_public(url: str) -> tuple[str, int, str, str] | None:
+    """(host, port, address, scheme) for a URL that points at a public web
+    host -- http(s), a hostname whose every address is public: never
+    loopback, private, link-local (the cloud metadata range), multicast or
+    reserved space -- else None. The address returned is the one the request
+    connects to, so no second lookup can answer differently (review of
+    0b360f9e: a hostname changing answers between the check and the request)."""
     import ipaddress
     import socket
     try:
         parts = urlsplit(url)
     except ValueError:
-        return False
+        return None
     if parts.scheme not in ("http", "https") or not parts.hostname:
-        return False
+        return None
     host = parts.hostname.strip("[]").lower()
-    if host in ("localhost",) or host.endswith(".localhost") or host.endswith(".local") or host.endswith(".internal"):
-        return False
+    if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
+        return None
+    port = parts.port or (443 if parts.scheme == "https" else 80)
     try:
-        infos = socket.getaddrinfo(host, parts.port or (443 if parts.scheme == "https" else 80), proto=socket.IPPROTO_TCP)
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
     except (socket.gaierror, UnicodeError, OSError):
-        return False
-    addresses = {ipaddress.ip_address(info[4][0]) for info in infos}
-    if not addresses:
-        return False
-    return all(ip.is_global and not ip.is_multicast for ip in addresses)
+        return None
+    addresses = [ipaddress.ip_address(info[4][0]) for info in infos]
+    if not addresses or not all(ip.is_global and not ip.is_multicast for ip in addresses):
+        return None
+    return host, port, str(addresses[0]), parts.scheme
+
+
+def public_destination(url: str) -> bool:
+    """Whether a URL points at a public web host (see resolve_public)."""
+    return resolve_public(url) is not None
+
+
+def _get_pinned(url: str, host: str, port: int, address: str, scheme: str) -> tuple[int, dict, str]:
+    """One GET to the resolved address with the hostname for SNI, certificate
+    verification and the Host header: (status, lower-cased headers, body)."""
+    import http.client
+    import socket
+    import ssl
+    parts = urlsplit(url)
+    path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+    raw = socket.create_connection((address, port), timeout=15)
+    sock = ssl.create_default_context().wrap_socket(raw, server_hostname=host) if scheme == "https" else raw
+    conn = http.client.HTTPConnection(host, port, timeout=15)
+    conn.sock = sock
+    try:
+        host_header = host if port in (80, 443) else f"{host}:{port}"
+        conn.request("GET", path, headers={**_HEADERS, "Host": host_header})
+        response = conn.getresponse()
+        body = response.read(_MAX_BYTES)
+        headers = {k.lower(): v for k, v in response.getheaders()}
+    finally:
+        conn.close()
+    charset = "utf-8"
+    m = re.search(r"charset=([\w-]+)", headers.get("content-type", ""), re.I)
+    if m:
+        charset = m.group(1)
+    try:
+        text = body.decode(charset, errors="replace")
+    except LookupError:
+        text = body.decode("utf-8", errors="replace")
+    return response.status, headers, text
 
 
 def fetch(url: str) -> tuple[str, str] | None:
     """(title, text) of the page fetched directly, or None when the site
     refuses, answers with something that is not HTML, has no readable text
-    (an app shell), or is not a public destination on any hop."""
+    (an app shell), or is not a public destination on any hop. Each hop is
+    resolved once and fetched at that address."""
+    from urllib.parse import urljoin
     try:
         current = url
-        with httpx.Client(timeout=httpx.Timeout(15.0, connect=8.0), follow_redirects=False, headers=_HEADERS) as client:
-            for _ in range(_MAX_REDIRECTS + 1):
-                if not public_destination(current):
-                    logger.info("fetch refused, not a public destination: %s", current[:120])
-                    return None
-                response = client.get(current)
-                if response.is_redirect or response.status_code in (301, 302, 303, 307, 308):
-                    target = response.headers.get("location")
-                    if not target:
-                        return None
-                    current = str(httpx.URL(current).join(target))
-                    continue
-                break
-            else:
+        for _ in range(_MAX_REDIRECTS + 1):
+            pinned = resolve_public(current)
+            if pinned is None:
+                logger.info("fetch refused, not a public destination: %s", current[:120])
                 return None
-        if response.status_code >= 400 or "html" not in (response.headers.get("content-type") or ""):
+            status, headers, text = _get_pinned(current, *pinned)
+            if status in (301, 302, 303, 307, 308):
+                target = headers.get("location")
+                if not target:
+                    return None
+                current = urljoin(current, target)
+                continue
+            break
+        else:
             return None
-        title, text = extract_text(response.text)
-        return (title, text) if len(text) >= MIN_TEXT_CHARS else None
+        if status >= 400 or "html" not in headers.get("content-type", ""):
+            return None
+        title, body = extract_text(text)
+        return (title, body) if len(body) >= MIN_TEXT_CHARS else None
     except Exception:
         logger.info("direct fetch failed for %s", url[:120], exc_info=True)
         return None

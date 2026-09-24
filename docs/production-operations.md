@@ -3329,3 +3329,9 @@ first-party-search URLs are read and the reader refuses non-public destinations 
 (`url_reader.public_destination`); the conversation lock outlives the longest turn the policy allows; a name the
 support check flags is rewritten once or the summary is withheld, and a check that cannot run withholds; the page
 budget bounds initial reads and follow-ups together. Rollout remains off.
+
+Review of 0b360f9e (2026-09-25): page verdicts now gate the summary deterministically (`research_loop.unlabelled_names`;
+a snippet can no longer support what the page did not establish, and a failed candidate listing withholds); the
+reader resolves once and connects to the checked address with SNI and Host set (`url_reader.resolve_public`,
+`_get_pinned`), per redirect hop, and the fallback reader never sees a rejected URL; page reads and follow-up searches
+are recorded calls, so the public provider-call count is complete.
