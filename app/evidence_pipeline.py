@@ -178,6 +178,18 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         near = [n for n in _near_tools(contract, ranked) if n in enabled]
         near.sort(key=rank, reverse=True)
         if not near:
+            covered_but_down = [name for name, reason in ranked if reason == "eligible" and name not in enabled]
+            if covered_but_down:
+                # A source covers this; it is paused right now (a provider's
+                # rate limit or breaker). Say that, not "nothing covers this"
+                # (PEPE holders during a Mobula cooldown read as uncovered,
+                # frozen run 2026-09-24).
+                gate = fact_gate.check(contract, [], scope_satisfied=True)
+                gate.missing = [f"the source that covers this is unavailable right now ({', '.join(covered_but_down[:3])})"]
+                gate.ok = False
+                text = (f"The source that covers this ({', '.join(covered_but_down[:3])}) is unavailable right now, usually a provider's rate limit "
+                        f"or a short outage, so I have nothing verified for {contract.label()}. Ask again in a minute; I will not answer it from the web.")
+                return {"answer": text, "trajectory": None, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "contract"}
             gate = fact_gate.check(contract, [], scope_satisfied=False)
             text = (f"No source I have covers this exactly ({contract.label()}). " + gate.gap_sentence(contract) +
                     " Name a venue or chain I do cover, or ask for the global ranking instead.")

@@ -227,3 +227,26 @@ def test_a_question_about_what_a_safety_concept_means_is_open_research():
     assert contracts.is_open_research("Jupiter says verified and there is no mint authority. Does that mean I cannot lose money or get rugged?")
     assert contracts.plan_by_rules("Jupiter says verified and there is no mint authority. Does that mean I cannot lose money or get rugged?").kind == "open_research"
     assert not contracts.is_open_research("is 9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump safe")
+
+
+def test_a_covered_source_that_is_paused_is_reported_as_unavailable_not_uncovered(monkeypatch):
+    # PEPE holders during a Mobula cooldown read "No source I have covers this" (fourth frozen run, 2026-09-24).
+    import asyncio
+    from types import SimpleNamespace
+    from app import evidence_pipeline, tool_catalog
+    from app.nodes import runtime
+    monkeypatch.setattr(runtime, "planner_available", lambda: False)
+    monkeypatch.setattr(evidence_pipeline.settings, "contract_pipeline_enabled", True)
+
+    class Router:
+        replay = True
+        def tools(self):
+            return tuple(SimpleNamespace(name=n, priority=1.0, spec=tool_catalog.TOOL_SPECS.get(n), matches=lambda r: True) for n in tool_catalog.CONTRACT_COVERAGE)
+        def _enabled(self, tool):
+            return not tool.name.startswith(("mobula", "bitquery", "goldrush", "solana_rpc"))     # every holders source paused
+        def invoke(self, *a, **k):
+            return None
+    monkeypatch.setattr(evidence_pipeline, "get_provider_router", lambda: Router())
+    out = asyncio.run(evidence_pipeline.answer({}, "Who are the top holders of PEPE?", ()))
+    assert out["answer"].startswith("The source that covers this (") and "unavailable right now" in out["answer"]
+    assert out["gate"]["scope_satisfied"] is True and not out["gate"]["ok"] and "No source I have covers" not in out["answer"]

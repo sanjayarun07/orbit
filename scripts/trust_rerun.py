@@ -156,7 +156,8 @@ def main() -> None:
     cases += asyncio.run(headline_cases())
     if args.include_skipped:
         for c in cases:
-            c.pop("skip", None)
+            if c.get("prompt"):
+                c.pop("skip", None)                  # a placeholder with no prompt (highlights unavailable) stays skipped
     if args.only:
         keep = set(args.only.split(","))
         cases = [c for c in cases if c["id"] in keep or c["persona"] in keep]

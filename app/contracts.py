@@ -175,7 +175,14 @@ def _window_hours(text: str) -> float | None:
             return 168.0
         if "month" in word or word == "30d":
             return 720.0
-        if word in ("today", "this morning"):
+        if word == "today":
+            # A ranking "today" is the day's change: the daily sources' 24h
+            # figure, not the hours since midnight UTC (at 02:43 UTC "today"
+            # was 2.7 hours and no source was eligible, fourth frozen run
+            # 2026-09-24). The tick ledger reads "since midnight" from the
+            # words themselves (tequity.period_start), not from this window.
+            return 24.0
+        if word == "this morning":
             now = datetime.now(timezone.utc)
             return max(1.0, (now - now.replace(hour=0, minute=0, second=0, microsecond=0)).total_seconds() / 3600)
         return None

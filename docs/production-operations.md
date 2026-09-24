@@ -3015,3 +3015,12 @@ verified and no mint authority: does that mean I cannot get rugged?") is open re
 (`contracts._OPEN_RESEARCH` knows mean/guarantee/does-that; the no-token security branch hands it to the contract),
 and a compound ask whose every clause came back as a question returns that question once, never a synthesis over
 two copies of it.
+
+**Fourth frozen run, build e0823ffb (2026-09-24, `reports/trust-rerun-e0823ffb/`), wallet connected and the
+notification cases included.** 102 turns: 90 pass, 9 partial, 3 fail by the judge; one real defect after the read.
+A source that covers the ask but is paused (a provider's rate limit or breaker) was reported as "No source I have
+covers this exactly"; the pipeline now says the covering source is unavailable right now, names it, and answers
+nothing from the web (`evidence_pipeline.answer`, the `covered_but_down` branch). The run also showed "today" resolving
+to the hours since midnight UTC, which left every daily source ineligible early in the day; a ranking's "today" is now
+the day's window (`contracts._window_hours`), while the tick ledger still reads "since midnight" from the words. The
+harness keeps a prompt-less placeholder skipped under `--include-skipped`.
