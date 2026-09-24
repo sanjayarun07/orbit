@@ -1191,6 +1191,15 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
                 if dedupe_key not in seen:
                     seen.add(dedupe_key)
                     resolved.append(candidate)
+        if len(named_chains) == 1 and lead and len(resolved) <= 1 and not (resolved and resolved[0].get("verified")):
+            # The listed asset's contract on the named chain is the token
+            # ("WIF on Solana" is dogwifhat, CoinGecko rank 164, not a pump.fun
+            # namesake; Jupiter's lookup can be rate-limited, 2026-09-24).
+            listed_contract = await asyncio.to_thread(symbol_registry.contract, lead["id"])
+            if listed_contract and _chain_key(listed_contract[0]) == _chain_key(named_chains[0]):
+                picked = _resolved({"chain": named_chains[0], "address": listed_contract[1]})
+                picked.note = f"_Read **{ticker}** as {lead['name']} (CoinGecko rank {lead['rank']}) on {named_chains[0]}._"
+                return picked
         if len(resolved) == 1:
             # One chain named, but several tokens carry the ticker there and
             # none stands out (ROBINHOOD on Robinhood Chain, 2026-09-18): ask

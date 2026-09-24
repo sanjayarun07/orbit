@@ -355,6 +355,11 @@ def resolve_contextual_request(
         if focus.get("kind") == "token" and focus.get("address"):
             chain = f" on {focus['chain']}" if focus.get("chain") else ""
             return f"{request}\nResolved from canonical session context: token {focus_label}{' mint ' + focus['address'] if focus_label else focus['address']}{chain}."
+        if focus.get("source") == "home_headline":
+            # A Home headline's words are not an ask ("as yields rise" sent
+            # "when did that happen?" to the yields tool, 2026-09-24).
+            return (f"{request}\nResolved from conversation context: this continues the discussion about the Home news headline \"{focus['label']}\" "
+                    "(a news story: answer about the story, its event date and its sources, never about a word in the headline).")
         if focus.get("kind") == "topic":
             return (f"{request}\nResolved from conversation context: this continues the discussion about {focus['label']} "
                     "(the subject of the previous turns: a protocol, company or topic, not a token symbol to look up).")

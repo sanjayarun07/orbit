@@ -56,6 +56,15 @@ _SIZED_EXIT = re.compile(
     rf"^\s*(?:and\s+|so\s+|but\s+)?(?:(?:which|what|how)\b(?=[^?]*\b(?:exit\w*|get\s+out|unwind\w*)\b)[^?]*?|(?:exiting|unwinding)\s+)"
     rf"(?:a\s+|an\s+|my\s+|for\s+a\s+|for\s+|of\s+)?(?P<amount>\$\s*\d[\d,]*(?:\.\d+)?\s*[kK]?)(?:\s+(?:position|worth|stake|bag|exit|of\s+it|of\s+that|of\s+this))?"
     rf"(?:\s+(?:in|of|from)\s+{_named('t')})?\s*[?.!]?(?:\s.*)?$", re.I | re.S)
+# "For the ANSEM amount there, estimate a full exit to USDC; no trade": the
+# wallet's position quoted, in any wording; a stated amount is a simulation
+# instead, and without a wallet the estimate asks for a size (2026-09-24).
+_EXIT_ESTIMATE = re.compile(rf"\b(?:estimate|quote|price[- ]check|simulate|what\s+would)\s+(?:a\s+|the\s+|my\s+)?(?:full\s+|entire\s+|whole\s+|complete\s+)?exit\b(?:\s+(?:of|from|for|on)\s+{_named('t')})?", re.I)
+_STATED_AMOUNT = re.compile(r"\b\d+(?:\.\d+)?\s*[A-Za-z]{2,10}\b")
+_MENTION = re.compile(r"(?<![A-Za-z0-9$])\$?([A-Z][A-Z0-9]{1,9})(?![A-Za-z0-9])")
+_MENTION_STOP = {"USDC", "USDT", "SOL", "USD", "OK", "I", "A", "DEX", "LP", "AI"}
+# "I only want a read-only estimate" right after an exit analysis: it was one.
+_READ_ONLY = re.compile(r"^\s*(?:i\s+(?:only\s+|just\s+)?want\s+|just\s+|only\s+|give\s+me\s+)?(?:a\s+)?read[- ]only\s+(?:estimate|quote|number|answer|version)\b", re.I)
 _AMOUNT = re.compile(r"\$?\s*(\d[\d,]*(?:\.\d+)?)")
 _ADDRESS = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
@@ -66,7 +75,8 @@ def is_public_control(message: str) -> bool:
 
 
 def is_exit_control(message: str) -> bool:
-    return any(p.match(message or "") for p in (_WATCH, _STOP, _ASK, _LIST, _THRESHOLD, _CHANNEL, _SIZES, _CHANGED, _SIZED_EXIT))
+    return any(p.match(message or "") for p in (_WATCH, _STOP, _ASK, _LIST, _THRESHOLD, _CHANNEL, _SIZES, _CHANGED, _SIZED_EXIT)) \
+        or bool(_EXIT_ESTIMATE.search(message or "")) or bool(_READ_ONLY.match(message or ""))
 
 
 async def _since_entry(p: dict) -> str:
@@ -214,9 +224,28 @@ async def _sized_exit(text: str, m: re.Match, focus: dict | None) -> str:
     return f"{lead}\n\n{out}"
 
 
-async def handle(message: str, user: dict | None, wallet: str | None, focus: dict | None = None) -> str | None:
+def _token_mention(text: str, focus: dict | None) -> str | None:
+    """The token a sentence names anywhere ("For the ANSEM amount there"),
+    else the conversation's focus token."""
+    for m in _MENTION.finditer(text or ""):
+        if m.group(1) not in _MENTION_STOP:
+            return m.group(1)
+    focus = focus or {}
+    if focus.get("kind") == "token" and focus.get("address"):
+        return focus["address"]
+    if focus.get("kind") in ("token", "topic") and focus.get("label") and focus["label"] != "TOKEN":
+        return focus["label"]
+    return None
+
+
+async def handle(message: str, user: dict | None, wallet: str | None, focus: dict | None = None, last_capabilities: list[str] | None = None) -> str | None:
     """The reply to an exit control, or None when the message is not one."""
     text = (message or "").strip()
+    if _READ_ONLY.match(text):
+        if "exit_control" in (last_capabilities or []):
+            return ("That exit analysis was already read-only: Jupiter quotes of what the position would fetch, nothing prepared, signed or submitted. "
+                    "The table above is the estimate; say `watch my exit on <token>` to have it re-quoted on a schedule.")
+        return None
     m = _SIZED_EXIT.match(text)
     if m:
         return await _sized_exit(text, m, focus)
@@ -308,11 +337,17 @@ async def handle(message: str, user: dict | None, wallet: str | None, focus: dic
                 return f"Stopped watching your {symbol or mint[:6]} exit."
         return f"You were not watching an exit on {symbol or mint[:6]}."
     m = _WATCH.match(text) or _ASK.match(text)
-    if not m:
+    est = None if m else _EXIT_ESTIMATE.search(text)
+    if est and (_STATED_AMOUNT.search(text) or not wallet):
+        return None                  # a stated amount is a read-only simulation; without a wallet the estimate asks for a size
+    if not m and not est:
         return None
     if not wallet:
         return "Connect a Solana wallet first, or paste the wallet address, so I can read the position you actually hold."
-    mint, symbol, question = await resolve_token(_token_of(m))
+    token = _token_of(m) if m else (_clean(est.group("t")) if est.group("t") else _token_mention(text, focus))
+    if not token:
+        return "Which token's exit? Name it (a $ticker or its mint) and I'll quote what the connected wallet's position would fetch."
+    mint, symbol, question = await resolve_token(token)
     if question:
         return question
     try:
@@ -322,7 +357,7 @@ async def handle(message: str, user: dict | None, wallet: str | None, focus: dic
     if position is None:
         return f"`{wallet[:6]}…{wallet[-4:]}` holds no {symbol or mint[:6]} on Solana, so there is no position to quote."
     rows = await exit_monitor.quote_exit(mint, position["quantity_raw"])
-    existing = next((p for p in await exit_monitor.list_for(user["id"]) if p["status"] == "active" and p["mint"] == mint and p["wallet"] == wallet), None)
+    existing = next((p for p in (await exit_monitor.list_for(user["id"]) if user else []) if p["status"] == "active" and p["mint"] == mint and p["wallet"] == wallet), None)
     if existing and not await exit_monitor.is_live(existing):
         # An active row whose monitor is gone (a registration that failed
         # halfway, a cancelled job): closed and registered afresh.

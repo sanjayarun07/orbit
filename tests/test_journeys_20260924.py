@@ -244,3 +244,59 @@ def test_a_venue_bound_source_is_not_near_another_venue():
 def test_contract_describes_itself_in_plain_words():
     assert plan_by_rules("Show BASE gainers.").describe() == "gainers on Base (trades on that venue) over 24h"
     assert plan_by_rules("Top ANSEM holders").describe().startswith("holders for ANSEM")
+
+
+# --- run 3: headline follow-ups, exit estimates, read-only after an exit ----
+
+_HEADLINE_FOCUS = {"kind": "topic", "label": "Bitcoin falls below $84,000 as yields rise", "address": None, "chain": None, "confidence": 0.9, "source": "home_headline"}
+
+
+def test_headline_followup_is_research_on_the_story_not_its_words():
+    note = context_entities.resolve_contextual_request("When did that event happen, versus when was the source published?", "", {"focus": _HEADLINE_FOCUS})
+    assert 'Home news headline "Bitcoin falls below $84,000 as yields rise"' in note
+    contract = plan_by_rules(note)
+    assert contract.kind == "open_research" and contract.subject.name == _HEADLINE_FOCUS["label"] and contract.window_hours is None
+
+
+def test_headline_followup_routes_to_web_research():
+    from app.routing import resolver
+
+    async def no_model(*a, **k):
+        raise AssertionError("the rule decides before the model")
+
+    state = {"request": "What is different since then?", "session_context": {"focus": _HEADLINE_FOCUS}, "history": "user: Summarize the first Home market headline.\nassistant: ..."}
+    update = asyncio.run(resolver.resolve(state, no_model))
+    assert update["intent"] == "research" and update["routing_decision"]["reason"] == "headline_followup"
+    assert "web_research" in update["capabilities"]
+
+
+@pytest.mark.parametrize("text, token", [
+    ("For the ANSEM amount there, estimate a full exit to USDC; no trade.", "ANSEM"),
+    ("Estimate a full exit from BONK", "BONK"),
+])
+def test_exit_estimate_in_any_wording_is_an_exit_control(text, token):
+    assert exit_controls.is_exit_control(text)
+    est = exit_controls._EXIT_ESTIMATE.search(text)
+    assert (exit_controls._clean(est.group("t")) if est.group("t") else exit_controls._token_mention(text, None)) == token
+
+
+def test_a_stated_amount_is_a_simulation_not_a_position_exit():
+    text = "Price-check my 0.05 SOL exit into USDC, no wallet signature."
+    assert not exit_controls.is_exit_control(text)
+    assert asyncio.run(exit_controls.handle(text, {"id": "u"}, "3aHLqHsvw3gPxnq1fVEYG6P3pCcxkGo3ETSkQGE4KZkS")) is None
+
+
+def test_exit_estimate_without_a_wallet_falls_through_to_the_size_ask():
+    assert asyncio.run(exit_controls.handle("For the ANSEM amount there, estimate a full exit to USDC; no trade.", {"id": "u"}, None)) is None
+
+
+def test_read_only_after_an_exit_analysis_says_it_already_was():
+    answer = asyncio.run(exit_controls.handle("I only want a read-only estimate.", {"id": "u"}, None, last_capabilities=["exit_control"]))
+    assert answer and "already read-only" in answer
+    assert asyncio.run(exit_controls.handle("I only want a read-only estimate.", {"id": "u"}, None, last_capabilities=[])) is None
+
+
+def test_token_mention_prefers_the_sentence_then_the_focus():
+    assert exit_controls._token_mention("For the ANSEM amount there", None) == "ANSEM"
+    assert exit_controls._token_mention("estimate a full exit", {"kind": "token", "label": "TOKEN", "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"}) == "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+    assert exit_controls._token_mention("estimate a full exit to USDC", None) is None

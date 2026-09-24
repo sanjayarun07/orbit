@@ -3107,3 +3107,18 @@ describe it in the user's words (`QuestionContract.describe`: "gainers on Base (
 internal record). Regressions: `tests/test_journeys_20260924.py`. Still open from run 2: two subjects in one ask
 ("Compare BONK and WIF liquidity") resolve one; a web synthesis can open with "Yes" and then say "not"; a product
 answer's own "30 minutes" can trip the figure check on the next turn.
+
+Run 3 (build e0b07ed2, wallet in, 77 turns; `reports/journeys-expanded-2026-09-24-run3/report.md`) was cut by the
+OpenAI account running out of credits during J6: eight turns errored and seven fell to the router's abstain
+clarification, which says nothing about the mechanisms -- warm the highlights *and* check the model account before a
+run. The valid part confirmed the run-2 fixes and found five more, fixed the same day: a Home-headline follow-up is
+research on the story, never on a word in the headline ("as yields rise" had reached the yields tool;
+`context_entities` names the story, `contracts.plan_by_rules` plans open research on it, the resolver routes it to web
+research before the model); an exit estimate in any wording is the exit control on the wallet's position
+(`exit_controls._EXIT_ESTIMATE`, the token from the sentence or the focus; a stated amount stays a simulation, and
+without a wallet it falls through to the size ask); "I only want a read-only estimate" right after an exit analysis is
+told it already was (`last_capabilities: exit_control`); the listed asset's contract on the named chain settles a
+namesake when Jupiter's lookup is rate-limited (WIF on Solana); and the pipeline's web search receives the
+market-scoped question ("PUMP revenue" had come back as ProPetro). Open after run 3: labelling holder addresses
+("which of those are exchanges or pools"), a synthesis copying the previous turn's framing over a correct card, a
+question about the feed's own coverage, "back to X" after "switch topics", and "this" for a listed set of headlines.

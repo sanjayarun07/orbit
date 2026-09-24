@@ -309,6 +309,11 @@ async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> d
         index_ask = await listed_asset.index_namesake_ask(request)
         if index_ask:
             return {**_clarify_route("rules"), "clarification": index_ask, "routing_decision": {"method": "rules", "reason": "index_namesake"}}
+    if not controlled and ((state.get("session_context") or {}).get("focus") or {}).get("source") == "home_headline" and subject_probe.continues_subject(request):
+        # A follow-up about a Home headline is web research on that story
+        # (its words are not a topic: "as yields rise" reached the yields tool).
+        return {"intent": "research", "capabilities": ["web_research", "news"], "chains": [],
+                "route_source": "rules", "routing_decision": {"method": "rules", "reason": "headline_followup", "speech_act": "research"}}
     if not controlled and snapshot_compare.dated_ask(request):
         # A comparison between dates is research on the snapshot ledger,
         # whatever else the sentence says ("using saved snapshots" read as an

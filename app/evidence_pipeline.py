@@ -64,7 +64,9 @@ async def _invoke(router, name: str, request: str, chains: tuple[str, ...], cont
     if name == "perplexity_web_search" and contract is not None and perplexity_tools.perplexity_available() and not getattr(router, "replay", False):
         try:
             days = int((contract.window_hours or 24 * 30) / 24) or 1 if contract.kind in ("recent_events", "open_research") else None
-            found = await asyncio.to_thread(perplexity_tools.perplexity_search_with_sources, request, recency_days=days)
+            from app.routing.subject_probe import market_scoped
+            # The web reads the ticker as a crypto asset first ("PUMP revenue" came back as ProPetro, NYSE: PUMP, 2026-09-24).
+            found = await asyncio.to_thread(perplexity_tools.perplexity_search_with_sources, market_scoped(request), recency_days=days)
             card = perplexity_tools.render_search_card(request, found)
             result = SimpleNamespace(output=card, tool=name, provider="perplexity", structured=found)
             return result

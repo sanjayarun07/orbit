@@ -295,6 +295,13 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
         filters["min_liquidity_usd"] = value
     limit = int(_LIMIT.search(text).group(1)) if _LIMIT.search(text) else 10
     window = _window_hours(text)
+    headline = re.search(r'Home news headline "([^"]+)"', text)
+    if headline:
+        # A follow-up about a Home headline is research on that story; the
+        # headline's own words ("yields", "gainers") plan nothing (2026-09-24).
+        return QuestionContract(kind="open_research", subject=Subject(kind="topic", name=headline.group(1)), scope="any", metric="events",
+                                window_hours=None, freshness_seconds=7 * 86400, evidence_order="discovery_first",
+                                required_facts=["source"], confidence=0.6, planner="rules")
     explanation = bool(re.match(r"\s*(?:why|what(?:'s| is)\s+(?:driving|behind|moving))\b", text, re.I))
     stated_amount = bool(re.search(r"\b\d+(?:\.\d+)?\s*[A-Za-z$][A-Za-z0-9]{1,9}\b", text))
     if _TRANSACTION.search(text) and not _EXPLANATION_ASK.search(text) and (not _PORTFOLIO_ASK.search(text) or _EXIT_ASK.search(text) or stated_amount):

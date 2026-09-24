@@ -328,14 +328,18 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         remembered_wallet = ((session_context or {}).get("connected_wallet") or {}).get("address")
         effective_wallet = body.wallet_address or remembered_wallet or ""
         task_reply = await task_scheduling.handle_chat_control(body, identity, action)
+        exit_reply = False
         if task_reply is None and action is None and (identity.signed_in or exit_controls.is_public_control(body.message)) and exit_controls.is_exit_control(body.message):
             # Sizing before entry needs no account (a guest asked it, 2026-09-23); the position controls need one.
             task_reply = await exit_controls.handle(body.message, identity.user if identity.signed_in else None, effective_wallet or None,
-                                                    focus=(session_context or {}).get("focus"))
+                                                    focus=(session_context or {}).get("focus"),
+                                                    last_capabilities=(session_context or {}).get("last_capabilities"))
+            exit_reply = task_reply is not None
         if task_reply is not None:
             from app.graph import AgentRun
             # No trajectory: a task control is a plain (1-credit) turn, not a tool turn.
-            run = AgentRun(answer=task_reply, trajectory=None, trade_plan=None, intent="general", capabilities=[], control=True)
+            # An exit control is remembered as such ("I only want a read-only estimate" right after it).
+            run = AgentRun(answer=task_reply, trajectory=None, trade_plan=None, intent="general", capabilities=["exit_control"] if exit_reply else [], control=True)
             turn_evidence = []
         else:
             # The user's TradingView token is bound to this turn (None when
