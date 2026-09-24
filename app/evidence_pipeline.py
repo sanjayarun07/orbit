@@ -50,7 +50,11 @@ def _near_tools(contract: contracts.QuestionContract, ranked: list[tuple[str, st
     fallback, shown as such ("I can only verify the global ranking"). A tool
     that also fails the metric or the window is not near; it is wrong."""
     relaxed = contract.model_copy(update={"scope": "any", "venue": None})
-    return [name for name, reason in ranked if reason != "eligible" and tool_catalog.eligible(name, relaxed)[0]]
+    # A source bound to particular venues (the Tequity feed: Aster and
+    # Hyperliquid) is not near an ask about another venue: Binance movers
+    # ran the Hyperliquid ledger and reported "nothing usable" (2026-09-24).
+    return [name for name, reason in ranked if reason != "eligible" and tool_catalog.eligible(name, relaxed)[0]
+            and not (contract.venue and (tool_catalog.CONTRACT_COVERAGE.get(name) or {}).get("venues"))]
 
 
 async def _invoke(router, name: str, request: str, chains: tuple[str, ...], contract=None):
@@ -214,10 +218,10 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
                 gate.missing = [f"the source that covers this is unavailable right now ({', '.join(covered_but_down[:3])})"]
                 gate.ok = False
                 text = (f"The source that covers this ({', '.join(covered_but_down[:3])}) is unavailable right now, usually a provider's rate limit "
-                        f"or a short outage, so I have nothing verified for {contract.label()}. Ask again in a minute; I will not answer it from the web.")
+                        f"or a short outage, so I have nothing verified for {contract.describe()}. Ask again in a minute; I will not answer it from the web.")
                 return {"answer": text, "trajectory": None, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "contract"}
             gate = fact_gate.check(contract, [], scope_satisfied=False)
-            text = (f"No source I have covers this exactly ({contract.label()}). " + gate.gap_sentence(contract) +
+            text = (f"No source I have covers this exactly ({contract.describe()}). " + gate.gap_sentence(contract) +
                     " Name a venue or chain I do cover, or ask for the global ranking instead.")
             return {"answer": text, "trajectory": None, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "contract"}
         chosen = near[:1]

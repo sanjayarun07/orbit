@@ -190,6 +190,10 @@ def portfolio(request: str) -> str:
     wallet = address_in(request)
     if not wallet:
         raise ValueError("No wallet address found in the request")
+    from app import address_roles
+    refusal = address_roles.not_a_wallet(wallet)
+    if refusal:
+        raise ValueError(refusal)
     data = _get("/api/1/wallet/portfolio", {"wallet": wallet, "unlistedAssets": "true"})
     if not isinstance(data, dict):
         raise RuntimeError("Mobula returned no portfolio")

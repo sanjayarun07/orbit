@@ -76,6 +76,28 @@ class QuestionContract(BaseModel):
     confidence: float = 0.5
     planner: str = "rules"
 
+    def describe(self) -> str:
+        """The ask in the user's terms, for the answers that name it
+        ("market_ranking BASE on Base venue venue_trades 24h" read as the
+        internal record it is, expanded journeys 2026-09-24)."""
+        kind = {"market_ranking": {"gainers": "gainers", "losers": "losers"}.get(self.direction, "a ranking"), "holders": "holders",
+                "recent_events": "recent events", "yields": "yields", "open_research": "research", "portfolio": "holdings",
+                "transaction_intent": "a quote"}.get(self.kind, self.kind)
+        parts = [kind]
+        if self.kind == "market_ranking" and self.metric and self.metric != "price_change":
+            parts.append(f"by {self.metric.replace('_', ' ')}")
+        subject = self.subject.symbol or self.subject.name
+        place = self.venue or self.subject.chain
+        if subject and subject.lower() != (place or "").lower():
+            parts.append(f"for {subject}")
+        if place:
+            parts.append(f"on {place.title()}")
+            if self.scope == "venue_trades":
+                parts.append("(trades on that venue)")
+        if self.window_hours:
+            parts.append(f"over {self.window_hours:g}h")
+        return " ".join(parts)
+
     def label(self) -> str:
         parts = [self.kind]
         if self.subject.symbol or self.subject.name:
@@ -148,6 +170,10 @@ _TRANSACTION = re.compile(r"\b(?:swap(?:ped|ping)?|sell(?:ing)?|sold|buy(?:ing)?
                           r"|\bexit\b.{0,40}\bposition\b|\bexit\s+(?:quotes?|analysis)\b"
                           r"|\b(?:how\s+much|what\s+would|what(?:'s|\s+is)\s+the\s+minimum|i'?d\s+get|would\s+i\s+get|estimate|simulat\w+|price[- ]check|quote)\b.{0,50}\b\d+(?:\.\d+)?\s*[A-Za-z$][A-Za-z0-9]{1,9}\b(?:.{0,50}\b(?:get|receive|fetch|for|into|to|→)\b|.{0,30}\bslippage\b)"
                           r"|\b(?:quote|estimate)\b.{0,40}\b[A-Za-z]{2,10}\s*(?:→|->|/|to)\s*[A-Za-z]{2,10}\b.{0,40}\b\d+(?:\.\d+)?\s*[A-Za-z]{2,10}\b", re.I)     # "a Jupiter quote for SOL→USDC, 0.05 SOL"
+# Words an amount can sit beside without being its token: "$1,000 position",
+# "2 tokens", "50 bps".
+_AMOUNT_NOUNS = {"BPS", "BP", "PCT", "USD", "MIN", "MINS", "H", "M", "D", "X", "POSITION", "POSITIONS", "WORTH", "TOKEN", "TOKENS", "COIN", "COINS",
+                 "OF", "IN", "AT", "FOR", "TO", "AND", "OR", "THE", "DAYS", "DAY", "HOURS", "HOUR", "WEEKS", "WEEK", "MONTHS", "PERCENT", "TIMES"}
 _CHAIN_WORDS = {"SOLANA", "BASE", "ETHEREUM", "ETH", "ARBITRUM", "OPTIMISM", "POLYGON", "BSC", "BNB", "AVALANCHE", "SUI", "HYPERLIQUID", "ROBINHOOD", "JUPITER", "RAYDIUM", "ORCA", "METEORA"}
 _EXIT_ASK = re.compile(r"\bexit\b.{0,40}\bposition\b|\bexit\s+(?:quotes?|analysis)\b", re.I)
 _EXPLANATION_ASK = re.compile(r"^\s*(?:how\s+(?:does|do|is|to)|what\s+is|what\s+are|explain|why)\b(?!.{0,60}\b\d+(?:\.\d+)?\s*[A-Z]{2,10}\b)", re.I)
@@ -281,6 +307,7 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
         normalised = re.sub(r"\bquote\s+me\b", "swap", re.sub(r"\b(?:sold|sell(?:ing)?)\b", "sell", text, flags=re.I), flags=re.I)
         normalised = re.sub(r"\b(?:how\s+much\s+\w+\s+would|what\s+would|estimate\s+(?:selling\s+)?|simulat\w+\s+(?:selling\s+)?|price[- ]check\s+(?:my\s+)?|quote\s+for\s+)", "swap ", normalised, flags=re.I)
         draft = parse_execution_draft(normalised, (chain,) if chain else ())
+        usd_amount: float | None = None
         if draft.destination_chain is None and draft.source_chain is not None and not re.search(r"\b(?:cross[- ]chain|bridge)\b", text, re.I):
             import dataclasses
             draft = dataclasses.replace(draft, destination_chain=draft.source_chain)          # a same-chain swap names one chain
@@ -289,8 +316,14 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
             # 0.05 SOL" and "a quote for SOL→USDC, 0.05 SOL" name the same swap
             # by an amount beside its token and one other token in the sentence.
             import dataclasses
-            amount_m = re.search(r"\b(\d+(?:\.\d+)?)\s*([A-Za-z]{2,10})\b", text)
-            if amount_m and amount_m.group(2).upper() not in {"BPS", "BP", "PCT", "USD", "MIN", "MINS", "H", "M", "D", "X"}:
+            # A dollar size ("a $1,000 position") is a USD amount, never a token
+            # amount of "000 POSITION" (expanded journeys, 2026-09-24).
+            usd_m = re.search(r"\$\s*(\d[\d,]*(?:\.\d+)?)\s*([kKmM])?\b", text)
+            if usd_m:
+                scale = {"k": 1e3, "m": 1e6}.get((usd_m.group(2) or "").lower(), 1)
+                usd_amount = float(usd_m.group(1).replace(",", "")) * scale
+            amount_m = re.search(r"(?<![\d,.$])\b(\d+(?:\.\d+)?)\s*([A-Za-z]{2,10})\b", text)
+            if amount_m and amount_m.group(2).upper() not in _AMOUNT_NOUNS:
                 inp = amount_m.group(2).upper()
                 others = [s for s in re.findall(r"\b([A-Z]{2,10})\b", text) if s not in {inp, "USD", "BPS", "SOL→USDC"} and s not in _CHAIN_WORDS]
                 arrow = re.search(rf"\b{inp}\s*(?:→|->|/|to|into|for)\s*([A-Z]{{2,10}})\b|\b([A-Z]{{2,10}})\s*(?:→|->|/)\s*{inp}\b", text)
@@ -307,7 +340,8 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
             need = [words[m] for m in missing if not (m == "destination_chain" and "source_chain" in missing)]
             ambiguity = "To quote this I need " + ", ".join(need[:-1]) + (" and " if len(need) > 1 else "") + need[-1] + ". Nothing is prepared until then."
         return QuestionContract(kind="transaction_intent", subject=Subject(kind="token", symbol=(draft.input_token or draft.output_token or symbol or "").upper() or None, chain=draft.source_chain or chain),
-                                scope="on_chain", metric="quote", unit="usd", filters={k: v for k, v in draft.as_dict().items() if v is not None},
+                                scope="on_chain", metric="quote", unit="usd",
+                                filters={**{k: v for k, v in draft.as_dict().items() if v is not None}, **({"amount_usd": usd_amount} if usd_amount else {})},
                                 freshness_seconds=120, evidence_order="state_first", required_facts=["quote_row"], ambiguity=ambiguity, confidence=0.7, planner="rules")
     if _PORTFOLIO_ASK.search(text) and not _HOLDERS.search(text) and not _TRANSACTION.search(text):
         return QuestionContract(kind="portfolio", subject=Subject(kind="wallet", chain=chain), scope="on_chain", metric="holdings", unit="usd",
@@ -339,13 +373,19 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
     if _YIELDS.search(text) and not _EVENTS.search(text):
         return QuestionContract(kind="yields", subject=Subject(kind="token", symbol=symbol, chain=chain), scope="global", metric="apy", unit="pct",
                                 filters=filters, freshness_seconds=3600, evidence_order="state_first", required_facts=["yield_row"], confidence=0.6, planner="rules")
-    if _EVENTS.search(text) and not _RANKING.search(text):
+    # "Does that automatically authorize Robinhood Chain today?" asks about the
+    # previous answer; "today" is not a window and the ask is not a list of
+    # events (expanded journeys, 2026-09-24: gated as "no event in the last
+    # day"). A referent question is open research on the carried subject.
+    from app.routing.subject_probe import _REFERENT
+    referent = bool(_REFERENT.match(text))
+    if _EVENTS.search(text) and not _RANKING.search(text) and not referent:
         return QuestionContract(kind="recent_events", subject=Subject(kind="topic", symbol=symbol, name=None, chain=chain), scope="any", metric="events",
                                 window_hours=window or 24 * 30, freshness_seconds=3 * 86400, evidence_order="discovery_first",
                                 required_facts=["event"], confidence=0.5, planner="rules")
-    if is_open_research(text):
+    if is_open_research(text) or referent:
         return QuestionContract(kind="open_research", subject=Subject(kind="topic", symbol=symbol, chain=chain), scope="any", metric="events",
-                                window_hours=window, freshness_seconds=7 * 86400, evidence_order="discovery_first",
+                                window_hours=None if referent else window, freshness_seconds=7 * 86400, evidence_order="discovery_first",
                                 required_facts=["source"], confidence=0.5, planner="rules")
     return QuestionContract(kind="other", planner="rules", confidence=0.3)
 

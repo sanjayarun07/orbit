@@ -36,7 +36,7 @@ from .intent_router import route_capabilities, plan_execution_route, default_cap
 from .instruments import equity_instruments
 from .model import speech_classifier
 from .semantic import SpeechUnderstanding, embedding_router
-from app import deployment, product_actions, snapshot_compare
+from app import deployment, listed_asset, product_actions, snapshot_compare
 from .speech import CONDITIONAL_ORDER_ANSWER, has_competing_speech, is_conditional_order, is_parameter_fragment
 from .trade_parser import extract_cross_chain_draft
 from app.clarify import is_clarification, is_market_text
@@ -283,7 +283,8 @@ def _bare_referent(request: str, state: dict) -> bool:
     context = state.get("session_context") or {}
     if not _REFERENT.match(request or "") or has_own_subject(request or ""):
         return False
-    return not (context.get("focus") or context.get("last_contract") or context.get("pending_token") or (state.get("history") or "").strip())
+    from app.user_memory import conversation_only
+    return not (context.get("focus") or context.get("last_contract") or context.get("pending_token") or conversation_only(state.get("history") or "").strip())
 
 
 async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> dict:
@@ -304,6 +305,10 @@ async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> d
         # review 2026-09-24).
         return {**_clarify_route("rules"), "clarification": "Which token, protocol or topic do you mean by that? Name it and I'll look.",
                 "routing_decision": {"method": "rules", "reason": "bare_referent"}}
+    if not controlled:
+        index_ask = await listed_asset.index_namesake_ask(request)
+        if index_ask:
+            return {**_clarify_route("rules"), "clarification": index_ask, "routing_decision": {"method": "rules", "reason": "index_namesake"}}
     if not controlled and snapshot_compare.dated_ask(request):
         # A comparison between dates is research on the snapshot ledger,
         # whatever else the sentence says ("using saved snapshots" read as an

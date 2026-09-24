@@ -183,7 +183,10 @@ def _sync(coro):
 
 _DEX = re.compile(r"\b(aster|hyperliquid|hl)\b", re.I)
 _BOTH = re.compile(r"\b(?:across|both|either|all)\b.{0,30}\b(?:venues?|dexes|exchanges|aster|hyperliquid)\b|\baster\b.{0,20}\b(?:and|vs\.?|versus)\b.{0,20}\bhyperliquid\b|\bhyperliquid\b.{0,20}\b(?:and|vs\.?|versus)\b.{0,20}\baster\b", re.I)
-_NO_STOCKS = re.compile(r"\b(?:excluding|exclude|without|no|not|ignore|skip|minus)\s+(?:the\s+)?(?:tokeni[sz]ed\s+)?(?:stocks?|equit(?:y|ies)|shares?)\b|\bcrypto\s+only\b|\bonly\s+crypto\b", re.I)
+# "not Nasdaq shares", "excluding the US equities": a venue or market name may
+# sit between the negation and the stock word (expanded journeys, 2026-09-24:
+# "Aster perpetual contracts, not Nasdaq shares" found 0 crypto rows).
+_NO_STOCKS = re.compile(r"\b(?:excluding|exclude|without|no|not|ignore|skip|minus)\s+(?:the\s+)?(?:(?:tokeni[sz]ed|nasdaq|nyse|us|u\.s\.|american|listed|traditional)\s+){0,2}(?:stocks?|equit(?:y|ies)|shares?)\b|\bcrypto\s+only\b|\bonly\s+crypto\b|\bperp(?:etual)?s?(?:\s+contracts?)?\b[^.?!]{0,30}\bnot\b[^.?!]{0,25}\b(?:stocks?|shares?|equities)\b", re.I)
 _MOVERS_WORDS = re.compile(r"\b(?:movers?|gainers?|losers?|top\s+(?:stocks?|tokens?|pairs?|perps?)|biggest\s+(?:moves?|winners?|losers?)|"
                            r"most\s+(?:active|traded)|pumping|dumping|up\s+the\s+most|down\s+the\s+most|leaders?|laggards?)\b", re.I)
 _STOCK_WORDS = re.compile(r"\b(?:stocks?|equit(?:y|ies)|tokeni[sz]ed\s+(?:stocks?|equities|shares)|shares?|xstocks?)\b", re.I)
@@ -618,8 +621,15 @@ def period_movers(request: str) -> str:
     start = period_start(request)
     if not start:
         raise ValueError("Name the period, e.g. 'movers on hyperliquid this week'")
-    stocks_only = bool(_STOCK_WORDS.search(request or ""))
+    # "no stocks" is crypto only, "stocks" alone is stocks only (expanded
+    # journeys, 2026-09-24: "gainers in the last hour, no stocks" listed stocks).
+    filt = stock_filter(request)
+    stocks_only = filt is True
     out = _sync(tequity_ledger.movers_between(venue, start, datetime.now(timezone.utc), stocks_only=stocks_only))
+    if filt is False:
+        for key in ("gainers", "losers"):
+            out[key] = [r for r in out.get(key) or [] if not r.get("is_stock")]
+        out["pairs"] = len(out.get("gainers") or [])
     evidence.complete("tequity_period_movers", {"kind": "venue", "id": venue, "chain": None, "symbol": None},
                       {"pairs": out.get("pairs", 0), "from": out["from"].isoformat() if out.get("from") else None, "to": out["to"].isoformat() if out.get("to") else None},
                       [{"provider": "tequity_ledger", "endpoint": "tequity_ticks", "as_of": _fmt_when(out.get("to"))}])

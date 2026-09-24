@@ -118,6 +118,24 @@ _HOME_HEADLINES = re.compile(r"\b(?:home\s+(?:market\s+|news\s+)?(?:headlines?|t
 _ORDINAL_PICK = re.compile(r"\b(first|second|third|fourth|1st|2nd|3rd|4th|last)\b", re.I)
 
 
+def picked_headline(request: str) -> str | None:
+    """The title of the Home headline a product answer summarised ("the
+    first Home market headline"), so the next turn's "that event" points at
+    it; None when the request is not a headline pick."""
+    if not _HOME_HEADLINES.search(request or ""):
+        return None
+    pick = _ORDINAL_PICK.search(request or "")
+    if not pick or re.search(r"\b(?:all|each|every|which)\b", request or "", re.I):
+        return None
+    from app import home_highlights
+    data = home_highlights.get_highlights()
+    cards = [c for c in (data.get("cards") or []) + (data.get("meme_cards") or []) if c.get("title") and c.get("kind") in ("crypto", "stocks", "memes")]
+    if not cards:
+        return None
+    order = {"first": 0, "1st": 0, "second": 1, "2nd": 1, "third": 2, "3rd": 2, "fourth": 3, "4th": 3, "last": len(cards) - 1}
+    return cards[min(order.get(pick.group(1).lower(), 0), len(cards) - 1)]["title"]
+
+
 def home_headlines_answer(request: str) -> str:
     from app import home_highlights
     data = home_highlights.get_highlights()

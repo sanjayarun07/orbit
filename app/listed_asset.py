@@ -219,3 +219,30 @@ class ListedAssetProvider:
             chains=(), cache_ttl_seconds=300, priority=15, spec=TOOL_SPECS.get("coingecko_coin_snapshot"),
             description="A listed coin's supply, market cap, rank, FDV and all-time high from CoinGecko's coin page, by ticker or CoinGecko id",
         ))
+
+
+_DISAMBIGUATED = re.compile(r"\b(?:index|s&p|nasdaq|dow|etf|futures?|options?|tokens?|coins?|meme\w*|crypto|6900|on\s+(?:solana|ethereum|base))\b", re.I)
+
+
+async def index_namesake_ask(request: str) -> str | None:
+    """The question to ask when a bare index ticker in the request is also a
+    ranked coin's symbol; None when the words settle it or nothing collides."""
+    import asyncio
+    from app import symbol_registry
+    from app.routing.lexicon import INDEX_TICKERS
+    text = request or ""
+    if _DISAMBIGUATED.search(text):
+        return None
+    for word in re.findall(r"(?<![A-Za-z0-9$])\$?([A-Z][A-Z0-9]{1,6})(?![A-Za-z0-9])", text):
+        if word not in INDEX_TICKERS:
+            continue
+        try:
+            rows = await asyncio.to_thread(symbol_registry.listed, word)
+        except Exception:
+            return None
+        lead = symbol_registry.leader(rows) if rows else None
+        if not lead:
+            return None
+        return (f"**{word}** can mean the market index or the token **{lead['name']}** (CoinGecko rank {lead.get('rank') or '—'}). "
+                f"Which one? Say `{word} the index` or `{lead['name']} the token` and I'll answer that.")
+    return None

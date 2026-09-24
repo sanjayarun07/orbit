@@ -969,8 +969,12 @@ def _focus_token(state: AgentState) -> dict | None:
 
 def _named_tickers(request: str) -> list[str]:
     tickers: list[str] = []
+    from app.tequity import fuzzy_venue
     for match in _NAMED_TOKEN.finditer(request):
         ticker = next((g for g in match.groups() if g), "").upper()
+        venue = fuzzy_venue(ticker)
+        if venue and venue.upper() != ticker:
+            continue                     # "HL coin perps" names Hyperliquid, not a coin called HL (2026-09-24)
         if ticker and ticker not in _NAMED_STOP and ticker not in tickers:
             tickers.append(ticker)
     return tickers
@@ -1191,8 +1195,11 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
             # One chain named, but several tokens carry the ticker there and
             # none stands out (ROBINHOOD on Robinhood Chain, 2026-09-18): ask
             # with the namesakes, as OPEN does. A Bitquery pick (real traders)
-            # is trusted; only a DEX Screener pick is second-guessed.
-            if len(named_chains) == 1 and resolved[0].get("traders") is None:
+            # and Jupiter's verified registry are trusted; only a DEX Screener
+            # pick is second-guessed (expanded journeys, 2026-09-24: "WIF on
+            # Solana" asked between pump.fun namesakes while dogwifhat is the
+            # verified WIF there).
+            if len(named_chains) == 1 and resolved[0].get("traders") is None and not resolved[0].get("verified"):
                 namesakes = await asyncio.to_thread(_ds_namesakes, ticker, named_chains[0])
                 if len(namesakes) >= 2:
                     winner = clear_winner(namesakes)
@@ -2247,6 +2254,10 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         and not _HYPERLIQUID_REQUEST.search(request)
     ):
         address, chain = detected_wallet
+        from app import address_roles
+        refusal = address_roles.not_a_wallet(address)
+        if refusal:
+            return {"answer": refusal, "trajectory": None}
         streaming.emit("status", text="Fetching the wallet's balances and positions")
         answer, trajectory = await _compose_wallet_portfolio(address, chain)
         return {"answer": answer, "trajectory": trajectory}

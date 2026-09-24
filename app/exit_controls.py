@@ -47,17 +47,26 @@ _SIZES = re.compile(
 # the saved entry baseline, or the honest absence of one.
 _CHANGED = re.compile(
     rf"^\s*what(?:'s|\s+has|\s+is)?\s+changed\s+since\s+(?:i\s+)?(?:entered|bought|got\s+into|entry\s+(?:on|in|into)|my\s+entry\s+(?:on|in|into))\s+{_TOKEN}\s*\??(?:\s.*)?$", re.I | re.S)
+# "which has a better exit for a $1,000 position?", "what would exiting
+# $500 of BONK cost?": an exit at a dollar size is the sizing diagnostic
+# (entry, immediate reverse exit), read-only, no wallet; the token comes from
+# the sentence or from the conversation's focus (expanded journeys,
+# 2026-09-24: the wallet portfolio tool ran on the token's mint instead).
+_SIZED_EXIT = re.compile(
+    rf"^\s*(?:and\s+|so\s+|but\s+)?(?:(?:which|what|how)\b(?=[^?]*\b(?:exit\w*|get\s+out|unwind\w*)\b)[^?]*?|(?:exiting|unwinding)\s+)"
+    rf"(?:a\s+|an\s+|my\s+|for\s+a\s+|for\s+|of\s+)?(?P<amount>\$\s*\d[\d,]*(?:\.\d+)?\s*[kK]?)(?:\s+(?:position|worth|stake|bag|exit|of\s+it|of\s+that|of\s+this))?"
+    rf"(?:\s+(?:in|of|from)\s+{_named('t')})?\s*[?.!]?(?:\s.*)?$", re.I | re.S)
 _AMOUNT = re.compile(r"\$?\s*(\d[\d,]*(?:\.\d+)?)")
 _ADDRESS = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
 
 def is_public_control(message: str) -> bool:
     """A control that needs no account: the sizing diagnostic."""
-    return bool(_SIZES.match(message or ""))
+    return bool(_SIZES.match(message or "") or _SIZED_EXIT.match(message or ""))
 
 
 def is_exit_control(message: str) -> bool:
-    return any(p.match(message or "") for p in (_WATCH, _STOP, _ASK, _LIST, _THRESHOLD, _CHANNEL, _SIZES, _CHANGED))
+    return any(p.match(message or "") for p in (_WATCH, _STOP, _ASK, _LIST, _THRESHOLD, _CHANNEL, _SIZES, _CHANGED, _SIZED_EXIT))
 
 
 async def _since_entry(p: dict) -> str:
@@ -183,9 +192,34 @@ async def _resolve_token(token: str) -> tuple[str | None, str | None, str | None
     return None, None, f"I couldn't find a token with the symbol {token.upper()} in Jupiter's registry. Paste its mint address."
 
 
-async def handle(message: str, user: dict | None, wallet: str | None) -> str | None:
+async def _sized_exit(text: str, m: re.Match, focus: dict | None) -> str:
+    amounts = _amounts(m.group("amount"))
+    if m.group("amount") and m.group("amount").strip().lower().endswith("k") and amounts:
+        amounts = [a * 1000 for a in amounts]
+    named = _clean(m.group("t")) if m.group("t") else None
+    focus = focus or {}
+    token = named or (focus.get("address") if focus.get("kind") == "token" and focus.get("address") else focus.get("label") if focus.get("kind") in ("token", "topic") else None)
+    if not token or not amounts:
+        return "Which token, and at what dollar size? Name it (a $ticker or its mint) and I'll quote the exit at that size read-only, no wallet needed."
+    mint, symbol, question = await resolve_token(token)
+    if question:
+        return question
+    rows = await exit_monitor.size_comparison(mint, tuple(amounts))
+    label = symbol or ((focus.get("label") if focus.get("label") and focus.get("label") != "TOKEN" else None) or named or mint[:6])
+    out = exit_monitor.render_sizes(label, mint, rows)
+    lead = (f"**Read-only sizing for a {'/'.join(exit_monitor._usd(a) for a in amounts)} position in {label}**: what the book charges to enter and to leave at that size right now, "
+            "quoted without a wallet. Nothing is prepared or submitted.")
+    if not named and re.search(r"\b(?:which|compare|better|versus|vs|both|each)\b", text, re.I):
+        out += f"\n\n_Only {label} was sized, the token this conversation is about; name the other token and I'll size it the same way._"
+    return f"{lead}\n\n{out}"
+
+
+async def handle(message: str, user: dict | None, wallet: str | None, focus: dict | None = None) -> str | None:
     """The reply to an exit control, or None when the message is not one."""
     text = (message or "").strip()
+    m = _SIZED_EXIT.match(text)
+    if m:
+        return await _sized_exit(text, m, focus)
     if user is None and not _SIZES.match(text):
         return "Sign in to use exit monitors and alerts; the sizing comparison works without an account."
     if _LIST.match(text):

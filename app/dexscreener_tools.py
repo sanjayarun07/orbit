@@ -258,10 +258,17 @@ def _rank_pairs(pairs: list[dict], limit: int = 10) -> list[dict]:
     return sorted(pairs, key=lambda pair: (_vol(pair), _liq(pair)), reverse=True)[:limit]
 
 
+_DESCRIPTORS = {"the", "a", "an", "this", "that", "meme", "memecoin", "defi", "ai", "gaming", "utility", "governance", "new", "any", "some", "which",
+                "what", "your", "my", "our", "their", "each", "every", "solana", "base", "ethereum", "mean", "meant", "i"}
+
+
 def dexscreener_pair_search(request: str) -> str:
     """Search DEX pairs by token name, symbol, contract, or natural-language query."""
     address = _ADDRESS.search(request)
-    named = re.search(r"\b([A-Za-z][A-Za-z0-9._-]{1,15})\s+(?:token|coin)\b", request, re.I)
+    # "SPX6900 the meme token" names SPX6900; "meme", "the", "new" describe
+    # (expanded journeys, 2026-09-24: the search ran for MEME).
+    named = next((m for m in re.finditer(r"\b([A-Za-z][A-Za-z0-9._-]{1,15})\s+(?:(?:the|a|an)\s+)?(?:(?:meme|defi|ai|gaming|utility|governance|new|solana|base)\s+)?(?:token|coin|memecoin)\b", request, re.I)
+                  if m.group(1).lower() not in _DESCRIPTORS), None)
     subject = address.group(0) if address else named.group(1) if named else None
     if subject is None:
         words = [word for word in re.findall(r"[A-Za-z0-9._-]+", request) if word.lower() not in {

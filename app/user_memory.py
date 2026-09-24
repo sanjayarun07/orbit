@@ -254,6 +254,22 @@ async def recall(user_id: str, message: str, k: int = RECALL_K) -> list[dict]:
     return [{key: value for key, value in f.items() if key != "embedding"} for f in picked]
 
 
+_BLOCK_HEAD = "What Orbit knows about this user from earlier conversations"
+
+
+def conversation_only(history: str) -> str:
+    """The history without the recalled-facts block `with_block` put in front
+    of it: what this conversation itself has said so far. A fresh chat with a
+    remembered user is still a fresh chat (expanded UI review, 2026-09-24:
+    "What did it do today?" read the memory block as prior turns and went
+    to the web for "it")."""
+    text = history or ""
+    if not text.startswith(_BLOCK_HEAD):
+        return text
+    _block, _sep, rest = text.partition("\n\n")
+    return rest
+
+
 def block(facts: list[dict]) -> str:
     """The recalled facts as a short block for the conversation history."""
     if not facts:

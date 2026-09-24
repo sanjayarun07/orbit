@@ -200,7 +200,7 @@ def missing_exact_figures(claim: str, evidence_text: str) -> list[str]:
     return out
 
 
-_COMPARATIVE = re.compile(r"(?P<a>\$?\d[\d,]*(?:\.\d+)?%?)\s*,?\s*(?:(?:is|was|which\s+is|sits|closed|closing|trading|now)\s+)?(?P<rel>below|under|beneath|lower\s+than|less\s+than|down\s+from|above|over|higher\s+than|more\s+than|up\s+from)\s+(?:(?:a|an|the|its|yesterday'?s|prior|previous|earlier|last|close|level|of|at)\s+){0,4}(?P<b>\$?\d[\d,]*(?:\.\d+)?%?)", re.I)
+_COMPARATIVE = re.compile(r"(?P<a>\$?\d[\d,]*(?:\.\d+)?%?)\s*,?\s*(?:(?:is|was|which\s+is|sits|closed|closing|trading|now)\s+)?(?P<rel>below|under|beneath|lower\s+than|less\s+than|down\s+from|above|over|higher\s+than|more\s+than|up\s+from)\s+(?:(?:a|an|the|its|yesterday'?s|prior|previous|earlier|last|close|level|of|at)\s+){0,4}(?P<b>\$?\d[\d,]*(?:\.\d+)?%?)(?!\s*(?:days?|hours?|hrs?|weeks?|months?|minutes?|mins?|years?|d|h|w|m|y|x)\b)", re.I)     # "over 30 days" is a window, not a comparison (2026-09-24)
 _LOWER = ("below", "under", "beneath", "lower than", "less than", "down from")
 
 

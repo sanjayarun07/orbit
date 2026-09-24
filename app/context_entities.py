@@ -15,6 +15,36 @@ _LABELED_TOKEN_ADDRESS = re.compile(
     re.IGNORECASE,
 )
 _TOKEN_WORD = re.compile(r"\b(?:token|coin|contract|mint|memecoin|meme coin|erc-?20)\b", re.IGNORECASE)
+# "I mean SPX6900 the meme token, not the index.": a correction of the previous
+# request's subject re-runs that request about the corrected subject
+# (expanded journeys, 2026-09-24: the correction itself went to the web).
+_SUBJECT_CORRECTION = re.compile(r"^\s*(?:no,?\s+|sorry,?\s+|actually,?\s+)?i\s+mean(?:t)?\s+(?P<new>\$?[A-Za-z][A-Za-z0-9._-]{1,15})\b\s*(?P<rest>.*)$", re.IGNORECASE | re.DOTALL)
+
+
+def _last_user_request(history: str, current: str) -> str | None:
+    """The previous user turn in the bounded history (never this turn)."""
+    turns = [line[len("user: "):].strip() for line in (history or "").splitlines() if line.startswith("user: ")]
+    turns = [t for t in turns if t and t != (current or "").strip()]
+    return turns[-1] if turns else None
+
+
+def corrected_request(request: str, conversation_history: str) -> str | None:
+    """The previous request re-targeted at the corrected subject, or None."""
+    from app.routing.subject_probe import subject_of
+    m = _SUBJECT_CORRECTION.match(request or "")
+    if not m:
+        return None
+    previous = _last_user_request(conversation_history, request)
+    if not previous:
+        return None
+    new = m.group("new").lstrip("$")
+    old = subject_of(previous)
+    if not old or old.lower() == new.lower() or not re.search(rf"\b{re.escape(old)}\b", previous):
+        return None
+    rerun = re.sub(rf"\b{re.escape(old)}\b", new, previous)
+    rest = m.group("rest").strip(" .,;!")
+    return (f"{rerun}\nResolved from conversation context: the user corrected the subject of the previous request from {old} to {new}"
+            + (f" ({rest})" if rest else "") + "; answer that request about the corrected subject.")
 # A message that's just a pronoun reference back to the canonical focus --
 # "it"/"that"/"this", optionally "... one". Deliberately anchored (^...$)
 # only where used standalone (_PRONOUN.match on an already-isolated capture
@@ -318,6 +348,9 @@ def resolve_contextual_request(
         return (f"{request}\nResolved from canonical session context: the previous ask was {what} on {last['venue']}"
                 + (" (tokenized stocks only)" if (last.get("filters") or {}).get("stocks_only") else " (crypto only)" if (last.get("filters") or {}).get("crypto_only") else "")
                 + f"; this continues it on {last['venue']} with the change stated here.")
+    corrected = corrected_request(request, conversation_history)
+    if corrected:
+        return corrected
     if focus.get("label") and continues_subject(request):
         if focus.get("kind") == "token" and focus.get("address"):
             chain = f" on {focus['chain']}" if focus.get("chain") else ""

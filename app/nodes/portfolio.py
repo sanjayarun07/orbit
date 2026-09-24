@@ -75,6 +75,17 @@ async def _portfolio_node(state: AgentState) -> dict:
     hypothetical = not state.get("wallet_address") and "trade_simulation" in capabilities and bool(re.search(r"\b\d+(?:\.\d+)?\s*[A-Za-z]{2,10}\b", request))
     if hypothetical:
         state = {**state, "wallet_address": ""}
+    if not state.get("wallet_address") and not hypothetical and "trade_simulation" in capabilities:
+        # "I only want a read-only estimate" after an exit ask with no wallet:
+        # the estimate needs a size, not a wallet (expanded journeys,
+        # 2026-09-24: it asked to connect a wallet again).
+        focus = (state.get("session_context") or {}).get("focus") or {}
+        from app import contracts
+        f = contracts.plan_by_rules(request).filters or {}
+        symbol = f.get("input_token") or (focus.get("label") if focus.get("label") and focus.get("label") != "TOKEN" else None) or "the token"
+        return {"answer": (f"No wallet is needed for an estimate, only a size. How much {symbol}: a token amount (`estimate selling 1000 {symbol} to USDC`) "
+                           f"or a dollar size (`what would exiting $1,000 of {symbol} cost`)? I'll quote it read-only; nothing is prepared or submitted."),
+                "trajectory": None}
     if not state.get("wallet_address") and not hypothetical:
         # Parked like a swap without a wallet: "connected" on the next turn
         # re-runs this request instead of falling through to a clarification.

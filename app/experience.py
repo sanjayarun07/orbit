@@ -98,6 +98,9 @@ def build_intent_lock(
     return None
 
 
+_WALLET_ASK = re.compile(r"\b(?:wallets?|address(?:es)?|portfolios?|holdings?|whales?|holders?|balances?|counterpart\w+|pnl|traders?|buyers?|sellers?)\b", re.IGNORECASE)
+
+
 def build_context_capsules(
     request: str,
     history: str,
@@ -134,7 +137,10 @@ def build_context_capsules(
         # Historical addresses are considered only for explicit wallet
         # follow-ups. Otherwise an old wallet—or a Solana token mint—can leak
         # into a completely new topic.
-        wallet = extract_wallet_reference(request, answer)
+        # An address quoted inside the answer (a forum post in a knowledge
+        # passage, 2026-09-24) is the conversation's wallet only when the
+        # request asked about a wallet.
+        wallet = extract_wallet_reference(request) or (extract_wallet_reference(answer) if _WALLET_ASK.search(request) else None)
         if wallet is None and re.search(
             r"\b(?:this|that|the)\s+(?:wallet|address|portfolio)\b"
             r"|\b(?:its|their)\s+(?:transactions?|balances?|holdings?|counterparties|pnl)\b",
@@ -337,6 +343,19 @@ def advance_session_context(
             context["focus"] = None
         # A referent follow-up ("does that authorize Robinhood Chain?") keeps
         # the subject it points at, whatever other name it mentions.
+    elif intent == "general":
+        # A product answer about one Home headline makes that story the
+        # subject ("when did that event happen?"); a control that names a
+        # token ("Can I exit ANSEM?") makes the token the subject. Neither
+        # clears a focus (expanded journeys, 2026-09-24).
+        from app import product_actions
+        from app.routing.subject_probe import continues_subject, subject_of
+        headline = product_actions.picked_headline(request)
+        topic = None if headline else subject_of(request)
+        if headline:
+            context["focus"] = {"kind": "topic", "label": headline, "address": None, "chain": None, "confidence": 0.9, "source": "home_headline"}
+        elif topic and not continues_subject(request) and not product_actions.is_product_question(request):
+            context["focus"] = {"kind": "topic", "label": topic, "address": None, "chain": None, "confidence": 0.6, "source": "request"}
     if is_trade_cancellation(request):
         context["active_workflow"] = None
     elif intent_lock:

@@ -1,0 +1,246 @@
+"""Regressions from the expanded journeys re-run (2026-09-24, run 2):
+context carry across product answers and controls, a fresh chat with a
+remembered user, corrections of the previous subject, and a token mint that
+must never be read as a wallet."""
+from __future__ import annotations
+
+import asyncio
+import re
+
+import pytest
+
+from app import address_roles, context_entities, dexscreener_tools, exit_controls, experience, tequity, user_memory
+from app.contracts import plan_by_rules
+from app.routing.resolver import _bare_referent
+from app.routing.subject_probe import _REFERENT, continues_subject
+
+
+# --- a fresh chat with a remembered user is still a fresh chat ---------------
+
+def test_memory_block_is_not_conversation_history():
+    history = user_memory.with_block("", [{"fact": "Holds SOL and ANSEM"}])
+    assert user_memory.conversation_only(history) == ""
+    assert _bare_referent("What did it do today?", {"session_context": {}, "history": history})
+
+
+def test_conversation_after_memory_block_is_kept():
+    history = user_memory.with_block("user: Check BONK.\nassistant: BONK is ...", [{"fact": "Holds SOL"}])
+    assert user_memory.conversation_only(history).startswith("user: Check BONK.")
+    assert not _bare_referent("What did it do today?", {"session_context": {}, "history": history})
+
+
+# --- a referent question is not a list of events ----------------------------
+
+def test_referent_question_is_open_research_without_a_window():
+    contract = plan_by_rules("Does that automatically authorize Robinhood Chain today?")
+    assert contract.kind == "open_research"
+    assert contract.window_hours is None
+
+
+def test_events_ask_still_plans_events():
+    assert plan_by_rules("What happened with Aave this week?").kind == "recent_events"
+
+
+def test_since_then_points_at_the_previous_answer():
+    assert _REFERENT.match("What is different since then?")
+    assert continues_subject("What is different since then?")
+    assert not _REFERENT.match("What is the price of BONK?")
+
+
+# --- "not Nasdaq shares" is a crypto-only ask --------------------------------
+
+@pytest.mark.parametrize("text", ["I mean Aster perpetual contracts, not Nasdaq shares.", "Aster movers excluding the US equities", "crypto only on Aster"])
+def test_stock_negation_with_a_market_name(text):
+    assert tequity.stock_filter(text) is False
+
+
+def test_stock_words_alone_still_mean_stocks():
+    assert tequity.stock_filter("Which Aster stocks are moving?") is True
+
+
+# --- a dollar size is a USD amount, never "000 POSITION" --------------------
+
+def test_dollar_position_is_a_usd_amount():
+    contract = plan_by_rules("And which has a better exit for a $1,000 position?\nResolved from canonical session context: token TOKEN mint DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 on solana.")
+    assert contract.filters.get("amount_usd") == 1000.0
+    assert contract.filters.get("input_token") != "POSITION"
+    assert contract.filters.get("amount") != "000"
+
+
+def test_token_amount_still_parses():
+    contract = plan_by_rules("estimate selling 0.05 SOL to USDC")
+    assert (contract.filters["amount"], contract.filters["input_token"], contract.filters["output_token"]) == ("0.05", "SOL", "USDC")
+
+
+# --- a sized exit is a read-only sizing, an order is not --------------------
+
+@pytest.mark.parametrize("text, amount, token", [
+    ("And which has a better exit for a $1,000 position?", "$1,000", None),
+    ("What would exiting $500 of BONK cost?", "$500", "BONK"),
+    ("What would a $1,000 exit of BONK return?", "$1,000", "BONK"),
+])
+def test_sized_exit_grammar(text, amount, token):
+    m = exit_controls._SIZED_EXIT.match(text)
+    assert m and m.group("amount") == amount and m.group("t") == token
+    assert exit_controls.is_exit_control(text) and exit_controls.is_public_control(text)
+
+
+@pytest.mark.parametrize("text", ["sell $2k of WIF", "How do I sell $100 of SOL?", "What is the price of $BONK?", "How much is $1,000 of SOL?"])
+def test_orders_and_prices_are_not_sized_exits(text):
+    assert exit_controls._SIZED_EXIT.match(text) is None
+
+
+def test_sized_exit_takes_the_focus_token_and_says_so(monkeypatch):
+    async def fake_resolve(token):
+        return "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", "BONK", None
+
+    async def fake_sizes(mint, amounts):
+        return [{"ok": True, "usd": amounts[0], "tokens": 1.0, "entry_price": 1.0, "entry_impact_pct": 0.1, "exit_usd": amounts[0] * 0.99, "round_trip_pct": -1.0, "routes": "Raydium"}]
+
+    monkeypatch.setattr(exit_controls, "resolve_token", fake_resolve)
+    monkeypatch.setattr(exit_controls.exit_monitor, "size_comparison", fake_sizes)
+    monkeypatch.setattr(exit_controls.exit_monitor, "render_sizes", lambda symbol, mint, rows: f"# Sizing — {symbol}")
+    focus = {"kind": "token", "label": "TOKEN", "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", "chain": "solana"}
+    answer = asyncio.run(exit_controls.handle("And which has a better exit for a $1,000 position?", None, None, focus=focus))
+    assert "Read-only sizing" in answer and "# Sizing — BONK" in answer
+    assert "Only BONK was sized" in answer and "name the other token" in answer
+
+
+def test_sized_exit_without_a_token_asks():
+    answer = asyncio.run(exit_controls.handle("What would exiting $500 cost?", None, None, focus=None))
+    assert answer.startswith("Which token")
+
+
+# --- a token mint is never read as a wallet ---------------------------------
+
+def test_address_roles_bind_the_focus_token():
+    mint = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+    token = address_roles.bind_turn({"focus": {"kind": "token", "address": mint}})
+    try:
+        assert address_roles.role_of(mint) == "token"
+        assert "not a wallet" in address_roles.not_a_wallet(mint)
+        assert address_roles.not_a_wallet("3aHLqHsvw3gPxnq1fVEYG6P3pCcxkGo3ETSkQGE4KZkS") is None
+    finally:
+        address_roles.end_turn(token)
+    assert address_roles.role_of(mint) is None
+
+
+def test_mobula_portfolio_refuses_the_focus_token(monkeypatch):
+    from app import mobula_wallet
+    mint = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+    monkeypatch.setattr(mobula_wallet, "_get", lambda *a, **k: pytest.fail("must not call Mobula"))
+    token = address_roles.bind_turn({"focus": {"kind": "token", "address": mint}})
+    try:
+        with pytest.raises(ValueError, match="not a wallet"):
+            mobula_wallet.portfolio(f"{mint} wallet portfolio")
+    finally:
+        address_roles.end_turn(token)
+
+
+# --- an address quoted in the answer is not the conversation's wallet -------
+
+def test_wallet_quoted_in_a_passage_is_not_the_focus():
+    answer = "Forum passage: My address is 0x96f33f234603f3cc01b063e0563f550c504ac0b7, can anyone help?"
+    capsules = experience.build_context_capsules("What did it do today?", "", answer, None, None)
+    assert not [c for c in capsules if c.kind == "wallet"]
+
+
+def test_wallet_in_the_answer_counts_for_a_wallet_ask():
+    answer = "Top holder wallet: 0x96f33f234603f3cc01b063e0563f550c504ac0b7 on ethereum"
+    capsules = experience.build_context_capsules("Which whale wallets hold the most?", "", answer, None, None)
+    assert [c for c in capsules if c.kind == "wallet"]
+
+
+# --- controls and product answers set the subject ---------------------------
+
+def test_exit_control_names_the_token_as_focus():
+    context = experience.advance_session_context({}, "Can I exit ANSEM?", None, "general", [], [], None)
+    assert context["focus"]["label"] == "ANSEM"
+
+
+def test_product_question_keeps_the_focus():
+    context = experience.advance_session_context({"focus": {"kind": "topic", "label": "ANSEM"}}, "What can I do here?", None, "general", [], [], None)
+    assert context["focus"]["label"] == "ANSEM"
+
+
+def test_headline_pick_becomes_the_focus(monkeypatch):
+    from app import home_highlights
+    monkeypatch.setattr(home_highlights, "get_highlights", lambda: {"cards": [{"title": "Bitcoin ETFs pull in $999 million", "kind": "crypto"}], "meme_cards": []})
+    context = experience.advance_session_context({}, "Summarize the first Home market headline.", None, "general", [], [], None)
+    assert context["focus"] == {"kind": "topic", "label": "Bitcoin ETFs pull in $999 million", "address": None, "chain": None, "confidence": 0.9, "source": "home_headline"}
+
+
+# --- a correction of the subject re-runs the previous request ---------------
+
+def test_subject_correction_reruns_the_previous_request():
+    history = "user: Check SPX.\nassistant: The ticker SPX primarily denotes the S&P 500 Index..."
+    resolved = context_entities.resolve_contextual_request("I mean SPX6900 the meme token, not the index.", history, {"focus": {"kind": "topic", "label": "SPX"}})
+    assert resolved.startswith("Check SPX6900.")
+    assert "corrected the subject of the previous request from SPX to SPX6900" in resolved
+
+
+def test_correction_without_a_previous_request_is_left_alone():
+    assert context_entities.corrected_request("I mean SPX6900 the meme token.", "") is None
+
+
+def test_pair_search_names_the_token_not_its_description():
+    request = "I mean SPX6900 the meme token, not the index."
+    named = next((m for m in re.finditer(r"\b([A-Za-z][A-Za-z0-9._-]{1,15})\s+(?:(?:the|a|an)\s+)?(?:(?:meme|defi|ai|gaming|utility|governance|new|solana|base)\s+)?(?:token|coin|memecoin)\b", request, re.I)
+                  if m.group(1).lower() not in dexscreener_tools._DESCRIPTORS), None)
+    assert named and named.group(1) == "SPX6900"
+
+
+# --- family fixes: period movers, HL alias, durations, index namesakes -------
+
+def test_no_stocks_period_movers_keep_crypto_only(monkeypatch):
+    from app import tequity_ledger
+    rows = {"venue": "hyperliquid", "from": None, "to": None, "pairs": 2,
+            "gainers": [{"symbol": "AAPL/USDC", "is_stock": True, "change_between_pct": 3.0, "price_then": 1, "last_price": 1.03},
+                        {"symbol": "ACE/USDC", "is_stock": False, "change_between_pct": 2.0, "price_then": 1, "last_price": 1.02}],
+            "losers": [], "coverage_gap": None}
+    seen = {}
+
+    async def fake(venue, start, end, *, stocks_only=False, limit=15, max_gap=None):
+        seen["stocks_only"] = stocks_only
+        return dict(rows)
+
+    monkeypatch.setattr(tequity_ledger, "movers_between", fake)
+    monkeypatch.setattr(tequity, "_sync", lambda coro: asyncio.run(coro))
+    monkeypatch.setattr(tequity.evidence, "complete", lambda *a, **k: None)
+    out = tequity.period_movers("Top Hyperliquid crypto perp gainers in the last hour, no stocks.")
+    assert seen["stocks_only"] is False
+    assert "ACE/USDC" in out and "AAPL/USDC" not in out
+
+
+def test_hl_is_the_venue_not_a_coin():
+    from app.nodes import research
+    assert research._named_tickers("Which HL coin perps have pumped most over 60m?") == []
+    assert research._named_tickers("Check ASTER token") == ["ASTER"]
+
+
+def test_a_duration_is_not_a_comparison():
+    from app import fact_gate
+    assert fact_gate.contradictions("PUMP earned $14.97M over 30 days.") == []
+    assert fact_gate.contradictions("BTC at $86,000 is above $90,000.")
+
+
+def test_index_ticker_that_is_a_listed_coin_asks(monkeypatch):
+    from app import listed_asset, symbol_registry
+    monkeypatch.setattr(symbol_registry, "listed", lambda symbol: [{"id": "spx6900", "name": "SPX6900", "symbol": "SPX", "rank": 126}])
+    ask = asyncio.run(listed_asset.index_namesake_ask("What is SPX doing?"))
+    assert ask and "SPX6900" in ask and "index" in ask
+    assert asyncio.run(listed_asset.index_namesake_ask("What is the SPX index doing?")) is None
+    assert asyncio.run(listed_asset.index_namesake_ask("Check BONK")) is None
+
+
+def test_a_venue_bound_source_is_not_near_another_venue():
+    from app import evidence_pipeline
+    contract = plan_by_rules("Meme tokens on Binance are moving.")
+    assert contract.venue == "binance"
+    ranked = [("tequity_period_movers", "venue binance not covered"), ("tequity_movers", "venue binance not covered")]
+    assert evidence_pipeline._near_tools(contract, ranked) == []
+
+
+def test_contract_describes_itself_in_plain_words():
+    assert plan_by_rules("Show BASE gainers.").describe() == "gainers on Base (trades on that venue) over 24h"
+    assert plan_by_rules("Top ANSEM holders").describe().startswith("holders for ANSEM")

@@ -3079,3 +3079,31 @@ the venue ledger and the contract ("1h movers on HL", "over 60m", "past-hour", "
 amount quotes without a wallet in any wording, the swap fields taken from the transaction contract and the output
 ticker resolved against Jupiter's verified list (`nodes/portfolio._verified_mint`; the stablecoins and SOL need no
 lookup).
+
+The second journey run (run 2, 77 turns) found the third layer, again context and wording, each fixed as a mechanism:
+a fresh chat with a remembered user is still a fresh chat (`user_memory.conversation_only` strips the recalled-facts
+block before `resolver._bare_referent` looks for prior turns; "What did it do today?" had gone to the web for "it");
+an address quoted inside an answer (a forum post in a knowledge passage) becomes the conversation's wallet only when
+the request asked about a wallet (`experience._WALLET_ASK`); an address the conversation typed as a token is never
+read as a wallet (`app/address_roles.py` binds the focus roles per turn; `mobula_wallet.portfolio` and the composed
+portfolio refuse it -- the wallet portfolio tool had run on BONK's mint and written "the user holds $125K of SOL");
+an exit at a dollar size is the read-only sizing diagnostic, the token from the sentence or the focus, and says when
+only the focused token was sized (`exit_controls._SIZED_EXIT`; a "$1,000 position" had parsed as "000 POSITION" --
+`contracts._AMOUNT_NOUNS`, `amount_usd`); an estimate with no wallet and no size asks for the size, not the wallet
+(`nodes/portfolio`); a control that names a token ("Can I exit ANSEM?") and a product answer about one Home headline
+set the focus, and a product question never clears it (`experience.advance_session_context`,
+`product_actions.picked_headline`); "since then" and "after that" point at the previous answer (`_REFERENT`); a
+referent question is open research on the carried subject, never a list of events in the last day
+(`contracts.plan_by_rules`); a correction of the previous subject re-runs the previous request about the corrected
+subject ("I mean SPX6900 the meme token, not the index" becomes "Check SPX6900."; `context_entities.corrected_request`),
+and the pair search names the token, not its description (`dexscreener_tools._DESCRIPTORS`: it had searched MEME); an
+index ticker that is also a ranked coin is a question, never a guess either way (`lexicon.INDEX_TICKERS`,
+`listed_asset.index_namesake_ask`: SPX is the S&P 500 and SPX6900); "not Nasdaq shares" and "no stocks" are crypto only
+in the ledger movers too (`tequity._NO_STOCKS`, `period_movers`); a Jupiter-verified Solana token is not second-guessed
+against pump.fun namesakes when the chain is named (WIF on Solana); "$14.97M over 30 days" is a window, not a
+comparison (`fact_gate._COMPARATIVE`); a source bound to particular venues is not "near" an ask about another venue
+(`evidence_pipeline._near_tools`: Binance movers had run the Hyperliquid ledger); and the answers that name the ask
+describe it in the user's words (`QuestionContract.describe`: "gainers on Base (trades on that venue) over 24h", not the
+internal record). Regressions: `tests/test_journeys_20260924.py`. Still open from run 2: two subjects in one ask
+("Compare BONK and WIF liquidity") resolve one; a web synthesis can open with "Yes" and then say "not"; a product
+answer's own "30 minutes" can trip the figure check on the next turn.

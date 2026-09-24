@@ -13,7 +13,7 @@ import logging
 import re
 from uuid import uuid4
 
-from app import accounts, credits, notifications, research_gaps, session_access, task_scheduling, tool_outcomes
+from app import address_roles, accounts, credits, notifications, research_gaps, session_access, task_scheduling, tool_outcomes
 from app.answer_validator import validate_answer
 from app.experience import (advance_session_context, build_context_capsules, build_evidence_summary,
     with_resolved_token, build_gas_advisory, build_intent_lock, build_trade_readiness)
@@ -330,7 +330,8 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         task_reply = await task_scheduling.handle_chat_control(body, identity, action)
         if task_reply is None and action is None and (identity.signed_in or exit_controls.is_public_control(body.message)) and exit_controls.is_exit_control(body.message):
             # Sizing before entry needs no account (a guest asked it, 2026-09-23); the position controls need one.
-            task_reply = await exit_controls.handle(body.message, identity.user if identity.signed_in else None, effective_wallet or None)
+            task_reply = await exit_controls.handle(body.message, identity.user if identity.signed_in else None, effective_wallet or None,
+                                                    focus=(session_context or {}).get("focus"))
         if task_reply is not None:
             from app.graph import AgentRun
             # No trajectory: a task control is a plain (1-credit) turn, not a tool turn.
@@ -349,6 +350,9 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             # account, its answer delivered to this conversation.
             jobs_bound = jobs.bind_turn(signed_in_user, identity.account_id if signed_in_user else None, session_id)
             evidence_bound = evidence_envelopes.start_turn()
+            # The addresses this conversation already typed (the focus token,
+            # the focus wallet): a wallet reader refuses a token mint.
+            roles_bound = address_roles.bind_turn(session_context)
             try:
                 run = await asyncio.wait_for(
                     run_agent(
@@ -362,6 +366,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
                 )
                 turn_evidence = evidence_envelopes.collected()
             finally:
+                address_roles.end_turn(roles_bound)
                 evidence_envelopes.end_turn(evidence_bound)
                 tradingview.current_token.reset(tv_bound)
                 decision_records.current_user.reset(receipts_bound)

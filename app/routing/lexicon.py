@@ -183,3 +183,10 @@ CHAIN_ALIASES = {
     "tron": "tron", "bitcoin": "bitcoin",
 }
 CHAIN_PATTERN = "|".join(re.escape(alias) for alias in sorted(CHAIN_ALIASES, key=len, reverse=True))
+
+
+# Equity index and ETF tickers that also name a ranked coin ("SPX" is the
+# S&P 500 and SPX6900): a bare one is a question, never a guess either way
+# (expanded journeys, 2026-09-24: "Check SPX." was read as the index and the
+# correction went to the web).
+INDEX_TICKERS = {"SPX", "SPY", "NDX", "QQQ", "DJI", "DJIA", "DIA", "VIX", "IWM", "RUT", "DXY", "TLT", "GLD", "USO", "TSX", "FTSE", "DAX", "NIKKEI"}
