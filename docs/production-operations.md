@@ -3268,3 +3268,17 @@ for named projects with first-party sources (Sol then 2/3, with precision slippi
 brief applies the question's constraints strictly); every line the user wrote reaches the search, not only the
 first; and a named example counts as sourced only when its full name appears in a card. Open: a support check for
 each named example's mechanism claim against its cited source, which the fact gate (figures only) does not do.
+
+Live, 2026-09-24 evening: "What is the full name and description of the stock labeled NBIS on Hyperliquid?" carried a
+knowledge-base card of Hyperliquid bridge and HLP descriptions with a line admitting NBIS was not in them, and went
+to the generic web search. Mechanisms: the knowledge card is dropped when its passages never mention the question's
+subject (`knowledge/tool._mentions_subject`; a venue or chain word in the sentence is not the subject); a stock ask
+leads discovery with the finance-tuned search, which now runs through the structured, dated-sources call
+(`tool_catalog` marks it `stocks`, `evidence_pipeline` orders it first only for `stocks_only`); and an identity
+question about a symbol the feed lists ("what is / full name of the stock labeled X on Hyperliquid") is a feed quote
+ask (`tequity._QUOTE_WORDS`). The next turn, "top 10 holders of musebook on robinhood", planned holders for NBIS: the
+rules planner read the symbol out of the research-objective note under the ask, and "musebook" in lowercase was no
+subject at all. The planner now reads the ask only (`composition.split_notes` first), a lowercase word in a token
+position is a subject and the symbol (`subject_probe._LOWER_TOKEN`), and a standing objective is attached only to a
+request that refers back or names no new subject (`research_objective.attach`). Coverage gap left as stated: no
+holders source declares Robinhood Chain.

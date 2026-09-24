@@ -206,6 +206,15 @@ _NOT_A_NAME = {"the", "a", "an", "this", "that", "any", "which", "what", "main",
                "no", "not", "or", "per", "via", "from", "with", "into", "onto", "smart", "social", "lightning", "test", "main", "public", "private", "whole", "entire"}
 
 
+_CHAIN_NAMES = {"solana", "base", "ethereum", "eth", "arbitrum", "optimism", "polygon", "bsc", "bnb", "avalanche", "sui", "hyperliquid", "robinhood", "tron", "ton"}
+_GENERIC_WORDS = {"movers", "gainers", "losers", "winners", "laggards", "tokens", "token", "coins", "coin", "pairs", "pools", "stocks", "perps", "perpetuals", "volume",
+                  "trending", "holders", "prices", "price", "memes", "memecoins", "liquidity", "everything", "anything", "something", "news", "events", "whales",
+                  "activity", "trades", "listings", "assets", "markets", "market", "yields", "yield", "apy", "tvl", "fees", "revenue", "leaders", "leaderboard",
+                  "positions", "balances", "holdings", "wallets", "wallet", "gas", "bridges", "dexes", "protocols", "chains", "trending", "contracts", "orders"}
+_LOWER_TOKEN = re.compile(r"\b(?:holders?|price|liquidity|volume|chart|supply|whales?|top\s+\d+\s+holders?)\s+(?:of|for|in)\s+(?:the\s+)?\$?([a-z][a-z0-9]{2,15})\b"
+                          r"|\b\$?([a-z][a-z0-9]{2,15})\s+(?:token|coin)?\s*on\s+(?:solana|base|ethereum|arbitrum|optimism|polygon|bsc|bnb|avalanche|sui|robinhood|hyperliquid|tron|ton)\b", re.I)
+
+
 def subject_of(request: str) -> str | None:
     """The name worth looking up in this message, or None."""
     from app.tequity import fuzzy_venue
@@ -219,6 +228,14 @@ def subject_of(request: str) -> str | None:
             continue                                   # a venue typed a letter off is not a token ("hyperloquid", 2026-09-23); the venue itself is a subject
         if name and name.upper() not in _STOP:
             return name
+    # "holders of musebook on robinhood", "price of musebook": a lowercase word
+    # in a token position is the token (live, 2026-09-24: with no subject read,
+    # the holders ask inherited the previous turn's NBIS).
+    m = _LOWER_TOKEN.search(request or "")
+    if m:
+        word = m.group(1) or m.group(2)
+        if word.lower() not in _NOT_A_NAME and word.lower() not in _GENERIC_WORDS and word.upper() not in _STOP and not fuzzy_venue(word) and word.lower() not in _CHAIN_NAMES:
+            return word.upper()
     for name, kind in _NAMED_KIND.findall(request or ""):
         if name.lower() not in _NOT_A_NAME and name.upper() not in _STOP and not fuzzy_venue(name):
             return f"{name.title()} {kind.title()}"

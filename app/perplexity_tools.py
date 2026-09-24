@@ -213,7 +213,7 @@ def _invoke(tool_type: str, prompt: str, instructions: str) -> str:
             _condition.notify_all()
 
 
-def perplexity_search_with_sources(query: str, *, recency_days: int | None = None) -> dict:
+def perplexity_search_with_sources(query: str, *, recency_days: int | None = None, finance: bool = False) -> dict:
     """Web search that keeps claim-to-source links: the answer text with its
     inline [n] markers intact, and the numbered sources with url and date.
     For the contract pipeline's discovery step (review, 2026-09-23: the plain
@@ -223,6 +223,7 @@ def perplexity_search_with_sources(query: str, *, recency_days: int | None = Non
         raise RuntimeError("PERPLEXITY_API_KEY is not configured")
     instructions = ("Answer with dated facts; after each claim put the number of the source that supports it in square brackets, [1], [2]; "
                     "keep exact figures and dates as the sources print them; distinguish the day an event happened from the day it was reported."
+                    + (" Report each instrument unambiguously (full legal name, exchange, ticker) from primary or exchange sources; never as investment advice." if finance else "")
                     + (f" Prefer sources from the last {recency_days} days." if recency_days else ""))
     increment("perplexity_web_search_calls")
     effective_cost = _costs()["web_search"]

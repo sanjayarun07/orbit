@@ -284,6 +284,13 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
     """A contract from generic vocabulary alone. The kinds it names are the
     four the pipeline serves; anything else is `other` and the legacy path."""
     text = request or ""
+    # The ask is the user's words: the notes under it (a research objective
+    # naming NBIS) are never where the symbol, venue or window come from
+    # ("top 10 holders of musebook on robinhood" planned holders for NBIS, 2026-09-24).
+    from app.composition import split_notes
+    body, notes = split_notes(text)
+    headline = re.search(r'Home news headline "([^"]+)"', notes or "")
+    text = body or text
     chain, venue = _chain_of(text), _venue_of(text)
     if venue in ("hyperliquid",) and chain == "hyperliquid":
         chain = None
@@ -291,6 +298,11 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
     m = re.search(r"\$([A-Za-z][A-Za-z0-9]{1,9})\b", text) or re.search(r"\b([A-Z][A-Z0-9]{2,9})\b", re.sub(r"\b(?:USD|USDC|USDT|APY|APR|TVL|LP|DEX|AI|ETF|NFT|CLMM|DLMM)\b", " ", text))
     if m:
         symbol = m.group(1).upper()
+    else:
+        from app.routing.subject_probe import subject_of
+        named = subject_of(text)
+        if named and " " not in named and named.isupper():
+            symbol = named                 # "holders of musebook": a lowercase token name in a token position (2026-09-24)
     address = _ADDRESS.search(text)
     filters: dict = {}
     excluded = excluded_names(text)
@@ -310,7 +322,6 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
         filters["min_liquidity_usd"] = value
     limit = int(_LIMIT.search(text).group(1)) if _LIMIT.search(text) else 10
     window = _window_hours(text)
-    headline = re.search(r'Home news headline "([^"]+)"', text)
     if headline:
         # A follow-up about a Home headline is research on that story; the
         # headline's own words ("yields", "gainers") plan nothing (2026-09-24).
@@ -408,7 +419,7 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
     if is_open_research(text) or referent:
         from app.routing.subject_probe import subject_of
         return QuestionContract(kind="open_research", subject=Subject(kind="topic", symbol=symbol, name=None if symbol else subject_of(text), chain=chain), scope="any", metric="events",
-                                window_hours=None if referent else window, freshness_seconds=7 * 86400, evidence_order="discovery_first",
+                                window_hours=None if referent else window, filters=filters, freshness_seconds=7 * 86400, evidence_order="discovery_first",
                                 required_facts=["source"], confidence=0.5, planner="rules")
     return QuestionContract(kind="other", planner="rules", confidence=0.3)
 

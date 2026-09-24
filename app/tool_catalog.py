@@ -550,6 +550,8 @@ CONTRACT_COVERAGE: dict[str, dict] = {
     "perplexity_web_search": {"kinds": {"recent_events", "open_research"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 3 * 86400, "discovery": True},
     "knowledge_base_search": {"kinds": {"recent_events", "open_research"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": None, "background": True},
     "openai_web_search": {"kinds": {"recent_events", "open_research"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 3 * 86400, "discovery": True},
+    # The finance-tuned search leads discovery for a stock ask ("the stock labeled NBIS on Hyperliquid" went to the generic web, 2026-09-24).
+    "perplexity_finance_search": {"kinds": {"recent_events", "open_research"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 3 * 86400, "discovery": True, "stocks": True},
     "tradingview_news": {"kinds": {"recent_events"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 86400, "discovery": True},
     "exchange_listing_announcements": {"kinds": {"recent_events"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 86400, "discovery": True},
 }

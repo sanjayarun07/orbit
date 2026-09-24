@@ -673,7 +673,7 @@ def volume_leaders(request: str) -> str:
     return compact_tool_result("\n\n".join(cards))
 
 
-_QUOTE_WORDS = re.compile(r"\b(?:price|quote|trading\s+at|how\s+much|last\s+price|worth|rate)\b", re.I)
+_QUOTE_WORDS = re.compile(r"\b(?:price|quote|trading\s+at|how\s+much|last\s+price|worth|rate|what\s+is|what'?s|full\s+name|description|which\s+company|labell?ed|listed\s+as)\b", re.I)     # "what is the stock labeled NBIS on Hyperliquid": the feed's own record answers first (2026-09-24)
 
 
 def quote_matches(request: str) -> bool:

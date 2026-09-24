@@ -51,3 +51,12 @@ def test_spelled_as_name_reads_the_sentence():
     assert spelled_as_name(entity, "cap", "Cap is a lending protocol")
     assert not spelled_as_name(entity, "cap", "the market cap fell")
     assert not spelled_as_name(entity, "cap", "capital markets")
+
+
+def test_passages_that_never_mention_the_subject_are_no_card():
+    from types import SimpleNamespace
+    from app.knowledge import tool
+    hits = [SimpleNamespace(protocol_name="Hyperliquid Bridge", document_title="What is Hyperliquid?", chunk=SimpleNamespace(heading="", content="Hyperliquid is a Layer 1 blockchain..."))]
+    assert not tool._mentions_subject(hits, 'What is the full name and description of the stock labeled "NBIS" on Hyperliquid?')
+    assert tool._mentions_subject(hits, "What is Hyperliquid's HLP vault?")
+    assert tool._mentions_subject(hits, "how do onchain order books work")      # no subject named: nothing to require

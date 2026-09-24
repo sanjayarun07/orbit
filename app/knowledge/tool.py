@@ -124,6 +124,22 @@ def _on_topic(hits, plan) -> bool:
     return False
 
 
+def _mentions_subject(hits, request: str) -> bool:
+    """Whether the passages mention what the question is about, when the
+    question names something: a ticker or a name that a venue or chain word
+    in the same sentence must not stand in for."""
+    from app.routing.subject_probe import subject_of
+    subject = subject_of(request or "")
+    if not subject:
+        return True
+    key = subject.lower()
+    for hit in hits:
+        haystack = " ".join([hit.protocol_name or "", hit.document_title or "", getattr(hit.chunk, "heading", "") or "", hit.chunk.content or ""]).lower()
+        if key in haystack:
+            return True
+    return False
+
+
 _PASSAGE_CHARS = 700
 _PASSAGES_CHARS = 3500
 
@@ -197,9 +213,11 @@ def _link_text(title: str) -> str:
 def knowledge_base_search(request: str) -> str:
     """Retrieve passages with citations for a protocol / concept question."""
     hits, plan = _run(_search_with_resolver(request))
-    if not hits or not _on_topic(hits, plan):
+    if not hits or not _on_topic(hits, plan) or not _mentions_subject(hits, request):
         # No output means the router moves on to the next tool; a citation
-        # list that cannot mention the subject is not an answer.
+        # list that cannot mention the subject is not an answer ("NBIS on
+        # Hyperliquid" matched Hyperliquid and printed its bridge and HLP
+        # descriptions with a line admitting NBIS was not in them, 2026-09-24).
         raise RuntimeError("No indexed knowledge matched this question")
     uncovered = _uncovered_terms(hits, request, plan)
     context, citations = build_context(_rank_hits(hits, request)[:_SHOW])

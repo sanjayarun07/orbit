@@ -89,5 +89,14 @@ def attach(resolved_request: str, session_context: dict | None) -> str:
     objective = ((session_context or {}).get("research_objective") or "").strip()
     if not enabled() or not objective or "Research objective of this conversation" in (resolved_request or ""):
         return resolved_request
+    from app.routing.subject_probe import continues_subject, subject_of
+    from app.context_entities import _THEME_PRONOUN
+    ask = (resolved_request or "").splitlines()[0]
+    if subject_of(ask) and not continues_subject(ask) and not _THEME_PRONOUN.search(ask):
+        # A request with its own new subject and no reference back ("top 10
+        # holders of musebook on robinhood" after an NBIS question) is not
+        # in service of the standing objective; the update after the turn
+        # replaces or ends it (live, 2026-09-24).
+        return resolved_request
     return (f"{resolved_request}\nResearch objective of this conversation: {objective}. Answer the current question in service of that "
             "objective; when the question is ambiguous, the objective settles what it means.")

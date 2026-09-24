@@ -234,3 +234,64 @@ def test_a_which_other_projects_ask_runs_a_second_discovery_search(monkeypatch):
     searches = [r for n, r in seen if n == "perplexity_web_search"]
     assert len(searches) == 2 and "first-party source" in searches[1]
     assert out is not None and "Synthetix" in (out.get("answer") or "")
+
+
+def test_an_identity_question_about_a_listed_stock_is_a_feed_quote(monkeypatch):
+    from app import tequity
+    import time
+    tequity._snapshots[tequity.MOVERS["hyperliquid"]] = {"data": {"data": [{"symbol": "NBIS/USDC", "base_asset": "NBIS", "quote_asset": "USDC", "last_price": 91.2, "is_stock": True}]}, "received_at": time.time(), "server_ts": None}
+    try:
+        assert tequity.quote_matches('What is the full name and description of the stock labeled "NBIS" on Hyperliquid?')
+        assert not tequity.quote_matches("Top movers on Hyperliquid today")
+    finally:
+        tequity._snapshots.pop(tequity.MOVERS["hyperliquid"], None)
+
+
+def test_a_stock_ask_leads_discovery_with_the_finance_search(monkeypatch):
+    from tests.test_contract_pipeline import FakeRouter
+    from types import SimpleNamespace
+    monkeypatch.setattr(evidence_pipeline.settings, "contract_pipeline_enabled", True)
+    monkeypatch.setattr(evidence_pipeline.settings, "discovery_first_research", True)
+    from app.nodes import runtime
+    monkeypatch.setattr(runtime, "planner_available", lambda: False)
+
+    async def synth(request, cards, trajectory, advice=False, research=False):
+        return f"**Taken together**\n\nsummary\n\n---\n\n{cards}"
+
+    monkeypatch.setattr(evidence_pipeline.composition, "synthesize", synth)
+    card = "# Finance\n**Checked**: 2026-09-24 14:00 UTC\n\nNebius Group N.V. Class A [1]\n\nSources:\n[1] [Nasdaq](https://nasdaq.com/nbis) · 2026-09-24"
+    router = FakeRouter({"perplexity_finance_search": card, "perplexity_web_search": card.replace("Finance", "Web")})
+    router.plan_across = lambda request, caps, chains, n: []
+    saved = evidence_pipeline.get_provider_router
+    evidence_pipeline.get_provider_router = lambda: router
+    try:
+        contract = plan_by_rules('What is the full name and description of the stock labeled "NBIS" on Hyperliquid?')
+        assert contract.kind == "open_research" and contract.filters.get("stocks_only")
+        out = asyncio.run(evidence_pipeline.answer({}, 'What is the full name and description of the stock labeled "NBIS" on Hyperliquid?', ()))
+        assert "perplexity_finance_search" in router.calls and "perplexity_web_search" not in router.calls
+        crypto = asyncio.run(evidence_pipeline.answer({}, "how it works in akash network", ()))
+    finally:
+        evidence_pipeline.get_provider_router = saved
+    assert out is not None and "Nebius" in (out.get("answer") or "")
+    assert router.calls.count("perplexity_finance_search") == 1          # a crypto ask never leads with the finance search
+
+
+def test_the_rules_planner_reads_the_ask_not_the_objective_note():
+    text = "top 10 holders of musebook on robinhood\nResearch objective of this conversation: identify the full company name for the stock labeled \"NBIS\". Answer the current question in service of that objective."
+    contract = plan_by_rules(text)
+    assert contract.subject.symbol == "MUSEBOOK" and contract.kind == "holders"
+
+
+def test_a_stale_objective_is_not_attached_to_a_new_subject():
+    ctx = {"research_objective": "identify the full company name for the stock labeled NBIS"}
+    assert research_objective.attach("top 10 holders of musebook on robinhood", ctx) == "top 10 holders of musebook on robinhood"
+    assert "Research objective" in research_objective.attach("which other projects follow lock collateral → mint a tradable second token", ctx)
+    assert "Research objective" in research_objective.attach("how it works in akash network", ctx)
+
+
+def test_lowercase_token_names_are_subjects():
+    from app.routing.subject_probe import subject_of
+    assert subject_of("top 10 holders of musebook on robinhood") == "MUSEBOOK"
+    assert subject_of("price of musebook") == "MUSEBOOK"
+    assert subject_of("top movers on hyperliquid") is None
+    assert subject_of("trending tokens on solana") is None

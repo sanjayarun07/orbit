@@ -122,11 +122,12 @@ async def _invoke(router, name: str, request: str, chains: tuple[str, ...], cont
     """One tool. The web discovery tool runs through the structured search so
     claims keep their [n] markers and numbered, dated sources; everything
     else through the router (quota, cache, breaker as usual)."""
-    if name == "perplexity_web_search" and contract is not None and perplexity_tools.perplexity_available() and not getattr(router, "replay", False):
+    if name in ("perplexity_web_search", "perplexity_finance_search") and contract is not None and perplexity_tools.perplexity_available() and not getattr(router, "replay", False):
         try:
             days = int((contract.window_hours or 24 * 30) / 24) or 1 if contract.kind in ("recent_events", "open_research") else None
-            found = await asyncio.to_thread(perplexity_tools.perplexity_search_with_sources, research_query(request), recency_days=days)
-            card = perplexity_tools.render_search_card(request, found)
+            finance = name == "perplexity_finance_search"
+            found = await asyncio.to_thread(perplexity_tools.perplexity_search_with_sources, research_query(request), recency_days=days, finance=finance)
+            card = perplexity_tools.render_search_card(request, found, title="From the web (finance, dated, with sources)" if finance else "From the web (dated, with sources)")
             result = SimpleNamespace(output=card, tool=name, provider="perplexity", structured=found)
             return result
         except Exception:
@@ -235,6 +236,11 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
     cov = tool_catalog.CONTRACT_COVERAGE
     state_tools = [n for n in eligible if not cov[n].get("discovery") and not cov[n].get("background")]
     discovery_tools = [n for n in eligible if cov[n].get("discovery")]
+    if contract.filters.get("stocks_only"):
+        # A stock ask leads with the finance-tuned search; otherwise the finance search never leads.
+        discovery_tools = [n for n in discovery_tools if cov[n].get("stocks")] + [n for n in discovery_tools if not cov[n].get("stocks")]
+    else:
+        discovery_tools = [n for n in discovery_tools if not cov[n].get("stocks")]
     background_tools = [n for n in eligible if cov[n].get("background")]
     # Among the eligible, the catalogue's fit and the tool's own priority order them.
     def rank(name: str) -> float:
