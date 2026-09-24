@@ -30,7 +30,12 @@ class TurnJudge(dspy.Signature):
     a clarifying question where the prompt was clear, or an error.
     Judge only what is on the page: an answer that says exactly what it could not verify is honest, not a fail.
     A research-mode deployment cannot quote or execute swaps; a plain refusal that names that limit is partial,
-    a refusal that misreads the ask is fail."""
+    a refusal that misreads the ask is fail.
+    Three readings that were wrong in every run so far: the dates in the answers are today's (2026), not the
+    future; an answer that keeps a wallet's funding date distinct from its first trade in the token and treats
+    missing counts as unknown meets an expectation about "first trade"; a stop confirmation that names the token
+    is complete. A deterministic card (a scenario, a health check) is judged on its figures and stated
+    assumptions, not on narrative or recommendations the prompt did not ask for."""
     prompt: str = dspy.InputField()
     expected: str = dspy.InputField(desc="the reviewer's expectation for this turn")
     answer: str = dspy.InputField(desc="the answer as rendered, cards included")

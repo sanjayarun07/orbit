@@ -250,3 +250,25 @@ def test_a_covered_source_that_is_paused_is_reported_as_unavailable_not_uncovere
     out = asyncio.run(evidence_pipeline.answer({}, "Who are the top holders of PEPE?", ()))
     assert out["answer"].startswith("The source that covers this (") and "unavailable right now" in out["answer"]
     assert out["gate"]["scope_satisfied"] is True and not out["gate"]["ok"] and "No source I have covers" not in out["answer"]
+
+
+def test_expired_tiles_are_served_while_one_background_rebuild_runs(monkeypatch):
+    import threading, time
+    from app import home_highlights as hh
+    calls = []
+    gate = threading.Event()
+
+    def slow_build():
+        calls.append(1)
+        gate.wait(2)
+        return {"as_of": "x", "source": "news", "cards": [{"id": "new"}]}
+    monkeypatch.setattr(hh, "build", slow_build)
+    monkeypatch.setattr(hh.settings, "home_highlights_ttl_seconds", 60)
+    hh._cached = (time.monotonic() - 1, {"as_of": "old", "source": "news", "cards": [{"id": "old"}]})      # expired
+    hh._rebuilding = False
+    t0 = time.time()
+    first = hh.get_highlights(); second = hh.get_highlights()
+    assert first["cards"][0]["id"] == "old" and second["cards"][0]["id"] == "old" and time.time() - t0 < 1.0, "expired tiles are served at once"
+    gate.set(); time.sleep(0.3)
+    assert calls == [1] and hh.get_highlights()["cards"][0]["id"] == "new", "one background rebuild, then the new tiles"
+    hh.reset()

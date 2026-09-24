@@ -3024,3 +3024,10 @@ nothing from the web (`evidence_pipeline.answer`, the `covered_but_down` branch)
 to the hours since midnight UTC, which left every daily source ineligible early in the day; a ranking's "today" is now
 the day's window (`contracts._window_hours`), while the tick ledger still reads "since midnight" from the words. The
 harness keeps a prompt-less placeholder skipped under `--include-skipped`.
+
+**Home tiles served while they rebuild (2026-09-24).** With the headline verification a rebuild is six sourced reads
+and can pass thirty seconds, so `home_highlights.get_highlights` now serves an expired window's tiles as they are while
+one background thread rebuilds them (`_build_into_cache`, single in-flight guard); only a process with no tiles at
+all builds in the caller's thread, and `force=True` still rebuilds inline. The contract note also tells the writer to
+name the window as asked ("24 days", never "24 hours"), and the trust judge carries the three readings it got wrong
+in every run (today's dates, the "first trade" expectation, a stop confirmation) so they stop costing a read.

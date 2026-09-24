@@ -29,7 +29,8 @@ MAX_TOOLS = 3
 def _contract_note(contract: contracts.QuestionContract, gate: fact_gate.GateResult, fact_rows: list[facts_mod.Fact], scope_note: str | None) -> str:
     hours = contract.window_hours
     window = "-" if not hours else (f"{hours / 24:g} days" if hours >= 48 else f"{hours:g} hours")     # "24 days" was written up as "the last 24 hours" (2026-09-24)
-    lines = [f"Question contract: {contract.label()} · metric {contract.metric or '-'} · scope {contract.scope} · window asked: {window} (name it as asked; a card that covers less says so) · filters {contract.filters or '{}'}",
+    lines = [f"Question contract: {contract.label()} · metric {contract.metric or '-'} · scope {contract.scope} · window asked: {window} "
+             f"(write the window as asked, '{window}', never as 24 hours when days were asked; when a card covers less than that, say the covered span and that it is less) · filters {contract.filters or '{}'}",
              f"Accepted facts: {len(fact_rows)} ({', '.join(sorted({f.kind for f in fact_rows})) or 'none'}).",
              "Instructions for the answer: state only figures present in the cards; name the source and its time for each; keep the [n] "
              "source markers next to the claims they support when the cards carry them; if the cards do not satisfy the contract, say exactly "

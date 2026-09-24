@@ -289,23 +289,45 @@ def suggestions(wallet_holdings: list[str] | None = None) -> list[dict]:
     return categories
 
 
-def get_highlights(force: bool = False) -> dict:
-    """Cached highlights; one build per TTL window, callers coalesce on the lock."""
-    global _cached
+_rebuilding = False
+
+
+def _build_into_cache(force: bool = False) -> dict:
+    """One build under the lock; a failure serves the static cards."""
+    global _cached, _rebuilding
     ttl = max(60, int(settings.home_highlights_ttl_seconds))
-    now = time.monotonic()
-    if not force and _cached and _cached[0] > now:
-        return _cached[1]
     with _lock:
         if not force and _cached and _cached[0] > time.monotonic():
-            return _cached[1]
+            _rebuilding = False
+            return _cached[1]                         # another caller built it while this one waited
         try:
             result = build()
         except Exception:
             logger.warning("home highlights: build failed; serving static cards", exc_info=True)
             result = {"as_of": datetime.now(timezone.utc).isoformat(), "source": "static", "cards": STATIC_CARDS}
         _cached = (time.monotonic() + ttl, result)
+        _rebuilding = False
         return result
+
+
+def get_highlights(force: bool = False) -> dict:
+    """Cached highlights. A window's tiles are served for as long as the next
+    build takes: with the headline verification a rebuild is six sourced
+    reads and can pass thirty seconds (the fourth frozen run saw the endpoint
+    time out, 2026-09-24), so an expired cache is served as it is while one
+    background thread rebuilds it. Only a process with no tiles at all builds
+    in the caller's thread."""
+    global _rebuilding
+    now = time.monotonic()
+    if not force and _cached and _cached[0] > now:
+        return _cached[1]
+    if _cached and not force:
+        with _lock:
+            if not _rebuilding:
+                _rebuilding = True
+                threading.Thread(target=_build_into_cache, name="home-highlights-rebuild", daemon=True).start()
+        return _cached[1]
+    return _build_into_cache(force)
 
 
 def reset() -> None:
