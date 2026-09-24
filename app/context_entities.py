@@ -42,8 +42,12 @@ def themed_followup(request: str, conversation_history: str, session_context: di
     what that question was about, applied to the subject named now (live,
     2026-09-24: Orbit explained Akash in general; the theme was dual tokens)."""
     from app.routing.subject_probe import subject_of
-    if not _THEME_PRONOUN.search(request or "") or (session_context or {}).get("focus"):
-        return None                      # with a focus, "it" is the focus (the referent carry); the theme only stands in when there is none
+    from app.routing.subject_probe import is_referent
+    focus = (session_context or {}).get("focus") or {}
+    if not _THEME_PRONOUN.search(request or ""):
+        return None
+    if focus and (is_referent(request) or (focus.get("kind") == "token" and focus.get("address"))):
+        return None                      # a referent question ("does that authorize X?") and a resolved token are the focus's (the referent carry); a leftover topic under "how it works in X" is not
     subject = subject_of(request)
     if not subject:
         return None

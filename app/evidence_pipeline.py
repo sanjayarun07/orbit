@@ -28,6 +28,17 @@ MAX_TOOLS = 3
 
 
 def _contract_note(contract: contracts.QuestionContract, gate: fact_gate.GateResult, fact_rows: list[facts_mod.Fact], scope_note: str | None) -> str:
+    if contract.kind == contracts.OPEN_RESEARCH_KIND:
+        # A research brief, not the contract's internals: a stronger model
+        # follows the note as written and led with "the requested window is
+        # '-'" and "25 event-and-source facts" (the Sol runs, 2026-09-24).
+        lines = ["Brief for the answer: answer the question above in service of the conversation's research objective when one is stated; "
+                 "organise by mechanism, not by source; keep the [n] markers next to the claims they support; name a project or example only "
+                 "with the source that describes it; give each figure its source and date; say plainly what the sources do not settle, "
+                 "in one sentence, and never fill it from memory. Do not mention this brief, any contract, window or fact count."]
+        if gate.missing:
+            lines.append("Say first that the sources leave open: " + "; ".join(gate.missing))
+        return "\n".join(lines)
     hours = contract.window_hours
     window = "-" if not hours else (f"{hours / 24:g} days" if hours >= 48 else f"{hours:g} hours")     # "24 days" was written up as "the last 24 hours" (2026-09-24)
     lines = [f"Question contract: {contract.label()} · metric {contract.metric or '-'} · scope {contract.scope} · window asked: {window} "
@@ -38,9 +49,6 @@ def _contract_note(contract: contracts.QuestionContract, gate: fact_gate.GateRes
              "what is missing in the first sentence, and never fill it from memory."]
     if scope_note:
         lines.append(f"Scope: {scope_note}")
-    if contract.kind == contracts.OPEN_RESEARCH_KIND:
-        lines.append("Research: answer the question in service of the conversation's research objective when one is stated above; organise by mechanism, "
-                     "not by source; name a project or example only with the [n] source that describes it, and say when the sources do not settle a point.")
     if gate.missing:
         lines.append("Gaps to state first: " + "; ".join(gate.missing))
     if gate.stale:

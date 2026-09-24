@@ -66,6 +66,9 @@ async def update(previous: str | None, request: str, answer: str, *, intent: str
     previous one when the model is unavailable, or None when it says none."""
     if not enabled() or not applies(intent, contract, previous):
         return previous
+    from app.clarify import is_clarification
+    if is_clarification(answer or ""):
+        return previous                  # a question back to the user changes nothing about what they are researching
     from app.nodes import runtime
     try:
         result = await asyncio.wait_for(

@@ -3231,3 +3231,14 @@ mint/burn flow; the dual-token links carried into turn two; Akash's AKT -> ACT b
 is); analogues with the project's own token as collateral and a separately tradable second token (not Lido and
 bridges). Then relevance, factual support (named examples sourced), latency and cost before Sol becomes the research
 default.
+
+The measurement (`reports/dual-token-eval/report.md`, 2026-09-24): objective off reproduces the user's comparison
+(turn three explains the Akash marketplace, turn four lists Cyclo, Hylo and Maker); objective on with gpt-4.1-mini
+fixes turns two and three (BME, AKT burned to mint ACT) and only partly disciplines turn four; GPT-5.6 Sol at high
+effort on the research tier passes all four (only Venice is a direct match; ACT, Factom and Helium credits are
+non-transferable; the Terra family differs) with dated first-party citations, at about twice the latency. Three more
+mechanisms came out of the runs: intercepts read the ask without its notes (`research._ask`: "burn-to-unlock" in an
+objective had made an unlock clarification), a clarification never updates the objective, the compound-ask splitter
+never splits the notes (`composition.split_notes`), the web search is asked the question with the objective as a
+short context (`evidence_pipeline.research_query`), and the open-research note is a brief with no internals (Sol had
+led with "the requested window is '-'"). One to three runs per configuration; five each is the next measurement.

@@ -2034,6 +2034,13 @@ def _shift_trajectory(trajectory: dict, by: int) -> dict:
     return out
 
 
+def _ask(request: str) -> str:
+    """The user's words without the resolution notes under them: an intercept
+    reads the ask, never a note (a research objective naming "whales" or
+    "unlocks" is not a whale or unlock ask, dual-token runs 2026-09-24)."""
+    return composition.split_notes(request)[0] or request
+
+
 async def _research_node(state: AgentState, sink: dict) -> dict:
     request = _effective_request(state)
     # A broad "how's the crypto market" ask -> the compact overview card, composed
@@ -2042,7 +2049,7 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     # token-specific, or "trending tokens" request still falls through to its
     # ranked-list tools.
     broad_market = bool(
-        _MARKET_OVERVIEW.search(request)
+        _MARKET_OVERVIEW.search(_ask(request))
         and not _TOKEN_ADDRESS.search(request)
         and not tuple(state.get("chains", []))
         and not TRENDING_TOKENS.search(request)
@@ -2051,7 +2058,7 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     # ask, four tools. Movers, volume, sentiment and news are composed by name
     # and read together; the model never picks what to buy. A ticker in the
     # ask means a specific asset and belongs to the deep dive below.
-    if _NARRATIVE_ASK.search(request) and not _DEX_SCOPED.search(request) and not _mentions_asset(request) and perplexity_available():
+    if _NARRATIVE_ASK.search(_ask(request)) and not _DEX_SCOPED.search(request) and not _mentions_asset(request) and perplexity_available():
         # "What are the trending narratives right now?": narratives are themes
         # drawing flows across the market, not DEX Screener's memecoin metas.
         # The market read leads (dated, sourced); the metas card follows as
@@ -2080,14 +2087,14 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
                     "is the memecoin slice only and its buckets are tags, not narratives. Name each narrative with its dated evidence and source.")
             answer = await composition.synthesize(f"{request}\n{note}", cards, trajectory)
             return {"answer": answer, "trajectory": {"thought_0": "Narratives are themes; the market read leads and the DEX metas follow as the memecoin slice.", **trajectory}}
-    if composition.MARKET_ADVICE.search(request) and not _mentions_asset(request):
+    if composition.MARKET_ADVICE.search(_ask(request)) and not _mentions_asset(request):
         cards, trajectory = await composition.compose_market_advice(request)
         if cards:
             answer = await composition.synthesize(request, cards, trajectory, advice=True)
             return {"answer": answer, "trajectory": {"thought_0": "A market-wide 'what to trade' ask is movers, volume, sentiment and news read together.", **trajectory}}
     # "check whale activity" with no token, address or ticker: whales of what?
     # Asked, not guessed (and never silently dropped from a compound message).
-    if _WHALE_ASK.search(request) and not _mentions_asset(request):
+    if _WHALE_ASK.search(_ask(request)) and not _mentions_asset(request):
         return {"answer": ("Whale activity for which token or wallet? Name the token (a $ticker or its contract/mint) and I'll pull its top holders "
                            "and concentration, or paste a wallet address and I'll show its recent large transfers."), "trajectory": None}
     # "why is SOL down?" -> the composed market + news card (crypto first, stock
@@ -2104,7 +2111,7 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         lead = "_The market here is the crypto market, led by BTC; say \"stock market\" for equities._"
         return {"answer": f"{lead}\n\n{overview}\n\n---\n\n{answer}",
                 "trajectory": {"thought_0": "A market-wide why-moving ask: the crypto overview, then BTC's card and news.", **(trajectory or {})}}
-    moving = why_moving.match(request)
+    moving = why_moving.match(_ask(request))
     if moving and not _TOKEN_ADDRESS.search(request):
         prefer_stock = why_moving.prefers_stock(request) or "equity_research" in set(state.get("capabilities", []))
         streaming.emit("status", text="Reading the market data and the news for the move")
@@ -2134,7 +2141,9 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     # "what about the unlock next month?" with no token named: the token in
     # the conversation's focus, or a question -- never the market calendar's
     # first unlock (live 2026-09-18: it answered with SUI nobody asked about).
-    if token_unlocks.UNLOCK_ASK.search(request) and not _mentions_asset(request):
+    # The ask is the user's words: the resolution notes under it ("burn-to-unlock" in
+    # a research objective) are never an unlock ask (dual-token runs, 2026-09-24).
+    if token_unlocks.UNLOCK_ASK.search(composition.split_notes(request)[0]) and not _mentions_asset(request):
         focus = _focus_token(state)
         if focus and focus.get("symbol"):
             request = f"{focus['symbol']} {request} {focus['address']}" + (f" on {focus['chain']}" if focus.get("chain") else "")

@@ -15,6 +15,20 @@ logger = logging.getLogger(__name__)
 # Every DSPy hop gets an explicit per-request timeout (litellm otherwise waits up
 # to 600s on a wedged provider) plus litellm's own exponential-backoff retries
 # against the same model. See _call_lm for the cross-provider fallback on top.
+def _reasoning_kwargs(model: str | None) -> dict:
+    """A reasoning model (GPT-5.x, o-series) takes no sampling temperature and
+    needs room for its reasoning tokens; the effort level is passed through
+    when configured."""
+    name = (model or "").lower()
+    if not any(tag in name for tag in ("gpt-5", "/o1", "/o3", "/o4", "o1-", "o3-", "o4-")):
+        return {}
+    out = {"temperature": 1.0, "max_tokens": 16000}
+    if settings.research_reasoning_effort:
+        out["reasoning_effort"] = settings.research_reasoning_effort
+    return out
+
+
+
 _primary_lm = dspy.LM(
     settings.model,
     timeout=settings.llm_request_timeout_seconds,
@@ -53,19 +67,6 @@ _planner_lm = (
     if _planner_model and _planner_model != settings.model
     else None
 )
-def _reasoning_kwargs(model: str | None) -> dict:
-    """A reasoning model (GPT-5.x, o-series) takes no sampling temperature and
-    needs room for its reasoning tokens; the effort level is passed through
-    when configured."""
-    name = (model or "").lower()
-    if not any(tag in name for tag in ("gpt-5", "/o1", "/o3", "/o4", "o1-", "o3-", "o4-")):
-        return {}
-    out = {"temperature": 1.0, "max_tokens": 16000}
-    if settings.research_reasoning_effort:
-        out["reasoning_effort"] = settings.research_reasoning_effort
-    return out
-
-
 _research_lm = (
     dspy.LM(settings.research_model, timeout=settings.llm_request_timeout_seconds, num_retries=settings.llm_num_retries, **_reasoning_kwargs(settings.research_model))
     if settings.research_model and settings.research_model != settings.model

@@ -125,3 +125,34 @@ def test_the_web_query_is_the_question_with_its_context():
     assert q.startswith("In Akash Network: apart from staking how else can we tie dual token to the main token? (Context: this continues research on compare dual-token mechanisms to Venice")
     assert "Resolved from" not in q and "Answer the current question" not in q
     assert "crypto-first markets assistant" in evidence_pipeline.research_query("What is OPEN?")
+
+
+def test_a_clarification_answer_leaves_the_objective_alone(monkeypatch):
+    from app.nodes import runtime
+
+    async def never(program, **kw):
+        raise AssertionError("no model call on a clarification")
+
+    monkeypatch.setattr(runtime, "_call_research_lm", never)
+    out = asyncio.run(research_objective.update("compare dual-token mechanisms", "how it works in akash network",
+                                                "Which token's unlock? Name it (a $ticker, the project name or its contract address) and I'll pull its vesting schedule.",
+                                                intent="research", contract={"kind": "open_research"}))
+    assert out == "compare dual-token mechanisms"
+
+
+def test_an_unlock_word_in_the_notes_is_not_an_unlock_ask():
+    from app import composition, token_unlocks
+    request = "how it works in akash network\nResearch objective of this conversation: mechanisms including lock-to-mint and burn-to-unlock. Answer the current question in service of that objective."
+    assert token_unlocks.UNLOCK_ASK.search(request)
+    assert not token_unlocks.UNLOCK_ASK.search(composition.split_notes(request)[0])
+
+
+def test_the_open_research_note_is_a_brief_without_internals():
+    from app import fact_gate
+    contract = plan_by_rules("how it works in akash network")
+    assert contract.kind == "open_research"
+    gate = fact_gate.check(contract, [], scope_satisfied=True)
+    note = evidence_pipeline._contract_note(contract, gate, [], None)
+    assert "Brief for the answer" in note and "organise by mechanism" in note
+    for internal in ("Question contract", "window asked", "Accepted facts", "metric"):
+        assert internal not in note

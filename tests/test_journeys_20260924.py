@@ -592,3 +592,14 @@ def test_a_pattern_question_is_scoped_to_the_mechanism_not_the_tokens_market():
     assert "mechanism or design pattern" in scoped and "never answer with that token's price, vesting or unlock" in scoped
     plain = market_scoped("What is VVV?")
     assert "mechanism or design pattern" not in plain and "Read \"VVV\"" in plain
+
+
+def test_the_theme_stands_over_a_leftover_topic_focus():
+    # After "Research on ... Venice VVV and DIEM" (focus: a topic) and a concept question, "how it works in akash network" is the concept applied to Akash.
+    history = "user: apart from staking how else can we tie dual token to the main token\nassistant: Burn-to-mint..."
+    ctx = {"focus": {"kind": "topic", "label": "Venice"}, "last_request": "apart from staking how else can we tie dual token to the main token"}
+    resolved = context_entities.themed_followup("how it works in akash network", history, ctx)
+    assert resolved and resolved.startswith("In Akash Network: apart from staking")
+    # a resolved token in focus is what "it" means
+    ctx_token = {"focus": {"kind": "token", "label": "BONK", "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"}, "last_request": "apart from staking how else can we tie dual token to the main token"}
+    assert context_entities.themed_followup("how it works in akash network", history, ctx_token) is None
