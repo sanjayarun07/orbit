@@ -240,6 +240,18 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         streaming.emit("card", markdown=result.output, tool=result.tool)
         parts.append((result.output, {"tool_name_0": result.tool, "tool_args_0": {"request": request}, "observation_0": result.output}))
         fact_rows.extend(_facts_of(result, contract.kind))
+    if not parts:
+        # The chosen source returned nothing usable: the next eligible source
+        # answers instead (Mobula had no ANSEM holders three times over while
+        # the Solana RPC read was eligible, 2026-09-24).
+        for name in sorted([n for n, reason in ranked if reason == "eligible" and n in enabled and n not in chosen], key=rank, reverse=True):
+            result = await _invoke(router, name, request, chains, contract)
+            chosen = chosen + [name]
+            if result is not None and result.output:
+                streaming.emit("card", markdown=result.output, tool=result.tool)
+                parts.append((result.output, {"tool_name_0": result.tool, "tool_args_0": {"request": request}, "observation_0": result.output}))
+                fact_rows.extend(_facts_of(result, contract.kind))
+                break
     gate = fact_gate.check(contract, fact_rows, scope_satisfied=scope_satisfied)
     if not gate.ok and gate.missing and discovery_tools and not any(n in chosen for n in discovery_tools):
         # One repair: a discovery tool for the gap the state tools left.
@@ -264,6 +276,13 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         asked = f"{contract.window_hours / 24:g} days" if contract.window_hours >= 48 else f"{contract.window_hours:g} hours"
         gate.notes.append(f"covers {covered:.1f} hours of the {asked} asked")
         scope_note = (scope_note + "; " if scope_note else "") + f"the cards cover {covered:.1f} hours of the {asked} asked, say so"
+    elif covered is not None and contract.window_hours and covered > 1.25 * contract.window_hours:
+        # The cards span more than the window asked (a 102-minute tick span
+        # presented as the hourly change, review of bc40f724): the span is
+        # said first and the change is never called the window's.
+        asked = f"{contract.window_hours / 24:g} days" if contract.window_hours >= 48 else f"{contract.window_hours:g} hours"
+        gate.notes.append(f"spans {covered:.1f} hours for the {asked} asked (nearest stored ticks)")
+        scope_note = (scope_note + "; " if scope_note else "") + f"the cards span {covered:.1f} hours for the {asked} asked, say the span and never call the change a {asked} change"
     note = _contract_note(contract, gate, fact_rows, scope_note)
     synthesized = await composition.synthesize(f"{request}\n{note}", cards, trajectory)
     lead = gate.gap_sentence(contract)

@@ -47,11 +47,17 @@ def test_since_then_points_at_the_previous_answer():
     assert not _REFERENT.match("What is the price of BONK?")
 
 
-# --- "not Nasdaq shares" is a crypto-only ask --------------------------------
+# --- stock negations: an exclusion is crypto only; "perps, not Nasdaq shares" keeps stocks
 
-@pytest.mark.parametrize("text", ["I mean Aster perpetual contracts, not Nasdaq shares.", "Aster movers excluding the US equities", "crypto only on Aster"])
+@pytest.mark.parametrize("text", ["Aster movers excluding the US equities", "crypto only on Aster", "Hyperliquid gainers, no stocks"])
 def test_stock_negation_with_a_market_name(text):
     assert tequity.stock_filter(text) is False
+
+
+def test_perps_not_shares_keeps_the_tokenized_stock_reading():
+    # "Which Aster stocks are moving?" -> "I mean Aster perpetual contracts, not Nasdaq shares": the perps on stocks, not crypto (review of bc40f724)
+    assert tequity.stock_filter("I mean Aster perpetual contracts, not Nasdaq shares.") is True
+    assert plan_by_rules("Aster perpetual contracts moving most, not Nasdaq shares").filters == {"stocks_only": True}
 
 
 def test_stock_words_alone_still_mean_stocks():
@@ -175,7 +181,7 @@ def test_headline_pick_becomes_the_focus(monkeypatch):
 def test_subject_correction_reruns_the_previous_request():
     history = "user: Check SPX.\nassistant: The ticker SPX primarily denotes the S&P 500 Index..."
     resolved = context_entities.resolve_contextual_request("I mean SPX6900 the meme token, not the index.", history, {"focus": {"kind": "topic", "label": "SPX"}})
-    assert resolved.startswith("Check SPX6900.")
+    assert resolved.startswith("Check the SPX6900 token.")
     assert "corrected the subject of the previous request from SPX to SPX6900" in resolved
 
 
@@ -300,3 +306,169 @@ def test_token_mention_prefers_the_sentence_then_the_focus():
     assert exit_controls._token_mention("For the ANSEM amount there", None) == "ANSEM"
     assert exit_controls._token_mention("estimate a full exit", {"kind": "token", "label": "TOKEN", "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"}) == "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
     assert exit_controls._token_mention("estimate a full exit to USDC", None) is None
+
+
+# --- run 4: bare "what changed", holders in more words, crypto-only wording,
+# the headline list as focus, the next eligible source, the feed's own coverage
+
+def test_bare_what_changed_points_back_and_asks_when_nothing_is_there():
+    assert _REFERENT.match("What changed?") and continues_subject("What changed?")
+    assert not _REFERENT.match("What happened with Aave this week?")
+    assert _bare_referent("What changed?", {"session_context": {}, "history": ""})
+
+
+def test_top_ten_hold_is_a_holders_ask():
+    assert plan_by_rules("Back to BONK: what percent do the top 10 hold, and what counts in that denominator?").kind == "holders"
+
+
+@pytest.mark.parametrize("text", ["Top Hyperliquid crypto perp gainers today.", "Which HL coin perps have pumped most over 60m?", "Past-hour winners on Hyperliquid, crypto contracts only."])
+def test_crypto_perp_wording_is_crypto_only(text):
+    assert tequity.stock_filter(text) is False
+    assert plan_by_rules(text).filters.get("crypto_only") is True
+
+
+def test_headline_list_becomes_the_focus(monkeypatch):
+    from app import home_highlights
+    monkeypatch.setattr(home_highlights, "get_highlights", lambda: {"cards": [{"title": "A story", "kind": "crypto"}, {"title": "B story", "kind": "stocks"}], "meme_cards": []})
+    context = experience.advance_session_context({}, "Summarize today's Home headlines; which source published each and when?", None, "general", [], [], None)
+    assert context["focus"]["label"] == "A story; B story" and context["focus"]["source"] == "home_headline"
+
+
+def test_corrected_subject_travels_as_a_token():
+    from app.nodes import research
+    resolved = context_entities.corrected_request("I mean SPX6900 the meme token, not the index.", "user: Check SPX.\nassistant: ...")
+    assert resolved.startswith("Check the SPX6900 token.")
+    assert research._named_tickers(resolved) == ["SPX6900"]
+
+
+def test_registry_lists_a_coin_by_name(monkeypatch):
+    from app import symbol_registry
+    symbol_registry.reset()
+    monkeypatch.setattr(symbol_registry, "_cg", lambda path, params: {"coins": [{"id": "spx6900", "name": "SPX6900", "symbol": "SPX", "market_cap_rank": 125}]})
+    rows = symbol_registry._search("SPX6900")            # the suite stubs listed(); the search is the part that reads the name
+    assert rows and rows[0]["id"] == "spx6900" and rows[0]["symbol"] == "SPX"
+
+
+def test_a_minute_span_is_not_an_unsupported_figure():
+    from app import fact_gate
+    assert fact_gate.unsupported_figures("The window ran 1 hour and 42 minutes; volume was $57.", [], "From tick 08:42 to 10:24 UTC") == ["$57"]
+
+
+def test_sized_exit_label_has_no_dollar_sign(monkeypatch):
+    async def fake_resolve(token):
+        return "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm", None, None
+
+    async def fake_sizes(mint, amounts):
+        return []
+
+    monkeypatch.setattr(exit_controls, "resolve_token", fake_resolve)
+    monkeypatch.setattr(exit_controls.exit_monitor, "size_comparison", fake_sizes)
+    monkeypatch.setattr(exit_controls.exit_monitor, "render_sizes", lambda symbol, mint, rows: f"# Sizing — {symbol}")
+    answer = asyncio.run(exit_controls.handle("And which has a better exit for a $1,000 position?", None, None, focus={"kind": "topic", "label": "$WIF"}))
+    assert "# Sizing — WIF" in answer and "$WIF" not in answer
+
+
+def test_feed_coverage_question_is_a_product_question():
+    from app import product_actions
+    assert product_actions.asks_feed_coverage("Can your feed really support that interval?")
+    assert product_actions.is_product_question("Can your feed really support that interval?")
+    assert not product_actions.asks_feed_coverage("Top movers on Hyperliquid in the last hour")
+
+
+
+# --- review of bc40f724: task numbers, excluded venues, hour baselines, "50 bps", verified mints
+
+def test_filtered_task_list_keeps_the_full_list_numbers(monkeypatch):
+    from app import tasks, tasks_nl
+    rows = [{"id": "a", "title": "Price alert", "schedule": {"every": "5m"}, "status": "active", "next_run_at": None},
+            {"id": "b", "title": "Morning brief", "schedule": {"daily": "08:00"}, "status": "paused", "next_run_at": None}]
+
+    async def fake_list(user_id, include_done=False):
+        return rows
+
+    monkeypatch.setattr(tasks, "list_tasks", fake_list)
+    monkeypatch.setattr(tasks, "describe_schedule", lambda schedule, tz: "daily")
+    monkeypatch.setattr(tasks_nl, "_when", lambda task: "soon")
+    listing = asyncio.run(tasks_nl._render_list({"id": "u"}, status="paused"))
+    assert "2. **Morning brief**" in listing and "1. **Morning brief**" not in listing
+    assert "resume task 1" not in listing and "task 2" in listing
+
+
+def test_an_excluded_venue_is_never_the_venue():
+    contract = plan_by_rules("Top stock perps not on Hyperliquid but on Aster")
+    assert contract.venue == "aster" and contract.filters.get("exclude") == ["hyperliquid"]
+    assert plan_by_rules("Top movers on Hyperliquid, not Aster").venue == "hyperliquid"
+
+
+def test_an_hour_window_takes_the_nearest_tick_after_a_far_baseline(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from app import tequity_ledger
+    now = datetime(2026, 9, 24, 10, 24, tzinfo=timezone.utc)
+    start = now - timedelta(hours=1)
+    far = [{"symbol": "X", "taken_at": start - timedelta(minutes=42), "last_price": 100.0}]
+    near = [{"symbol": "X", "taken_at": start + timedelta(minutes=3), "last_price": 101.0}]
+    end_rows = [{"symbol": "X", "taken_at": now, "last_price": 103.0}]
+
+    async def tick_at(channel, moment):
+        return end_rows if moment == now else far
+
+    async def first_tick_from(channel, moment):
+        return near
+
+    monkeypatch.setattr(tequity_ledger, "tick_at", tick_at)
+    monkeypatch.setattr(tequity_ledger, "first_tick_from", first_tick_from)
+    out = asyncio.run(tequity_ledger.movers_between("hyperliquid", start, now))
+    assert out["from"] == near[0]["taken_at"]
+    assert out["coverage_gap"] is None
+    assert round(out["gainers"][0]["change_between_pct"], 2) == round((103 - 101) / 101 * 100, 2)
+
+
+def test_a_far_baseline_with_nothing_nearer_is_named(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from app import tequity_ledger
+    now = datetime(2026, 9, 24, 10, 24, tzinfo=timezone.utc)
+    start = now - timedelta(hours=1)
+    far = [{"symbol": "X", "taken_at": start - timedelta(minutes=42), "last_price": 100.0}]
+    end_rows = [{"symbol": "X", "taken_at": now, "last_price": 103.0}]
+
+    async def tick_at(channel, moment):
+        return end_rows if moment == now else far
+
+    async def first_tick_from(channel, moment):
+        return []
+
+    monkeypatch.setattr(tequity_ledger, "tick_at", tick_at)
+    monkeypatch.setattr(tequity_ledger, "first_tick_from", first_tick_from)
+    out = asyncio.run(tequity_ledger.movers_between("hyperliquid", start, now))
+    assert out["coverage_gap"] == "baseline tick 42 min before the window start"
+    card = tequity.render_period_movers("hyperliquid", out, start, stocks_only=False, losers=False)
+    assert "spans 102 minutes, not the 60 asked" in card
+
+
+def test_an_overlong_span_is_said_first():
+    from app import evidence_pipeline
+    cards = "**From tick**: 2026-09-24 08:42 UTC · **To tick**: 2026-09-24 10:24 UTC"
+    assert evidence_pipeline._covered_hours(cards) is not None
+
+
+def test_bps_is_not_a_stated_amount():
+    assert exit_controls._STATED_AMOUNT.search("Estimate a full exit of ANSEM with 50 bps slippage") is None
+    assert exit_controls._STATED_AMOUNT.search("Estimate selling 1000 ANSEM to USDC")
+    assert exit_controls.is_exit_control("Estimate a full exit of ANSEM with 50 bps slippage")
+
+
+def test_verified_mint_never_takes_an_unverified_lone_match(monkeypatch):
+    from app.nodes import portfolio
+    from app.jupiter import jupiter
+
+    async def search(symbol):
+        return [{"id": "Mint1111111111111111111111111111111111111111", "symbol": "ANSEM", "tags": [], "organicScore": 90}]
+
+    monkeypatch.setattr(jupiter, "search_tokens", search)
+    assert asyncio.run(portfolio._verified_mint("ANSEM")) is None
+
+    async def search_verified(symbol):
+        return [{"id": "Mint1111111111111111111111111111111111111111", "symbol": "ANSEM", "tags": ["verified"], "organicScore": 90}]
+
+    monkeypatch.setattr(jupiter, "search_tokens", search_verified)
+    assert asyncio.run(portfolio._verified_mint("ANSEM")) == "Mint1111111111111111111111111111111111111111"

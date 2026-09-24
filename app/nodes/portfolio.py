@@ -51,9 +51,9 @@ async def _verified_mint(symbol: str) -> str | None:
     except Exception:
         return None
     exact = [r for r in rows or [] if str(r.get("symbol") or "").upper() == symbol.upper()]
-    verified = [r for r in exact if "verified" in [str(t).lower() for t in (r.get("tags") or [])]] or exact
+    verified = [r for r in exact if "verified" in [str(t).lower() for t in (r.get("tags") or [])]]
     if not verified:
-        return None
+        return None                                                  # an unverified namesake is never a silent pick (review of bc40f724)
     verified.sort(key=lambda r: float(r.get("organicScore") or 0), reverse=True)
     top = verified[0]
     if len(verified) > 1 and float(verified[1].get("organicScore") or 0) >= float(top.get("organicScore") or 0) * 0.5:

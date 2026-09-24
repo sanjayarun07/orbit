@@ -90,6 +90,10 @@ async def general_node(state: AgentState) -> dict:
         # an SEC order and got the card (expanded UI review, 2026-09-24).
         return {"answer": policy_summary(state), "trajectory": None}
     from app import product_actions
+    if product_actions.asks_feed_coverage(request):
+        # "Can your feed really support that interval?" is about the source, answered from its own state.
+        from app import tequity
+        return {"answer": await tequity.feed_coverage_answer(), "trajectory": None}
     if (state.get("routing_decision") or {}).get("speech_act") == "app" or product_actions.is_product_question(request):
         # "What can I do here without connecting a wallet" is about this
         # product, whatever act the classifier gave it (2026-09-23: explain,

@@ -3122,3 +3122,30 @@ namesake when Jupiter's lookup is rate-limited (WIF on Solana); and the pipeline
 market-scoped question ("PUMP revenue" had come back as ProPetro). Open after run 3: labelling holder addresses
 ("which of those are exchanges or pools"), a synthesis copying the previous turn's framing over a correct card, a
 question about the feed's own coverage, "back to X" after "switch topics", and "this" for a listed set of headlines.
+
+Run 4 (build bc40f724, wallet in, 77 turns, no outage; `reports/journeys-expanded-2026-09-24-run4/report.md`)
+confirmed every fix from runs 2 and 3 and found nine more, fixed the same day: a bare "What changed?" points at the
+previous subject and, with none, is a question (it had explained DeFi yields); "top 10 hold" is a holders ask;
+"crypto perp", "coin perps" and "crypto contracts only" are crypto only in the contract and the feed (a stock had led
+the list); the next eligible source answers when the chosen one returns nothing (`evidence_pipeline.answer`: Mobula
+had no ANSEM holders while the Solana RPC read was eligible); a question about the feed itself is answered from its
+own state -- venues, snapshot age, the ledger's span, the windows the period tools accept
+(`product_actions.asks_feed_coverage`, `tequity.feed_coverage_answer`); the listed headlines are a focus, so "is this
+old news?" is research on those stories; a corrected subject travels as "the X token" and the listing registry matches
+a coin by name as well as symbol (SPX6900 is the name of the coin whose symbol is SPX; Jupiter's search had picked a
+Wormhole copy); a minute count is a span, not a figure; and the sizing label drops the dollar sign. Open after run 4:
+labelling holder addresses, two subjects in one ask, and a synthesis rephrasing a correct card's header.
+
+The review of bc40f724 (2026-09-24) held UAT on four correctness points, fixed the same day with regressions in
+`tests/test_journeys_20260924.py`: a task's number is its place in the full list in every listing, so "resume task
+2" after "show paused tasks" acts on the task shown (`tasks_nl._render_list`; a filtered list renumbered from 1 had
+acted on the unfiltered first task); an excluded venue is never the venue ("not on Hyperliquid but on Aster" is Aster,
+`contracts._venue_of`); an hour window's baseline is the stored tick nearest its start, the first tick after the
+start when the last tick before it is farther (`tequity_ledger.BASELINE_TOLERANCE`), a far baseline with nothing
+nearer is named on the card as the span it actually measures, and a card that spans more than the window asked is
+said first and never called the window's change (`evidence_pipeline`, the mirror of the short-coverage lead); and
+"Aster perpetual contracts, not Nasdaq shares" keeps the tokenized-stock reading -- the contrast is perps against the
+shares themselves, not stocks against crypto (`_SHARES_VS_PERPS` in `tequity` and `contracts`; the run-2 fix had read
+it the other way). Two narrower ones: "50 bps slippage" is a parameter, not a stated amount, so "estimate a full exit
+of ANSEM with 50 bps slippage" is the exit control (`exit_controls._STATED_AMOUNT`); and the verified-mint lookup
+never takes a lone unverified namesake (`nodes/portfolio._verified_mint`).

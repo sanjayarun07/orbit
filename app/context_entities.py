@@ -41,8 +41,11 @@ def corrected_request(request: str, conversation_history: str) -> str | None:
     old = subject_of(previous)
     if not old or old.lower() == new.lower() or not re.search(rf"\b{re.escape(old)}\b", previous):
         return None
-    rerun = re.sub(rf"\b{re.escape(old)}\b", new, previous)
     rest = m.group("rest").strip(" .,;!")
+    # "the SPX6900 token": the token word travels with the name so the
+    # resolver reads it as a ticker (digits alone are not one).
+    replacement = f"the {new} token" if _TOKEN_WORD.search(rest) else new
+    rerun = re.sub(rf"\b{re.escape(old)}\b", replacement, previous)
     return (f"{rerun}\nResolved from conversation context: the user corrected the subject of the previous request from {old} to {new}"
             + (f" ({rest})" if rest else "") + "; answer that request about the corrected subject.")
 # A message that's just a pronoun reference back to the canonical focus --

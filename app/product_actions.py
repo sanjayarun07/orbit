@@ -136,6 +136,29 @@ def picked_headline(request: str) -> str | None:
     return cards[min(order.get(pick.group(1).lower(), 0), len(cards) - 1)]["title"]
 
 
+def listed_headlines(request: str) -> str | None:
+    """The titles a product answer listed ("summarize today's Home
+    headlines"), joined, so "is this old news?" points at them."""
+    if not _HOME_HEADLINES.search(request or "") or picked_headline(request):
+        return None
+    from app import home_highlights
+    data = home_highlights.get_highlights()
+    titles = [c["title"] for c in (data.get("cards") or []) + (data.get("meme_cards") or []) if c.get("title") and c.get("kind") in ("crypto", "stocks", "memes")]
+    return "; ".join(titles[:4]) if titles else None
+
+
+_FEED_COVERAGE = re.compile(r"\b(?:can|does|do|will|is|could)\s+(?:your|the|this)\s+(?:feed|data\s+feed|source|ledger|tick\s+data)\b|\byour\s+(?:feed|ledger|tick\s+data)\b[^?]{0,40}\b(?:support|cover|handle|resolution|interval|granular\w*|go\s+back|history|span)", re.I)
+
+
+def asks_feed_coverage(request: str) -> bool:
+    """A question about what the feed itself can answer, not a data ask."""
+    return bool(_FEED_COVERAGE.search(request or ""))
+
+
+FEED_COVERAGE = ("The Tequity feed covers Aster and Hyperliquid pairs: live snapshots every few seconds for 24h figures, and a tick ledger "
+                 "(about every 5 minutes) for any window from 30 minutes to 30 days inside its span. Ask `what does your feed cover` for the live span.")
+
+
 def home_headlines_answer(request: str) -> str:
     from app import home_highlights
     data = home_highlights.get_highlights()
@@ -168,7 +191,7 @@ def is_product_question(request: str) -> bool:
     """A question about what this product does or how to use it, or about one
     of its own concepts (an exit watch, marked value against sale proceeds)."""
     text = request or ""
-    if _FIND_CHAT.search(text) or _EXIT_WATCH_MEANING.search(text) or _MARKED_VS_PROCEEDS.search(text) or _WALLET_VIEW.search(text) or _asks_quote_failure_behaviour(text) or _HOME_HEADLINES.search(text):
+    if _FIND_CHAT.search(text) or _EXIT_WATCH_MEANING.search(text) or _MARKED_VS_PROCEEDS.search(text) or _WALLET_VIEW.search(text) or _asks_quote_failure_behaviour(text) or _HOME_HEADLINES.search(text) or _FEED_COVERAGE.search(text):
         return True
     return bool(_WHAT_CAN.search(text)) and not re.search(r"\b(?:price|holders?|liquidity|volume|market\s+cap|tvl)\b", text, re.I)
 
@@ -196,6 +219,8 @@ def answer(request: str) -> str:
         return QUOTE_FAILURE
     if _HOME_HEADLINES.search(text):
         return home_headlines_answer(text)
+    if _FEED_COVERAGE.search(text):
+        return FEED_COVERAGE
     if _WHAT_CAN.search(text) and not parts:
         return WHAT_CAN
     if not parts:

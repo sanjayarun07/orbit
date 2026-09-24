@@ -38,16 +38,24 @@ def listed(symbol: str) -> list[dict]:
         hit = _cache.get(key)
         if hit and hit[0] > now:
             return hit[1]
+    rows = _search(key)
+    with _lock:
+        _cache[key] = (now + _TTL, rows)
+    return rows
+
+
+def _search(key: str) -> list[dict]:
+    """CoinGecko's coins whose symbol, or whose name, is exactly `key`
+    ("SPX6900" is the name of the coin whose symbol is SPX, 2026-09-24)."""
     rows: list[dict] = []
     try:
         for coin in (_cg("/search", {"query": key}).get("coins") or []):
-            if str(coin.get("symbol") or "").upper() == key and coin.get("id"):
-                rows.append({"id": coin["id"], "name": coin.get("name") or coin["id"], "symbol": key, "rank": coin.get("market_cap_rank")})
+            symbol = str(coin.get("symbol") or "").upper()
+            if (symbol == key or str(coin.get("name") or "").upper() == key) and coin.get("id"):
+                rows.append({"id": coin["id"], "name": coin.get("name") or coin["id"], "symbol": symbol or key, "rank": coin.get("market_cap_rank")})
     except Exception:
         logger.info("coingecko symbol search failed for %s", key, exc_info=True)
     rows.sort(key=lambda r: (r["rank"] is None, r["rank"] or 0))
-    with _lock:
-        _cache[key] = (now + _TTL, rows)
     return rows
 
 

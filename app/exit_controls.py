@@ -60,7 +60,7 @@ _SIZED_EXIT = re.compile(
 # wallet's position quoted, in any wording; a stated amount is a simulation
 # instead, and without a wallet the estimate asks for a size (2026-09-24).
 _EXIT_ESTIMATE = re.compile(rf"\b(?:estimate|quote|price[- ]check|simulate|what\s+would)\s+(?:a\s+|the\s+|my\s+)?(?:full\s+|entire\s+|whole\s+|complete\s+)?exit\b(?:\s+(?:of|from|for|on)\s+{_named('t')})?", re.I)
-_STATED_AMOUNT = re.compile(r"\b\d+(?:\.\d+)?\s*[A-Za-z]{2,10}\b")
+_STATED_AMOUNT = re.compile(r"\b\d+(?:\.\d+)?\s*(?!(?:bps?|pct|percent|x|k|m|b|min|mins|minutes?|hours?|hrs?|days?|weeks?|months?|seconds?|secs?)\b)[A-Za-z]{2,10}\b", re.I)     # "50 bps slippage" is a parameter, not an amount (review of bc40f724)
 _MENTION = re.compile(r"(?<![A-Za-z0-9$])\$?([A-Z][A-Z0-9]{1,9})(?![A-Za-z0-9])")
 _MENTION_STOP = {"USDC", "USDT", "SOL", "USD", "OK", "I", "A", "DEX", "LP", "AI"}
 # "I only want a read-only estimate" right after an exit analysis: it was one.
@@ -215,7 +215,7 @@ async def _sized_exit(text: str, m: re.Match, focus: dict | None) -> str:
     if question:
         return question
     rows = await exit_monitor.size_comparison(mint, tuple(amounts))
-    label = symbol or ((focus.get("label") if focus.get("label") and focus.get("label") != "TOKEN" else None) or named or mint[:6])
+    label = (symbol or ((focus.get("label") if focus.get("label") and focus.get("label") != "TOKEN" else None) or named or mint[:6])).lstrip("$")
     out = exit_monitor.render_sizes(label, mint, rows)
     lead = (f"**Read-only sizing for a {'/'.join(exit_monitor._usd(a) for a in amounts)} position in {label}**: what the book charges to enter and to leave at that size right now, "
             "quoted without a wallet. Nothing is prepared or submitted.")

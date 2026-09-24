@@ -186,7 +186,11 @@ _BOTH = re.compile(r"\b(?:across|both|either|all)\b.{0,30}\b(?:venues?|dexes|exc
 # "not Nasdaq shares", "excluding the US equities": a venue or market name may
 # sit between the negation and the stock word (expanded journeys, 2026-09-24:
 # "Aster perpetual contracts, not Nasdaq shares" found 0 crypto rows).
-_NO_STOCKS = re.compile(r"\b(?:excluding|exclude|without|no|not|ignore|skip|minus)\s+(?:the\s+)?(?:(?:tokeni[sz]ed|nasdaq|nyse|us|u\.s\.|american|listed|traditional)\s+){0,2}(?:stocks?|equit(?:y|ies)|shares?)\b|\bcrypto\s+only\b|\bonly\s+crypto\b|\bperp(?:etual)?s?(?:\s+contracts?)?\b[^.?!]{0,30}\bnot\b[^.?!]{0,25}\b(?:stocks?|shares?|equities)\b", re.I)
+# "Aster perpetual contracts, not Nasdaq shares" contrasts the instrument
+# (perps on stocks) with the shares themselves: the tokenized-stock reading
+# stays (review of bc40f724, 2026-09-24: it had become crypto only).
+_SHARES_VS_PERPS = re.compile(r"\b(?:perps?|perpetuals?|perpetual\s+contracts?|contracts?)\b[^.?!]*\bnot\b[^.?!]*\b(?:nasdaq|nyse|listed|real|actual|underlying|spot|cash)\s+(?:shares?|stocks?|equities)\b", re.I)
+_NO_STOCKS = re.compile(r"\b(?:excluding|exclude|without|no|not|ignore|skip|minus)\s+(?:the\s+)?(?:(?:tokeni[sz]ed|nasdaq|nyse|us|u\.s\.|american|listed|traditional)\s+){0,2}(?:stocks?|equit(?:y|ies)|shares?)\b|\bcrypto\s+only\b|\bonly\s+crypto\b|\bperp(?:etual)?s?(?:\s+contracts?)?\b[^.?!]{0,30}\bnot\b[^.?!]{0,25}\b(?:stocks?|shares?|equities)\b|\bcrypto\s+(?:\w+\s+){0,2}only\b|\b(?:crypto|coin)\s+(?:perps?|perpetuals?|contracts?|pairs?|tokens?|coins?)\b", re.I)
 _MOVERS_WORDS = re.compile(r"\b(?:movers?|gainers?|losers?|top\s+(?:stocks?|tokens?|pairs?|perps?)|biggest\s+(?:moves?|winners?|losers?)|"
                            r"most\s+(?:active|traded)|pumping|dumping|up\s+the\s+most|down\s+the\s+most|leaders?|laggards?)\b", re.I)
 _STOCK_WORDS = re.compile(r"\b(?:stocks?|equit(?:y|ies)|tokeni[sz]ed\s+(?:stocks?|equities|shares)|shares?|xstocks?)\b", re.I)
@@ -252,6 +256,8 @@ def venues_of(request: str) -> list[str]:
 def stock_filter(request: str) -> bool | None:
     """True for stocks only, False for crypto only ("excluding stocks"), None for all."""
     text = request or ""
+    if _SHARES_VS_PERPS.search(text):
+        return True
     if _NO_STOCKS.search(text):
         return False
     return True if _STOCK_WORDS.search(text) else None
@@ -418,6 +424,10 @@ def render_period_movers(venue: str, out: dict, start: datetime, *, stocks_only:
             lines.append(f"| {i} | {r.get('base_asset') or r['symbol']}/{r.get('quote_asset') or '?'} | {'stock' if r.get('is_stock') else 'crypto'} | {_price(r['price_then'])} | {_price(r['last_price'])} | {_pct(r['change_between_pct'])} | {_money(r.get('quote_volume'))} |")
     if out.get("from") and out["from"] > start + timedelta(minutes=10):
         lines += ["", f"The ledger's earliest tick in range is {_fmt_when(out['from'])}, later than the period asked for; changes are measured from there."]
+    elif out.get("from") and out.get("to") and out["from"] < start - timedelta(minutes=10):
+        span = (out["to"] - out["from"]).total_seconds() / 60
+        asked = (out["to"] - start).total_seconds() / 60
+        lines += ["", f"The nearest stored tick before the period start is {_fmt_when(out['from'])}: the change spans {span:.0f} minutes, not the {asked:.0f} asked."]
     lines += ["", "Changes are between two stored ticks of the feed's last price, not the venue's own 24h figure. Not a recommendation."]
     return "\n".join(lines)
 
@@ -756,3 +766,30 @@ class TequityProvider:
             cache_ttl_seconds=30, priority=8, spec=TOOL_SPECS.get("tequity_news"),
             description="Breaking equities headlines from the company's live feed (only once the feed has published any)",
         ))
+
+
+async def feed_coverage_answer() -> str:
+    """What the feed and its ledger can answer, from their own state: the
+    venues, the snapshot cadence, the ledger's span per venue and the
+    windows the period tools accept ("Can your feed really support that
+    interval?" was answered with a movers table, 2026-09-24)."""
+    from app import tequity_ledger
+    from app.tool_catalog import CONTRACT_COVERAGE
+    now = datetime.now(timezone.utc)
+    lines = ["**What the Tequity feed covers**", ""]
+    for venue, channel in MOVERS.items():
+        age = last_seen(channel)
+        live = f"live snapshot {age:.0f}s old" if age is not None else "no live snapshot in this process"
+        try:
+            first = await tequity_ledger.first_tick_from(channel, now - timedelta(days=30))
+            latest = await tequity_ledger.latest_tick_time(channel)
+        except Exception:
+            first, latest = [], None
+        span = (f"ledger ticks from {first[0]['taken_at'].strftime('%Y-%m-%d %H:%M UTC')} to {latest.strftime('%Y-%m-%d %H:%M UTC')}"
+                if first and latest else "no stored ticks")
+        lines.append(f"- **{venue.title()}**: {live}; {span}.")
+    windows = (CONTRACT_COVERAGE.get("tequity_period_movers") or {}).get("windows") or (0.5, 720.0)
+    lines += ["", f"Price-change windows come from stored ticks (about every 5 minutes), so any window from {windows[0] * 60:.0f} minutes to {windows[1] / 24:.0f} days "
+              "inside the ledger's span is answerable; a window that starts before the earliest tick is answered from the earliest tick and says so. "
+              "The 24h figures on a live snapshot are the feed's own. News and stats channels are wired but have never published, so nothing is answered from them."]
+    return "\n".join(lines)

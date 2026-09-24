@@ -127,7 +127,8 @@ _INDEFINITE = re.compile(r"\b(?:a|an|any|some|every)\s+(?:wallet|address|token|c
 # lost to "Robinhood" and to "I'm not sure what this refers to").
 _REFERENT = re.compile(r"^\s*(?:and\s+|so\s+|but\s+|ok,?\s+)?(?:(?:(?:what|which|how|when|where|why)\s+)?(?:does|do|is|was|did|will|would|can|could|has|have|which\s+part\s+of|what\s+part\s+of|how\s+much\s+of)\s+(?:that|this|it|those|these)\b"
                        r"|(?:which|what)\s+(?:parts?|portion|bits?|of\s+those|of\s+these|of\s+them|ones?)\b"
-                       r"|(?:what|which|how|who)\b[^?]{0,40}?\b(?:since|after|before|from|about)\s+(?:then|that|this|it)\b)", re.I)     # "What is different since then?" points at the previous answer     # "Which part was in the order and which is your inference?" partitions the previous answer
+                       r"|(?:what|which|how|who)\b[^?]{0,40}?\b(?:since|after|before|from|about)\s+(?:then|that|this|it)\b"
+                       r"|(?:what|anything)(?:'s|\s+is|\s+has)?\s+(?:changed|new|different|happened|moved)\s*[?.!]?\s*$)", re.I)     # a bare "What changed?" points at the previous subject; with none it is a question (2026-09-24: it explained DeFi yields)     # "What is different since then?" points at the previous answer     # "Which part was in the order and which is your inference?" partitions the previous answer
 
 
 def continues_subject(request: str) -> bool:

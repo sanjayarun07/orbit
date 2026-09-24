@@ -248,3 +248,13 @@ def test_an_explain_about_a_protocol_takes_the_open_research_contract(monkeypatc
     monkeypatch.setattr(general.runtime, "answer", no_lm)
     out = asyncio.run(general.general_node({"request": "thanks, that helps", "routing_decision": {"speech_act": "explain", "domain": "general"}, "session_context": {}}))
     assert out["answer"] == "hi" and called and len(seen) == 1, "chit-chat never reaches the contract"
+
+
+def test_the_next_eligible_source_answers_when_the_chosen_one_returns_nothing():
+    # Mobula had no ANSEM holders three times over while the Solana RPC read was eligible (journey run 4, 2026-09-24).
+    holders = "# Top holders\n**Checked**: 2026-09-24 10:30 UTC\n\n| # | wallet | share |\n|---:|---|---:|\n| 1 | 7oU9nR9V | 49.00% |\n"
+    out, router = _run({"solana_rpc_token_top_holders": holders, "bitquery_token_top_holders": holders}, "Top 10 ANSEM holders on Solana")
+    assert "mobula_token_holders" in router.calls
+    assert any(name in router.calls for name in ("solana_rpc_token_top_holders", "bitquery_token_top_holders"))
+    assert "returned nothing usable" not in (out.get("answer") or "")
+    assert "7oU9nR9V" in (out.get("answer") or "")

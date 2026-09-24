@@ -149,7 +149,7 @@ question_planner = dspy.Predict(QuestionPlan)
 _VENUE = re.compile(r"\b(aster|hyperliquid|hl|dex\s*screener|dexscreener|jupiter|raydium|uniswap|binance|coinbase|pump\.?fun)\b", re.I)
 _CHAIN = re.compile(r"\b(solana|base|ethereum|eth|arbitrum|optimism|polygon|bsc|bnb|avalanche|sui|hyperliquid|robinhood)\b", re.I)
 _RANKING = re.compile(r"\b(?:gainers?|losers?|movers?|winners?|laggards?|most\s+traded|top\s+(?:tokens?|coins?|pairs?|stocks?|volume)|by\s+volume|trending\s+(?:tokens?|coins?|pairs?)|pumping|dumping|pumped\s+(?:the\s+)?most|rose\s+most|biggest\s+(?:moves?|winners?|losers?)|volume\s+leaders?|rank\w*|(?:up|down)\s+the\s+most|best\s+performing|worst\s+performing|moving|moves?\s+(?:today|now|the\s+most)|leaderboard)\b", re.I)
-_HOLDERS = re.compile(r"\b(?:holders?|holding|concentration|who\s+(?:holds|owns)|top\s+wallets?|whales?)\b", re.I)
+_HOLDERS = re.compile(r"\b(?:holders?|holding|concentration|who\s+(?:holds|owns)|top\s+wallets?|whales?|top\s+\d+\s+(?:hold|own|control)|(?:hold|own|control)s?\s+(?:the\s+)?(?:most|majority|largest\s+share))\b", re.I)
 _YIELDS = re.compile(r"\b(?:yields?|apy|apr|earn|lending\s+rates?|staking\s+rates?|farm\w*)\b", re.I)
 _EVENTS = re.compile(r"\b(?:news|headlines?|vote[ds]?|voting|proposal|governance|recently|latest|what\s+happened|announce\w*|launch(?:ed|es)?|hack(?:ed|s)?|exploit\w*|incidents?|this\s+week|today)\b", re.I)
 _LOSERS = re.compile(r"\b(?:losers?|dumping|down\s+the\s+most|worst|laggards?)\b", re.I)
@@ -182,7 +182,11 @@ _ECOSYSTEM = re.compile(r"\becosystem\b|\bassociated\s+with\b|\bglobal\b", re.I)
 _WINDOW = re.compile(r"\b(?:last|past|previous)\s+(\d+)\s*(h(?:ours?)?|d(?:ays?)?|w(?:eeks?)?|m(?:in(?:utes?)?)?)\b|\b(?:over|in|within)?\s*(\d+)\s*(h|d|w|m)\b|\b(24\s*h(?:ours)?|this\s+week|past\s+week|last\s+week|today|this\s+morning|this\s+month|7d|30d|"
                      r"(?:past|last|previous)[- ]hour|(?:one|an)\s+hour\s+ago|hourly|60\s*m)\b", re.I)
 _STOCKS = re.compile(r"\b(?:tokeni[sz]ed\s+)?(?:stocks?|equit(?:y|ies)|shares)\b", re.I)
-_NO_STOCKS = re.compile(r"\b(?:excluding|exclude|without|no|not|minus)\s+(?:the\s+)?(?:tokeni[sz]ed\s+|nasdaq\s+|nyse\s+)?(?:stocks?|equit(?:y|ies)|shares)\b|\bcrypto\s+only\b|\bperpetual\s+contracts?\b.{0,30}\bnot\b.{0,20}\bshares\b", re.I)
+# "Aster perpetual contracts, not Nasdaq shares" contrasts the instrument
+# (perps on stocks) with the shares themselves: the tokenized-stock reading
+# stays (review of bc40f724, 2026-09-24: it had become crypto only).
+_SHARES_VS_PERPS = re.compile(r"\b(?:perps?|perpetuals?|perpetual\s+contracts?|contracts?)\b[^.?!]*\bnot\b[^.?!]*\b(?:nasdaq|nyse|listed|real|actual|underlying|spot|cash)\s+(?:shares?|stocks?|equities)\b", re.I)
+_NO_STOCKS = re.compile(r"\b(?:excluding|exclude|without|no|not|minus)\s+(?:the\s+)?(?:tokeni[sz]ed\s+|nasdaq\s+|nyse\s+)?(?:stocks?|equit(?:y|ies)|shares)\b|\bcrypto\s+only\b|\bperpetual\s+contracts?\b.{0,30}\bnot\b.{0,20}\bshares\b|\bcrypto\s+(?:\w+\s+){0,2}only\b|\b(?:crypto|coin)\s+(?:perps?|perpetuals?|contracts?|pairs?|tokens?|coins?)\b", re.I)
 _SINGLE = re.compile(r"\b(?:without\s+(?:exposing\s+me\s+to\s+)?(?:another|other|any|a)\s+(?:volatile\s+)?(?:token|asset|coin)s?|single[- ]asset|no\s+(?:il|impermanent\s+loss))\b", re.I)
 _MIN_LIQ = re.compile(r"(?:at\s+least|over|above|minimum(?:\s+of)?|min)\s+\$?\s*([\d,]+(?:\.\d+)?)\s*([kKmM]?)\s*(?:in\s+)?(?:liquidity|tvl)", re.I)
 _LIMIT = re.compile(r"\btop\s+(\d{1,3})\b", re.I)
@@ -255,16 +259,20 @@ def _chain_of(text: str) -> str | None:
 
 
 def _venue_of(text: str) -> str | None:
-    m = _VENUE.search(text or "")
-    if not m:
-        from app.tequity import fuzzy_venue
-        for word in re.findall(r"[A-Za-z]{5,}", text or ""):
-            venue = fuzzy_venue(word)
-            if venue:
-                return venue
-        return None
-    word = m.group(1).lower().replace(" ", "")
-    return {"hl": "hyperliquid", "pumpfun": "pump.fun", "pump.fun": "pump.fun"}.get(word, word)
+    excluded = excluded_names(text)
+    # "not on Hyperliquid but on Aster": the first venue word is the excluded
+    # one (review of bc40f724, 2026-09-24).
+    for m in _VENUE.finditer(text or ""):
+        word = m.group(1).lower().replace(" ", "")
+        venue = {"hl": "hyperliquid", "pumpfun": "pump.fun", "pump.fun": "pump.fun"}.get(word, word)
+        if venue not in excluded:
+            return venue
+    from app.tequity import fuzzy_venue
+    for word in re.findall(r"[A-Za-z]{5,}", text or ""):
+        venue = fuzzy_venue(word)
+        if venue and venue not in excluded:
+            return venue
+    return None
 
 
 def plan_by_rules(request: str, context: str = "") -> QuestionContract:
@@ -283,7 +291,9 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
     excluded = excluded_names(text)
     if excluded:
         filters["exclude"] = sorted(excluded)
-    if _NO_STOCKS.search(text):
+    if _SHARES_VS_PERPS.search(text):
+        filters["stocks_only"] = True
+    elif _NO_STOCKS.search(text):
         filters["crypto_only"] = True
     elif _STOCKS.search(text):
         filters["stocks_only"] = True

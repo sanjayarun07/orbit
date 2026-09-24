@@ -310,6 +310,9 @@ async def first_tick_from(channel: str, moment: datetime) -> list[dict]:
         return [dict(r) for r in _rows if r["channel"] == channel and r["taken_at"] == when]
 
 
+BASELINE_TOLERANCE = timedelta(minutes=10)     # ticks are stored about every 5 minutes
+
+
 async def movers_between(venue: str, start: datetime, end: datetime, *, stocks_only: bool = False, limit: int = 15,
                          max_gap: timedelta | None = None) -> dict:
     """Price change per pair between the last tick at or before `start` (or
@@ -320,6 +323,13 @@ async def movers_between(venue: str, start: datetime, end: datetime, *, stocks_o
     if not channel:
         return {"venue": venue, "rows": [], "from": None, "to": None}
     a, b = await tick_at(channel, start), await tick_at(channel, end)
+    if a and start - a[0]["taken_at"] > BASELINE_TOLERANCE:
+        # The last tick before the start can be much older than the start
+        # (a "last hour" ranking spanned 102 minutes, review of bc40f724):
+        # the first tick after the start is the baseline when it is nearer.
+        after = await first_tick_from(channel, start)
+        if after and after[0]["taken_at"] - start < start - a[0]["taken_at"]:
+            a = after
     if not a:
         a = await first_tick_from(channel, start)
     if a and b and a[0]["taken_at"] == b[0]["taken_at"]:
@@ -337,6 +347,9 @@ async def movers_between(venue: str, start: datetime, end: datetime, *, stocks_o
             a = []
     elif max_gap is not None and not (a and b):
         coverage = "no stored ticks at both ends of the window"
+    elif a and b and abs(a[0]["taken_at"] - start) > BASELINE_TOLERANCE:
+        minutes = abs((a[0]["taken_at"] - start).total_seconds()) / 60
+        coverage = f"baseline tick {minutes:.0f} min {'before' if a[0]['taken_at'] < start else 'after'} the window start"
     first = {r["symbol"]: r for r in a}
     out = []
     for r in b:

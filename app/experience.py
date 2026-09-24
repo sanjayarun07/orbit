@@ -350,7 +350,7 @@ def advance_session_context(
         # clears a focus (expanded journeys, 2026-09-24).
         from app import product_actions
         from app.routing.subject_probe import continues_subject, subject_of
-        headline = product_actions.picked_headline(request)
+        headline = product_actions.picked_headline(request) or product_actions.listed_headlines(request)
         topic = None if headline else subject_of(request)
         if headline:
             context["focus"] = {"kind": "topic", "label": headline, "address": None, "chain": None, "confidence": 0.9, "source": "home_headline"}

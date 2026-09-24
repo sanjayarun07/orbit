@@ -276,15 +276,21 @@ def _inventory_ask(text: str) -> bool:
 async def _render_list(user: dict, status: str | None = None) -> str:
     want_done = status in ("done", "completed", "finished")
     items = await tasks.list_tasks(user["id"], include_done=want_done)
+    # A task's number is its place in the full list, in every listing: a
+    # filtered list renumbered from 1 made "resume task 1" act on the
+    # unfiltered first task (review of bc40f724, 2026-09-24).
+    numbered = list(enumerate(items, start=1))
     if status:
         wanted = {"running": "active", "completed": "done", "finished": "done", "pending": "active"}.get(status, status)
-        items = [t for t in items if t.get("status") == wanted]
-        if not items:
+        numbered = [(n, t) for n, t in numbered if t.get("status") == wanted]
+        if not numbered:
             return f"None of your tasks is {status}. Say *show my tasks* for the full list."
-    if not items:
+    if not numbered:
         return "No tasks yet. Try *remind me tomorrow at 9am to check SOL*, *alert me when SOL drops below $90*, or *send me a morning brief at 8am*."
     lines = [f"**Your {status} tasks**" if status else "**Your tasks**", ""]
-    for index, task in enumerate(items, start=1):
+    for index, task in numbered:
         lines.append(f"{index}. **{task['title']}** · {tasks.describe_schedule(task['schedule'], task.get('tz_offset_min', 0))} · {task['status']} · next {_when(task)}")
-    lines += ["", "Say `pause task 1`, `delete task 1`, or open Settings → Tasks." if len(items) == 1 else f"Say `pause task 2`, `delete task 1` (numbers 1–{len(items)}), or open Settings → Tasks."]
+    first = numbered[0][0]
+    lines += ["", (f"Say `pause task {first}`, `delete task {first}`, or open Settings → Tasks." if len(numbered) == 1
+                   else f"Say `pause task {numbered[1][0]}`, `delete task {first}` (the numbers are the task's place in the full list), or open Settings → Tasks.")]
     return "\n".join(lines)
