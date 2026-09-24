@@ -3166,3 +3166,12 @@ ledger on the dev box has gaps whenever `--reload` restarts the server during ed
 so short-window coverage leads in a run made during editing are the ledger's, not the mechanism's. Open after run 5:
 labelling holder addresses (J1.4), two subjects in one ask (J9.2), and "ASTER on Hyperliquid" answered from the web in
 the harness process because the feed snapshot lives in the server process only.
+
+Live, 2026-09-24: "What are the specific reasons behind the 6.32% drop in the total crypto market cap today?" quoted
+the knowledge base -- the Cap protocol's vault-cap scripts and a "Drop exploit" incident -- under a correct web
+answer. The entity resolver had matched the lowercase words "cap" (the protocol's canonical name is lowercase, and
+its DefiLlama slug and ticker are "cap") and "drop" (an incident alias). A registry name that is also an everyday word
+now resolves only when written as a name -- capitalised, `$`-prefixed, or as the entity spells it -- in the mention or
+its sentence, on every index (name, alias, external id, ticker); the curated set `knowledge/entities._COMMON_WORDS`
+grows as collisions are seen (`is_common_word`, `spelled_as_name`; `tests/test_knowledge_common_words.py`). A system
+dictionary was tried and dropped: "lido" and "spark" are English words too, and those are names however written.

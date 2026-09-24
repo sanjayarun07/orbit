@@ -35,7 +35,31 @@ CHAIN_ALIASES = {
     "hyperliquid": ["hyperevm", "hyperliquid l1", "eip155:999"],
     "sui": [], "aptos": ["apt"], "tron": ["trx"],
 }
-_COMMON_WORDS = {"mode", "base", "core", "flow", "near", "zero", "world", "moonbeam", "fuse", "wax", "step", "ronin", "sonic", "unit", "manta", "linea", "blast", "kava", "celo", "ink", "soneium"}
+_COMMON_WORDS = {"mode", "base", "core", "flow", "near", "zero", "world", "moonbeam", "fuse", "wax", "step", "ronin", "sonic", "unit", "manta", "linea", "blast", "kava", "celo", "ink", "soneium",
+                 "cap", "drop", "crypto", "token", "coin", "chain", "market", "exploit", "protocol", "network", "finance", "swap", "bridge", "vault", "pool", "yield",
+                 "stake", "farm", "mint", "compound", "drift", "cover", "pump", "dump", "bond", "tide", "wave", "spark", "sky", "beam", "echo", "orbit", "pendle"}
+def is_common_word(name: str) -> bool:
+    """A registry name that is also an everyday word ("cap", "drop",
+    "compound"): the curated set, grown as collisions are seen. A system
+    dictionary was tried and dropped: "lido" and "spark" are words too, and
+    those are names however they are written."""
+    return (name or "").lower() in _COMMON_WORDS
+
+
+def spelled_as_name(entity: Entity, name: str, text: str) -> bool:
+    """Whether `text` writes a common-word name the way a name is written:
+    the entity's own capitalised spelling, a capitalised form, or with a $.
+    "market cap" is not the Cap protocol and "the drop in" is not the Drop
+    exploit (live, 2026-09-24: both were quoted for a market-wide question)."""
+    key = name.lower()
+    spellings = {a for a in entity.aliases if a.lower() == key and not a.islower()}
+    if entity.canonical_name.lower() == key and not entity.canonical_name.islower():
+        spellings.add(entity.canonical_name)
+    spellings.add(key.capitalize())
+    spellings.add(key.upper())
+    spellings.add("$" + key)
+    spellings.add("$" + key.upper())
+    return any(re.search(r"(?<![A-Za-z0-9#-])" + re.escape(sp) + r"(?![a-z0-9-])", text or "") for sp in spellings)
 _EVM = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _SOL = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
@@ -118,30 +142,35 @@ class EntityResolver:
             if hit:
                 return Resolution(self._by_id[hit], CONFIDENCE["chain_contract" if chain else "contract"], "chain_contract" if chain else "contract")
             return None
+        def named(entity: Entity) -> bool:
+            # A common-word mention resolves only when written as a name in the
+            # mention itself or in its sentence ("cap" in "market cap" is no protocol,
+            # whichever index -- name, alias or DefiLlama slug -- holds the word).
+            return not is_common_word(lowered) or spelled_as_name(entity, lowered, text) or spelled_as_name(entity, lowered, context)
         # 2. external ids
         for key in ("coingecko_id", "defillama_slug"):
             hit = self._by_external.get((key, lowered))
-            if hit:
+            if hit and named(self._by_id[hit]):
                 return Resolution(self._by_id[hit], CONFIDENCE["coingecko_id" if key == "coingecko_id" else "defillama_id"], key)
         # 3. exact canonical name
         hit = self._by_name.get(lowered)
-        if hit:
+        if hit and named(self._by_id[hit]):
             return Resolution(self._by_id[hit], CONFIDENCE["canonical_name"], "canonical_name")
         # 4. alias (+ context disambiguation)
         candidates = self._by_alias.get(lowered) or []
-        if len(candidates) == 1:
+        if len(candidates) == 1 and named(self._by_id[candidates[0]]):
             return Resolution(self._by_id[candidates[0]], CONFIDENCE["alias"], "alias")
         if len(candidates) > 1:
             pick = self._disambiguate(candidates, chain, context)
-            if pick:
+            if pick and named(self._by_id[pick]):
                 return Resolution(self._by_id[pick], CONFIDENCE["alias"] - 0.1, "alias")
         # 5. ticker alone: low confidence, prefer a single unambiguous match
         symbols = self._by_symbol.get(text.upper().lstrip("$")) or []
-        if len(symbols) == 1:
+        if len(symbols) == 1 and named(self._by_id[symbols[0]]):
             return Resolution(self._by_id[symbols[0]], CONFIDENCE["ticker"], "ticker")
         if len(symbols) > 1:
             pick = self._disambiguate(symbols, chain, context)
-            if pick:
+            if pick and named(self._by_id[pick]):
                 return Resolution(self._by_id[pick], CONFIDENCE["ticker"], "ticker")
         return None
 
@@ -196,16 +225,11 @@ class EntityResolver:
             if len(name) < 3:
                 continue
             entity = self._by_id[eid]
-            if len(name) <= 5 or name in _COMMON_WORDS:
-                # Short or dictionary-word names ("Mode", "Base", "Core", "Flow", "USDe")
-                # only count as a mention when written as the entity spells them and
-                # standalone -- "E-mode" is not Mode L2, "usde" in a URL is not USDe.
-                spellings = {a for a in entity.aliases if a.lower() == name and not a.islower()}
-                if name == entity.canonical_name.lower():
-                    spellings.add(entity.canonical_name)
-                if not spellings:
-                    spellings.add(name.capitalize())
-                if not any(re.search(r"(?<![A-Za-z0-9$#-])" + re.escape(s) + r"(?![a-z0-9-])", text) for s in spellings):
+            if len(name) <= 5 or is_common_word(name):
+                # Short or dictionary-word names ("Mode", "Base", "Core", "Flow", "USDe",
+                # "cap", "drop") only count as a mention when written as a name and
+                # standalone -- "E-mode" is not Mode L2, "market cap" is not Cap.
+                if not spelled_as_name(entity, name, text):
                     continue
             elif not re.search(r"(?<![a-z0-9])" + re.escape(name) + r"(?![a-z0-9])", lowered):
                 continue
