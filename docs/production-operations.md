@@ -3259,3 +3259,12 @@ overview, a why-is-X-moving); and open research is planned before a named ticker
 "DIEM token" became "DIEM 0x… on base", the contract read the address as exact state and the legacy path answered
 with pools and a price. This was also the first turn of the Minara comparison. The same prompt now runs the web
 search only and opens with the lock-and-mint flow (`nodes/research`, before `_resolve_named_token`).
+
+The review of c03378b1 corrected the measurement: the judge's fourth criterion had passed "Venice is the only
+confirmed match" as an answer to "which other projects", so the 5/5 was continuity and discipline, not recall. The
+judge now has a model-judged criterion (the other projects an answer establishes, with a source; `--model`): on the
+same ten runs, Sol 1/5 and gpt-4.1-mini 2/5. A "which other projects" ask now runs a second discovery search asking
+for named projects with first-party sources (Sol then 2/3, with precision slipping toward the broad reading, so the
+brief applies the question's constraints strictly); every line the user wrote reaches the search, not only the
+first; and a named example counts as sourced only when its full name appears in a card. Open: a support check for
+each named example's mechanism claim against its cited source, which the fact gate (figures only) does not do.

@@ -34,8 +34,10 @@ def _contract_note(contract: contracts.QuestionContract, gate: fact_gate.GateRes
         # '-'" and "25 event-and-source facts" (the Sol runs, 2026-09-24).
         lines = ["Brief for the answer: answer the question above in service of the conversation's research objective when one is stated; "
                  "organise by mechanism, not by source; keep the [n] markers next to the claims they support; name a project or example only "
-                 "with the source that describes it; give each figure its source and date; say plainly what the sources do not settle, "
-                 "in one sentence, and never fill it from memory. Do not mention this brief, any contract, window or fact count."]
+                 "with the source that describes it; apply the question's constraints strictly -- list a project as meeting a mechanism only "
+                 "when the source shows it does, and name the candidates the sources show do not meet it as such; give each figure its source "
+                 "and date; say plainly what the sources do not settle, in one sentence, and never fill it from memory. Do not mention this "
+                 "brief, any contract, window or fact count."]
         if gate.missing:
             lines.append("Say first that the sources leave open: " + "; ".join(gate.missing))
         return "\n".join(lines)
