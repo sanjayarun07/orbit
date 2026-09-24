@@ -485,7 +485,6 @@ def test_a_tile_tap_is_never_a_bare_referent(text):
     assert not is_referent(text)
     assert not continues_subject(text)
     assert not _bare_referent(text, {"session_context": {}, "history": ""})
-    assert plan_by_rules(text).kind != "open_research" or plan_by_rules(text).subject.name is None
 
 
 def test_a_bare_pronoun_question_still_asks():
@@ -522,3 +521,74 @@ def test_a_holders_ask_resolves_its_ticker_whatever_the_capabilities(monkeypatch
     monkeypatch.setattr(research, "token_candidates", lambda ticker: [])
     resolution = asyncio.run(research._resolve_named_token("Any whales in ANSEM?", {"wallet_intelligence", "web_research"}, ()))
     assert "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump" in resolution.request and resolution.chain == "solana"
+
+
+# --- a theme carries into "how it works in X" (Akash vs Minara, live 2026-09-24) ---
+
+def test_a_lowercase_name_beside_its_kind_word_is_a_subject():
+    from app.routing.subject_probe import subject_of
+    assert subject_of("how it works in akash network") == "Akash Network"
+    assert subject_of("compare render network and akash") == "Render Network"
+    assert subject_of("which protocol is best") is None
+    assert subject_of("the main protocol token") is None
+
+
+def test_it_after_a_concept_question_is_that_theme():
+    history = "user: apart from staking how else can we tie dual token to the main token\nassistant: Burn-to-mint, fee burns..."
+    resolved = context_entities.resolve_contextual_request("how it works in akash network", history, {"focus": None, "last_contract": {"kind": "open_research", "subject": {"kind": "topic"}}})
+    assert resolved.startswith("In Akash Network: apart from staking how else can we tie dual token to the main token?")
+    assert '"it" is what the previous question was about' in resolved
+
+
+def test_it_after_a_question_with_its_own_subject_is_left_to_the_focus():
+    history = "user: How does Aave V3 liquidation work?\nassistant: ..."
+    assert context_entities.themed_followup("how it works in akash network", history) is None
+
+
+def test_open_research_names_a_lowercase_subject():
+    contract = plan_by_rules("how it works in akash network")
+    assert contract.kind == "open_research" and contract.subject.name == "Akash Network"
+    assert plan_by_rules("apart from staking how else can we tie dual token to the main token").subject.name is None
+
+
+def test_the_theme_yields_to_a_focus():
+    history = "user: what does the order authorize?\nassistant: ..."
+    ctx = {"focus": {"kind": "topic", "label": "SEC tokenized-stock order"}}
+    assert context_entities.themed_followup("Does that automatically authorize Robinhood Chain today?", history, ctx) is None
+
+
+def test_the_previous_request_survives_a_long_answer():
+    # The bounded history text drops the user line after a long answer; the session context remembers it.
+    ctx = experience.advance_session_context({}, "apart from staking how else can we tie dual token to the main token", None, "research", ["web_research"], [], None)
+    assert ctx["last_request"] == "apart from staking how else can we tie dual token to the main token"
+    history = "assistant: **Taken together**\n\nBurn-to-mint..." 
+    resolved = context_entities.resolve_contextual_request("how it works in akash network", history, {"focus": None, "last_request": ctx["last_request"]})
+    assert resolved.startswith("In Akash Network: apart from staking")
+    corrected = context_entities.corrected_request("I mean SPX6900 the meme token, not the index.", "assistant: ...", {"last_request": "Check SPX."})
+    assert corrected.startswith("Check the SPX6900 token.")
+
+
+def test_the_general_research_hook_reads_the_resolved_request(monkeypatch):
+    from app.nodes import general
+    from app import evidence_pipeline
+    seen = {}
+
+    async def fake_answer(state, request, chains, **kw):
+        seen["request"] = request
+        return {"answer": "ok", "trajectory": None}
+
+    monkeypatch.setattr(evidence_pipeline, "answer", fake_answer)
+    monkeypatch.setattr(general.settings, "contract_pipeline_enabled", True, raising=False)
+    state = {"request": "how it works in akash network", "contextual_request": "In Akash Network: apart from staking how else can we tie dual token to the main token?\nResolved from conversation context: ...",
+             "routing_decision": {"speech_act": "explain", "domain": "crypto"}, "session_context": {}, "history": "", "capabilities": []}
+    out = asyncio.run(general.general_node(state))
+    assert seen.get("request", "").startswith("In Akash Network:"), seen
+
+
+def test_a_pattern_question_is_scoped_to_the_mechanism_not_the_tokens_market():
+    from app.routing.subject_probe import market_scoped
+    q = "Which other projects follow the Venice VVV → DIEM pattern: lock the project token, mint a tradable second token?"
+    scoped = market_scoped(q)
+    assert "mechanism or design pattern" in scoped and "never answer with that token's price, vesting or unlock" in scoped
+    plain = market_scoped("What is VVV?")
+    assert "mechanism or design pattern" not in plain and "Read \"VVV\"" in plain

@@ -188,8 +188,13 @@ async def general_node(state: AgentState) -> dict:
         # first, then the check. Anything the contract does not cover (a
         # concept with no subject) still gets the lightweight reply below.
         from app import contracts, evidence_pipeline
-        if contracts.is_open_research(request):
-            piped = await evidence_pipeline.answer(state, request, ())
+        # The resolved request, never the raw words: "how it works in akash
+        # network" after a dual-token question is that question applied to
+        # Akash, and the note is what carries it (live, 2026-09-24: the
+        # general path answered what Akash is).
+        resolved = _effective_request(state)
+        if contracts.is_open_research(resolved):
+            piped = await evidence_pipeline.answer(state, resolved, ())
             if piped is not None:
                 from app import composition
                 from app.clarify import is_clarification

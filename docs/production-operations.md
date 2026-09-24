@@ -3181,3 +3181,18 @@ Live, 2026-09-24: "apart from staking how else can we tie dual token to the main
 token tools in the open-research branch -- the web and the knowledge base only (`evidence_pipeline.answer`,
 `named_subject`); and a lowercase adjective before "token" ("dual", "main", "native", "reward") is a description, never
 the name the pair search looks up (`dexscreener_tools._DESCRIPTORS`).
+
+Live, 2026-09-24 (the user's own conversation, compared with Minara on the same context): after "apart from staking
+how else can we tie dual token to the main token", "how it works in akash network" explained Akash in general, while
+the theme was dual tokens. Four mechanisms: a lowercase name beside its kind word is a subject ("akash network",
+"render network"; `subject_probe._NAMED_KIND` -- it had none); after a question that named no subject, "it" is that
+question's theme applied to the subject named now, and the rewritten question leads the resolved request ("In Akash
+Network: apart from staking how else can we tie dual token to the main token?") because every reader takes the first
+line as the ask (`context_entities.themed_followup`; yields to a focus when one exists); the previous request is
+remembered in session context (`last_request`) because the bounded history text drops the user line after a long
+answer, which also made the "I mean X" correction unreliable; and the general node's research hook reads the resolved
+request, never the raw words -- the speech model had called the follow-up "explain", and that path dropped every
+contextual rewrite (`nodes/general`). Also from the turn log: "Which other projects follow the Venice VVV → DIEM
+pattern" came back with VVV's vesting and DIEM's price, and the user said so; a question about a mechanism or design
+pattern and its examples is now scoped to the mechanism, never to the named token's market (`subject_probe._PATTERN_ASK`).
+The open-research contract names its subject even when it is not a ticker, so the targeted tools can plan for it.

@@ -21,20 +21,51 @@ _TOKEN_WORD = re.compile(r"\b(?:token|coin|contract|mint|memecoin|meme coin|erc-
 _SUBJECT_CORRECTION = re.compile(r"^\s*(?:no,?\s+|sorry,?\s+|actually,?\s+)?i\s+mean(?:t)?\s+(?P<new>\$?[A-Za-z][A-Za-z0-9._-]{1,15})\b\s*(?P<rest>.*)$", re.IGNORECASE | re.DOTALL)
 
 
-def _last_user_request(history: str, current: str) -> str | None:
-    """The previous user turn in the bounded history (never this turn)."""
+def _last_user_request(history: str, current: str, session_context: dict | None = None) -> str | None:
+    """The previous user turn: from the session context first (the bounded
+    history text drops the user line after a long answer, live 2026-09-24),
+    else from the history (never this turn)."""
+    remembered = ((session_context or {}).get("last_request") or "").strip()
+    if remembered and remembered != (current or "").strip():
+        return remembered
     turns = [line[len("user: "):].strip() for line in (history or "").splitlines() if line.startswith("user: ")]
     turns = [t for t in turns if t and t != (current or "").strip()]
     return turns[-1] if turns else None
 
 
-def corrected_request(request: str, conversation_history: str) -> str | None:
+_THEME_PRONOUN = re.compile(r"\b(?:it|this|that|these|those|the\s+same)\b", re.IGNORECASE)
+
+
+def themed_followup(request: str, conversation_history: str, session_context: dict | None = None) -> str | None:
+    """'how it works in akash network' after 'how else can we tie a dual token
+    to the main token': the previous question named no subject, so "it" is
+    what that question was about, applied to the subject named now (live,
+    2026-09-24: Orbit explained Akash in general; the theme was dual tokens)."""
+    from app.routing.subject_probe import subject_of
+    if not _THEME_PRONOUN.search(request or "") or (session_context or {}).get("focus"):
+        return None                      # with a focus, "it" is the focus (the referent carry); the theme only stands in when there is none
+    subject = subject_of(request)
+    if not subject:
+        return None
+    previous = _last_user_request(conversation_history, request, session_context)
+    if not previous or subject_of(previous):
+        return None                      # the previous question had its own subject: the focus carry handles "it"
+    # The rewritten question leads: every reader of the request -- the web
+    # search's query, the contract planner, the router -- takes its first
+    # line as the ask, and a note under a bare "how it works in X" still
+    # fetched "what X is" (live, 2026-09-24).
+    theme = previous.strip().rstrip("?.! ")
+    return (f"In {subject}: {theme}?\nResolved from conversation context: the user wrote \"{request.strip()}\"; \"it\" is what the previous question was about "
+            f"(\"{previous.strip()}\"), so this asks how {subject} does that -- answer {subject}'s version of that, not what {subject} is in general.")
+
+
+def corrected_request(request: str, conversation_history: str, session_context: dict | None = None) -> str | None:
     """The previous request re-targeted at the corrected subject, or None."""
     from app.routing.subject_probe import subject_of
     m = _SUBJECT_CORRECTION.match(request or "")
     if not m:
         return None
-    previous = _last_user_request(conversation_history, request)
+    previous = _last_user_request(conversation_history, request, session_context)
     if not previous:
         return None
     new = m.group("new").lstrip("$")
@@ -351,9 +382,12 @@ def resolve_contextual_request(
         return (f"{request}\nResolved from canonical session context: the previous ask was {what} on {last['venue']}"
                 + (" (tokenized stocks only)" if (last.get("filters") or {}).get("stocks_only") else " (crypto only)" if (last.get("filters") or {}).get("crypto_only") else "")
                 + f"; this continues it on {last['venue']} with the change stated here.")
-    corrected = corrected_request(request, conversation_history)
+    corrected = corrected_request(request, conversation_history, session_context)
     if corrected:
         return corrected
+    themed = themed_followup(request, conversation_history, session_context)
+    if themed:
+        return themed
     if focus.get("label") and continues_subject(request):
         if focus.get("kind") == "token" and focus.get("address"):
             chain = f" on {focus['chain']}" if focus.get("chain") else ""

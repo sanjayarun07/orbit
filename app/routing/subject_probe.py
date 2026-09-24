@@ -197,6 +197,15 @@ def has_own_subject(request: str) -> bool:
     return subject_of(text) is not None or _lower_name(text) is not None
 
 
+# "akash network", "render network", "drift protocol": a lowercase name
+# beside its kind word is a name (live, 2026-09-24: "how it works in akash
+# network" had no subject at all).
+_NAMED_KIND = re.compile(r"\b([a-z][a-z0-9]{2,})\s+(network|protocol|chain|finance|labs|dao|exchange|foundation)\b", re.I)
+_NOT_A_NAME = {"the", "a", "an", "this", "that", "any", "which", "what", "main", "dual", "our", "your", "its", "their", "on", "in", "of", "for", "to", "and",
+               "decentralized", "decentralised", "blockchain", "layer", "base", "each", "every", "same", "other", "another", "new", "old", "one", "two", "some",
+               "no", "not", "or", "per", "via", "from", "with", "into", "onto", "smart", "social", "lightning", "test", "main", "public", "private", "whole", "entire"}
+
+
 def subject_of(request: str) -> str | None:
     """The name worth looking up in this message, or None."""
     from app.tequity import fuzzy_venue
@@ -210,6 +219,9 @@ def subject_of(request: str) -> str | None:
             continue                                   # a venue typed a letter off is not a token ("hyperloquid", 2026-09-23); the venue itself is a subject
         if name and name.upper() not in _STOP:
             return name
+    for name, kind in _NAMED_KIND.findall(request or ""):
+        if name.lower() not in _NOT_A_NAME and name.upper() not in _STOP and not fuzzy_venue(name):
+            return f"{name.title()} {kind.title()}"
     return None
 
 
@@ -270,6 +282,9 @@ def context_search(request: str) -> str | None:
     return result
 
 
+_PATTERN_ASK = re.compile(r"\b(?:which|what|other|more|similar)\s+(?:other\s+)?(?:projects?|protocols?|tokens?|chains?|teams?|networks?)\b|\b(?:pattern|mechanism|model|design|examples?|archetypes?|taxonomy)\b", re.I)
+
+
 def market_scoped(request: str) -> str:
     """A question naming a ticker-like word, rewritten for a web search so it
     is read as a markets question. Live 2026-09-18: "What is OPEN?" came back
@@ -280,6 +295,15 @@ def market_scoped(request: str) -> str:
     subject = subject_of(request)
     if not subject:
         return request
+    if _PATTERN_ASK.search(request):
+        # "Which other projects follow the Venice VVV -> DIEM pattern" asks for
+        # a mechanism and its examples; steering the search to the named
+        # token's market brought back its vesting schedule and price, and the
+        # user said so (turn log, 2026-09-24 12:10).
+        return (f"{request}\n\n{marker} This asks about a mechanism or design pattern and for the projects that use it: answer with "
+                f"how the mechanism works and named examples -- project, the tokens involved, how they are linked -- read "
+                f"\"{subject}\" as the crypto project or token it names, and never answer with that token's price, vesting or unlock "
+                f"schedule unless asked.)")
     return (f"{request}\n\n{marker} Read \"{subject}\" and any other ticker-like name in the question first as a crypto "
             f"token or protocol -- name each such token with its chain -- and then as a stock or company if one shares the "
             f"name; never as a dictionary word, a medicine, a civic organisation or a planet. If no token or company "

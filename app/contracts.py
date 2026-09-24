@@ -406,7 +406,8 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
                                 window_hours=window or 24 * 30, freshness_seconds=3 * 86400, evidence_order="discovery_first",
                                 required_facts=["event"], confidence=0.5, planner="rules")
     if is_open_research(text) or referent:
-        return QuestionContract(kind="open_research", subject=Subject(kind="topic", symbol=symbol, chain=chain), scope="any", metric="events",
+        from app.routing.subject_probe import subject_of
+        return QuestionContract(kind="open_research", subject=Subject(kind="topic", symbol=symbol, name=None if symbol else subject_of(text), chain=chain), scope="any", metric="events",
                                 window_hours=None if referent else window, freshness_seconds=7 * 86400, evidence_order="discovery_first",
                                 required_facts=["source"], confidence=0.5, planner="rules")
     return QuestionContract(kind="other", planner="rules", confidence=0.3)

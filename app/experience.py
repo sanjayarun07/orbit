@@ -291,6 +291,9 @@ def advance_session_context(
         if subject_of(request):
             context.pop("last_contract", None)          # a turn about something new ends the carry; a control or a question about the feed does not
     context["last_intent"] = intent
+    # The previous request itself: the bounded history text drops the user
+    # line after a long answer, and "I mean X" / "how it works in X" need it.
+    context["last_request"] = request
     # Risk charter persists across turns in session context (Minara-style
     # "Custom Prompt"). Set/clear it here so the next trade turn's Risk agent
     # sees it; a plain message leaves whatever is already stored untouched.
