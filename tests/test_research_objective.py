@@ -189,3 +189,48 @@ def test_open_research_runs_before_a_ticker_is_resolved(monkeypatch):
              "contextual_request": None, "capabilities": ["web_research"], "chains": [], "session_context": {}, "history": "", "routing_decision": {}}
     out = asyncio.run(research._research_node(state, {}))
     assert out.get("answer") == "web research" and "DIEM token" in seen["request"]
+
+
+def test_every_line_the_user_wrote_reaches_the_search():
+    q = evidence_pipeline.research_query("which other projects follow lock collateral -> mint a tradable second token\nOnly include transferable tokens\nExclude wrapped assets\nResearch objective of this conversation: compare dual-token mechanisms. Answer the current question in service of that objective; when the question is ambiguous, the objective settles what it means.")
+    assert "Only include transferable tokens" in q and "Exclude wrapped assets" in q and "Answer the current question" not in q
+
+
+def test_a_first_word_match_does_not_source_a_name():
+    cards = "Sources:\n[1] [Nova market index](https://x) · 2026-09-09"
+    assert evidence_pipeline.unsourced_examples("Nova Labs mints transferable ASTRA [1].", cards) == ["Nova Labs"]
+    assert evidence_pipeline.unsourced_examples("Nova Labs mints transferable ASTRA [1].", cards + "\n[2] [Nova Labs docs](https://y)") == []
+
+
+def test_a_which_other_projects_ask_runs_a_second_discovery_search(monkeypatch):
+    from tests.test_contract_pipeline import FakeRouter
+    from types import SimpleNamespace
+    monkeypatch.setattr(evidence_pipeline.settings, "contract_pipeline_enabled", True)
+    monkeypatch.setattr(evidence_pipeline.settings, "discovery_first_research", True)
+    from app.nodes import runtime
+    monkeypatch.setattr(runtime, "planner_available", lambda: False)
+
+    async def synth(request, cards, trajectory, advice=False, research=False):
+        return f"**Taken together**\n\nsummary\n\n---\n\n{cards}"
+
+    monkeypatch.setattr(evidence_pipeline.composition, "synthesize", synth)
+    seen = []
+    web = "# From the web (dated, with sources)\n**Query**: q\n\nSynthetix locks SNX to mint sUSD. [1]\n\nSources:\n[1] [Synthetix docs](https://docs.synthetix.io) · 2026-09-09"
+    router = FakeRouter({"perplexity_web_search": web})
+    original = router.invoke
+
+    def invoke(name, request, chains=()):
+        seen.append((name, request))
+        return original(name, request, chains)
+
+    router.invoke = invoke
+    router.plan_across = lambda request, caps, chains, n: []
+    saved = evidence_pipeline.get_provider_router
+    evidence_pipeline.get_provider_router = lambda: router
+    try:
+        out = asyncio.run(evidence_pipeline.answer({}, "which other projects follow lock collateral → mint a tradable second token", ()))
+    finally:
+        evidence_pipeline.get_provider_router = saved
+    searches = [r for n, r in seen if n == "perplexity_web_search"]
+    assert len(searches) == 2 and "first-party source" in searches[1]
+    assert out is not None and "Synthetix" in (out.get("answer") or "")

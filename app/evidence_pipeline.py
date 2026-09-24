@@ -76,7 +76,10 @@ def research_query(request: str) -> str:
     body, notes = composition.split_notes(request)
     objective = _OBJECTIVE_LINE.search(notes or "")
     if objective:
-        question = body.splitlines()[0].strip() if body else request.strip()
+        # Every line the user wrote is the question ("Only include transferable
+        # tokens" / "Exclude wrapped assets" on later lines had been dropped,
+        # review of c03378b1); only the notes fold into the context.
+        question = " ".join(line.strip() for line in (body or request).splitlines() if line.strip())
         return f"{question} (Context: this continues research on {objective.group(1).strip()}; answer for that context, not the general case.)"
     # "PUMP revenue" came back as ProPetro (NYSE: PUMP): the ticker reads as a crypto asset first.
     return market_scoped(request)
@@ -94,8 +97,8 @@ def unsourced_examples(summary: str, cards: str) -> list[str]:
             name = " ".join(words[1:])
             if not name or name in _NOT_NAMES:
                 continue
-        if name.lower() in haystack or name.split()[0].lower() in haystack:
-            continue
+        if name.lower() in haystack:
+            continue                     # the full name, never its first word ("Nova Labs" is not sourced by "Nova market index", review of c03378b1)
         if name not in out:
             out.append(name)
     return out[:8]
@@ -294,8 +297,20 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         cov_scope = cov[chosen[0]]["scope"]
         scope_note = (f"the ask needs {contract.scope.replace('_', ' ')}; the only source available is {chosen[0]} whose scope is {cov_scope.replace('_', ' ')} "
                       f"-- shown as the nearest verifiable ranking, not as the ask itself")
-    streaming.emit("status", text=f"Contract: {contract.label()} · tools: {', '.join(chosen)}")
-    results = await asyncio.gather(*(_invoke(router, name, request, chains, contract) for name in chosen))
+    # "Which other projects follow this pattern?": one search rarely surfaces
+    # the examples (five Sol runs named another qualifying project once,
+    # review of c03378b1). A second discovery search asks for named projects
+    # with first-party sources, and its card joins the evidence.
+    from app.routing.subject_probe import _PATTERN_ASK
+    calls = [(name, request) for name in chosen]
+    body = composition.split_notes(request)[0] or request
+    if contract.kind == contracts.OPEN_RESEARCH_KIND and discovery_tools and _PATTERN_ASK.search(body):
+        calls.append((discovery_tools[0], f"{body}\nName the projects that use this exact mechanism, one per line, each with a first-party source "
+                                          "(documentation, blog post or governance proposal) describing it; include recent adaptations of the same design."
+                                          + ("\n" + composition.split_notes(request)[1] if composition.split_notes(request)[1] else "")))
+    streaming.emit("status", text=f"Contract: {contract.label()} · tools: {', '.join(n for n, _ in calls)}")
+    results = await asyncio.gather(*(_invoke(router, name, text, chains, contract) for name, text in calls))
+    chosen = [name for name, _ in calls]
     parts, fact_rows = [], []
     for name, result in zip(chosen, results):
         if result is None or not result.output:
