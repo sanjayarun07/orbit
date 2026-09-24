@@ -3039,3 +3039,11 @@ transaction proof withholds the written answer (the holdings shown were another 
 cards with the reason, whatever the answer's first characters. The knowledge tool retrieves twelve candidates and
 shows the six that mention the question's terms, since ranking six cannot recover a passage retrieval left out (the
 E-mode passages now lead for the E-mode question), and bracketed titles are escaped so every source renders as a link.
+
+**Fifth frozen run, build 9b3b431c (2026-09-24, `reports/trust-rerun-9b3b431c/`, wallet in).** 102 turns: 91 pass,
+9 partial, 2 fail by the judge; one real defect after the read. A paused *nearest* source (CoinGecko's breaker during
+"top gainers on Base in the last 24h") fell through to "No source I have covers this exactly"; a paused near source is
+now reported as unavailable right now and named, like a paused eligible one. Five frozen builds have gone 4, 5, 1, 1, 1
+real defects on the same 106 prompts, so the set is saturated and the next number must come from prompts the system
+has not seen. The Home strip's four news cases were absent from both wallet runs because the highlights were cold at
+launch; warm `/home/highlights` before launching a run.

@@ -301,3 +301,25 @@ def test_a_failed_proof_withholds_the_written_answer():
 def test_knowledge_link_titles_with_brackets_render_as_links():
     from app.knowledge import tool
     assert tool._link_text("[ARFC] Liquidation Protocol Fee") == "\\[ARFC\\] Liquidation Protocol Fee" and tool._RETRIEVE > tool._SHOW
+
+
+def test_a_paused_nearest_source_is_reported_as_unavailable_too(monkeypatch):
+    # "top gainers on Base in the last 24h" while CoinGecko was paused read "No source covers this" (fifth frozen run, 2026-09-24).
+    import asyncio
+    from types import SimpleNamespace
+    from app import evidence_pipeline, tool_catalog
+    from app.nodes import runtime
+    monkeypatch.setattr(runtime, "planner_available", lambda: False)
+    monkeypatch.setattr(evidence_pipeline.settings, "contract_pipeline_enabled", True)
+
+    class Router:
+        replay = True
+        def tools(self):
+            return tuple(SimpleNamespace(name=n, priority=1.0, spec=tool_catalog.TOOL_SPECS.get(n), matches=lambda r: True) for n in tool_catalog.CONTRACT_COVERAGE)
+        def _enabled(self, tool):
+            return tool.name != "coingecko_gainers_losers"
+        def invoke(self, *a, **k):
+            return None
+    monkeypatch.setattr(evidence_pipeline, "get_provider_router", lambda: Router())
+    out = asyncio.run(evidence_pipeline.answer({}, "top gainers on Base in the last 24h", ("base",)))
+    assert out["answer"].startswith("The source that covers this (coingecko_gainers_losers) is unavailable right now")

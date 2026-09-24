@@ -186,6 +186,7 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         near.sort(key=rank, reverse=True)
         if not near:
             covered_but_down = [name for name, reason in ranked if reason == "eligible" and name not in enabled]
+            covered_but_down += [name for name in _near_tools(contract, ranked) if name not in enabled and name not in covered_but_down]   # the nearest source, paused (CoinGecko during the fifth frozen run)
             if covered_but_down:
                 # A source covers this; it is paused right now (a provider's
                 # rate limit or breaker). Say that, not "nothing covers this"
