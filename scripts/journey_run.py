@@ -68,7 +68,9 @@ async def run(journeys: dict, out_dir: Path, wallet: str | None, repeat: int = 1
             try:
                 for attempt in range(4):
                     try:
-                        resp = await asyncio.wait_for(execute_chat_turn(ChatRequest(message=prompt, session_id=session, wallet_address=wallet), identity), timeout=170)
+                        # A research turn under the evidence loop runs up to settings.research_loop_timeout_seconds (240 s): the harness waits a little longer.
+                        resp = await asyncio.wait_for(execute_chat_turn(ChatRequest(message=prompt, session_id=session, wallet_address=wallet), identity),
+                                                      timeout=(settings.research_loop_timeout_seconds + 20) if settings.research_loop_enabled else 170)
                         break
                     except Exception as exc:  # noqa: BLE001
                         if attempt < 3 and ("already updating this chat" in str(exc) or "Too many chat requests" in str(exc)):

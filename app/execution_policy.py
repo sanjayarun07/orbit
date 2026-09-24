@@ -366,7 +366,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
                         session_context,
                         action,
                     ),
-                    timeout=settings.chat_execution_timeout_seconds,
+                    timeout=(settings.research_loop_timeout_seconds if settings.research_loop_enabled else settings.chat_execution_timeout_seconds),
                 )
                 turn_evidence = evidence_envelopes.collected()
             finally:

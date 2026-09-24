@@ -72,6 +72,13 @@ _research_lm = (
     if settings.research_model and settings.research_model != settings.model
     else None
 )
+# The same research model at the loop's effort for its structured calls.
+_research_loop_lm = (
+    dspy.LM(settings.research_model, timeout=settings.llm_request_timeout_seconds, num_retries=settings.llm_num_retries,
+            **{**_reasoning_kwargs(settings.research_model), **({"reasoning_effort": settings.research_loop_effort} if settings.research_loop_effort and _reasoning_kwargs(settings.research_model) else {})})
+    if settings.research_model and settings.research_model != settings.model
+    else None
+)
 dspy.configure(lm=_primary_lm)
 
 # Provider-side failures worth retrying on a DIFFERENT model (a transient outage
@@ -701,6 +708,21 @@ async def _call_synthesis_lm(program, **kwargs):
             increment("llm_synthesis_transient_failures")
             logger.warning("synthesis model '%s' failed transiently (%s); using the primary path", settings.synthesis_model, type(exc).__name__)
     return await _call_lm(program, **kwargs)
+
+
+async def _call_research_loop_lm(program, **kwargs):
+    """The loop's structured calls: the research model at `research_loop_effort`."""
+    if _research_loop_lm is None:
+        return await _call_research_lm(program, **kwargs)
+    async with _llm_slots:
+        increment("llm_calls")
+        try:
+            return await _run_guarded(program, _research_loop_lm, kwargs)
+        except Exception as exc:
+            if not _is_transient_lm_error(exc):
+                raise
+            logger.warning("research loop model failed transiently (%s); using the research path", type(exc).__name__)
+    return await _call_research_lm(program, **kwargs)
 
 
 async def _call_research_lm(program, **kwargs):

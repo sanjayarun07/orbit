@@ -450,6 +450,163 @@
      "Which token should I check"
     ]
    }
+  },
+  {
+   "id": "dual-token-1-venice",
+   "prompt": "Research on projects which had 2 tokens like Venice project VVV and DIEM to understand how the second token is minted, and other ways to mint a second token",
+   "kind": "open_research",
+   "fixtures": {
+    "perplexity_web_search": "dual_token_turn1_web.md"
+   },
+   "loop": {
+    "plan": {
+     "subject": "Venice VVV/DIEM",
+     "question": "how DIEM is minted from VVV and what other second-token minting designs exist",
+     "constraints": "none",
+     "required_facts": "the VVV to DIEM mint mechanism\nother minting designs\nfirst-party sources",
+     "capabilities": "web_discovery",
+     "queries": "web_discovery: how does Venice mint DIEM from VVV and what other designs mint a second token"
+    },
+    "reviews": [
+     "stop"
+    ],
+    "support": {
+     "supported": "Venice",
+     "related_but_different": "none",
+     "not_established": "none"
+    }
+   },
+   "goal": {
+    "tools_any": [
+     "perplexity_web_search"
+    ],
+    "must_not_contain": [
+     "could not be verified",
+     "nothing usable"
+    ],
+    "replay_must_contain": [
+     "DIEM"
+    ],
+    "pipeline": "research_loop"
+   }
+  },
+  {
+   "id": "dual-token-3-akash",
+   "prompt": "In Akash Network: apart from staking how else can we tie dual token to the main token?\nResolved from conversation context: the user wrote \"how it works in akash network\"; \"it\" is what the previous question was about.\nResearch objective of this conversation: compare dual-token mechanisms to Venice's VVV/DIEM: the project's own token as collateral and a separately tradable second token. Answer the current question in service of that objective; when the question is ambiguous, the objective settles what it means.",
+   "kind": "open_research",
+   "fixtures": {
+    "perplexity_web_search": "dual_token_turn3_web.md"
+   },
+   "loop": {
+    "plan": {
+     "subject": "Akash Network",
+     "question": "how Akash ties its second token to AKT other than staking",
+     "constraints": "none",
+     "required_facts": "Akash's burn-mint mechanism\nwhether the second token is transferable\nfirst-party source",
+     "capabilities": "web_discovery",
+     "queries": "web_discovery: how does Akash's burn-mint equilibrium tie ACT to AKT"
+    },
+    "reviews": [
+     "stop"
+    ],
+    "support": {
+     "supported": "Akash",
+     "related_but_different": "none",
+     "not_established": "none"
+    }
+   },
+   "goal": {
+    "tools_any": [
+     "perplexity_web_search"
+    ],
+    "must_not_contain": [
+     "could not be verified",
+     "nothing usable"
+    ],
+    "replay_must_contain": [
+     "ACT"
+    ],
+    "pipeline": "research_loop"
+   }
+  },
+  {
+   "id": "dual-token-4-mentions-not-proves",
+   "prompt": "which other projects follow lock collateral → mint a tradable second token\nResearch objective of this conversation: compare dual-token mechanisms to Venice's VVV/DIEM: the project's own token as collateral and a separately tradable second token. Answer the current question in service of that objective; when the question is ambiguous, the objective settles what it means.",
+   "kind": "open_research",
+   "fixtures": {
+    "perplexity_web_search": "mentions_not_proves.md"
+   },
+   "loop": {
+    "plan": {
+     "subject": "own-token collateral designs",
+     "question": "which other projects lock their own token to mint a tradable second token",
+     "constraints": "own token as collateral; second token tradable",
+     "required_facts": "named projects\nmechanism per project from a first-party source",
+     "capabilities": "web_discovery",
+     "queries": "web_discovery: projects that lock their own token to mint a tradable second token"
+    },
+    "reviews": [
+     "stop"
+    ],
+    "support": {
+     "supported": "Venice",
+     "related_but_different": "none",
+     "not_established": "Nova Labs"
+    }
+   },
+   "goal": {
+    "tools_any": [
+     "perplexity_web_search"
+    ],
+    "must_contain": [
+     "I withheld the written summary",
+     "Nova Labs"
+    ],
+    "replay_must_contain": [
+     "Nova Labs"
+    ],
+    "pipeline": "research_loop"
+   }
+  },
+  {
+   "id": "dual-token-4-second-axis",
+   "prompt": "which other projects follow lock collateral → mint a tradable second token\nResearch objective of this conversation: compare dual-token mechanisms to Venice's VVV/DIEM: the project's own token as collateral and a separately tradable second token. Answer the current question in service of that objective; when the question is ambiguous, the objective settles what it means.",
+   "kind": "open_research",
+   "fixtures": {
+    "perplexity_web_search": "mentions_not_proves.md",
+    "perplexity_web_search#2": "second_axis_proves.md"
+   },
+   "loop": {
+    "plan": {
+     "subject": "own-token collateral designs",
+     "question": "which other projects lock their own token to mint a tradable second token",
+     "constraints": "own token as collateral; second token tradable",
+     "required_facts": "named projects\nmechanism per project from a first-party source",
+     "capabilities": "web_discovery",
+     "queries": "web_discovery: projects that lock their own token to mint a tradable second token"
+    },
+    "reviews": [
+     "web_discovery: first-party documentation of protocols whose native token is staked or locked as collateral to mint a tradable synthetic or credit token",
+     "stop"
+    ],
+    "support": {
+     "supported": "none",
+     "related_but_different": "none",
+     "not_established": "none"
+    }
+   },
+   "goal": {
+    "tools_count": {
+     "perplexity_web_search": 2
+    },
+    "must_contain": [
+     "Synthetix"
+    ],
+    "replay_must_contain": [
+     "Synthetix"
+    ],
+    "pipeline": "research_loop"
+   }
   }
  ]
 }

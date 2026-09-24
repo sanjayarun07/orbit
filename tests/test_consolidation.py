@@ -25,6 +25,22 @@ def test_public_activity_does_not_expose_raw_arguments_or_errors():
     assert "secret" not in str(exposed) and "private" not in str(exposed)
 
 
+def test_public_research_progress_shows_source_status_without_model_text():
+    from app.public_activity import public_activity
+    raw = {"research_loop": {
+        "question": "private model planning text", "calls": ["web_discovery: private query", "wallet_state: skipped (no wallet)"],
+        "verdicts": [
+            {"name": "Akash", "url": "https://akash.network/docs?id=42&api_key=secret", "verdict": "related_but_different", "provenance": "page", "quote": "private source passage"},
+            {"name": "Unsafe", "url": "javascript:alert(1)", "verdict": "qualifies", "provenance": "page"},
+        ],
+    }}
+    exposed = public_activity(raw)
+    assert exposed == {"research_progress": {"status": "complete", "provider_calls": 1, "sources": [
+        {"name": "Akash", "url": "https://akash.network/docs?id=42", "verdict": "related_but_different", "provenance": "page"},
+    ]}}
+    assert "private" not in str(exposed)
+
+
 def test_wallet_leverage_action_keeps_wallet_capability(monkeypatch):
     action = structured_quick_actions([f"Review leverage risk for {WALLET}"], 1)[0]
     assert action.capabilities == ["wallet_intelligence"]

@@ -64,6 +64,24 @@ class Settings(BaseSettings):
     # comparison with Minara, 2026-09-24: each web query was the latest
     # message alone). Off = each turn is searched on its own words.
     research_objective_enabled: bool = True
+    # The bounded evidence loop for open research (app/research_loop.py,
+    # docs/engineering/claude-code-evidence-loop.md): plan the evidence on the
+    # research tier over the capability catalog, retrieve, review the gaps,
+    # call again or stop, then check every named example against its source.
+    # Off = the pipeline's fixed sequence (one discovery read, the knowledge
+    # base, the gate). One flag; the old path is the fallback when the plan fails.
+    research_loop_enabled: bool = False
+    research_loop_seconds: int = 75           # wall-clock budget for the loop's retrieval rounds; the turn must fit the chat timeout
+    # The loop's structured calls (plan, gap review, example support) run at
+    # this effort on the research model; the synthesis keeps
+    # research_reasoning_effort. A first live run at high effort throughout
+    # took 123 s and hit the chat timeout (2026-09-24).
+    research_loop_effort: str | None = "medium"
+    # A research turn under the loop plans, reads, inspects sources and writes:
+    # it earns a longer wall clock than a price check (the brief, step 3). Used
+    # for every turn while the flag is on; the loop's own budgets bound the work.
+    research_loop_timeout_seconds: float = 240.0
+    research_loop_inspect_pages: int = 4       # cited pages read per turn to check candidates against the conditions
     contract_pipeline_enabled: bool = True     # market rankings, holders, recent events and yields go through the contract pipeline
     # Open-ended research (not exact on-chain state) starts with a dated,
     # source-linked web read, then targeted tools, then the evidence check.

@@ -18,7 +18,7 @@ import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from app import composition, contracts, evidence, fact_gate, facts as facts_mod, perplexity_tools, streaming, tool_catalog
+from app import composition, contracts, evidence, fact_gate, facts as facts_mod, perplexity_tools, research_loop, streaming, tool_catalog
 from app.provider_registry import get_provider_router
 from app.settings import settings
 
@@ -230,6 +230,12 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
     if contract.ambiguity:
         return {"answer": contract.ambiguity, "trajectory": None, "contract": contract.model_dump(), "pipeline": "contract"}
     router = get_provider_router()
+    if contract.kind == contracts.OPEN_RESEARCH_KIND and research_loop.enabled():
+        # The bounded evidence loop (docs/engineering/claude-code-evidence-loop.md);
+        # None when its plan fails, and the fixed sequence below answers.
+        looped = await research_loop.run(state, request, contract, router, chains)
+        if looped is not None:
+            return looped
     enabled = {t.name: t for t in router.tools() if router._enabled(t)} if hasattr(router, "_enabled") else {t.name: t for t in router.tools()}
     ranked = tool_catalog.eligible_tools(contract)
     eligible = [name for name, reason in ranked if reason == "eligible" and name in enabled]
@@ -297,25 +303,20 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
                         f"or a short outage, so I have nothing verified for {contract.describe()}. Ask again in a minute; I will not answer it from the web.")
                 return {"answer": text, "trajectory": None, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "contract"}
             gate = fact_gate.check(contract, [], scope_satisfied=False)
-            text = (f"No source I have covers this exactly ({contract.describe()}). " + gate.gap_sentence(contract) +
-                    " Name a venue or chain I do cover, or ask for the global ranking instead.")
+            if contract.kind == "holders":
+                text = (f"I cannot verify {contract.describe()} with the available holder-data providers. "
+                        "No holder source was queried, so I cannot identify or rank the wallets for this token. "
+                        "A contract on a supported chain is a different asset; I will not substitute its holders.")
+            else:
+                text = (f"No source I have covers this exactly ({contract.describe()}). " + gate.gap_sentence(contract) +
+                        " Name a venue or chain I do cover, or ask for the global ranking instead.")
             return {"answer": text, "trajectory": None, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "contract"}
         chosen = near[:1]
         scope_satisfied = False
         cov_scope = cov[chosen[0]]["scope"]
         scope_note = (f"the ask needs {contract.scope.replace('_', ' ')}; the only source available is {chosen[0]} whose scope is {cov_scope.replace('_', ' ')} "
                       f"-- shown as the nearest verifiable ranking, not as the ask itself")
-    # "Which other projects follow this pattern?": one search rarely surfaces
-    # the examples (five Sol runs named another qualifying project once,
-    # review of c03378b1). A second discovery search asks for named projects
-    # with first-party sources, and its card joins the evidence.
-    from app.routing.subject_probe import _PATTERN_ASK
     calls = [(name, request) for name in chosen]
-    body = composition.split_notes(request)[0] or request
-    if contract.kind == contracts.OPEN_RESEARCH_KIND and discovery_tools and _PATTERN_ASK.search(body):
-        calls.append((discovery_tools[0], f"{body}\nName the projects that use this exact mechanism, one per line, each with a first-party source "
-                                          "(documentation, blog post or governance proposal) describing it; include recent adaptations of the same design."
-                                          + ("\n" + composition.split_notes(request)[1] if composition.split_notes(request)[1] else "")))
     streaming.emit("status", text=f"Contract: {contract.label()} · tools: {', '.join(n for n, _ in calls)}")
     results = await asyncio.gather(*(_invoke(router, name, text, chains, contract) for name, text in calls))
     chosen = [name for name, _ in calls]

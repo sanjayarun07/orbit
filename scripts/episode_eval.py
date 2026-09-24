@@ -55,7 +55,11 @@ class ReplayRouter:
 
     def invoke(self, name, request, chains=()):
         self.calls.append(name)
-        out = self.outputs.get(name)
+        # The n-th call of a tool takes the "<tool>#n" fixture when one exists
+        # (the loop's second search axis), else the tool's fixture.
+        nth = self.calls.count(name)
+        out = self.outputs.get(f"{name}#{nth}") if nth > 1 else None
+        out = out or self.outputs.get(name)
         return SimpleNamespace(output=out, tool=name, provider="replay") if out else None
 
 
@@ -63,19 +67,58 @@ async def _cards_only(request, cards, trajectory, advice=False, **kw):
     return f"**Taken together**\n\n(cards only in replay)\n\n---\n\n{cards}"
 
 
+def _scripted_research_tier(script: dict):
+    """The research tier from an episode's `loop` fixture: the plan, the gap
+    reviews in order, and the example-support labels. No model, no network."""
+    plan, reviews, support = script.get("plan") or {}, list(script.get("reviews") or ["stop"]), script.get("support") or {}
+
+    async def call(program, **kw):
+        fields = set(kw)
+        if "catalog" in fields and "request" in fields:
+            return SimpleNamespace(**{k: plan.get(k, "") for k in ("subject", "question", "constraints", "required_facts", "capabilities", "queries")})
+        if "calls_made" in fields:
+            nxt = reviews.pop(0) if reviews else "stop"
+            return SimpleNamespace(missing="see next" if nxt != "stop" else "none", next_call=nxt, reason="scripted")
+        if "answer" in fields and "evidence" in fields:
+            return SimpleNamespace(supported=support.get("supported", "none"), related_but_different=support.get("related_but_different", "none"),
+                                   not_established=support.get("not_established", "none"))
+        if "evidence" in fields and "question" in fields and "candidates" not in fields and "answer" not in fields:
+            return SimpleNamespace(candidates=script.get("candidates", "none"))
+        if "page" in fields:
+            verdicts = script.get("verdicts") or {}
+            v = verdicts.get(kw.get("candidate"), {"verdict": "not_established"})
+            return SimpleNamespace(verdict=v.get("verdict", "not_established"), conditions_met=v.get("conditions_met", "none"),
+                                   conditions_failed=v.get("conditions_failed", "none"), quote=v.get("quote", "none"))
+        return SimpleNamespace(objective="none", summary="")
+    return call
+
+
 def run_episode(episode: dict) -> dict:
     router = ReplayRouter(episode.get("fixtures") or {})
-    saved = (evidence_pipeline.get_provider_router, evidence_pipeline.composition.synthesize, runtime.planner_available, evidence_pipeline.settings.contract_pipeline_enabled)
+    loop_script = episode.get("loop")
+    saved = (evidence_pipeline.get_provider_router, evidence_pipeline.composition.synthesize, runtime.planner_available, evidence_pipeline.settings.contract_pipeline_enabled,
+             runtime._call_research_lm, evidence_pipeline.settings.research_loop_enabled, runtime._call_research_loop_lm)
     evidence_pipeline.get_provider_router = lambda: router
     evidence_pipeline.composition.synthesize = _cards_only
     runtime.planner_available = lambda: False
     evidence_pipeline.settings.contract_pipeline_enabled = True
+    evidence_pipeline.settings.research_loop_enabled = bool(loop_script)
+    from app import research_loop
+    saved_reader = research_loop.read_page
+    if loop_script:
+        runtime._call_research_lm = _scripted_research_tier(loop_script)
+        runtime._call_research_loop_lm = runtime._call_research_lm
+        pages = {url: _fixture(v) for url, v in (loop_script.get("pages") or {}).items()}
+        research_loop.read_page = lambda url: ({"url": url, "title": "fixture", "text": pages[url], "provenance": "page", "fetched_at": "replay"} if pages.get(url) and pages[url] != "unreadable"
+                                               else {"url": url, "title": "", "text": "", "provenance": "unreadable", "fetched_at": "replay"})
     t0 = time.time()
     try:
         out = asyncio.run(evidence_pipeline.answer({}, episode["prompt"], ()))
     finally:
         # Replay must leave the process as it found it (a leaked fake router failed an unrelated test, 2026-09-23).
-        evidence_pipeline.get_provider_router, evidence_pipeline.composition.synthesize, runtime.planner_available, evidence_pipeline.settings.contract_pipeline_enabled = saved
+        (evidence_pipeline.get_provider_router, evidence_pipeline.composition.synthesize, runtime.planner_available, evidence_pipeline.settings.contract_pipeline_enabled,
+         runtime._call_research_lm, evidence_pipeline.settings.research_loop_enabled, runtime._call_research_loop_lm) = saved
+        research_loop.read_page = saved_reader
     ms = (time.time() - t0) * 1000
     goal = episode.get("goal") or {}
     if goal.get("pipeline") == "legacy" and out is None:
@@ -110,6 +153,11 @@ def _judge(episode: dict, out: dict | None, calls: list[str], answer_override: s
     gate = out.get("gate") or {}
     if goal.get("tools_any") and not any(t in calls for t in goal["tools_any"]):
         failures.append(f"none of {goal['tools_any']} ran (ran {calls})")
+    for tool, count in (goal.get("tools_count") or {}).items():
+        if calls.count(tool) != count:
+            failures.append(f"{tool} ran {calls.count(tool)} times, expected {count}")
+    if goal.get("pipeline") == "research_loop" and (out or {}).get("pipeline") != "research_loop":
+        failures.append(f"expected the research loop, got {(out or {}).get('pipeline')}")
     for t in goal.get("tools_none") or []:
         if t in calls:
             failures.append(f"{t} must not run")

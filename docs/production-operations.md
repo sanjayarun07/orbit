@@ -3282,3 +3282,50 @@ subject at all. The planner now reads the ask only (`composition.split_notes` fi
 position is a subject and the symbol (`subject_probe._LOWER_TOKEN`), and a standing objective is attached only to a
 request that refers back or names no new subject (`research_objective.attach`). Coverage gap left as stated: no
 holders source declares Robinhood Chain.
+
+## The bounded evidence loop for open research (first slice, 2026-09-24, behind a flag)
+
+`app/research_loop.py`, per `docs/engineering/claude-code-evidence-loop.md`; `research_loop_enabled` (off by default; the
+fixed sequence in `evidence_pipeline.answer` is the fallback, also when the loop's plan call fails). One question
+contract drives a bounded cycle:
+
+1. **Plan** (research tier at `research_loop_effort`, medium): the subject, the actual question, the conditions a
+   correct answer must meet -- the user's constraints plus the ones a comparison implies, spelled out (whose asset is
+   the collateral, what is minted, transferability, redemption), so receipt tokens, wrapped assets, external-collateral
+   stablecoins and non-transferable credits fail a condition explicitly -- the facts a supported answer needs, a
+   capability shortlist and the first two queries. Capabilities are groups of tools by the job they do, derived from the
+   tool catalog (`CONTRACT_COVERAGE[tool]["capability"]`, `["inputs"]`); `CAPABILITY_JOBS` holds only the group's job
+   and inputs. `tool_for` is the deterministic boundary: a contract-kind tool serves only its kinds (a ranking is not
+   research), a state read needs a resolved contract address, wallet and execution groups are never research.
+2. **Retrieve** the round's calls concurrently, then a **gap review** (which required fact is missing, which capability
+   can supply it, one more "capability: query" or stop; never a query already made). Limits: 3 rounds, 5 provider
+   calls, 6 model calls, `research_loop_seconds` (75 s, capped to the chat timeout minus 60); a research turn runs
+   under `research_loop_timeout_seconds` (240 s) while the flag is on.
+3. **Inspect**: the candidates the cards discuss are listed with their cited URLs, and each cited page is read
+   directly (`url_reader.fetch`: title, text, fetched-at -- passage-level provenance), with Perplexity's reader as
+   the one bounded alternative labelled "search-index view", else "page unreadable: a search lead, not verified
+   evidence". Each page is checked against the conditions (`CandidateCheck`: qualifies / related but a different
+   design / not established, with the settling quote). A candidate not settled by its cited page gets one follow-up
+   read of its first-party documentation found by a discovery search (`first_party_url`). Bounded by
+   `research_loop_inspect_pages` (4).
+4. **Write** on the research brief with the verdicts ("state these verdicts, never upgrade one"), repair once on the
+   figure gate, else withhold; then the example-support check labels any name the synthesis introduces without a
+   source. The answer carries a **research trail**: timings per phase, every call and why it was skipped, and each
+   candidate's verdict with its URL, provenance, fetched-at and quote.
+
+Replay: episodes carry a `loop` fixture (scripted plan, reviews, candidates, page verdicts, support labels) and
+`pages` fixtures, so `scripts/episode_eval.py` runs the loop with no model and no network; `tests/test_research_loop.py`
+covers the boundary, the budget, the fallback, the misleading snippet, the unreadable page and the first-party
+follow-up. Measured on the four-turn dual-token sequence: see `reports/research-loop-2026-09-24/`.
+
+Measured (`reports/research-loop-2026-09-24/report.md`): flag off 1/5 runs name a reviewed true match on the fourth
+turn, flag on 3/5, false matches 0/5 both ways, median 60 s against 149 s per turn; 60 candidate pages read across
+the 20 loop turns. Rollout stays off: latency and cost roughly double, and discovery still bounds recall (AI Surplus
+was never surfaced). Next: the candidate lister names without URLs (added after the measurement), then extend the
+loop to the other contract kinds where it removes special cases.
+
+Review of the uncommitted loop (2026-09-24 evening) held four points, fixed the same evening: only cited or
+first-party-search URLs are read and the reader refuses non-public destinations on every redirect hop
+(`url_reader.public_destination`); the conversation lock outlives the longest turn the policy allows; a name the
+support check flags is rewritten once or the summary is withheld, and a check that cannot run withholds; the page
+budget bounds initial reads and follow-ups together. Rollout remains off.

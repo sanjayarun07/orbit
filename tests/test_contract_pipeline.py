@@ -92,6 +92,15 @@ def test_eligibility_is_hard():
     assert not tool_catalog.eligible("mobula_token_holders", plan_by_rules("top gainers on Base"))[0]
 
 
+def test_robinhood_chain_holders_report_missing_provider_without_a_false_fallback():
+    out, router = _run({}, "top 10 holders of MUSEBOOK on Robinhood")
+    assert out["contract"]["subject"]["chain"] == "robinhood"
+    assert router.calls == []
+    assert "available holder-data providers" in out["answer"]
+    assert "No holder source was queried" in out["answer"]
+    assert "global ranking" not in out["answer"]
+
+
 def test_facts_are_typed_and_burn_addresses_classified():
     rows = facts.facts_from_card("mobula_token_holders", PEPE_HOLDERS, "holders")
     assert len(rows) == 6 and rows[-1].attrs["class"] == "burn" and rows[0].attrs["class"] == "wallet" and rows[0].value == 7.0

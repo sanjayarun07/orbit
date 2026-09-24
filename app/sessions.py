@@ -60,9 +60,13 @@ async def acquire_session_turn(session_id: str) -> SessionTurnLease:
     redis = await get_redis()
     wait_seconds = max(1, settings.request_queue_timeout_seconds)
     if redis is not None:
+        # The lock must outlive the longest turn the policy allows: a research
+        # turn under the evidence loop runs up to research_loop_timeout_seconds
+        # (review, 2026-09-24: 240 s turns against a 135 s lock).
+        longest = max(settings.chat_execution_timeout_seconds, getattr(settings, "research_loop_timeout_seconds", 0) if getattr(settings, "research_loop_enabled", False) else 0)
         lock = redis.lock(
             f"chat_turn_lock:{session_id}",
-            timeout=max(15, settings.chat_execution_timeout_seconds + 15),
+            timeout=max(15, longest + 15),
             blocking_timeout=wait_seconds,
         )
         try:

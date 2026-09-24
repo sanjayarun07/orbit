@@ -1,0 +1,31 @@
+{
+  "note": "Human-reviewed labels for the fourth turn of the dual-token sequence: does the project lock or burn ITS OWN token as collateral to mint a SEPARATELY TRADABLE second token? Used by scripts/dual_token_judge.py to check named matches reproducibly; a name absent here is reported for review, never scored. Reviewed 2026-09-24 from first-party documentation; extend as new candidates appear. This file is an eval fixture, never read by the product.",
+  "qualifies": {
+    "Venice": "sVVV locked to mint DIEM, an ERC-20 that trades (venice.ai docs)",
+    "Synthetix": "SNX staked as collateral to mint sUSD and synths that trade freely (docs.synthetix.io)",
+    "AI Surplus": "own token locked to mint tradable ASTRA credits, a stated adaptation of the Venice design (aisurplus.io blog)"
+  },
+  "does_not_qualify": {
+    "Akash": "AKT is burned to mint ACT, which is non-transferable (AEP-76)",
+    "Lido": "stETH is a receipt for deposited ETH, not the protocol's own token as collateral",
+    "Rocket Pool": "rETH is a receipt for deposited ETH",
+    "Aave": "aTokens are deposit receipts",
+    "MakerDAO": "DAI is minted against external collateral (ETH, RWAs), not MKR",
+    "Sky": "USDS is minted against external collateral",
+    "Liquity": "LUSD is minted against ETH, not LQTY",
+    "Mirror Protocol": "mAssets were minted against UST and other external collateral",
+    "Usual": "USD0 is backed by treasuries; bUSD0 is a bonded receipt, not minted against USUAL",
+    "Chainlink CCIP": "cross-chain lock-and-mint of the same asset, a bridge",
+    "Mint Club": "smart tokens are backed by a chosen reserve token, not the protocol's own token",
+    "Factom": "Entry Credits are non-transferable",
+    "Helium": "Data Credits are non-transferable",
+    "Kaizen Finance": "claim tokens against vested allocations of third-party tokens, not its own token as collateral",
+    "Cyclo": "leverage tokens minted against FLR/sFLR deposits, an external asset on Flare",
+    "STBL": "USST minted against tokenized RWA collateral",
+    "Terra": "UST was minted by burning LUNA; the design matches structurally but the system collapsed in 2022 -- label it historical, not a live example",
+    "M0": "M tokens are minted against treasury collateral by approved minters",
+    "Raydium": "the Fee Key NFT is issued against locked liquidity, not the protocol's own token",
+    "Hylo": "hyUSD and xSOL are minted against LST deposits, external collateral",
+    "ListaDAO": "lisUSD is minted against external collateral"
+  }
+}

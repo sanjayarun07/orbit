@@ -732,6 +732,33 @@ const CASES = {
     const second = el.textContent;
     return { families, first, second, title, rotates: first !== second, phraseFor: phrases.search.includes(first) && phrases.search.includes(second) };
   },
+  async research_work_shows_progress_and_verified_source_status() {
+    const { dom, sandbox } = load();
+    const view = sandbox.streamView(dom.query("#typing"));
+    view.status("Planning the evidence");
+    const progress = dom.query("#typing >> .message-body >> .work-progress");
+    const plan = dom.query("#typing >> .message-body >> .work-progress >> .work-stage-plan");
+    const started = { visible: !progress.hidden, plan: plan.className };
+    view.status("Reading web_discovery: dual token mechanism");
+    view.card("[Akash docs](https://akash.network/docs)");
+    const sourceCount = dom.query("#typing >> .message-body >> .work-progress >> .work-progress-sources").textContent;
+    view.status("Reading 1 cited page to check candidates");
+    const review = dom.query("#typing >> .message-body >> .work-progress >> .work-stage-review").className;
+    const reviewStatus = dom.query("#typing >> .message-body >> .stream-status").textContent;
+    const final = sandbox.renderResearchWork({ research_progress: { provider_calls: 2, sources: [
+      { name: "Akash", url: "https://akash.network/docs", verdict: "related_but_different", provenance: "page" },
+    ] } });
+    const finalStatus = final?.querySelector(".research-work-source-status").textContent;
+    const calls = final?.querySelector(".research-work-count").textContent;
+    const legacy = sandbox.renderResearchWork({ tool_name_0: "perplexity_web_search" }, "See [Akash docs](https://akash.network/docs).", "research");
+    const legacyStatus = legacy?.querySelector(".research-work-source-status").textContent;
+    const uncovered = sandbox.renderResearchWork(null, "I cannot verify holders for this token on Robinhood Chain.", "research");
+    return { started, sourceCount, review, reviewStatus, final: finalStatus,
+      calls,
+      legacy: legacyStatus,
+      uncovered: { heading: uncovered?.querySelector(".research-work-heading strong").textContent,
+        status: uncovered?.querySelector(".research-work-source-status").textContent } };
+  },
   // A stream that breaks mid-turn is reported as interrupted, not as an error,
   // and recoverTurn finds the finished answer in the conversation's history.
   async a_broken_stream_is_recovered_from_history() {

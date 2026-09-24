@@ -144,6 +144,21 @@ def test_the_status_line_speaks_in_phrases_with_the_raw_text_as_tooltip():
     assert ".stream-status::before" in css and "orbit-spin" in css and "prefers-reduced-motion" in css
 
 
+def test_research_work_shows_progress_and_checked_sources():
+    from tests.test_ui_swap_flow import run_case
+    result = run_case("research_work_shows_progress_and_verified_source_status")
+    assert result["started"]["visible"] is True
+    assert "active" in result["started"]["plan"]
+    assert result["sourceCount"] == "1 source link found · page checks follow"
+    assert "active" in result["review"]
+    assert result["reviewStatus"] == "Checking sources…"
+    assert result["final"] == "1 page checked"
+    assert result["calls"] == "2 evidence calls"
+    assert result["legacy"] == "1 source cited · page checks not recorded"
+    assert result["uncovered"] == {"heading": "No evidence available",
+                                   "status": "No answer evidence was gathered"}
+
+
 def test_the_client_falls_back_to_the_json_route_without_a_stream():
     from tests.test_ui_swap_flow import run_case
     assert run_case("stream_falls_back_to_json_when_the_response_is_not_a_stream")["fallback"] is True

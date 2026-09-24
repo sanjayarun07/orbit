@@ -1040,6 +1040,36 @@ function renderToolActivity(trajectory) {
     list.appendChild(card);
   }); return wrapper;
 }
+function renderResearchWork(trajectory,answer="",intent=""){
+  let record=trajectory?.research_progress||trajectory?.research_loop;
+  if(!record&&intent==="research"){
+    const cited=new Map();for(const match of String(answer||"").matchAll(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g)){if(!cited.has(match[2]))cited.set(match[2],{name:match[1],url:match[2],verdict:"cited",provenance:"citation"});}
+    record={status:"complete",provider_calls:parseTrajectory(trajectory).length,sources:[...cited.values()].slice(0,8)};
+  }
+  if(!record||typeof record!=="object")return null;
+  const sources=Array.isArray(record.sources)?record.sources:Array.isArray(record.verdicts)?record.verdicts:[];
+  const checked=sources.filter(source=>source?.provenance==="page").length;
+  const limited=sources.filter(source=>source?.provenance==="reader").length;
+  const unreadable=sources.filter(source=>source?.provenance==="unreadable").length;
+  const cited=sources.filter(source=>source?.provenance==="citation").length;
+  const calls=Number(record.provider_calls??record.calls?.length??0);
+  const hasEvidence=calls>0||sources.length>0;
+  const panel=document.createElement("section");panel.className="research-work";panel.setAttribute("aria-label","Research work status");
+  panel.innerHTML='<div class="research-work-heading"><span class="research-work-mark">✓</span><strong>Work complete</strong><span class="research-work-count"></span></div><div class="research-work-stages"><span>Plan complete</span><span>Sources gathered</span><span>Evidence reviewed</span></div><div class="research-work-source-status"></div>';
+  $(".research-work-count",panel).textContent=`${calls} evidence ${calls===1?"call":"calls"}`;
+  const stages=$(".research-work-stages",panel);if(!hasEvidence){$(".research-work-heading strong",panel).textContent="No evidence available";$(".research-work-mark",panel).textContent="—";$(".research-work-mark",panel).classList.add("unavailable");}
+  if(stages?.children[1]&&!hasEvidence){stages.children[1].textContent="No sources gathered";stages.children[1].className="unavailable";}
+  if(stages?.lastElementChild){stages.lastElementChild.textContent=checked||limited?"Evidence reviewed":hasEvidence?"Page review unavailable":"No evidence to review";if(!checked&&!limited)stages.lastElementChild.className="unavailable";}
+  const status=$(".research-work-source-status",panel);
+  status.textContent=cited?`${cited} source${cited===1?"":"s"} cited · page checks not recorded`:sources.length?`${checked} page${checked===1?"":"s"} checked${limited?` · ${limited} reader view${limited===1?"":"s"}`:""}${unreadable?` · ${unreadable} unavailable`:""}`:hasEvidence?"No source pages checked":"No answer evidence was gathered";
+  if(sources.length){const details=document.createElement("details");details.className="research-work-details";details.innerHTML="<summary>Source status</summary>";const list=document.createElement("ul");
+    for(const source of sources){if(!source?.name||!source?.url)continue;let url;try{url=new URL(source.url);}catch{continue;}if(!["http:","https:"].includes(url.protocol))continue;
+      const item=document.createElement("li"),link=document.createElement("a"),label=document.createElement("span");link.href=url.href;link.target="_blank";link.rel="noopener noreferrer";link.textContent=source.name;label.className="research-work-verdict";
+      label.textContent=source.provenance==="citation"?"Cited, not page-checked":source.provenance==="unreadable"?"Page unavailable":source.verdict==="qualifies"?"Match verified":source.verdict==="related_but_different"?"Related, different design":"Not established";
+      item.append(link,label);list.appendChild(item);
+    }details.appendChild(list);panel.appendChild(details);}
+  return panel;
+}
 function fmtToken(amount, decimals, symbol) { const value = Number(amount) / 10 ** Number(decimals); return `${value.toLocaleString(undefined,{maximumFractionDigits:6})} ${symbol}`; }
 function bytesToBase64(bytes){let binary="";for(const byte of bytes)binary+=String.fromCharCode(byte);return btoa(binary);}
 function bytesToBase58(bytes){const alphabet="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";let value=0n;for(const byte of bytes)value=value*256n+BigInt(byte);let encoded="";while(value>0n){encoded=alphabet[Number(value%58n)]+encoded;value/=58n;}for(const byte of bytes){if(byte!==0)break;encoded="1"+encoded;}return encoded||"1";}
@@ -1174,7 +1204,7 @@ function finishAgentMessage(el, data) {
   if(data.job_id)watchJob(data.job_id);
   const body=$(".message-body",el); body.innerHTML='<div class="answer"></div>';
   if(data.error){el.classList.add("error");$(".answer",body).textContent=data.error;}
-  else { const answerNode=$(".answer",body);answerNode.replaceWith(renderAnswerResult(data.answer || ""));if(SHOW_TRACES&&data.intent)body.appendChild(renderRouteBadge(data.intent,data.capabilities));body.appendChild(renderExperience(data));const chartCard=renderChartCard(data.chart);if(chartCard)body.appendChild(chartCard);if(data.cross_chain_swap)body.appendChild(renderRelayPlanCard(data.cross_chain_swap,Number(data.session_revision??-1))); const portfolio=renderMcpPortfolioCard(data.trajectory);if(portfolio)body.appendChild(portfolio);const activity=SHOW_TRACES?renderToolActivity(data.trajectory):null; if(activity)body.appendChild(activity); if(data.trade_plan)body.appendChild(renderPlanCard(data.trade_plan));const actions=data.quick_actions?.length?data.quick_actions:[];if(actions.length)body.appendChild(renderSuggestions(actions,data.trade_plan));const related=renderRelated(data.suggestions);if(related)body.appendChild(related); }
+  else { const answerNode=$(".answer",body);answerNode.replaceWith(renderAnswerResult(data.answer || ""));const researchWork=renderResearchWork(data.trajectory,data.answer,data.intent);if(researchWork)body.appendChild(researchWork);if(SHOW_TRACES&&data.intent)body.appendChild(renderRouteBadge(data.intent,data.capabilities));body.appendChild(renderExperience(data));const chartCard=renderChartCard(data.chart);if(chartCard)body.appendChild(chartCard);if(data.cross_chain_swap)body.appendChild(renderRelayPlanCard(data.cross_chain_swap,Number(data.session_revision??-1))); const portfolio=renderMcpPortfolioCard(data.trajectory);if(portfolio)body.appendChild(portfolio);const activity=SHOW_TRACES?renderToolActivity(data.trajectory):null; if(activity)body.appendChild(activity); if(data.trade_plan)body.appendChild(renderPlanCard(data.trade_plan));const actions=data.quick_actions?.length?data.quick_actions:[];if(actions.length)body.appendChild(renderSuggestions(actions,data.trade_plan));const related=renderRelated(data.suggestions);if(related)body.appendChild(related); }
   if(!data.error) attachMessageActions(el, data.answer, data.session_revision, data.ts);
   scrollToBottom();
 }
@@ -1272,13 +1302,14 @@ function statusPhrase(raw){const family=statusFamily(raw);const list=STATUS_PHRA
 // markdown as it grows so lists and emphasis appear in place, not as raw marks.
 // Cards and text stream in the answer's own type and column (answer-result), so
 // nothing jumps in size or position when the final answer replaces the view.
-function streamView(typing){const body=$(".message-body",typing);body.innerHTML='<div class="answer streaming"><div class="stream-status"></div><div class="stream-summary rendered-result answer-result" hidden></div><div class="stream-cards"></div></div>';let text="";let raw="";let ticker=null;
+function streamView(typing){const body=$(".message-body",typing);body.innerHTML='<div class="answer streaming"><div class="stream-status"></div><div class="work-progress" hidden role="status" aria-live="polite"><strong class="work-progress-title">Research in progress</strong><div class="work-progress-steps"><span class="work-stage-plan">Plan</span><span class="work-stage-sources">Sources</span><span class="work-stage-review">Review</span><span class="work-stage-answer">Answer</span></div><div class="work-progress-sources"></div></div><div class="stream-summary rendered-result answer-result" hidden></div><div class="stream-cards"></div></div>';let text="";let raw="";let ticker=null;let research=false;let phase=-1;const sourceUrls=new Set();
   const stopTicker=()=>{if(ticker){clearInterval(ticker);ticker=null;}};
+  const progress=()=>{if(!research)return;const box=$(".work-progress",body);if(!box)return;box.hidden=false;const names=["plan","sources","review","answer"];names.forEach((name,index)=>{const step=$(`.work-stage-${name}`,box);if(step)step.className=`work-stage-${name} ${index<phase?"done":index===phase?"active":"pending"}`;});const label=$(".work-progress-sources",box);if(label)label.textContent=sourceUrls.size?`${sourceUrls.size} source ${sourceUrls.size===1?"link":"links"} found · page checks follow`:"Looking for relevant sources";};
   return {
-  status(next,{literal=false}={}){const el=$(".stream-status",body);if(!el)return;raw=next||"";stopTicker();if(!raw){el.hidden=true;el.textContent="";return;}el.hidden=false;el.title=raw;if(literal){el.textContent=raw;return;}el.textContent=statusPhrase(raw);
+  status(next,{literal=false}={}){const el=$(".stream-status",body);if(!el)return;raw=next||"";stopTicker();if(!raw){el.hidden=true;el.textContent="";return;}if(/planning the evidence|contract:\s*open_research|reading (?:web|finance)_discovery/i.test(raw))research=true;if(research){if(/reading \d+ cited pages?|checking (?:sources|candidates)|inspecting/i.test(raw))phase=Math.max(phase,2);else if(/reading|search|retriev/i.test(raw))phase=Math.max(phase,1);else if(/writing|synthesi|compos/i.test(raw))phase=Math.max(phase,3);else phase=Math.max(phase,0);progress();}el.hidden=false;el.title=raw;if(literal){el.textContent=raw;return;}if(research){el.textContent=["Planning research…","Finding sources…","Checking sources…","Preparing answer…"][phase];return;}el.textContent=statusPhrase(raw);
     ticker=setInterval(()=>{if(el.hidden||!raw)return stopTicker();el.textContent=statusPhrase(raw);},2800);},
-  card(markdown){const cards=$(".stream-cards",body);if(!cards)return;cards.appendChild(renderAnswerResult(markdown));const sep=document.createElement("hr");sep.className="stream-sep";cards.appendChild(sep);scrollToBottom();},
-  delta(chunk){text+=chunk;this.status("");const el=$(".stream-summary",body);if(!el)return;el.hidden=false;el.innerHTML=renderMarkdownHtml(text);scrollToBottom();},
+  card(markdown){const cards=$(".stream-cards",body);if(!cards)return;if(research){for(const match of String(markdown||"").matchAll(/\]\((https?:\/\/[^)\s]+)\)/g))sourceUrls.add(match[1]);phase=Math.max(phase,1);progress();}cards.appendChild(renderAnswerResult(markdown));const sep=document.createElement("hr");sep.className="stream-sep";cards.appendChild(sep);scrollToBottom();},
+  delta(chunk){text+=chunk;this.status("");if(research){phase=3;progress();}const el=$(".stream-summary",body);if(!el)return;el.hidden=false;el.innerHTML=renderMarkdownHtml(text);scrollToBottom();},
   stop(){stopTicker();},
 };}
 // Resolves to a fetch-shaped result ({ok,status,json()}) so the caller's handling is unchanged, or null to fall back.

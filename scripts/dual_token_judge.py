@@ -48,6 +48,38 @@ class OtherAnalogues(dspy.Signature):
 _other = dspy.Predict(OtherAnalogues)
 
 
+_CANDIDATES = Path(__file__).resolve().parents[1] / "evals" / "journeys" / "dual-token-candidates.json"
+
+
+def relationship_check(named: str) -> dict:
+    """The reproducible relationship check (the brief): each project the
+    model judge says the answer establishes as a match is looked up in the
+    human-reviewed fixture -- a true match, a false match, or unknown (for
+    review). The fixture is an eval artifact; the product never reads it."""
+    if not _CANDIDATES.exists() or not named or named.strip().lower() == "none":
+        return {"true": [], "false": [], "unknown": []}
+    labels = json.loads(_CANDIDATES.read_text())
+    yes = {k.lower(): k for k in labels.get("qualifies", {})}
+    no = {k.lower(): k for k in labels.get("does_not_qualify", {})}
+    out = {"true": [], "false": [], "unknown": []}
+    for raw in named.split(","):
+        name = raw.strip().strip(".")
+        if not name:
+            continue
+        key = name.lower()
+        hit_yes = next((v for k, v in yes.items() if k in key or key in k), None)
+        hit_no = next((v for k, v in no.items() if k in key or key in k), None)
+        if hit_yes and hit_yes.lower() != "venice":
+            out["true"].append(name)
+        elif hit_no:
+            out["false"].append(name)
+        elif hit_yes:
+            continue                                   # Venice itself is the reference, not an "other" project
+        else:
+            out["unknown"].append(name)
+    return out
+
+
 def other_analogues(answer: str) -> str:
     """The research tier's reading of criterion 4 (review of c03378b1: the
     lexical check passed answers that named no other project)."""
@@ -60,6 +92,7 @@ def score(turns: list[dict], model_judge: bool = False) -> dict:
     by = {t["turn"]: (t.get("answer") or "") for t in turns}
     s1, s2, s3, s4 = (synthesis(by.get(i, "")) for i in (1, 2, 3, 4))
     refusal = re.compile(r"nothing usable|no (?:specific |available )?information|which token|name it \(")
+    named_other = other_analogues(by.get(4, "")) if model_judge else "not judged"
     return {
         "1_vvv_diem_flow": ("diem" in s1) and any(w in s1 for w in ("svvv", "lock", "burn")),
         "2_links_carried": (not refusal.search(s2)) and sum(w in s2 for w in ("fee", "burn", "collateral", "redeem", "redemption", "governance", "buyback")) >= 2,
@@ -68,7 +101,8 @@ def score(turns: list[dict], model_judge: bool = False) -> dict:
         # It passes an honest "only Venice" answer, which is not an answer to "which other projects": the model
         # judge below names the other projects the answer actually establishes (review of c03378b1).
         "4_stays_on_pattern": ("venice" in s4) and not re.search(r"^.{0,400}\b(?:lido|rocket pool|bridge|wsteth|receipt)", s4, re.S),
-        "4_other_projects_named": (other_analogues(by.get(4, "")) if model_judge else "not judged"),
+        "4_other_projects_named": named_other,
+        "4_relationship_check": (relationship_check(named_other) if model_judge else "not judged"),
         "clarified_or_empty": [t["turn"] for t in turns if refusal.search(synthesis(t.get("answer") or ""))],
         "seconds": [round((t.get("ms") or 0) / 1000) for t in sorted(turns, key=lambda t: t["turn"])],
     }
@@ -87,6 +121,7 @@ def main(dirs: list[str]) -> None:
             runs.setdefault(f"{d}:{r['journey']}", []).append(r)
     totals = {k: 0 for k in ("1_vvv_diem_flow", "2_links_carried", "3_akash_bme", "4_stays_on_pattern")}
     others = 0
+    true_matches = false_matches = unknown = 0
     seconds: list[int] = []
     for name, turns in runs.items():
         s = score(turns, model_judge)
@@ -94,12 +129,15 @@ def main(dirs: list[str]) -> None:
             totals[k] += int(bool(s[k]))
         named = s["4_other_projects_named"]
         others += int(model_judge and named.lower() != "none")
+        if model_judge:
+            rel = s["4_relationship_check"]
+            true_matches += int(bool(rel["true"])); false_matches += int(bool(rel["false"])); unknown += len(rel["unknown"])
         seconds += s["seconds"]
-        print(name, {k: (v if k in ("clarified_or_empty", "seconds", "4_other_projects_named") else ("yes" if v else "NO")) for k, v in s.items()})
+        print(name, {k: (v if k in ("clarified_or_empty", "seconds", "4_other_projects_named", "4_relationship_check") else ("yes" if v else "NO")) for k, v in s.items()})
     n = len(runs)
     if n:
         print(f"\n{n} runs:", ", ".join(f"{k} {v}/{n}" for k, v in totals.items()),
-              (f"| 4_other_projects_named {others}/{n}" if model_judge else "| 4_other_projects_named: pass --model"),
+              (f"| 4_other_projects_named {others}/{n} | runs with a reviewed true match {true_matches}/{n} | runs with a false match {false_matches}/{n} | names for review {unknown}" if model_judge else "| 4_other_projects_named: pass --model"),
               f"| seconds per turn: median {statistics.median(seconds):.0f}, max {max(seconds)}")
 
 

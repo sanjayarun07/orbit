@@ -90,13 +90,57 @@ def extract_text(html: str) -> tuple[str, str]:
     return parser.title.strip(), text[:MAX_TEXT_CHARS]
 
 
+_MAX_REDIRECTS = 5
+
+
+def public_destination(url: str) -> bool:
+    """Whether a URL points at a public web host: http(s), a hostname that
+    resolves only to public addresses -- never loopback, private, link-local
+    (the cloud metadata range), multicast or reserved space. Checked on
+    every hop of a redirect (review of the research loop, 2026-09-24: a
+    model-chosen URL was fetched with redirects followed blindly)."""
+    import ipaddress
+    import socket
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return False
+    host = parts.hostname.strip("[]").lower()
+    if host in ("localhost",) or host.endswith(".localhost") or host.endswith(".local") or host.endswith(".internal"):
+        return False
+    try:
+        infos = socket.getaddrinfo(host, parts.port or (443 if parts.scheme == "https" else 80), proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, UnicodeError, OSError):
+        return False
+    addresses = {ipaddress.ip_address(info[4][0]) for info in infos}
+    if not addresses:
+        return False
+    return all(ip.is_global and not ip.is_multicast for ip in addresses)
+
+
 def fetch(url: str) -> tuple[str, str] | None:
     """(title, text) of the page fetched directly, or None when the site
-    refuses, answers with something that is not HTML, or has no readable
-    text (an app shell)."""
+    refuses, answers with something that is not HTML, has no readable text
+    (an app shell), or is not a public destination on any hop."""
     try:
-        with httpx.Client(timeout=httpx.Timeout(15.0, connect=8.0), follow_redirects=True, headers=_HEADERS) as client:
-            response = client.get(url)
+        current = url
+        with httpx.Client(timeout=httpx.Timeout(15.0, connect=8.0), follow_redirects=False, headers=_HEADERS) as client:
+            for _ in range(_MAX_REDIRECTS + 1):
+                if not public_destination(current):
+                    logger.info("fetch refused, not a public destination: %s", current[:120])
+                    return None
+                response = client.get(current)
+                if response.is_redirect or response.status_code in (301, 302, 303, 307, 308):
+                    target = response.headers.get("location")
+                    if not target:
+                        return None
+                    current = str(httpx.URL(current).join(target))
+                    continue
+                break
+            else:
+                return None
         if response.status_code >= 400 or "html" not in (response.headers.get("content-type") or ""):
             return None
         title, text = extract_text(response.text)

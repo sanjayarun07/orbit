@@ -532,28 +532,33 @@ def catalog_markdown(router=None) -> str:
 _ALL_EVM = frozenset({"ethereum", "base", "arbitrum", "optimism", "bsc", "polygon", "avalanche"})
 
 CONTRACT_COVERAGE: dict[str, dict] = {
-    "coingecko_gainers_losers": {"kinds": {"market_ranking"}, "scope": "global", "chains": _ALL_EVM | {"solana", "sui"}, "metrics": {"price_change"}, "windows": (12.0, 24.0), "fresh": 120},
-    "coingecko_top_volume": {"kinds": {"market_ranking"}, "scope": "global", "chains": _ALL_EVM | {"solana", "sui"}, "metrics": {"volume"}, "windows": (12.0, 24.0), "fresh": 120},
-    "dexscreener_boosted_tokens": {"kinds": {"market_ranking"}, "scope": "venue_trades", "chains": _ALL_EVM | {"solana", "sui", "robinhood"}, "venues": {"dexscreener", "pump.fun"}, "metrics": {"boosts"}, "windows": (12.0, 24.0), "fresh": 300},
-    "geckoterminal_pools": {"kinds": {"market_ranking"}, "scope": "venue_trades", "chains": _ALL_EVM | {"solana"}, "venues": {"dexscreener", "pump.fun"}, "metrics": {"volume", "new_listings"}, "windows": (12.0, 24.0), "fresh": 120},
+    # Tools that serve no contract kind on their own but a capability the research loop may plan (app/research_loop.py):
+    # a symbol's verified identity, one contract's market state, a wallet's holdings. `kinds` empty: never eligible for a contract by themselves.
+    "search_verified_tokens": {"capability": "token_identity", "inputs": ["symbol"], "kinds": set(), "scope": "any", "chains": {"solana"}, "metrics": set(), "windows": None, "fresh": 3600},
+    "birdeye_token_overview": {"capability": "market_state", "inputs": ["address", "chain"], "kinds": set(), "scope": "on_chain", "chains": _ALL_EVM | {"solana"}, "metrics": {"price", "volume", "liquidity"}, "windows": None, "fresh": 300},
+    "mobula_wallet_portfolio": {"capability": "wallet_state", "inputs": ["wallet"], "kinds": set(), "scope": "on_chain", "chains": _ALL_EVM | {"solana"}, "metrics": {"holdings"}, "windows": None, "fresh": 60},
+    "coingecko_gainers_losers": {"capability": "market_state", "inputs": ['query'], "kinds": {"market_ranking"}, "scope": "global", "chains": _ALL_EVM | {"solana", "sui"}, "metrics": {"price_change"}, "windows": (12.0, 24.0), "fresh": 120},
+    "coingecko_top_volume": {"capability": "market_state", "inputs": ['query'], "kinds": {"market_ranking"}, "scope": "global", "chains": _ALL_EVM | {"solana", "sui"}, "metrics": {"volume"}, "windows": (12.0, 24.0), "fresh": 120},
+    "dexscreener_boosted_tokens": {"capability": "market_state", "inputs": ['query'], "kinds": {"market_ranking"}, "scope": "venue_trades", "chains": _ALL_EVM | {"solana", "sui", "robinhood"}, "venues": {"dexscreener", "pump.fun"}, "metrics": {"boosts"}, "windows": (12.0, 24.0), "fresh": 300},
+    "geckoterminal_pools": {"capability": "market_state", "inputs": ['chain'], "kinds": {"market_ranking"}, "scope": "venue_trades", "chains": _ALL_EVM | {"solana"}, "venues": {"dexscreener", "pump.fun"}, "metrics": {"volume", "new_listings"}, "windows": (12.0, 24.0), "fresh": 120},
     # One token's pairs across DEXes with liquidity, volume and 24h change per pool: the state source for "BONK pools with at least $1M liquidity".
-    "dexscreener_token_pairs": {"kinds": {"market_ranking"}, "scope": "venue_trades", "chains": _ALL_EVM | {"solana", "sui"}, "venues": {"dexscreener"}, "metrics": {"liquidity", "volume", "price_change"}, "windows": (12.0, 24.0), "fresh": 120, "subject": "token"},
-    "tequity_movers": {"kinds": {"market_ranking"}, "scope": "venue_trades", "venues": {"aster", "hyperliquid"}, "chains": set(), "metrics": {"price_change"}, "windows": (12.0, 24.0), "fresh": 120},
-    "tequity_period_movers": {"kinds": {"market_ranking"}, "scope": "venue_trades", "venues": {"aster", "hyperliquid"}, "chains": set(), "metrics": {"price_change"}, "windows": (0.5, 720.0), "fresh": 600},
-    "tequity_volume_leaders": {"kinds": {"market_ranking"}, "scope": "venue_trades", "venues": {"aster", "hyperliquid"}, "chains": set(), "metrics": {"volume"}, "windows": (0.25, 720.0), "fresh": 600},
-    "tequity_trending": {"kinds": {"market_ranking"}, "scope": "venue_trades", "venues": {"aster", "hyperliquid"}, "chains": set(), "metrics": {"volume", "price_change"}, "windows": (12.0, 24.0), "fresh": 120},
-    "mobula_token_holders": {"kinds": {"holders"}, "scope": "on_chain", "chains": _ALL_EVM | {"solana"}, "metrics": {"holders"}, "windows": None, "fresh": 3600},
-    "solana_rpc_token_top_holders": {"kinds": {"holders"}, "scope": "on_chain", "chains": {"solana"}, "metrics": {"holders"}, "windows": None, "fresh": 300},
-    "bitquery_token_top_holders": {"kinds": {"holders"}, "scope": "on_chain", "chains": _ALL_EVM | {"solana"}, "metrics": {"holders"}, "windows": None, "fresh": 3600},
-    "goldrush_token_top_holders": {"kinds": {"holders"}, "scope": "on_chain", "chains": _ALL_EVM, "metrics": {"holders"}, "windows": None, "fresh": 3600},
-    "defillama_yields": {"kinds": {"yields"}, "scope": "global", "chains": _ALL_EVM | {"solana", "sui", "aptos", "tron", "hyperliquid"}, "metrics": {"apy"}, "windows": None, "fresh": 3600},
-    "perplexity_web_search": {"kinds": {"recent_events", "open_research"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 3 * 86400, "discovery": True},
-    "knowledge_base_search": {"kinds": {"recent_events", "open_research"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": None, "background": True},
-    "openai_web_search": {"kinds": {"recent_events", "open_research"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 3 * 86400, "discovery": True},
+    "dexscreener_token_pairs": {"capability": "market_state", "inputs": ['address', 'chain'], "kinds": {"market_ranking"}, "scope": "venue_trades", "chains": _ALL_EVM | {"solana", "sui"}, "venues": {"dexscreener"}, "metrics": {"liquidity", "volume", "price_change"}, "windows": (12.0, 24.0), "fresh": 120, "subject": "token"},
+    "tequity_movers": {"capability": "market_state", "inputs": ['venue'], "kinds": {"market_ranking"}, "scope": "venue_trades", "venues": {"aster", "hyperliquid"}, "chains": set(), "metrics": {"price_change"}, "windows": (12.0, 24.0), "fresh": 120},
+    "tequity_period_movers": {"capability": "market_state", "inputs": ['venue'], "kinds": {"market_ranking"}, "scope": "venue_trades", "venues": {"aster", "hyperliquid"}, "chains": set(), "metrics": {"price_change"}, "windows": (0.5, 720.0), "fresh": 600},
+    "tequity_volume_leaders": {"capability": "market_state", "inputs": ['venue'], "kinds": {"market_ranking"}, "scope": "venue_trades", "venues": {"aster", "hyperliquid"}, "chains": set(), "metrics": {"volume"}, "windows": (0.25, 720.0), "fresh": 600},
+    "tequity_trending": {"capability": "market_state", "inputs": ['venue'], "kinds": {"market_ranking"}, "scope": "venue_trades", "venues": {"aster", "hyperliquid"}, "chains": set(), "metrics": {"volume", "price_change"}, "windows": (12.0, 24.0), "fresh": 120},
+    "mobula_token_holders": {"capability": "on_chain_ownership", "inputs": ['address', 'chain'], "kinds": {"holders"}, "scope": "on_chain", "chains": _ALL_EVM | {"solana"}, "metrics": {"holders"}, "windows": None, "fresh": 3600},
+    "solana_rpc_token_top_holders": {"capability": "on_chain_ownership", "inputs": ['address', 'chain'], "kinds": {"holders"}, "scope": "on_chain", "chains": {"solana"}, "metrics": {"holders"}, "windows": None, "fresh": 300},
+    "bitquery_token_top_holders": {"capability": "on_chain_ownership", "inputs": ['address', 'chain'], "kinds": {"holders"}, "scope": "on_chain", "chains": _ALL_EVM | {"solana"}, "metrics": {"holders"}, "windows": None, "fresh": 3600},
+    "goldrush_token_top_holders": {"capability": "on_chain_ownership", "inputs": ['address', 'chain'], "kinds": {"holders"}, "scope": "on_chain", "chains": _ALL_EVM, "metrics": {"holders"}, "windows": None, "fresh": 3600},
+    "defillama_yields": {"capability": "market_state", "inputs": ['query'], "kinds": {"yields"}, "scope": "global", "chains": _ALL_EVM | {"solana", "sui", "aptos", "tron", "hyperliquid"}, "metrics": {"apy"}, "windows": None, "fresh": 3600},
+    "perplexity_web_search": {"capability": "web_discovery", "inputs": ['query'], "kinds": {"recent_events", "open_research"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 3 * 86400, "discovery": True},
+    "knowledge_base_search": {"capability": "knowledge", "inputs": ['query'], "kinds": {"recent_events", "open_research"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": None, "background": True},
+    "openai_web_search": {"capability": "web_discovery", "inputs": ['query'], "kinds": {"recent_events", "open_research"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 3 * 86400, "discovery": True},
     # The finance-tuned search leads discovery for a stock ask ("the stock labeled NBIS on Hyperliquid" went to the generic web, 2026-09-24).
-    "perplexity_finance_search": {"kinds": {"recent_events", "open_research"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 3 * 86400, "discovery": True, "stocks": True},
-    "tradingview_news": {"kinds": {"recent_events"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 86400, "discovery": True},
-    "exchange_listing_announcements": {"kinds": {"recent_events"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 86400, "discovery": True},
+    "perplexity_finance_search": {"capability": "finance_discovery", "inputs": ['query'], "kinds": {"recent_events", "open_research"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 3 * 86400, "discovery": True, "stocks": True},
+    "tradingview_news": {"capability": "web_discovery", "inputs": ['query'], "kinds": {"recent_events"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 86400, "discovery": True},
+    "exchange_listing_announcements": {"capability": "web_discovery", "inputs": ['query'], "kinds": {"recent_events"}, "scope": "any", "chains": set(), "metrics": {"events"}, "windows": None, "fresh": 86400, "discovery": True},
 }
 
 

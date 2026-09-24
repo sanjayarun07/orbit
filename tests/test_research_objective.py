@@ -202,11 +202,12 @@ def test_a_first_word_match_does_not_source_a_name():
     assert evidence_pipeline.unsourced_examples("Nova Labs mints transferable ASTRA [1].", cards + "\n[2] [Nova Labs docs](https://y)") == []
 
 
-def test_a_which_other_projects_ask_runs_a_second_discovery_search(monkeypatch):
+def test_the_fixed_sequence_runs_one_discovery_search(monkeypatch):
+    # The pattern-specific second search is gone: the research loop supplies a second axis when its gap review asks for one.
     from tests.test_contract_pipeline import FakeRouter
-    from types import SimpleNamespace
     monkeypatch.setattr(evidence_pipeline.settings, "contract_pipeline_enabled", True)
     monkeypatch.setattr(evidence_pipeline.settings, "discovery_first_research", True)
+    monkeypatch.setattr(evidence_pipeline.settings, "research_loop_enabled", False)
     from app.nodes import runtime
     monkeypatch.setattr(runtime, "planner_available", lambda: False)
 
@@ -214,16 +215,8 @@ def test_a_which_other_projects_ask_runs_a_second_discovery_search(monkeypatch):
         return f"**Taken together**\n\nsummary\n\n---\n\n{cards}"
 
     monkeypatch.setattr(evidence_pipeline.composition, "synthesize", synth)
-    seen = []
     web = "# From the web (dated, with sources)\n**Query**: q\n\nSynthetix locks SNX to mint sUSD. [1]\n\nSources:\n[1] [Synthetix docs](https://docs.synthetix.io) · 2026-09-09"
     router = FakeRouter({"perplexity_web_search": web})
-    original = router.invoke
-
-    def invoke(name, request, chains=()):
-        seen.append((name, request))
-        return original(name, request, chains)
-
-    router.invoke = invoke
     router.plan_across = lambda request, caps, chains, n: []
     saved = evidence_pipeline.get_provider_router
     evidence_pipeline.get_provider_router = lambda: router
@@ -231,9 +224,197 @@ def test_a_which_other_projects_ask_runs_a_second_discovery_search(monkeypatch):
         out = asyncio.run(evidence_pipeline.answer({}, "which other projects follow lock collateral → mint a tradable second token", ()))
     finally:
         evidence_pipeline.get_provider_router = saved
-    searches = [r for n, r in seen if n == "perplexity_web_search"]
-    assert len(searches) == 2 and "first-party source" in searches[1]
-    assert out is not None and "Synthetix" in (out.get("answer") or "")
+    assert router.calls.count("perplexity_web_search") == 1 and out is not None
+
+
+def test_the_open_research_note_is_a_brief_without_internals():
+    from app import fact_gate
+    contract = plan_by_rules("how it works in akash network")
+    assert contract.kind == "open_research"
+    gate = fact_gate.check(contract, [], scope_satisfied=True)
+    note = evidence_pipeline._contract_note(contract, gate, [], None)
+    assert "Brief for the answer" in note and "organise by mechanism" in note
+    for internal in ("Question contract", "window asked", "Accepted facts", "metric"):
+        assert internal not in note
+
+
+def test_a_multi_sentence_research_ask_is_one_ask():
+    from app import composition, contracts
+    request = ("Research on projects which had 2 tokens like Venice project VVV and DIEM token. and what mechinism should be used to mint "
+               "the 2nd token. what are all the different speculative ideas in crypto to achieve this")
+    clauses, _ = composition.plan_asks(request)
+    assert len(clauses) >= 2                       # the splitter alone sees three sentences
+    assert contracts.is_open_research(request)     # ... but the research node keeps it whole
+    from app.nodes import research
+    assert not research._DATA_ASK.search(research._ask(request))
+
+
+def test_open_research_runs_before_a_ticker_is_resolved(monkeypatch):
+    from app.nodes import research
+    from app import evidence_pipeline as ep
+    seen = {}
+
+    async def fake_answer(state, request, chains, **kw):
+        seen["request"] = request
+        return {"answer": "web research", "trajectory": None}
+
+    async def never(*a, **k):
+        raise AssertionError("the ticker must not be resolved before open research")
+
+    monkeypatch.setattr(ep, "answer", fake_answer)
+    monkeypatch.setattr(research, "_resolve_named_token", never)
+    monkeypatch.setattr(research.settings, "contract_pipeline_enabled", True, raising=False)
+    monkeypatch.setattr(research, "_web_context_part", lambda state: None)
+    state = {"request": "Research on projects which had 2 tokens like Venice project VVV and DIEM token. and what mechinism should be used to mint the 2nd token",
+             "contextual_request": None, "capabilities": ["web_research"], "chains": [], "session_context": {}, "history": "", "routing_decision": {}}
+    out = asyncio.run(research._research_node(state, {}))
+    assert out.get("answer") == "web research" and "DIEM token" in seen["request"]
+
+
+def test_every_line_the_user_wrote_reaches_the_search():
+    q = evidence_pipeline.research_query("which other projects follow lock collateral -> mint a tradable second token\nOnly include transferable tokens\nExclude wrapped assets\nResearch objective of this conversation: compare dual-token mechanisms. Answer the current question in service of that objective; when the question is ambiguous, the objective settles what it means.")
+    assert "Only include transferable tokens" in q and "Exclude wrapped assets" in q and "Answer the current question" not in q
+
+
+def test_a_first_word_match_does_not_source_a_name():
+    cards = "Sources:\n[1] [Nova market index](https://x) · 2026-09-09"
+    assert evidence_pipeline.unsourced_examples("Nova Labs mints transferable ASTRA [1].", cards) == ["Nova Labs"]
+    assert evidence_pipeline.unsourced_examples("Nova Labs mints transferable ASTRA [1].", cards + "\n[2] [Nova Labs docs](https://y)") == []
+
+
+def test_the_open_research_note_is_a_brief_without_internals():
+    from app import fact_gate
+    contract = plan_by_rules("how it works in akash network")
+    assert contract.kind == "open_research"
+    gate = fact_gate.check(contract, [], scope_satisfied=True)
+    note = evidence_pipeline._contract_note(contract, gate, [], None)
+    assert "Brief for the answer" in note and "organise by mechanism" in note
+    for internal in ("Question contract", "window asked", "Accepted facts", "metric"):
+        assert internal not in note
+
+
+def test_a_multi_sentence_research_ask_is_one_ask():
+    from app import composition, contracts
+    request = ("Research on projects which had 2 tokens like Venice project VVV and DIEM token. and what mechinism should be used to mint "
+               "the 2nd token. what are all the different speculative ideas in crypto to achieve this")
+    clauses, _ = composition.plan_asks(request)
+    assert len(clauses) >= 2                       # the splitter alone sees three sentences
+    assert contracts.is_open_research(request)     # ... but the research node keeps it whole
+    from app.nodes import research
+    assert not research._DATA_ASK.search(research._ask(request))
+
+
+def test_open_research_runs_before_a_ticker_is_resolved(monkeypatch):
+    from app.nodes import research
+    from app import evidence_pipeline as ep
+    seen = {}
+
+    async def fake_answer(state, request, chains, **kw):
+        seen["request"] = request
+        return {"answer": "web research", "trajectory": None}
+
+    async def never(*a, **k):
+        raise AssertionError("the ticker must not be resolved before open research")
+
+    monkeypatch.setattr(ep, "answer", fake_answer)
+    monkeypatch.setattr(research, "_resolve_named_token", never)
+    monkeypatch.setattr(research.settings, "contract_pipeline_enabled", True, raising=False)
+    monkeypatch.setattr(research, "_web_context_part", lambda state: None)
+    state = {"request": "Research on projects which had 2 tokens like Venice project VVV and DIEM token. and what mechinism should be used to mint the 2nd token",
+             "contextual_request": None, "capabilities": ["web_research"], "chains": [], "session_context": {}, "history": "", "routing_decision": {}}
+    out = asyncio.run(research._research_node(state, {}))
+    assert out.get("answer") == "web research" and "DIEM token" in seen["request"]
+
+
+def test_every_line_the_user_wrote_reaches_the_search():
+    q = evidence_pipeline.research_query("which other projects follow lock collateral -> mint a tradable second token\nOnly include transferable tokens\nExclude wrapped assets\nResearch objective of this conversation: compare dual-token mechanisms. Answer the current question in service of that objective; when the question is ambiguous, the objective settles what it means.")
+    assert "Only include transferable tokens" in q and "Exclude wrapped assets" in q and "Answer the current question" not in q
+
+
+def test_a_first_word_match_does_not_source_a_name():
+    cards = "Sources:\n[1] [Nova market index](https://x) · 2026-09-09"
+    assert evidence_pipeline.unsourced_examples("Nova Labs mints transferable ASTRA [1].", cards) == ["Nova Labs"]
+    assert evidence_pipeline.unsourced_examples("Nova Labs mints transferable ASTRA [1].", cards + "\n[2] [Nova Labs docs](https://y)") == []
+
+
+def test_the_fixed_sequence_runs_one_discovery_search(monkeypatch):
+    # The pattern-specific second search is gone: the research loop supplies a second axis when its gap review asks for one.
+    from tests.test_contract_pipeline import FakeRouter
+    monkeypatch.setattr(evidence_pipeline.settings, "contract_pipeline_enabled", True)
+    monkeypatch.setattr(evidence_pipeline.settings, "discovery_first_research", True)
+    monkeypatch.setattr(evidence_pipeline.settings, "research_loop_enabled", False)
+    from app.nodes import runtime
+    monkeypatch.setattr(runtime, "planner_available", lambda: False)
+
+    async def synth(request, cards, trajectory, advice=False, research=False):
+        return f"**Taken together**\n\nsummary\n\n---\n\n{cards}"
+
+    monkeypatch.setattr(evidence_pipeline.composition, "synthesize", synth)
+    web = "# From the web (dated, with sources)\n**Query**: q\n\nSynthetix locks SNX to mint sUSD. [1]\n\nSources:\n[1] [Synthetix docs](https://docs.synthetix.io) · 2026-09-09"
+    router = FakeRouter({"perplexity_web_search": web})
+    router.plan_across = lambda request, caps, chains, n: []
+    saved = evidence_pipeline.get_provider_router
+    evidence_pipeline.get_provider_router = lambda: router
+    try:
+        out = asyncio.run(evidence_pipeline.answer({}, "which other projects follow lock collateral → mint a tradable second token", ()))
+    finally:
+        evidence_pipeline.get_provider_router = saved
+    assert router.calls.count("perplexity_web_search") == 1 and out is not None
+
+
+def test_the_open_research_note_is_a_brief_without_internals():
+    from app import fact_gate
+    contract = plan_by_rules("how it works in akash network")
+    assert contract.kind == "open_research"
+    gate = fact_gate.check(contract, [], scope_satisfied=True)
+    note = evidence_pipeline._contract_note(contract, gate, [], None)
+    assert "Brief for the answer" in note and "organise by mechanism" in note
+    for internal in ("Question contract", "window asked", "Accepted facts", "metric"):
+        assert internal not in note
+
+
+def test_a_multi_sentence_research_ask_is_one_ask():
+    from app import composition, contracts
+    request = ("Research on projects which had 2 tokens like Venice project VVV and DIEM token. and what mechinism should be used to mint "
+               "the 2nd token. what are all the different speculative ideas in crypto to achieve this")
+    clauses, _ = composition.plan_asks(request)
+    assert len(clauses) >= 2                       # the splitter alone sees three sentences
+    assert contracts.is_open_research(request)     # ... but the research node keeps it whole
+    from app.nodes import research
+    assert not research._DATA_ASK.search(research._ask(request))
+
+
+def test_open_research_runs_before_a_ticker_is_resolved(monkeypatch):
+    from app.nodes import research
+    from app import evidence_pipeline as ep
+    seen = {}
+
+    async def fake_answer(state, request, chains, **kw):
+        seen["request"] = request
+        return {"answer": "web research", "trajectory": None}
+
+    async def never(*a, **k):
+        raise AssertionError("the ticker must not be resolved before open research")
+
+    monkeypatch.setattr(ep, "answer", fake_answer)
+    monkeypatch.setattr(research, "_resolve_named_token", never)
+    monkeypatch.setattr(research.settings, "contract_pipeline_enabled", True, raising=False)
+    monkeypatch.setattr(research, "_web_context_part", lambda state: None)
+    state = {"request": "Research on projects which had 2 tokens like Venice project VVV and DIEM token. and what mechinism should be used to mint the 2nd token",
+             "contextual_request": None, "capabilities": ["web_research"], "chains": [], "session_context": {}, "history": "", "routing_decision": {}}
+    out = asyncio.run(research._research_node(state, {}))
+    assert out.get("answer") == "web research" and "DIEM token" in seen["request"]
+
+
+def test_every_line_the_user_wrote_reaches_the_search():
+    q = evidence_pipeline.research_query("which other projects follow lock collateral -> mint a tradable second token\nOnly include transferable tokens\nExclude wrapped assets\nResearch objective of this conversation: compare dual-token mechanisms. Answer the current question in service of that objective; when the question is ambiguous, the objective settles what it means.")
+    assert "Only include transferable tokens" in q and "Exclude wrapped assets" in q and "Answer the current question" not in q
+
+
+def test_a_first_word_match_does_not_source_a_name():
+    cards = "Sources:\n[1] [Nova market index](https://x) · 2026-09-09"
+    assert evidence_pipeline.unsourced_examples("Nova Labs mints transferable ASTRA [1].", cards) == ["Nova Labs"]
+    assert evidence_pipeline.unsourced_examples("Nova Labs mints transferable ASTRA [1].", cards + "\n[2] [Nova Labs docs](https://y)") == []
 
 
 def test_an_identity_question_about_a_listed_stock_is_a_feed_quote(monkeypatch):
