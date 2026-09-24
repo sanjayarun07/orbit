@@ -86,6 +86,7 @@ class AgentRun:
     job_id: str | None = None
     job_attached: bool = False
     control: bool = False       # a reply to a command about the user's own things (tasks, watched exits): no related questions
+    contract: dict | None = None    # the question contract this turn answered (kind, subject, venue, window, filters), for the next turn's follow-ups
 
     def __iter__(self):
         """Retain compatibility with callers unpacking the original three values."""
@@ -178,4 +179,5 @@ async def _run_agent_traced(
         answer_gate=final_state.get("answer_gate"),
         job_id=final_state.get("job_id"),
         job_attached=bool(final_state.get("job_attached")),
+        contract=final_state.get("contract"),
     )

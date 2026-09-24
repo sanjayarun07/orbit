@@ -126,7 +126,7 @@ question_planner = dspy.Predict(QuestionPlan)
 
 _VENUE = re.compile(r"\b(aster|hyperliquid|hl|dex\s*screener|dexscreener|jupiter|raydium|uniswap|binance|coinbase|pump\.?fun)\b", re.I)
 _CHAIN = re.compile(r"\b(solana|base|ethereum|eth|arbitrum|optimism|polygon|bsc|bnb|avalanche|sui|hyperliquid|robinhood)\b", re.I)
-_RANKING = re.compile(r"\b(?:gainers?|losers?|movers?|most\s+traded|top\s+(?:tokens?|coins?|pairs?|stocks?|volume)|by\s+volume|trending\s+(?:tokens?|coins?|pairs?)|pumping|dumping|biggest\s+(?:moves?|winners?|losers?)|volume\s+leaders?|rank\w*|(?:up|down)\s+the\s+most|best\s+performing|worst\s+performing|moving|moves?\s+(?:today|now|the\s+most))\b", re.I)
+_RANKING = re.compile(r"\b(?:gainers?|losers?|movers?|winners?|laggards?|most\s+traded|top\s+(?:tokens?|coins?|pairs?|stocks?|volume)|by\s+volume|trending\s+(?:tokens?|coins?|pairs?)|pumping|dumping|pumped\s+(?:the\s+)?most|rose\s+most|biggest\s+(?:moves?|winners?|losers?)|volume\s+leaders?|rank\w*|(?:up|down)\s+the\s+most|best\s+performing|worst\s+performing|moving|moves?\s+(?:today|now|the\s+most)|leaderboard)\b", re.I)
 _HOLDERS = re.compile(r"\b(?:holders?|holding|concentration|who\s+(?:holds|owns)|top\s+wallets?|whales?)\b", re.I)
 _YIELDS = re.compile(r"\b(?:yields?|apy|apr|earn|lending\s+rates?|staking\s+rates?|farm\w*)\b", re.I)
 _EVENTS = re.compile(r"\b(?:news|headlines?|vote[ds]?|voting|proposal|governance|recently|latest|what\s+happened|announce\w*|launch(?:ed|es)?|hack(?:ed|s)?|exploit\w*|incidents?|this\s+week|today)\b", re.I)
@@ -145,14 +145,18 @@ _PORTFOLIO_ASK = re.compile(r"\b(?:my|connected)\b.{0,30}\b(?:portfolio|wallet|h
 # guess ("Start a cross-chain swap" got a generic clarification, 2026-09-23).
 _TRANSACTION = re.compile(r"\b(?:swap(?:ped|ping)?|sell(?:ing)?|sold|buy(?:ing)?|bought|bridg(?:e|ed|ing)|convert(?:ed|ing)?|exchang(?:e|ed|ing))\b.{0,60}\b(?:\d+(?:\.\d+)?\s*[A-Za-z$][A-Za-z0-9]{1,9}|[A-Z]{2,10}\s+(?:to|into|for)\s+[A-Z]{2,10})"
                           r"|\b(?:start|begin|prepare|quote)\s+(?:a\s+|an\s+|the\s+)?(?:cross[- ]chain\s+)?(?:swap|bridge|trade|quote)\b|\bquote\s+me\b"
-                          r"|\bexit\b.{0,40}\bposition\b|\bexit\s+(?:quotes?|analysis)\b", re.I)
+                          r"|\bexit\b.{0,40}\bposition\b|\bexit\s+(?:quotes?|analysis)\b"
+                          r"|\b(?:how\s+much|what\s+would|what(?:'s|\s+is)\s+the\s+minimum|i'?d\s+get|would\s+i\s+get|estimate|simulat\w+|price[- ]check|quote)\b.{0,50}\b\d+(?:\.\d+)?\s*[A-Za-z$][A-Za-z0-9]{1,9}\b(?:.{0,50}\b(?:get|receive|fetch|for|into|to|→)\b|.{0,30}\bslippage\b)"
+                          r"|\b(?:quote|estimate)\b.{0,40}\b[A-Za-z]{2,10}\s*(?:→|->|/|to)\s*[A-Za-z]{2,10}\b.{0,40}\b\d+(?:\.\d+)?\s*[A-Za-z]{2,10}\b", re.I)     # "a Jupiter quote for SOL→USDC, 0.05 SOL"
+_CHAIN_WORDS = {"SOLANA", "BASE", "ETHEREUM", "ETH", "ARBITRUM", "OPTIMISM", "POLYGON", "BSC", "BNB", "AVALANCHE", "SUI", "HYPERLIQUID", "ROBINHOOD", "JUPITER", "RAYDIUM", "ORCA", "METEORA"}
 _EXIT_ASK = re.compile(r"\bexit\b.{0,40}\bposition\b|\bexit\s+(?:quotes?|analysis)\b", re.I)
-_EXPLANATION_ASK = re.compile(r"^\s*(?:how\s+(?:does|do|is|to)|what\s+is|what\s+are|explain|why)\b", re.I)
+_EXPLANATION_ASK = re.compile(r"^\s*(?:how\s+(?:does|do|is|to)|what\s+is|what\s+are|explain|why)\b(?!.{0,60}\b\d+(?:\.\d+)?\s*[A-Z]{2,10}\b)", re.I)
 _TRADES_ON = re.compile(r"\b(?:trades?|trading|traded|volume|pairs?|pools?|dex(?:es)?)\s+on\b|\bon[- ]venue\b|\bvenue\b", re.I)
 _ECOSYSTEM = re.compile(r"\becosystem\b|\bassociated\s+with\b|\bglobal\b", re.I)
-_WINDOW = re.compile(r"\b(?:last|past|previous)\s+(\d+)\s*(h(?:ours?)?|d(?:ays?)?|w(?:eeks?)?)\b|\b(\d+)\s*(h|d|w)\b|\b(24\s*h(?:ours)?|this\s+week|past\s+week|last\s+week|today|this\s+morning|this\s+month|7d|30d)\b", re.I)
+_WINDOW = re.compile(r"\b(?:last|past|previous)\s+(\d+)\s*(h(?:ours?)?|d(?:ays?)?|w(?:eeks?)?|m(?:in(?:utes?)?)?)\b|\b(?:over|in|within)?\s*(\d+)\s*(h|d|w|m)\b|\b(24\s*h(?:ours)?|this\s+week|past\s+week|last\s+week|today|this\s+morning|this\s+month|7d|30d|"
+                     r"(?:past|last|previous)[- ]hour|(?:one|an)\s+hour\s+ago|hourly|60\s*m)\b", re.I)
 _STOCKS = re.compile(r"\b(?:tokeni[sz]ed\s+)?(?:stocks?|equit(?:y|ies)|shares)\b", re.I)
-_NO_STOCKS = re.compile(r"\b(?:excluding|exclude|without|no|not|minus)\s+(?:the\s+)?(?:tokeni[sz]ed\s+)?(?:stocks?|equit(?:y|ies))\b|\bcrypto\s+only\b", re.I)
+_NO_STOCKS = re.compile(r"\b(?:excluding|exclude|without|no|not|minus)\s+(?:the\s+)?(?:tokeni[sz]ed\s+|nasdaq\s+|nyse\s+)?(?:stocks?|equit(?:y|ies)|shares)\b|\bcrypto\s+only\b|\bperpetual\s+contracts?\b.{0,30}\bnot\b.{0,20}\bshares\b", re.I)
 _SINGLE = re.compile(r"\b(?:without\s+(?:exposing\s+me\s+to\s+)?(?:another|other|any|a)\s+(?:volatile\s+)?(?:token|asset|coin)s?|single[- ]asset|no\s+(?:il|impermanent\s+loss))\b", re.I)
 _MIN_LIQ = re.compile(r"(?:at\s+least|over|above|minimum(?:\s+of)?|min)\s+\$?\s*([\d,]+(?:\.\d+)?)\s*([kKmM]?)\s*(?:in\s+)?(?:liquidity|tvl)", re.I)
 _LIMIT = re.compile(r"\btop\s+(\d{1,3})\b", re.I)
@@ -175,6 +179,8 @@ def _window_hours(text: str) -> float | None:
             return 168.0
         if "month" in word or word == "30d":
             return 720.0
+        if word in ("past hour", "last hour", "previous hour", "past-hour", "one hour ago", "an hour ago", "hourly", "60m", "60 m"):
+            return 1.0
         if word == "today":
             # A ranking "today" is the day's change: the daily sources' 24h
             # figure, not the hours since midnight UTC (at 02:43 UTC "today"
@@ -186,15 +192,40 @@ def _window_hours(text: str) -> float | None:
             now = datetime.now(timezone.utc)
             return max(1.0, (now - now.replace(hour=0, minute=0, second=0, microsecond=0)).total_seconds() / 3600)
         return None
-    return float(n * (1 if u == "h" else 24 if u == "d" else 168))
+    return float(n * (1 if u == "h" else 24 if u == "d" else 168 if u == "w" else 1 / 60))
+
+
+# "Binance app listings, not BNB Chain", "pump.fun revenue, not the PUMP token":
+# a name after an exclusion word is what the user does NOT mean; it never
+# becomes the subject's chain or venue and it rules out sources that cover
+# only it (expanded UI review, 2026-09-24: the answer led with BNB Chain memes).
+_EXCLUSION = re.compile(r"\b(?:not|excluding|exclude|except|rather\s+than|other\s+than|instead\s+of|no)\s+(?:on\s+|the\s+|its\s+)?([A-Za-z][A-Za-z0-9.\s-]{1,24}?)(?=\s*(?:[,.;:!?]|$|\s+(?:and|but|or|which|that|memes?|tokens?|listings?|chain)\b))", re.I)
+
+
+def excluded_names(text: str) -> set[str]:
+    """Lowercase chain and venue names the message rules out."""
+    out: set[str] = set()
+    for m in _EXCLUSION.finditer(text or ""):
+        phrase = m.group(1).lower()
+        c = _CHAIN.search(phrase)
+        if c:
+            out.add({"eth": "ethereum", "bnb": "bsc"}.get(c.group(1).lower(), c.group(1).lower()))
+        v = _VENUE.search(phrase)
+        if v:
+            out.add(v.group(1).lower().replace(" ", ""))
+        if "bnb chain" in phrase or "binance smart chain" in phrase:
+            out.add("bsc")
+    return out
 
 
 def _chain_of(text: str) -> str | None:
-    m = _CHAIN.search(text or "")
-    if not m:
-        return None
-    word = m.group(1).lower()
-    return {"eth": "ethereum", "bnb": "bsc"}.get(word, word)
+    excluded = excluded_names(text)
+    for m in _CHAIN.finditer(text or ""):
+        word = m.group(1).lower()
+        chain = {"eth": "ethereum", "bnb": "bsc"}.get(word, word)
+        if chain not in excluded:
+            return chain
+    return None
 
 
 def _venue_of(text: str) -> str | None:
@@ -223,6 +254,9 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
         symbol = m.group(1).upper()
     address = _ADDRESS.search(text)
     filters: dict = {}
+    excluded = excluded_names(text)
+    if excluded:
+        filters["exclude"] = sorted(excluded)
     if _NO_STOCKS.search(text):
         filters["crypto_only"] = True
     elif _STOCKS.search(text):
@@ -236,16 +270,36 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
     limit = int(_LIMIT.search(text).group(1)) if _LIMIT.search(text) else 10
     window = _window_hours(text)
     explanation = bool(re.match(r"\s*(?:why|what(?:'s| is)\s+(?:driving|behind|moving))\b", text, re.I))
-    if _TRANSACTION.search(text) and not _EXPLANATION_ASK.search(text) and (not _PORTFOLIO_ASK.search(text) or _EXIT_ASK.search(text)):
+    stated_amount = bool(re.search(r"\b\d+(?:\.\d+)?\s*[A-Za-z$][A-Za-z0-9]{1,9}\b", text))
+    if _TRANSACTION.search(text) and not _EXPLANATION_ASK.search(text) and (not _PORTFOLIO_ASK.search(text) or _EXIT_ASK.search(text) or stated_amount):
+        # "Price-check my 0.05 SOL exit into USDC, no wallet signature": the
+        # amount makes it a quote, whatever possessives sit around it.
         # The fields the message evidences, and the ones a quote still needs.
         # "quote me 1 SOL to USDC" and "if I sold 0.05 SOL for USDC" are swap
         # intents in other words; an exit ask takes its size from the wallet.
         from app.routing.trade_parser import parse_execution_draft
         normalised = re.sub(r"\bquote\s+me\b", "swap", re.sub(r"\b(?:sold|sell(?:ing)?)\b", "sell", text, flags=re.I), flags=re.I)
+        normalised = re.sub(r"\b(?:how\s+much\s+\w+\s+would|what\s+would|estimate\s+(?:selling\s+)?|simulat\w+\s+(?:selling\s+)?|price[- ]check\s+(?:my\s+)?|quote\s+for\s+)", "swap ", normalised, flags=re.I)
         draft = parse_execution_draft(normalised, (chain,) if chain else ())
         if draft.destination_chain is None and draft.source_chain is not None and not re.search(r"\b(?:cross[- ]chain|bridge)\b", text, re.I):
             import dataclasses
             draft = dataclasses.replace(draft, destination_chain=draft.source_chain)          # a same-chain swap names one chain
+        if draft.amount is None or draft.input_token is None or draft.output_token is None:
+            # The draft parser knows swap verbs; "the minimum USDC I'd get for
+            # 0.05 SOL" and "a quote for SOL→USDC, 0.05 SOL" name the same swap
+            # by an amount beside its token and one other token in the sentence.
+            import dataclasses
+            amount_m = re.search(r"\b(\d+(?:\.\d+)?)\s*([A-Za-z]{2,10})\b", text)
+            if amount_m and amount_m.group(2).upper() not in {"BPS", "BP", "PCT", "USD", "MIN", "MINS", "H", "M", "D", "X"}:
+                inp = amount_m.group(2).upper()
+                others = [s for s in re.findall(r"\b([A-Z]{2,10})\b", text) if s not in {inp, "USD", "BPS", "SOL→USDC"} and s not in _CHAIN_WORDS]
+                arrow = re.search(rf"\b{inp}\s*(?:→|->|/|to|into|for)\s*([A-Z]{{2,10}})\b|\b([A-Z]{{2,10}})\s*(?:→|->|/)\s*{inp}\b", text)
+                out = (arrow.group(1) or arrow.group(2)) if arrow else (others[0] if len(others) == 1 else None)
+                if arrow and arrow.group(2):
+                    inp, out = arrow.group(2), inp
+                draft = dataclasses.replace(draft, amount=draft.amount or amount_m.group(1), input_token=draft.input_token or inp, output_token=draft.output_token or out,
+                                            source_chain=draft.source_chain or ("solana" if "SOL" in (inp, out) else None),
+                                            destination_chain=draft.destination_chain or ("solana" if "SOL" in (inp, out) else None))
         missing = () if _EXIT_ASK.search(text) else draft.missing()
         words = {"amount": "the amount", "input_token": "the token to sell", "output_token": "the token to buy", "source_chain": "the chain", "destination_chain": "the destination chain"}
         ambiguity = None

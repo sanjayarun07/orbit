@@ -28,7 +28,16 @@ _ALERT = re.compile(
     re.I,
 )
 _BRIEF = re.compile(r"^\s*(?:send|give|email)\s+me\s+(?:a\s+|the\s+)?(?:daily\s+|morning\s+)?(?:market\s+)?brief(?:ing)?(?:\s+(?:every\s+day|daily))?(?:\s+at\s+" + _TIME + r")?(?:\s+by\s+(?P<channel>email|mail))?\s*[.!]?\s*$", re.I)
-_LIST = re.compile(r"^\s*(?:show|list|what\s+are)\s+(?:me\s+)?(?:my\s+)?(?:tasks|reminders|alerts|scheduled\s+tasks)\??\s*$", re.I)
+_LIST = re.compile(r"^\s*(?:show|list|what\s+are)\s+(?:me\s+)?(?:my\s+)?(?:tasks|reminders|alerts|scheduled\s+tasks)\??\s*[.!]?\s*$", re.I)
+# The inventory in any words ("Anything scheduled for me?", "What alerts are running?",
+# "Did I set a morning brief?", "Which of those are paused?"): a task word with an
+# asking verb and no creation verb (expanded UI review, 2026-09-24: "Show my tasks."
+# with a full stop asked for a ticker; "anything scheduled for me" asked for a wallet).
+_INVENTORY = re.compile(r"\b(?:tasks?|reminders?|alerts?|watches|scheduled|schedule|morning\s+brief|briefs?)\b", re.I)
+_INVENTORY_ASK = re.compile(r"\b(?:show|list|what|which|any|anything|do\s+i\s+have|did\s+i\s+set|have\s+i\s+set|are\s+there|is\s+there|running|active|paused|pending|already)\b", re.I)
+_CREATES = re.compile(r"^\s*(?:please\s+)?(?:remind\s+me|alert\s+me|notify\s+me|tell\s+me\s+when|send\s+me|set\s+(?:a|an|up)|create|schedule\s+a|watch\s+my)\b", re.I)   # an instruction opens the message; "did I set a brief?" asks
+_STATUS_FILTER = re.compile(r"\b(paused|active|running|done|completed|finished|pending)\b", re.I)
+_REFERENT_STATUS = re.compile(r"^\s*(?:and\s+|so\s+|ok\s+)?which\s+(?:of\s+(?:those|them|these)\s+|ones\s+)?(?:are|is)\s+(paused|active|running|done|completed|pending)\b", re.I)
 # "tell me when any tokenized stock moves more than 10% on hyperliquid within an hour"
 _MOVERS_ALERT = re.compile(
     r"^\s*(?:please\s+)?(?:alert|notify|tell|ping|warn)\s+me\s+(?:when|if|once)\s+(?:any|a|some)\s+(?P<what>tokeni[sz]ed\s+stocks?|stocks?|equit(?:y|ies)|pairs?|tokens?|coins?|perps?)"
@@ -39,7 +48,7 @@ _MUTATE_ALL = re.compile(r"^\s*(?P<verb>pause|resume|delete|cancel|stop)\s+all\s
 
 
 def is_task_control(message: str) -> bool:
-    return any(p.match(message or "") for p in (_REMIND, _ALERT, _MOVERS_ALERT, _BRIEF, _LIST, _MUTATE, _MUTATE_ALL))
+    return any(p.match(message or "") for p in (_REMIND, _ALERT, _MOVERS_ALERT, _BRIEF, _LIST, _MUTATE, _MUTATE_ALL)) or _inventory_ask(message or "")
 
 
 def _clock(h: str | None, m: str | None, ap: str | None, default: tuple[int, int] = (9, 0)) -> tuple[int, int]:
@@ -145,8 +154,9 @@ async def handle(message: str, user: dict, tz_offset_min: int = 0) -> str | None
     if not is_task_control(message):
         return None
     text = message.strip()
-    if _LIST.match(text):
-        return await _render_list(user)
+    if _inventory_ask(text):
+        status = _STATUS_FILTER.search(text)
+        return await _render_list(user, status=status.group(1).lower() if status else None)
     m = _MUTATE_ALL.match(text)
     if m:
         verb = m.group("verb").lower()
@@ -257,11 +267,23 @@ def _when(task: dict) -> str:
     return local.strftime("%a %d %b, %H:%M")
 
 
-async def _render_list(user: dict) -> str:
-    items = await tasks.list_tasks(user["id"], include_done=False)
+def _inventory_ask(text: str) -> bool:
+    """An ask to see the tasks, in any words, with no creation verb."""
+    return bool(_LIST.match(text) or _REFERENT_STATUS.match(text)
+                or (_INVENTORY.search(text) and _INVENTORY_ASK.search(text) and not _CREATES.search(text) and len(text.split()) <= 14))
+
+
+async def _render_list(user: dict, status: str | None = None) -> str:
+    want_done = status in ("done", "completed", "finished")
+    items = await tasks.list_tasks(user["id"], include_done=want_done)
+    if status:
+        wanted = {"running": "active", "completed": "done", "finished": "done", "pending": "active"}.get(status, status)
+        items = [t for t in items if t.get("status") == wanted]
+        if not items:
+            return f"None of your tasks is {status}. Say *show my tasks* for the full list."
     if not items:
         return "No tasks yet. Try *remind me tomorrow at 9am to check SOL*, *alert me when SOL drops below $90*, or *send me a morning brief at 8am*."
-    lines = ["**Your tasks**", ""]
+    lines = [f"**Your {status} tasks**" if status else "**Your tasks**", ""]
     for index, task in enumerate(items, start=1):
         lines.append(f"{index}. **{task['title']}** · {tasks.describe_schedule(task['schedule'], task.get('tz_offset_min', 0))} · {task['status']} · next {_when(task)}")
     lines += ["", "Say `pause task 1`, `delete task 1`, or open Settings → Tasks." if len(items) == 1 else f"Say `pause task 2`, `delete task 1` (numbers 1–{len(items)}), or open Settings → Tasks."]

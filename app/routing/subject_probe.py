@@ -57,12 +57,18 @@ _STOP = {w.upper() for w in (
 # opening a sentence ("Bonk price?", "ANSEM holders") is still a subject.
 _SENTENCE_START = re.compile(r"(?:^|[.!?:;]\s+)([A-Z][a-z][A-Za-z0-9]{1,20})\s+([a-z]+)\b")
 _INSTRUCTION_NEXT = {"this", "that", "these", "those", "the", "a", "an", "my", "me", "our", "your", "all", "each", "every", "it", "them",
-                     "token", "tokens", "coin", "coins", "investigation", "report", "everything", "anything"}
+                     "token", "tokens", "coin", "coins", "investigation", "report", "everything", "anything",
+                     # "Switch topics:", "Then show 24h", "And which are paused?": a capitalised opener before a topic word,
+                     # a verb or a question word is not a name (expanded UI review, 2026-09-24: Switch, Then and And became assets)
+                     "topics", "topic", "subject", "which", "what", "how", "where", "when", "who", "why", "show", "list", "give", "tell",
+                     "compare", "check", "find", "run", "please", "now", "again", "back", "only", "just", "also", "instead"}
 
 
 # English imperatives and pronouns that open a sentence: "Build bull, base and
 # bear cases", "Mark database-only claims", "Handle pools", "You showed" all
 # reached the web as BUILD / MARK / Handle.fi / YOU (UI run, 2026-09-23).
+_OPENERS = {"switch", "then", "and", "also", "now", "next", "ok", "okay", "back", "so", "but", "first", "second", "finally", "anyway",
+            "meanwhile", "instead", "actually", "alternatively", "well", "right", "fine", "sure", "yes", "no", "wait", "hmm", "plus"}
 _IMPERATIVES = {w.lower() for w in (
     "build mark handle treat separate save export show list give tell explain compare confirm include exclude inspect prepare revisit "
     "distinguish require use name say link rank sort filter summarize summarise describe outline draft write create make add remove "
@@ -77,7 +83,7 @@ _IMPERATIVES = {w.lower() for w in (
 
 
 def _is_sentence_starter(word: str, next_word: str) -> bool:
-    return word.lower() in _IMPERATIVES or next_word in _INSTRUCTION_NEXT
+    return word.lower() in _IMPERATIVES or word.lower() in _OPENERS or next_word in _INSTRUCTION_NEXT
 _INSTRUCTIONS = (
     "You identify what a name refers to in the context of markets, crypto and finance. Return ONLY strict JSON: "
     '{"kind": "token|protocol|equity|person|company|concept|other", "name": "...", "symbol": "... or null", "chain": "solana|ethereum|base|arbitrum|bsc|polygon|avalanche|other or null", '
@@ -98,7 +104,11 @@ _CONTINUES = re.compile(
     r"conclusions?|cases?|bull|bear|thesis|risks?|memo|diligence|funding|rounds?|revenue|fees|tvl|tokens?|protocol|chain|wallets?|exit|quotes?|"
     r"concentrat\w+|customers|operators|dependencies|incidents?|security|audit|metrics?|changes?|compare|comparison|valuation|exposure|ownership|"
     r"investors?|competitors?|adoption|unlocks?|sentiment|mint|contract|extensions?|program|pools?|lp|depth|slippage|sources?|timestamps?|data|"
-    r"report|table|its|checks?|verify|verified|proven|inferred|disputed|unsupported|assumptions?|questions?)\b", re.I)
+    r"report|table|its|checks?|verify|verified|proven|inferred|disputed|unsupported|assumptions?|questions?|"
+    # a time or window correction continues the previous ask ("I meant the past hour", "then show 24h separately", 2026-09-24)
+    r"hours?|hourly|minutes?|24h|1h|daily|weekly|interval|window|period|separately|labell?ed|feed|support|meant|"
+    # "I only want a read-only estimate", "restate the quote limits", "do not submit anything": the exit ask continues (2026-09-24)
+    r"estimate|estimates|read[- ]only|hypothetical|restate|submit|limits|research\s+mode|sell\s+it\s+now|denominator|percent|same)\b", re.I)
 _NEW_TOPIC = re.compile(
     r"\b(?:trending|gainers|losers|movers|narratives?|metas?|market\s+(?:today|now|overview|update|brief)|crypto\s+market|new\s+(?:launches|pairs|tokens|listings)|"
     r"what'?s\s+(?:hot|trending|launching|new)|how\s+is\s+the\s+market|top\s+\d+\s+(?:coins|tokens)|fear\s+and\s+greed)\b", re.I)
@@ -110,10 +120,21 @@ _NEW_TOPIC = re.compile(
 _INDEFINITE = re.compile(r"\b(?:a|an|any|some|every)\s+(?:wallet|address|token|coin|contract|portfolio|protocol|chain|position|account|exchange)\b", re.I)
 
 
+# "Does that automatically authorize Robinhood Chain today?", "Which part was
+# in the SEC order and which is your inference?": a referent pronoun at the
+# head of the question points at the conversation's subject even when another
+# name appears later in it (expanded UI review, 2026-09-24: the SEC order was
+# lost to "Robinhood" and to "I'm not sure what this refers to").
+_REFERENT = re.compile(r"^\s*(?:and\s+|so\s+|but\s+|ok,?\s+)?(?:(?:(?:what|which|how|when|where|why)\s+)?(?:does|do|is|was|did|will|would|can|could|has|have|which\s+part\s+of|what\s+part\s+of|how\s+much\s+of)\s+(?:that|this|it|those|these)\b"
+                       r"|(?:which|what)\s+(?:parts?|portion|bits?|of\s+those|of\s+these|of\s+them|ones?)\b)", re.I)     # "Which part was in the order and which is your inference?" partitions the previous answer
+
+
 def continues_subject(request: str) -> bool:
     """Whether a message that names nothing of its own reads as a follow-up
     on the conversation's subject rather than a new topic or small talk."""
     text = request or ""
+    if _REFERENT.match(text) and not _NEW_TOPIC.search(text):
+        return True
     if len(text.split()) < 3 or has_own_subject(text) or _NEW_TOPIC.search(text) or _INDEFINITE.search(text):
         return False
     return bool(_CONTINUES.search(text))

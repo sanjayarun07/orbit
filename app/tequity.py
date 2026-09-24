@@ -277,7 +277,10 @@ def news_matches(request: str) -> bool:
 
 _PERIOD = re.compile(
     r"\b(?:since\s+this\s+morning|this\s+morning|today|this\s+week|past\s+week|last\s+week|last\s+24\s*h(?:ours)?|past\s+24\s*h(?:ours)?|"
-    r"(?:over|in|during|for)?\s*the\s+(?:last|past)\s+(?P<n>\d+)\s*(?P<u>hours?|h|days?|d|weeks?|w)|(?:last|past)\s+(?P<n2>\d+)\s*(?P<u2>hours?|h|days?|d|weeks?|w)|"
+    r"(?:over|in|during|for)?\s*the\s+(?:last|past)\s+(?P<n>\d+)\s*(?P<u>hours?|h|days?|d|weeks?|w|minutes?|mins?|m)|(?:last|past)\s+(?P<n2>\d+)\s*(?P<u2>hours?|h|days?|d|weeks?|w|minutes?|mins?|m)|"
+    # "1h movers", "over 60m", "past-hour", "last hour", "one hour ago" (expanded UI review, 2026-09-24: the 1h asks found no period)
+    r"(?P<n3>\d+)\s*(?P<u3>h|hr|hrs|hours?|m|min|mins|minutes?)\b(?=\s+(?:movers?|gainers?|losers?|winners?|change|window|leaderboard|ago|,|$))|(?:over|in|within)\s+(?P<n4>\d+)\s*(?P<u4>h|hr|hrs|hours?|m|min|mins|minutes?)\b|"
+    r"(?P<hour>(?:past|last|previous)[- ]hour|(?:one|an)\s+hour\s+ago|past-hour|hourly)|"
     r"since\s+(?P<since>[A-Za-z]{3,9}\.?\s+\d{1,2}(?:,?\s+\d{4})?|\d{4}-\d{2}-\d{2}|yesterday))\b", re.I)
 _VOLUME_WORDS = re.compile(r"\b(?:most\s+traded|volume\s+leaders?|highest\s+volume|by\s+(?:traded\s+|quote\s+)?volume|most\s+volume|biggest\s+volume|volume\s+rank\w*|rank\w*\s+by\s+volume|top\s+volume)\b", re.I)
 _HISTORY_WORDS = re.compile(r"\b(?:how\s+(?:has|did|is)|moved|moving|move|change[ds]?|performance|performed|done|doing|trend|history)\b", re.I)
@@ -292,10 +295,14 @@ def period_start(request: str, now: datetime | None = None) -> datetime | None:
     text = m.group(0).lower()
     if "morning" in text or text == "today":
         return now.replace(hour=0, minute=0, second=0, microsecond=0)
-    n, u = (m.group("n") or m.group("n2")), (m.group("u") or m.group("u2") or "")
+    groups = m.groupdict()
+    if groups.get("hour"):
+        return now - timedelta(hours=1)
+    n = groups.get("n") or groups.get("n2") or groups.get("n3") or groups.get("n4")
+    u = groups.get("u") or groups.get("u2") or groups.get("u3") or groups.get("u4") or ""
     if n:                                                                  # a quantity and its unit first: "last 24 days" is days (review of 07190a22)
         unit = u.lower()[:1]
-        return now - (timedelta(hours=int(n)) if unit == "h" else timedelta(days=int(n)) if unit == "d" else timedelta(weeks=int(n)))
+        return now - (timedelta(minutes=int(n)) if unit == "m" else timedelta(hours=int(n)) if unit == "h" else timedelta(days=int(n)) if unit == "d" else timedelta(weeks=int(n)))
     if "week" in text:
         return now - timedelta(days=7)
     if re.fullmatch(r"(?:last|past)\s+24\s*h(?:ours)?", text):

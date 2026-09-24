@@ -1,4 +1,5 @@
 from app.nodes.state import AgentState, effective_request as _effective_request
+import re
 from app.nodes import runtime
 from app.settings import settings
 from app.tracing import trace
@@ -57,13 +58,36 @@ def policy_summary(state: AgentState) -> str:
     return "\n".join(lines)
 
 
+_ORBIT_POLICY = re.compile(r"\b(?:your|orbit'?s?|this\s+app'?s?|the\s+app'?s?|the\s+bot'?s?)\s+(?:trading\s+)?(?:policy|policies|rules|limits|caps|settings|charter)\b"
+                           r"|\b(?:trading\s+policy|risk\s+charter|max(?:imum)?\s+per\s+trade|slippage\s+cap|price[- ]impact\s+cap|research\s+mode|execution\s+mode)\b"
+                           r"|\b(?:can|could|will|do|does|are)\s+(?:you|orbit|the\s+app)\s+(?:trade|sign|execute|submit|buy|sell|swap|move\s+funds|allowed|permitted)\b"
+                           r"|\bwhat\s+(?:are|am)\s+(?:you|i)\s+(?:allowed|permitted)\b|\bin\s+research\s+mode\b", re.I)
+
+
+_POLICY_WORD = re.compile(r"\b(?:polic(?:y|ies)|limits?|caps?|rules|allowed|permitted|max\s+spend)\b", re.I)
+
+
+def _about_orbits_policy(request: str) -> bool:
+    """A policy-labelled turn is about Orbit's own policy unless it names
+    something else ("Does that authorize Robinhood Chain?" names an order and
+    a chain); "max spend policy?" and "my wallet policy?" name nothing else."""
+    from app.routing.subject_probe import has_own_subject
+    text = request or ""
+    if _ORBIT_POLICY.search(text):
+        return True
+    return bool(_POLICY_WORD.search(text)) and not has_own_subject(text)
+
+
 @trace(name="general", as_type="agent")
 async def general_node(state: AgentState) -> dict:
     """No tool calls: a single lightweight LM call for chit-chat/conceptual replies."""
     if state.get("clarification"):
         return {"answer": state["clarification"], "trajectory": None}
     request = state["request"]
-    if (state.get("routing_decision") or {}).get("speech_act") == "policy":
+    if (state.get("routing_decision") or {}).get("speech_act") == "policy" and _about_orbits_policy(request):
+        # The policy card answers questions about Orbit's own trading policy;
+        # "Does that automatically authorize Robinhood Chain today?" is about
+        # an SEC order and got the card (expanded UI review, 2026-09-24).
         return {"answer": policy_summary(state), "trajectory": None}
     from app import product_actions
     if (state.get("routing_decision") or {}).get("speech_act") == "app" or product_actions.is_product_question(request):

@@ -3047,3 +3047,35 @@ now reported as unavailable right now and named, like a paused eligible one. Fiv
 real defects on the same 106 prompts, so the set is saturated and the next number must come from prompts the system
 has not seen. The Home strip's four news cases were absent from both wallet runs because the highlights were cold at
 launch; warm `/home/highlights` before launching a run.
+
+**The expanded vocabulary and multi-turn review (2026-09-24, `reports/expanded-ui-2026-09-24/`).** The reviewer's
+first unseen prompts: 29 paraphrases, 12 ambiguity probes, 10 journeys; all three four-turn journeys run failed end to
+end. The failures were wording and context, and each fix is a mechanism: a capitalised sentence opener before a topic
+word, a verb or a question word is not a name (`subject_probe._OPENERS`, `_INSTRUCTION_NEXT`: "Switch topics", "Then
+show", "And which" had become assets); a time or window correction continues the previous ask and the venue it was on
+(`_CONTINUES` time words; the question contract a turn answered is kept in session context as `last_contract` via
+`AgentRun.contract`, and `context_entities.resolve_contextual_request` carries the venue and kind into "I meant the
+past hour" or "I mean Aster perpetual contracts"); the task inventory reads in any words with an optional status
+filter and never creates (`tasks_nl._inventory_ask`: "Anything scheduled for me?", "Did I set a morning brief?", "And
+which are paused?"); a pasted address with the word wallet and no token word is never a token deep dive, and a
+wallet-role correction ("That is a wallet address, not a token mint") re-types the focus so "Which assets does it
+hold?" reads the wallet; an estimate with a stated amount is a read-only Jupiter quote that needs no wallet
+(`lexicon.SIMULATE_TRADE`, `nodes/portfolio`); a ledger card that covers less than the window asked says so first, in
+numbers (`evidence_pipeline._covered_hours`); a name after an exclusion word ("not BNB Chain") is never the subject's
+chain or venue and rules out sources that cover only it (`contracts.excluded_names`, `tool_catalog.eligible`); and a
+numeric comparative the numbers deny ("7,719 below a prior 7,706") fails the gate like an untraceable figure
+(`fact_gate.contradictions`). `scripts/journey_run.py` runs the journeys through the real chat turn, one session each,
+recording the focus and last contract after every turn (`evals/journeys/expanded-2026-09-24.json`).
+
+The first journey run on those mechanisms found the second layer: a referent question ("Does that authorize Robinhood
+Chain?", "Which part was in the order?", "What did it do today?") keeps the subject it points at whatever other name
+it mentions (`subject_probe._REFERENT`; `experience` never replaces the focus on such a turn), and with nothing in
+focus it is a clarification, never a web read of whatever "it" the search returns (`resolver._bare_referent`); the
+trading-policy card answers only questions about Orbit's own policy (`nodes/general._about_orbits_policy`); the Home
+headlines are product state, listed with event date, source and verification (`product_actions.home_headlines_answer`);
+a chain named in the ask settles a ticker namesake ("BONK and WIF liquidity on Solana"); hour and minute windows reach
+the venue ledger and the contract ("1h movers on HL", "over 60m", "past-hour", "one hour ago"); "winners" and
+"leaderboard" are ranking words; "HL" is the venue's alias, never a coin; and a read-only estimate with a stated
+amount quotes without a wallet in any wording, the swap fields taken from the transaction contract and the output
+ticker resolved against Jupiter's verified list (`nodes/portfolio._verified_mint`; the stablecoins and SOL need no
+lookup).

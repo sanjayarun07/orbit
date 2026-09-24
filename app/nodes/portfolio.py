@@ -38,13 +38,44 @@ async def _perp_positions(wallet: str, request: str) -> dict:
 
 
 @trace(name="portfolio", as_type="agent")
+async def _verified_mint(symbol: str) -> str | None:
+    """The Solana mint of a ticker from Jupiter's verified list: the one
+    verified token with exactly that symbol, else None (never a guess among
+    namesakes)."""
+    known = {"USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "USDT": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", "SOL": "So11111111111111111111111111111111111111112"}
+    if symbol.upper() in known:
+        return known[symbol.upper()]                                  # the stablecoins and SOL need no lookup (a rate-limited search asked for a wallet instead)
+    from app.jupiter import jupiter
+    try:
+        rows = await jupiter.search_tokens(symbol)
+    except Exception:
+        return None
+    exact = [r for r in rows or [] if str(r.get("symbol") or "").upper() == symbol.upper()]
+    verified = [r for r in exact if "verified" in [str(t).lower() for t in (r.get("tags") or [])]] or exact
+    if not verified:
+        return None
+    verified.sort(key=lambda r: float(r.get("organicScore") or 0), reverse=True)
+    top = verified[0]
+    if len(verified) > 1 and float(verified[1].get("organicScore") or 0) >= float(top.get("organicScore") or 0) * 0.5:
+        return None                                                  # two comparable namesakes: not for a silent pick
+    return top.get("id")
+
+
 async def _portfolio_node(state: AgentState) -> dict:
     handle = handles.social_handle(_effective_request(state))
     if handle:
         # A handle names someone else's wallet, which Orbit cannot resolve;
         # the connected wallet is not what was asked about (live, 2026-09-21).
         return {"answer": handles.answer_for(handle), "trajectory": None}
-    if not state.get("wallet_address"):
+    capabilities = set(state.get("capabilities", []))
+    request = _effective_request(state)
+    # A hypothetical amount needs no wallet: "How much USDC would 0.05 SOL
+    # get? Just estimate." is a read-only Jupiter quote of the stated size
+    # (expanded UI review, 2026-09-24: it asked to connect a wallet).
+    hypothetical = not state.get("wallet_address") and "trade_simulation" in capabilities and bool(re.search(r"\b\d+(?:\.\d+)?\s*[A-Za-z]{2,10}\b", request))
+    if hypothetical:
+        state = {**state, "wallet_address": ""}
+    if not state.get("wallet_address") and not hypothetical:
         # Parked like a swap without a wallet: "connected" on the next turn
         # re-runs this request instead of falling through to a clarification.
         return {
@@ -225,12 +256,33 @@ async def _portfolio_node(state: AgentState) -> dict:
             "trajectory": {"thought_0": "Apply a deterministic price shock to current priced holdings.", "tool_name_0": "portfolio_scenario", "tool_args_0": {"change_pct": change, "symbol": report["target"]}, "observation_0": report},
         }
     if "trade_simulation" in capabilities:
-        result = await runtime.answer(
-            runtime.trade_simulator,
-            request=request,
-            wallet_address=state["wallet_address"],
-            conversation_history=state.get("history", ""),
-        )
+        from types import SimpleNamespace
+        pre = (None, None, None, None)
+        if hypothetical:
+            # The transaction contract already read the amount and the pair in
+            # any wording ("selling 0.05 SOL to USDC", "the minimum USDC I'd
+            # get for 0.05 SOL"); the swap fields come from those, in the one
+            # form the field completer reads.
+            from app import contracts
+            f = contracts.plan_by_rules(request).filters or {}
+            spelled = f"swap {f['amount']} {f['input_token']} to {f['output_token']}" if f.get("amount") and f.get("input_token") and f.get("output_token") else request
+            pre = complete_swap_fields(spelled, state.get("history", ""), None, None, None, None)
+            if pre[0] and pre[2] and not pre[1] and f.get("output_token"):
+                # The completer takes mints, not tickers: the output ticker is
+                # resolved against Jupiter's verified list, exact symbol only.
+                pre = (pre[0], await _verified_mint(f["output_token"]), pre[2], pre[3])
+        if hypothetical and pre[0] and pre[1] and pre[2]:
+            # No wallet and a stated amount: the request's own words carry the
+            # swap ("0.05 SOL to USDC"), so the extractor and its balance read
+            # are skipped (it asked for a wallet it did not need, 2026-09-24).
+            result = SimpleNamespace(answer="", trajectory=None, input_mint=pre[0], output_mint=pre[1], amount_atomic=pre[2], should_simulate=True)
+        else:
+            result = await runtime.answer(
+                runtime.trade_simulator,
+                request=request,
+                wallet_address=state["wallet_address"],
+                conversation_history=state.get("history", ""),
+            )
         answer = _sanitize_react_answer(result.answer)
         trajectory = getattr(result, "trajectory", None)
         # complete_swap_fields is the same boundary the real trade path uses
@@ -242,6 +294,13 @@ async def _portfolio_node(state: AgentState) -> dict:
         input_mint, output_mint, amount_atomic, _slippage = complete_swap_fields(
             request, state.get("history", ""), result.input_mint, result.output_mint, result.amount_atomic, None,
         )
+        if hypothetical and not (input_mint and output_mint and amount_atomic):
+            # No wallet and a stated amount: the request's own words carry the
+            # swap ("0.05 SOL to USDC"); the extractor asked for a wallet to
+            # read a balance it does not need (expanded UI review, 2026-09-24).
+            input_mint, output_mint, amount_atomic, _slippage = complete_swap_fields(request, state.get("history", ""), None, None, None, None)
+        if hypothetical and input_mint and output_mint and amount_atomic:
+            result = SimpleNamespace(should_simulate=True)
         if result.should_simulate and input_mint and output_mint and amount_atomic:
             try:
                 sim = await simulate_swap(input_mint, output_mint, amount_atomic)

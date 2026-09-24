@@ -12,7 +12,11 @@ TRADE = re.compile(r"\b(?:swap|buy|sell|exchange|bridge|trade|convert)\b", re.I)
 # OPEN_QUESTION fallback instead of getting real simulation handling.
 SIMULATE_TRADE = re.compile(
     r"\b(?:what\s+would\s+happen\s+if\s+i|what\s+if\s+i|should\s+i|simulate)\b"
-    r".{0,40}\b(?:sell(?:ing)?|sold|buy(?:ing)?|bought|swap(?:ping|ped)?|trad(?:e|ing|ed)|exchang(?:e|ing|ed)|convert(?:ing|ed)?)\b",
+    r".{0,40}\b(?:sell(?:ing)?|sold|buy(?:ing)?|bought|swap(?:ping|ped)?|trad(?:e|ing|ed)|exchang(?:e|ing|ed)|convert(?:ing|ed)?)\b"
+    # A read-only estimate in other words, always with an amount: "How much USDC would 0.05 SOL get?",
+    # "Price-check my 0.05 SOL exit into USDC", "Give me a Jupiter quote for SOL->USDC, 0.05 SOL",
+    # "What's the minimum USDC I'd get for 0.05 SOL" (expanded UI review, 2026-09-24: these went to the web or asked for a wallet)
+    r"|\b(?:how\s+much\s+\w+\s+would|what(?:'s|\s+is)\s+the\s+minimum|estimate|price[- ]check|(?:jupiter\s+)?quote\s+for|i'?d\s+get\s+for|would\s+\S+\s+get)\b.{0,60}\b\d+(?:\.\d+)?\s*(?:SOL|USDC|USDT|ETH|BTC|[A-Z]{2,10})\b",
     re.I,
 )
 # "Should I buy X?" with no holding or amount is a recommendation question,

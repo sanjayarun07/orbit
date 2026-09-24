@@ -269,10 +269,21 @@ def advance_session_context(
     capsules: list[ContextCapsule],
     intent_lock: IntentLock | None,
     workflow_draft: CrossChainSwapDraft | None = None,
+    last_contract: dict | None = None,
 ) -> dict:
     """Create the next canonical context snapshot after one completed turn."""
     context = dict(previous or {})
     context["revision"] = int(context.get("revision", 0)) + 1
+    # The contract this turn answered is what a short correction changes:
+    # "I meant the past hour" after Hyperliquid gainers keeps the venue and
+    # the kind and changes the window (expanded UI review, 2026-09-24: the
+    # venue was lost because only tokens and topics ever became the focus).
+    if last_contract and last_contract.get("kind") not in (None, "other"):
+        context["last_contract"] = {k: last_contract.get(k) for k in ("kind", "subject", "venue", "scope", "metric", "window_hours", "direction", "filters")}
+    else:
+        from app.routing.subject_probe import subject_of
+        if subject_of(request):
+            context.pop("last_contract", None)          # a turn about something new ends the carry; a control or a question about the feed does not
     context["last_intent"] = intent
     # Risk charter persists across turns in session context (Minara-style
     # "Custom Prompt"). Set/clear it here so the next trade turn's Risk agent
@@ -298,7 +309,16 @@ def advance_session_context(
             "address": connected_wallet,
             "chain": "solana" if not connected_wallet.startswith("0x") else context.get("connected_wallet", {}).get("chain"),
         }
-    if capsules:
+    import re as _re
+    role_fix = _re.match(r"\s*(?:(?:no|actually|sorry|wait|correction|again)[,:]?\s+)?(?:that|this|it)(?:'s|\s+is)\s+(?:a\s+|an\s+)?(?P<role>wallet|token|mint)\b", request or "", _re.I)
+    if role_fix and (context.get("focus") or {}).get("address"):
+        # "That is a wallet address, not a token mint": the correction re-types
+        # the address the conversation already holds (expanded UI review,
+        # 2026-09-24: the correction was acknowledged in prose and ignored by
+        # the next turn's routing).
+        role = "wallet" if role_fix.group("role") == "wallet" else "token"
+        context["focus"] = {**context["focus"], "kind": role, "label": context["focus"].get("label") or role.title(), "source": "correction", "confidence": 1.0}
+    elif capsules:
         # Prefer the latest token subject; otherwise retain the explicit wallet.
         focus = next((item for item in reversed(capsules) if item.kind == "token"), capsules[-1])
         context["focus"] = focus.model_dump()
@@ -311,10 +331,12 @@ def advance_session_context(
         from app.routing.subject_probe import continues_subject, subject_of
 
         topic = subject_of(request)
-        if topic:
+        if topic and not continues_subject(request):
             context["focus"] = {"kind": "topic", "label": topic, "address": None, "chain": None, "confidence": 0.6, "source": "request"}
-        elif not continues_subject(request):
+        elif not topic and not continues_subject(request):
             context["focus"] = None
+        # A referent follow-up ("does that authorize Robinhood Chain?") keeps
+        # the subject it points at, whatever other name it mentions.
     if is_trade_cancellation(request):
         context["active_workflow"] = None
     elif intent_lock:

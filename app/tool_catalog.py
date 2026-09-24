@@ -566,6 +566,13 @@ def eligible(tool_name: str, contract) -> tuple[bool, str]:
     if cov.get("subject") == "token" and not (contract.subject.kind == "token" and (contract.subject.symbol or contract.subject.id)):
         # A per-token source (one token's pairs) cannot serve a chain-wide or venue-wide ask.
         return False, "reads one named token, no token in the ask"
+    excluded = set((contract.filters or {}).get("exclude") or [])
+    if excluded:
+        # "not BNB Chain": a source that covers only what the ask rules out cannot serve it.
+        chains = set(cov.get("chains") or ())
+        venues = set(cov.get("venues") or ())
+        if (chains and chains <= excluded) or (venues and venues <= excluded):
+            return False, f"covers only {', '.join(sorted(chains or venues))}, which the ask rules out"
     if contract.metric and cov["metrics"] and contract.metric not in cov["metrics"]:
         return False, f"metric {contract.metric} not in {', '.join(sorted(cov['metrics']))}"
     if contract.scope == "venue_trades" and cov["scope"] not in ("venue_trades", "on_chain"):

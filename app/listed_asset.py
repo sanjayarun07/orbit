@@ -54,9 +54,11 @@ def coin_id_in(request: str) -> str | None:
 
 
 def ticker_in(request: str) -> str | None:
+    from app.tequity import fuzzy_venue
     for match in _TICKER.finditer(request or ""):
         sym = (match.group(1) or match.group(2) or "").upper()
-        if sym and sym not in _STOP:
+        if sym and sym not in _STOP and not (not match.group(1) and fuzzy_venue(sym.lower()) == "hyperliquid" and sym.lower() in ("hl",)):
+            # "HL" is the venue's alias, not a coin ("Holy Liquid, rank 5389", expanded UI review 2026-09-24); $HL would still be a ticker
             return sym
     return None
 

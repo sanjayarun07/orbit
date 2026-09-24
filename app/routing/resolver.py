@@ -277,6 +277,15 @@ async def _model_first(request: str, candidate: CapabilityRoute | None, call_lm,
     return update, meta
 
 
+def _bare_referent(request: str, state: dict) -> bool:
+    """A pronoun question with nothing in the conversation for it to point at."""
+    from app.routing.subject_probe import _REFERENT, has_own_subject
+    context = state.get("session_context") or {}
+    if not _REFERENT.match(request or "") or has_own_subject(request or ""):
+        return False
+    return not (context.get("focus") or context.get("last_contract") or context.get("pending_token") or (state.get("history") or "").strip())
+
+
 async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> dict:
     """Return a route decision; the model caller is injected for budget/testing."""
     request = state["request"]
@@ -288,6 +297,13 @@ async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> d
         # web described marketplaces (funded UI run, 2026-09-23).
         return {"intent": "general", "capabilities": [], "chains": [], "route_source": "rules",
                 "routing_decision": {"method": "rules", "reason": "product_question", "speech_act": "app"}}
+    if not controlled and _bare_referent(request, state):
+        # "What did it do today?" in a fresh chat: "it" points at nothing this
+        # conversation holds, so the answer is a question, never a web read
+        # of whatever "it" the search returns (Iran sanctions, expanded UI
+        # review 2026-09-24).
+        return {**_clarify_route("rules"), "clarification": "Which token, protocol or topic do you mean by that? Name it and I'll look.",
+                "routing_decision": {"method": "rules", "reason": "bare_referent"}}
     if not controlled and snapshot_compare.dated_ask(request):
         # A comparison between dates is research on the snapshot ledger,
         # whatever else the sentence says ("using saved snapshots" read as an

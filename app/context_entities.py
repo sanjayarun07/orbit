@@ -23,7 +23,7 @@ _TOKEN_WORD = re.compile(r"\b(?:token|coin|contract|mint|memecoin|meme coin|erc-
 _PRONOUN = re.compile(r"^(?:it|that|this)(?:\s+one)?$", re.IGNORECASE)
 _TOKEN_FOLLOWUP = re.compile(
     r"\b(?:this|that|the)\s+(?:token|coin|contract)\b"
-    r"|\b(?:its|their)\s+(?:(?:top|largest|biggest|current|recent)\s+)?(?:holders?|liquidity|volume|price|trades?|safety|risk)\b"
+    r"|\b(?:its|their)\s+(?:(?:top|largest|biggest|current|recent|five|ten|twenty|\d+)\s+){0,2}(?:holders?|liquidity|volume|price|trades?|safety|risk)\b"
     # Bare pronoun follow-ups ("how about that one?", "tell me more about it") --
     # verified live these previously resolved to nothing at all, unlike the
     # "this/that + noun" phrasing above, which was already handled.
@@ -35,7 +35,9 @@ _TOKEN_FOLLOWUP = re.compile(
 )
 _WALLET_FOLLOWUP = re.compile(
     r"\b(?:this|that|the)\s+(?:wallet|address|portfolio)\b"
-    r"|\b(?:its|their)\s+(?:transactions?|balances?|holdings?|counterparties|pnl|leverage|positions?)\b"
+    r"|\b(?:its|their)\s+(?:transactions?|balances?|holdings?|counterparties|pnl|leverage|positions?|assets?)\b"
+    # "Which assets does it hold?", "what's in it?", "the ANSEM amount there": the wallet in focus (expanded UI review, 2026-09-24)
+    r"|\b(?:does|do|did)\s+(?:it|they)\s+(?:hold|own|have|contain)\b|\bwhat(?:'s|\s+is)\s+in\s+(?:it|there)\b|\bamount\s+(?:there|in\s+it)\b|\bassets?\s+(?:in|of)\s+(?:it|that|there)\b"
     r"|\b(?:how|what)\s+about\s+(?:it|that|this)(?:\s+one)?\b"
     r"|\b(?:tell\s+me\s+more\s+about|check|analyze)\s+(?:it|that|this)(?:\s+one)?\b",
     re.IGNORECASE,
@@ -304,6 +306,18 @@ def resolve_contextual_request(
     # EigenLayer (UI run, 2026-09-23: they became new questions or new assets).
     from app.routing.subject_probe import continues_subject
 
+    last = (session_context or {}).get("last_contract") or {}
+    from app.tequity import fuzzy_venue
+    names_last_venue = bool(last.get("venue")) and any(fuzzy_venue(w) == last["venue"] for w in re.findall(r"[A-Za-z]{4,}", request))
+    corrects_last_venue = names_last_venue and re.match(r"\s*(?:i\s+mean|i\s+meant|no,?\s|not\b|only\b|just\b|actually\b)", request, re.I) is not None
+    if last.get("venue") and not focus.get("address") and (continues_subject(request) or corrects_last_venue):
+        # A correction to the previous venue ask ("I meant the past hour",
+        # "then show 24h separately") keeps the venue and the kind; the words
+        # of this turn change only what they say (expanded UI review, 2026-09-24).
+        what = {"market_ranking": "movers", "holders": "holders", "yields": "yields"}.get(last.get("kind"), last.get("kind") or "data")
+        return (f"{request}\nResolved from canonical session context: the previous ask was {what} on {last['venue']}"
+                + (" (tokenized stocks only)" if (last.get("filters") or {}).get("stocks_only") else " (crypto only)" if (last.get("filters") or {}).get("crypto_only") else "")
+                + f"; this continues it on {last['venue']} with the change stated here.")
     if focus.get("label") and continues_subject(request):
         if focus.get("kind") == "token" and focus.get("address"):
             chain = f" on {focus['chain']}" if focus.get("chain") else ""

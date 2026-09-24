@@ -110,6 +110,35 @@ QUOTE_FAILURE = ("**A failed quote is unknown, never zero, and never a trade.**\
                  "prepared at all.")
 
 
+# "Summarize the first Home market headline", "Summarize today's Home
+# headlines; which source published each and when?": the tiles on Home are
+# product state, answered from the tiles themselves ("Home" was looked up as
+# a token, expanded UI review 2026-09-24).
+_HOME_HEADLINES = re.compile(r"\b(?:home\s+(?:market\s+|news\s+)?(?:headlines?|tiles?|cards?|strip)|(?:today'?s|the\s+current|the\s+latest)\s+(?:home\s+)?headlines?\b.{0,40}\b(?:home|tiles?|cards?)|headlines?\s+on\s+(?:the\s+)?home)\b", re.I)
+_ORDINAL_PICK = re.compile(r"\b(first|second|third|fourth|1st|2nd|3rd|4th|last)\b", re.I)
+
+
+def home_headlines_answer(request: str) -> str:
+    from app import home_highlights
+    data = home_highlights.get_highlights()
+    cards = [c for c in (data.get("cards") or []) + (data.get("meme_cards") or []) if c.get("title") and c.get("kind") in ("crypto", "stocks", "memes")]
+    if not cards:
+        return "Home is showing no news headlines right now (the tiles are the live market cards). Ask for the crypto market today, or name a story."
+    pick = _ORDINAL_PICK.search(request or "")
+    if pick and not re.search(r"\b(?:all|each|every|which)\b", request or "", re.I):
+        order = {"first": 0, "1st": 0, "second": 1, "2nd": 1, "third": 2, "3rd": 2, "fourth": 3, "4th": 3, "last": len(cards) - 1}
+        c = cards[min(order.get(pick.group(1).lower(), 0), len(cards) - 1)]
+        return (f"**{c['title']}**\n\n{c.get('summary') or ''}\n\n"
+                f"Event date: {c.get('date') or 'not stated by the source'} · Source: {c.get('source') or 'not stated'} · "
+                f"Checked: {str(data.get('as_of') or '')[:16].replace('T', ' ')} UTC · {'Verified against its source' if c.get('verified') else 'Not verified against a source'}.\n\n"
+                f"For the market read, tap the tile or ask: `{c.get('prompt') or 'What does this mean for the market: ' + c['title']}`")
+    lines = ["**Today's Home headlines** (event date · source · checked)", ""]
+    for i, c in enumerate(cards, start=1):
+        lines.append(f"{i}. **{c['title']}** · {c.get('date') or 'no date'} · {c.get('source') or 'no source'} · {'verified' if c.get('verified') else 'unverified'}")
+    lines += ["", f"Checked at {str(data.get('as_of') or '')[:16].replace('T', ' ')} UTC. The date is the day the event happened as the source printed it; the tiles are re-read every 30 minutes, so the publication time of each source is on the source's own page."]
+    return "\n".join(lines)
+
+
 def matches(request: str) -> bool:
     """Whether a specific product answer exists for this request. The
     classifier's `app` label stands only then; otherwise the ask is research
@@ -121,7 +150,7 @@ def is_product_question(request: str) -> bool:
     """A question about what this product does or how to use it, or about one
     of its own concepts (an exit watch, marked value against sale proceeds)."""
     text = request or ""
-    if _FIND_CHAT.search(text) or _EXIT_WATCH_MEANING.search(text) or _MARKED_VS_PROCEEDS.search(text) or _WALLET_VIEW.search(text) or _asks_quote_failure_behaviour(text):
+    if _FIND_CHAT.search(text) or _EXIT_WATCH_MEANING.search(text) or _MARKED_VS_PROCEEDS.search(text) or _WALLET_VIEW.search(text) or _asks_quote_failure_behaviour(text) or _HOME_HEADLINES.search(text):
         return True
     return bool(_WHAT_CAN.search(text)) and not re.search(r"\b(?:price|holders?|liquidity|volume|market\s+cap|tvl)\b", text, re.I)
 
@@ -147,6 +176,8 @@ def answer(request: str) -> str:
         return WALLET_VIEW
     if _asks_quote_failure_behaviour(text):
         return QUOTE_FAILURE
+    if _HOME_HEADLINES.search(text):
+        return home_headlines_answer(text)
     if _WHAT_CAN.search(text) and not parts:
         return WHAT_CAN
     if not parts:

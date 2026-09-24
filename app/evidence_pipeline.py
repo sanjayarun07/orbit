@@ -13,6 +13,7 @@ synthesis, one check. Latency is spent only on a named uncertainty.
 from __future__ import annotations
 
 import asyncio
+import re
 import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -77,6 +78,23 @@ async def _invoke(router, name: str, request: str, chains: tuple[str, ...], cont
             return result
         await asyncio.sleep(1.5)                                          # a provider's per-second budget: one pause, one retry
     return None
+
+
+_TICK_SPAN = re.compile(r"\*\*From tick\*\*: (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC · \*\*To tick\*\*: (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC")
+_COVERAGE_HOURS = re.compile(r"the means below cover ([\d.]+) hours")
+
+
+def _covered_hours(cards: str) -> float | None:
+    """How many hours the ledger cards actually cover, from their own From/To
+    ticks or Coverage line; None when no card states a span."""
+    spans = []
+    for a, b in _TICK_SPAN.findall(cards or ""):
+        try:
+            spans.append((datetime.fromisoformat(b) - datetime.fromisoformat(a)).total_seconds() / 3600)
+        except ValueError:
+            continue
+    spans += [float(h) for h in _COVERAGE_HOURS.findall(cards or "")]
+    return max(spans) if spans else None
 
 
 def _facts_of(result, kind: str) -> list:
@@ -232,28 +250,42 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         text = f"The sources for this ({', '.join(chosen)}) returned nothing usable right now. " + gate.gap_sentence(contract)
         return {"answer": text.strip(), "trajectory": None, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "contract"}
     cards, trajectory = composition.combine(parts)
+    covered = _covered_hours(cards)
+    if covered is not None and contract.window_hours and covered < 0.8 * contract.window_hours:
+        # The cards cover less of the window than was asked: said first, in
+        # numbers, whatever the summary calls it (a 5h40 ledger span was
+        # written up as "24 hours", expanded UI review 2026-09-24).
+        asked = f"{contract.window_hours / 24:g} days" if contract.window_hours >= 48 else f"{contract.window_hours:g} hours"
+        gate.notes.append(f"covers {covered:.1f} hours of the {asked} asked")
+        scope_note = (scope_note + "; " if scope_note else "") + f"the cards cover {covered:.1f} hours of the {asked} asked, say so"
     note = _contract_note(contract, gate, fact_rows, scope_note)
     synthesized = await composition.synthesize(f"{request}\n{note}", cards, trajectory)
     lead = gate.gap_sentence(contract)
     final = fact_gate.check(contract, fact_rows, synthesized, scope_satisfied=scope_satisfied, evidence_text=cards)
-    if final.unsupported:
-        # The claim check found figures no fact carries: one rewrite without
-        # them, then the check again; whatever remains is named under the answer.
-        redo = (f"{request}\n{note}\nDo not state these figures, no fact card carries them: {', '.join(final.unsupported)}. "
-                "State only figures that appear in the cards, or describe without the number.")
+    if final.unsupported or final.contradictions:
+        # The claim check found figures no fact carries, or a comparison the
+        # numbers deny ("7,719 below a prior 7,706"): one rewrite without them,
+        # then the check again; whatever remains withholds the summary.
+        redo = f"{request}\n{note}\n"
+        if final.unsupported:
+            redo += f"Do not state these figures, no fact card carries them: {', '.join(final.unsupported)}. State only figures that appear in the cards, or describe without the number. "
+        if final.contradictions:
+            redo += f"These comparisons contradict their own numbers, rewrite them correctly or drop them: {'; '.join(final.contradictions)}."
         rewritten = await composition.synthesize(redo, cards, trajectory)
         if rewritten:
             again = fact_gate.check(contract, fact_rows, rewritten, scope_satisfied=scope_satisfied, evidence_text=cards)
-            if len(again.unsupported) < len(final.unsupported):
+            if len(again.unsupported) + len(again.contradictions) < len(final.unsupported) + len(final.contradictions):
                 synthesized, final = rewritten, again
     answer_text = synthesized
-    if final.unsupported:
-        # Still untraceable after the rewrite: the written summary is withheld,
-        # never shown with a warning under it (second review, 2026-09-23). The
-        # cards are the evidence as fetched; the reader gets those and the
-        # reason, and the gate stays failed.
-        answer_text = ("**I withheld the written summary: it stated figures no source card carries (" + ", ".join(final.unsupported) +
-                       "). The cards below are the evidence as fetched; ask for one figure and I will read it from a card.**\n\n---\n\n" + cards)
+    if final.unsupported or final.contradictions:
+        # Still untraceable or self-contradicting after the rewrite: the
+        # written summary is withheld, never shown with a warning under it
+        # (second review, 2026-09-23). The cards are the evidence as fetched;
+        # the reader gets those and the reason, and the gate stays failed.
+        reasons = ([f"it stated figures no source card carries ({', '.join(final.unsupported)})"] if final.unsupported else []) + \
+                  ([f"it compared numbers wrongly ({'; '.join(final.contradictions)})"] if final.contradictions else [])
+        answer_text = ("**I withheld the written summary: " + " and ".join(reasons) +
+                       ". The cards below are the evidence as fetched; ask for one figure and I will read it from a card.**\n\n---\n\n" + cards)
     if lead:
         answer_text = f"**{lead}**\n\n{answer_text}"
     evidence.keep(evidence.Evidence(tool="contract_pipeline", status="complete" if final.ok else "partial",

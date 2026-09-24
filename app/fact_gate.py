@@ -33,6 +33,7 @@ class GateResult(BaseModel):
     scope_satisfied: bool = True
     missing: list[str] = Field(default_factory=list)          # requirements no fact meets
     unsupported: list[str] = Field(default_factory=list)      # figures in the prose that no fact carries
+    contradictions: list[str] = Field(default_factory=list)   # "7,719 below 7,706": a comparison the numbers deny
     stale: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
@@ -43,6 +44,7 @@ class GateResult(BaseModel):
         parts += [f"Not established: {m}." for m in self.missing]
         if self.stale:
             parts.append("Older than the freshness the question needs: " + "; ".join(self.stale) + ".")
+        parts += [n[0].upper() + n[1:] + "." for n in self.notes if n]          # "Covers 5.7 hours of the 24 hours asked."
         return " ".join(parts)
 
 
@@ -198,6 +200,30 @@ def missing_exact_figures(claim: str, evidence_text: str) -> list[str]:
     return out
 
 
+_COMPARATIVE = re.compile(r"(?P<a>\$?\d[\d,]*(?:\.\d+)?%?)\s*,?\s*(?:(?:is|was|which\s+is|sits|closed|closing|trading|now)\s+)?(?P<rel>below|under|beneath|lower\s+than|less\s+than|down\s+from|above|over|higher\s+than|more\s+than|up\s+from)\s+(?:(?:a|an|the|its|yesterday'?s|prior|previous|earlier|last|close|level|of|at)\s+){0,4}(?P<b>\$?\d[\d,]*(?:\.\d+)?%?)", re.I)
+_LOWER = ("below", "under", "beneath", "lower than", "less than", "down from")
+
+
+def contradictions(answer: str) -> list[str]:
+    """Numeric comparatives the numbers themselves deny: "7,719 was below
+    a prior 7,706 close" (expanded UI review, 2026-09-24). Only explicit
+    "A below/above B" phrases with two figures of the same unit are judged."""
+    out: list[str] = []
+    for m in _COMPARATIVE.finditer(prose_of(answer or "")):
+        a, b = _parse(m.group("a")), _parse(m.group("b"))
+        if a is None or b is None or a == b:
+            continue
+        if ("%" in m.group("a")) != ("%" in m.group("b")):
+            continue
+        rel = " ".join(m.group("rel").lower().split())
+        says_lower = rel in _LOWER
+        if (a < b) != says_lower:
+            phrase = m.group(0).strip()
+            if phrase not in out:
+                out.append(phrase[:80])
+    return out[:5]
+
+
 def check(contract: QuestionContract, facts: list[Fact], answer: str | None = None, *, scope_satisfied: bool = True, now: datetime | None = None,
           evidence_text: str = "") -> GateResult:
     now = now or datetime.now(timezone.utc)
@@ -293,6 +319,9 @@ def check(contract: QuestionContract, facts: list[Fact], answer: str | None = No
         # pipeline re-synthesizes once without it, then names what remains.
         result.unsupported = unsupported_figures(answer, facts, evidence_text)
         if result.unsupported:
+            result.ok = False
+        result.contradictions = contradictions(answer)
+        if result.contradictions:
             result.ok = False
     if not scope_satisfied:
         result.ok = False

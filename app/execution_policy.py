@@ -410,6 +410,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             context_capsules,
             intent_lock,
             run.cross_chain_swap,
+            last_contract=getattr(run, "contract", None),
         )
         # A pending token disambiguation lives exactly one turn: set when this
         # turn asked which chain a symbol is on, otherwise cleared (the follow-up

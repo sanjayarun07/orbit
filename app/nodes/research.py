@@ -1334,6 +1334,15 @@ async def _listed_resolution(request: str, ticker: str) -> "_TokenResolution | N
         where = await asyncio.to_thread(symbol_registry.contract, row["id"])
         candidates.append({"chain": where[0] if where else "a chain the tools do not cover", "address": where[1] if where else "",
                            "symbol": ticker, "name": f"{row['name']}, CoinGecko rank {row['rank']}", "liquidity_usd": 0.0})
+    # A chain named in the ask settles a namesake: "Compare BONK and WIF
+    # liquidity on Solana" is dogwifhat, not the other WIFs (expanded UI
+    # review, 2026-09-24: it asked which WIF with the chain in the sentence).
+    named = {c.lower() for c in extract_chains(request)}
+    on_chain = [c for c in candidates if c["address"] and c["chain"].lower() in named]
+    if len(on_chain) == 1:
+        c = on_chain[0]
+        return _TokenResolution(f"{request} {c['address']} on {c['chain']}",
+                                note=f"_Read **{ticker}** as {c['name'].split(',')[0]} on {c['chain'].title()}, the {ticker} on the chain you named._")
     return _build_ask(request, ticker, candidates, namesakes=True)
 
 
@@ -2127,8 +2136,13 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     # router, but this intercept ran first and resolved MSTR to a tokenized-
     # stock namesake on Jupiter, so a stock question got a token deep dive.
     from app import token_deepdive as _lens
+    from app import context_entities as _ce
     multi_dimension = _lens.names_dimensions(request) >= 3 and bool(_TOKEN_ADDRESS.search(request) or _named_tickers(request))
-    if (_DEEPDIVE.search(request) or multi_dimension) and not TRENDING_TOKENS.search(request) and ("equity_research" not in set(state.get("capabilities", [])) or _TOKEN_ADDRESS.search(request)):
+    # "Analyze public wallet <address>": the words say wallet and never token,
+    # so the address is a wallet to read, not a mint to screen (expanded UI
+    # review, 2026-09-24: it ran a token deep dive and called the wallet untradeable).
+    pasted_wallet = bool(_TOKEN_ADDRESS.search(request) and _ce._WALLET_WORD.search(request) and not _ce._TOKEN_WORD.search(request))
+    if (_DEEPDIVE.search(request) or multi_dimension) and not pasted_wallet and not TRENDING_TOKENS.search(request) and ("equity_research" not in set(state.get("capabilities", [])) or _TOKEN_ADDRESS.search(request)):
         # An equity-classed ask still gets the token lens when it carries a
         # contract address: "deep dive on 0x… on robinhood" is a Robinhood
         # Chain token, and an address is never a stock (live, 2026-09-18).

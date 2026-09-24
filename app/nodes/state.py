@@ -14,6 +14,7 @@ class AgentState(TypedDict, total=False):
     # The web's answer to the message, gathered before routing when the
     # router was unsure (app/routing/subject_probe.context_search).
     web_context: str
+    contract: dict | None       # the question contract the answering node used, when it used one
     execution_provider: Literal["jupiter", "relay"] | None
     missing_fields: list[str]
     routing_decision: dict
