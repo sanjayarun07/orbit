@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 TESTER_USER_ID = "a5b1b793-7421-45b3-83a3-aac056a753f0"
 
 
-async def run(journeys: dict, out_dir: Path, wallet: str | None) -> None:
+async def run(journeys: dict, out_dir: Path, wallet: str | None, repeat: int = 1) -> None:
     from app import accounts, sessions, tequity
     from app.execution_policy import execute_chat_turn
     from app.identity import _identity_for_user
@@ -54,6 +54,7 @@ async def run(journeys: dict, out_dir: Path, wallet: str | None) -> None:
     records = out_dir / "turns.jsonl"
     transcript = out_dir / "transcript.md"
     transcript.write_text(f"# Journeys — {stamp} UTC — build {git_sha()} — wallet {wallet or 'none'}\n\n")
+    journeys = {(f"{name}#{i + 1}" if repeat > 1 else name): prompts for name, prompts in journeys.items() for i in range(repeat)}
     for name, prompts in journeys.items():
         session = f"journey-{stamp}-{name}"
         with transcript.open("a") as t:
@@ -77,7 +78,7 @@ async def run(journeys: dict, out_dir: Path, wallet: str | None) -> None:
                 traj = resp.trajectory if isinstance(resp.trajectory, dict) else {}
                 ctx = await sessions.get_session_context(session)
                 rec.update(status="ok", answer=resp.answer or "", intent=resp.intent, tools=[v for k, v in traj.items() if k.startswith("tool_name")],
-                           focus=ctx.get("focus"), last_contract=ctx.get("last_contract"))
+                           focus=ctx.get("focus"), last_contract=ctx.get("last_contract"), research_objective=ctx.get("research_objective"))
             except Exception as exc:  # noqa: BLE001
                 rec.update(status="error", error=repr(exc)[:300], answer="")
             rec["ms"] = round((time.time() - t0) * 1000)
@@ -101,6 +102,7 @@ def main() -> None:
     ap.add_argument("journeys")
     ap.add_argument("--out", default=None)
     ap.add_argument("--wallet", default=None)
+    ap.add_argument("--repeat", type=int, default=1, help="run every journey this many times (fresh sessions each time)")
     ap.add_argument("--only", default=None, help="comma-separated journey names")
     args = ap.parse_args()
     journeys = json.loads(Path(args.journeys).read_text())
@@ -108,7 +110,7 @@ def main() -> None:
         keep = set(args.only.split(","))
         journeys = {k: v for k, v in journeys.items() if k in keep}
     out_dir = Path(args.out or (ROOT / f"reports/journeys-{git_sha()}"))
-    asyncio.run(run(journeys, out_dir, args.wallet))
+    asyncio.run(run(journeys, out_dir, args.wallet, args.repeat))
 
 
 if __name__ == "__main__":

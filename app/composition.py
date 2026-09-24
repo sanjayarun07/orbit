@@ -46,13 +46,30 @@ MARKET_ADVICE = re.compile(
 )
 
 
+_NOTE_LINE = re.compile(r"^(?:Resolved from (?:canonical session|conversation) context:|Research objective of this conversation:|\(Context: this is a question)", re.I)
+
+
+def split_notes(request: str) -> tuple[str, str]:
+    """(the user's ask, the resolution notes under it): the notes are the
+    lines the context resolver and the research objective add, never asks."""
+    body, notes = [], []
+    for line in (request or "").splitlines():
+        (notes if _NOTE_LINE.match(line.strip()) or (notes and not line.strip()) else body).append(line)
+    return "\n".join(body).strip(), "\n".join(notes).strip()
+
+
 def split_asks(request: str) -> list[str]:
     """The distinct asks in a message, or [request] when there is one. Splits
     only at sentence boundaries and explicit connectors, never at a bare
-    "and" ("price and volume of BONK" is one ask)."""
-    parts = [_NOISE.sub("", p.strip(" ,.;!?")).strip(" ,.;!?") for p in _CLAUSE_SPLIT.split(request or "")]
+    "and" ("price and volume of BONK" is one ask). The resolution notes under
+    the ask are never asks: each clause keeps them (a three-line resolved
+    request became three "returned nothing usable" answers, 2026-09-24)."""
+    body, notes = split_notes(request)
+    parts = [_NOISE.sub("", p.strip(" ,.;!?")).strip(" ,.;!?") for p in _CLAUSE_SPLIT.split(body or "")]
     parts = [p for p in parts if len(p.split()) >= 2]
-    return parts if len(parts) >= 2 else [request]
+    if len(parts) < 2:
+        return [request]
+    return [f"{p}\n{notes}" if notes else p for p in parts]
 
 
 _ADDRESS = re.compile(r"(?<![A-Za-z0-9])(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])")
@@ -247,8 +264,9 @@ def combine(parts: list[tuple[str, dict]]) -> tuple[str, dict]:
     return "\n\n---\n\n".join(a for a in answers if a), trajectory
 
 
-async def synthesize(request: str, cards: str, trajectory: dict, advice: bool = False) -> str:
-    """A short reading over the combined evidence, above the verbatim cards."""
+async def synthesize(request: str, cards: str, trajectory: dict, advice: bool = False, research: bool = False) -> str:
+    """A short reading over the combined evidence, above the verbatim cards.
+    `research`: written on the research tier's model when one is configured."""
     if not cards.strip():
         return cards
     try:
@@ -256,7 +274,9 @@ async def synthesize(request: str, cards: str, trajectory: dict, advice: bool = 
         if streaming.active():
             streaming.emit("status", text="Reading the cards together")
             result = await runtime.stream_synthesis(runtime.composite_synthesizer, "summary", lambda text: streaming.emit("delta", text=text),
-                                                    request=request, evidence=cards, stance=stance)
+                                                    research=research, request=request, evidence=cards, stance=stance)
+        elif research:
+            result = await runtime._call_research_lm(runtime.composite_synthesizer, request=request, evidence=cards, stance=stance)
         else:
             result = await runtime._call_synthesis_lm(runtime.composite_synthesizer, request=request, evidence=cards, stance=stance)
         summary = (getattr(result, "summary", "") or "").strip()

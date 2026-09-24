@@ -38,11 +38,59 @@ def _contract_note(contract: contracts.QuestionContract, gate: fact_gate.GateRes
              "what is missing in the first sentence, and never fill it from memory."]
     if scope_note:
         lines.append(f"Scope: {scope_note}")
+    if contract.kind == contracts.OPEN_RESEARCH_KIND:
+        lines.append("Research: answer the question in service of the conversation's research objective when one is stated above; organise by mechanism, "
+                     "not by source; name a project or example only with the [n] source that describes it, and say when the sources do not settle a point.")
     if gate.missing:
         lines.append("Gaps to state first: " + "; ".join(gate.missing))
     if gate.stale:
         lines.append("Stale sources to name: " + "; ".join(gate.stale))
     return "\n".join(lines)
+
+
+# Capitalised names (not tickers: the subject checks cover those), one or two words.
+_NAME_LIKE = re.compile(r"\b([A-Z][a-z][A-Za-z0-9]+(?:\s+[A-Z][a-z][A-Za-z0-9]+)?)\b")
+_NOT_NAMES = {"The", "This", "That", "These", "Those", "However", "Additionally", "Other", "Another", "Overall", "Finally", "First", "Second", "Third",
+              "Taken", "Together", "According", "Source", "Sources", "Not", "None", "Evidence", "Yes", "No", "Per", "For", "In", "On", "At", "With",
+              "Both", "Each", "Most", "Some", "Many", "Several", "Unlike", "Like", "Also", "Instead", "Meanwhile", "Note", "Summary"}
+
+
+_OBJECTIVE_LINE = re.compile(r"^Research objective of this conversation:\s*(.+?)\.?\s*Answer the current question", re.I | re.M)
+
+
+def research_query(request: str) -> str:
+    """What the web search is asked: the question itself with the
+    conversation's objective as a short context, or the market-scoped
+    question when there is none. An instruction block under the question
+    brought back "no information" on questions the same search answered
+    plainly (the dual-token runs, 2026-09-24)."""
+    from app.routing.subject_probe import market_scoped
+    body, notes = composition.split_notes(request)
+    objective = _OBJECTIVE_LINE.search(notes or "")
+    if objective:
+        question = body.splitlines()[0].strip() if body else request.strip()
+        return f"{question} (Context: this continues research on {objective.group(1).strip()}; answer for that context, not the general case.)"
+    # "PUMP revenue" came back as ProPetro (NYSE: PUMP): the ticker reads as a crypto asset first.
+    return market_scoped(request)
+
+
+def unsourced_examples(summary: str, cards: str) -> list[str]:
+    """Capitalised names the summary uses that appear nowhere in the cards:
+    examples named from general knowledge, not from the evidence fetched."""
+    haystack = (cards or "").lower()
+    out: list[str] = []
+    for m in _NAME_LIKE.finditer(summary or ""):
+        name = m.group(1)
+        words = name.split()
+        if words[0] in _NOT_NAMES:
+            name = " ".join(words[1:])
+            if not name or name in _NOT_NAMES:
+                continue
+        if name.lower() in haystack or name.split()[0].lower() in haystack:
+            continue
+        if name not in out:
+            out.append(name)
+    return out[:8]
 
 
 def _near_tools(contract: contracts.QuestionContract, ranked: list[tuple[str, str]]) -> list[str]:
@@ -64,9 +112,7 @@ async def _invoke(router, name: str, request: str, chains: tuple[str, ...], cont
     if name == "perplexity_web_search" and contract is not None and perplexity_tools.perplexity_available() and not getattr(router, "replay", False):
         try:
             days = int((contract.window_hours or 24 * 30) / 24) or 1 if contract.kind in ("recent_events", "open_research") else None
-            from app.routing.subject_probe import market_scoped
-            # The web reads the ticker as a crypto asset first ("PUMP revenue" came back as ProPetro, NYSE: PUMP, 2026-09-24).
-            found = await asyncio.to_thread(perplexity_tools.perplexity_search_with_sources, market_scoped(request), recency_days=days)
+            found = await asyncio.to_thread(perplexity_tools.perplexity_search_with_sources, research_query(request), recency_days=days)
             card = perplexity_tools.render_search_card(request, found)
             result = SimpleNamespace(output=card, tool=name, provider="perplexity", structured=found)
             return result
@@ -195,8 +241,12 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         # else can we tie a dual token to the main token") gets the web and
         # the knowledge base only: a token tool would read a word in it as a
         # ticker (a DEX pair table for "DUAL", live 2026-09-24).
-        named_subject = bool(contract.subject.symbol or contract.subject.id or contract.subject.name)
-        chosen = discovery_tools[:1] + [n for n in planned if n not in discovery_tools and (named_subject or n == "knowledge_base_search")][:2]
+        # Open research is discovery: the web and the knowledge base. A token
+        # tool joins only when the ask names a contract address -- "research
+        # projects with two tokens like Venice VVV and DIEM" had led with
+        # DIEM's trading pools (the four-turn comparison, 2026-09-24), and
+        # irrelevant evidence cannot be repaired after retrieval.
+        chosen = discovery_tools[:1] + [n for n in planned if n not in discovery_tools and (contract.subject.id or n == "knowledge_base_search")][:2]
     elif contract.evidence_order == "discovery_first":
         chosen = discovery_tools[:1] + state_tools[:1] + background_tools[:1]
     else:
@@ -289,7 +339,14 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         gate.notes.append(f"spans {covered:.1f} hours for the {asked} asked (nearest stored ticks)")
         scope_note = (scope_note + "; " if scope_note else "") + f"the cards span {covered:.1f} hours for the {asked} asked, say the span and never call the change a {asked} change"
     note = _contract_note(contract, gate, fact_rows, scope_note)
-    synthesized = await composition.synthesize(f"{request}\n{note}", cards, trajectory)
+    research = contract.kind == contracts.OPEN_RESEARCH_KIND
+    synthesized = await composition.synthesize(f"{request}\n{note}", cards, trajectory, research=research)
+    if research:
+        unsourced = unsourced_examples(synthesized, cards)
+        if unsourced:
+            # A named example the cards do not carry is general knowledge, said as such (never silently dropped, never passed as sourced).
+            synthesized = synthesized.rstrip() + "\n\n**Not in the sources fetched**: " + ", ".join(unsourced) + " -- named from general knowledge; verify before relying on them."
+
     lead = gate.gap_sentence(contract)
     final = fact_gate.check(contract, fact_rows, synthesized, scope_satisfied=scope_satisfied, evidence_text=cards)
     if final.unsupported or final.contradictions:

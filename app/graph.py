@@ -108,6 +108,8 @@ async def run_agent(
         # means run that swap now, not a fresh (and meaningless) request.
         request = parked
     resolved_request = resolve_contextual_request(request, history, session_context)
+    from app import research_objective
+    resolved_request = research_objective.attach(resolved_request, session_context)
     return await _run_agent_traced(
         request, resolved_request, wallet_address, history, session_context or {}, quick_action
     )

@@ -54,7 +54,7 @@ def _pipeline(monkeypatch):
     from app.nodes import runtime
     monkeypatch.setattr(runtime, "planner_available", lambda: False)
 
-    async def synth(request, cards, trajectory, advice=False):
+    async def synth(request, cards, trajectory, advice=False, **kw):
         return f"**Taken together**\n\nsummary\n\n---\n\n{cards}"
     monkeypatch.setattr(evidence_pipeline.composition, "synthesize", synth)
 

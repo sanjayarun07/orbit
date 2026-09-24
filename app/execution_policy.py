@@ -410,6 +410,9 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             logger.warning("research gap recording failed", exc_info=True)
         trade_readiness = build_trade_readiness(plan)
         gas_advisory = build_gas_advisory(run.cross_chain_swap)
+        from app import research_objective
+        objective = await research_objective.update((session_context or {}).get("research_objective"), body.message, answer,
+                                                    intent=run.intent, contract=getattr(run, "contract", None))
         next_context = advance_session_context(
             session_context,
             body.message,
@@ -420,6 +423,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             intent_lock,
             run.cross_chain_swap,
             last_contract=getattr(run, "contract", None),
+            research_objective=objective,
         )
         # A pending token disambiguation lives exactly one turn: set when this
         # turn asked which chain a symbol is on, otherwise cleared (the follow-up

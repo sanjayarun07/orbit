@@ -49,6 +49,21 @@ class Settings(BaseSettings):
     # the strongest model available, because a wrong plan propagates through
     # the whole answer. None uses the primary model.
     planner_model: str | None = None
+    # The research tier: the model that keeps the conversation's research
+    # objective, plans open research and writes its synthesis (a stronger
+    # reasoning model than the answer model, e.g. "openai/o4-mini"). Unset,
+    # those jobs run on the synthesis tier, then the primary model.
+    research_model: str | None = None
+    # Reasoning effort for the research tier when its model takes one
+    # ("low" | "medium" | "high"; GPT-5.6 Sol at "high" is the recommended
+    # research configuration, 2026-09-24). Ignored by models without it.
+    research_reasoning_effort: str | None = None
+    # The conversation-level research objective ("compare dual-token
+    # mechanisms to Venice: own-token collateral, tradable second token"),
+    # kept across turns and passed into every discovery search (the four-turn
+    # comparison with Minara, 2026-09-24: each web query was the latest
+    # message alone). Off = each turn is searched on its own words.
+    research_objective_enabled: bool = True
     contract_pipeline_enabled: bool = True     # market rankings, holders, recent events and yields go through the contract pipeline
     # Open-ended research (not exact on-chain state) starts with a dated,
     # source-linked web read, then targeted tools, then the evidence check.

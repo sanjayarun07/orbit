@@ -47,9 +47,28 @@ _synthesis_lm = (
     if settings.synthesis_model and settings.synthesis_model != settings.model
     else None
 )
+_planner_model = settings.planner_model or settings.research_model     # the planner runs on the research tier unless it has its own model
 _planner_lm = (
-    dspy.LM(settings.planner_model, timeout=settings.llm_request_timeout_seconds, num_retries=settings.llm_num_retries)
-    if settings.planner_model and settings.planner_model != settings.model
+    dspy.LM(_planner_model, timeout=settings.llm_request_timeout_seconds, num_retries=settings.llm_num_retries, **_reasoning_kwargs(_planner_model))
+    if _planner_model and _planner_model != settings.model
+    else None
+)
+def _reasoning_kwargs(model: str | None) -> dict:
+    """A reasoning model (GPT-5.x, o-series) takes no sampling temperature and
+    needs room for its reasoning tokens; the effort level is passed through
+    when configured."""
+    name = (model or "").lower()
+    if not any(tag in name for tag in ("gpt-5", "/o1", "/o3", "/o4", "o1-", "o3-", "o4-")):
+        return {}
+    out = {"temperature": 1.0, "max_tokens": 16000}
+    if settings.research_reasoning_effort:
+        out["reasoning_effort"] = settings.research_reasoning_effort
+    return out
+
+
+_research_lm = (
+    dspy.LM(settings.research_model, timeout=settings.llm_request_timeout_seconds, num_retries=settings.llm_num_retries, **_reasoning_kwargs(settings.research_model))
+    if settings.research_model and settings.research_model != settings.model
     else None
 )
 dspy.configure(lm=_primary_lm)
@@ -608,12 +627,13 @@ async def stream_answer(program, field: str, on_delta, **kwargs):
     return await _call_lm(program, **kwargs)
 
 
-async def stream_synthesis(program, field: str, on_delta, **kwargs):
-    """stream_answer on the synthesis tier's model."""
+async def stream_synthesis(program, field: str, on_delta, research: bool = False, **kwargs):
+    """stream_answer on the synthesis tier's model (the research tier's when
+    `research` and one is configured)."""
     if synthesis_recorder is not None:
         synthesis_recorder(_program_name(program), kwargs)
     try:
-        final = await _stream(program, field, on_delta, _synthesis_lm or _primary_lm, kwargs)
+        final = await _stream(program, field, on_delta, (_research_lm if research else None) or _synthesis_lm or _primary_lm, kwargs)
         if final is not None:
             return final
     except Exception:
@@ -680,6 +700,23 @@ async def _call_synthesis_lm(program, **kwargs):
             increment("llm_synthesis_transient_failures")
             logger.warning("synthesis model '%s' failed transiently (%s); using the primary path", settings.synthesis_model, type(exc).__name__)
     return await _call_lm(program, **kwargs)
+
+
+async def _call_research_lm(program, **kwargs):
+    """The research tier: `research_model` when configured, else the synthesis
+    tier's path. A transient failure falls back the same way."""
+    if _research_lm is None:
+        return await _call_synthesis_lm(program, **kwargs)
+    async with _llm_slots:
+        increment("llm_calls")
+        try:
+            return await _run_guarded(program, _research_lm, kwargs)
+        except Exception as exc:
+            if not _is_transient_lm_error(exc):
+                raise
+            increment("llm_research_transient_failures")
+            logger.warning("research model '%s' failed transiently (%s); using the synthesis path", settings.research_model, type(exc).__name__)
+    return await _call_synthesis_lm(program, **kwargs)
 
 
 def _program_name(program) -> str:

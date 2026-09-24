@@ -59,7 +59,7 @@ class ReplayRouter:
         return SimpleNamespace(output=out, tool=name, provider="replay") if out else None
 
 
-async def _cards_only(request, cards, trajectory, advice=False):
+async def _cards_only(request, cards, trajectory, advice=False, **kw):
     return f"**Taken together**\n\n(cards only in replay)\n\n---\n\n{cards}"
 
 

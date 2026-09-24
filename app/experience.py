@@ -276,9 +276,16 @@ def advance_session_context(
     intent_lock: IntentLock | None,
     workflow_draft: CrossChainSwapDraft | None = None,
     last_contract: dict | None = None,
+    research_objective: str | None = "__keep__",
 ) -> dict:
     """Create the next canonical context snapshot after one completed turn."""
     context = dict(previous or {})
+    if research_objective != "__keep__":
+        # The conversation's research objective (app/research_objective.py): set, refined or ended by this turn.
+        if research_objective:
+            context["research_objective"] = research_objective
+        else:
+            context.pop("research_objective", None)
     context["revision"] = int(context.get("revision", 0)) + 1
     # The contract this turn answered is what a short correction changes:
     # "I meant the past hour" after Hyperliquid gainers keeps the venue and

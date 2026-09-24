@@ -3196,3 +3196,38 @@ contextual rewrite (`nodes/general`). Also from the turn log: "Which other proje
 pattern" came back with VVV's vesting and DIEM's price, and the user said so; a question about a mechanism or design
 pattern and its examples is now scoped to the mechanism, never to the named token's market (`subject_probe._PATTERN_ASK`).
 The open-research contract names its subject even when it is not a ticker, so the targeted tools can plan for it.
+
+## The research objective and the research tier (2026-09-24)
+
+The four-turn comparison with Minara on the same prompts (Venice VVV/DIEM and ways to mint a second token; "apart
+from staking, how else can we tie the dual token to the main token"; "how it works in akash network"; "which other
+projects follow lock collateral -> mint a tradable second token") lost on every turn, and the user's diagnosis was
+exact: continuity and research planning. Orbit's first turn latched onto the named tokens and chose market-data
+tools (DIEM's pools led the answer, and DIEM was called a stablecoin); each later web query was the latest message
+without the conversation's research objective; token tools were allowed into open-research answers. Three mechanisms:
+
+- **The research objective** (`app/research_objective.py`): one sentence the research tier keeps up to date after
+  every research turn -- kept when the request continues it, refined when it narrows or extends it, replaced when
+  the topic changes, ended ("none") on a control, price or wallet turn. It lives in session context
+  (`research_objective`) and rides under the resolved request (`graph.run_agent` -> `research_objective.attach`),
+  so the router, the question planner, the discovery search (`market_scoped` keeps it) and the synthesis all read
+  it with the current question. `research_objective_enabled` turns it off for comparison.
+- **Open research is discovery only** (`evidence_pipeline.answer`): the web and the knowledge base; a token tool
+  joins only when the ask names a contract address. Irrelevant evidence cannot be repaired after retrieval. The
+  open-research synthesis is asked to organise by mechanism and to name an example only with the [n] source that
+  describes it; names the cards do not carry are listed under "Not in the sources fetched" rather than passed as
+  sourced (`unsourced_examples`).
+- **The research tier** (`settings.research_model`, `research_reasoning_effort`): the model for the objective, the
+  question planner (unless `planner_model` is set) and open-research synthesis; everything else -- prices, balances,
+  task commands, routing -- stays on the fast model. Reasoning models get their kwargs (`runtime._reasoning_kwargs`:
+  no sampling temperature, room for reasoning tokens, the effort level). Recommended: `openai/gpt-5.6-sol` at
+  `high` (litellm prices it at $4/M in, $20/M out); `openai/gpt-5.6-terra` ($2/$12) is the cost-conscious choice.
+  The user's key calls Sol (verified 2026-09-24).
+
+The four-turn sequence is `evals/journeys/dual-token-2026-09-24.json`; `scripts/journey_run.py --repeat N` runs it N
+times in fresh sessions, and the configurations are env overrides (`RESEARCH_OBJECTIVE_ENABLED=false`,
+`RESEARCH_MODEL=openai/gpt-5.6-sol RESEARCH_REASONING_EFFORT=high`). Judge each run on four points: the VVV -> DIEM
+mint/burn flow; the dual-token links carried into turn two; Akash's AKT -> ACT burn-mint equilibrium (not what Akash
+is); analogues with the project's own token as collateral and a separately tradable second token (not Lido and
+bridges). Then relevance, factual support (named examples sourced), latency and cost before Sol becomes the research
+default.
