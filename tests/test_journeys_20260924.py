@@ -472,3 +472,53 @@ def test_verified_mint_never_takes_an_unverified_lone_match(monkeypatch):
 
     monkeypatch.setattr(jupiter, "search_tokens", search_verified)
     assert asyncio.run(portfolio._verified_mint("ANSEM")) == "Mint1111111111111111111111111111111111111111"
+
+
+# --- a Home tile tap explains its referent after the colon (live, 2026-09-24) ---
+
+@pytest.mark.parametrize("text", [
+    "What does this mean for the market: Bitcoin and Ethereum ETFs see $592 million outflows",
+    "What does this mean for the market: Nasdaq closes at record",
+])
+def test_a_tile_tap_is_never_a_bare_referent(text):
+    from app.routing.subject_probe import is_referent
+    assert not is_referent(text)
+    assert not continues_subject(text)
+    assert not _bare_referent(text, {"session_context": {}, "history": ""})
+    assert plan_by_rules(text).kind != "open_research" or plan_by_rules(text).subject.name is None
+
+
+def test_a_bare_pronoun_question_still_asks():
+    from app.routing.subject_probe import is_referent
+    assert is_referent("What does this mean?")
+    assert _bare_referent("What does this mean?", {"session_context": {}, "history": ""})
+
+
+def test_since_yesterday_starts_at_yesterdays_midnight():
+    from datetime import datetime, timezone
+    from app.contracts import _window_hours
+    hours = _window_hours("Only events since yesterday, not pages updated today.")
+    now = datetime.now(timezone.utc)
+    assert hours is not None and 24.0 < hours <= 48.0
+    assert abs(hours - (now.hour + now.minute / 60 + 24)) < 0.1
+
+
+def test_a_holders_ask_about_a_listed_coin_is_not_the_listing_path():
+    from app import contracts
+    assert contracts._HOLDERS.search("Who owns ANSEM supply?")
+
+
+def test_a_holders_ask_resolves_its_ticker_whatever_the_capabilities(monkeypatch):
+    from app.nodes import research
+
+    def mint(ticker):
+        return "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump" if ticker == "ANSEM" else None
+
+    async def no_leader(ticker):
+        return None
+
+    monkeypatch.setattr(research, "_jupiter_solana_mint", mint)
+    monkeypatch.setattr(research, "_listed_leader", no_leader)
+    monkeypatch.setattr(research, "token_candidates", lambda ticker: [])
+    resolution = asyncio.run(research._resolve_named_token("Any whales in ANSEM?", {"wallet_intelligence", "web_research"}, ()))
+    assert "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump" in resolution.request and resolution.chain == "solana"

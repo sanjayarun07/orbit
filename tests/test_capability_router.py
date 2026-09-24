@@ -29,8 +29,10 @@ def test_resolve_named_token_injects_mint_for_holders_query(monkeypatch):
     out2 = asyncio.run(research_node_mod._resolve_named_token("trending tokens on solana", {"token_discovery", "market_data"}))
     assert out2.request == "trending tokens on solana" and out2.chain is None
     # Non-token requests and already-addressed requests are left untouched.
-    out3 = asyncio.run(research_node_mod._resolve_named_token("holders of BONK", set()))
-    assert out3.request == "holders of BONK" and out3.chain is None
+    # (a holders ask resolves whatever the capabilities since 2026-09-24 -- "Any whales
+    # in ANSEM?" routed as wallet intelligence had no mint; a price ask still waits for them)
+    out3 = asyncio.run(research_node_mod._resolve_named_token("price of BONK", set()))
+    assert out3.request == "price of BONK" and out3.chain is None
     addressed = "top holders of 9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump on solana"
     assert asyncio.run(research_node_mod._resolve_named_token(addressed, caps)).request == addressed
 

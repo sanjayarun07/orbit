@@ -1148,7 +1148,11 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
     # tags it "advice" -> web caps); resolving the mint here is what lets the
     # security dossier tool out-rank a web search downstream.
     security_ask = bool(_SECURITY_ASK.search(request))
-    if not (capabilities & {"token_discovery", "token_security", "market_data"}) and not security_ask:
+    # A holders ask is a token-data question whatever capabilities the speech
+    # layer gave it ("Any whales in ANSEM?" was routed as wallet intelligence,
+    # the ticker never resolved, and four holders tools had no mint, run 5).
+    holders_ask = bool(contracts._HOLDERS.search(request))
+    if not (capabilities & {"token_discovery", "token_security", "market_data"}) and not security_ask and not holders_ask:
         return _TokenResolution(request)
     tickers = _named_tickers(request) or (_bare_symbols(request) if _DATA_ASK.search(request) else [])
     if not tickers:
@@ -1162,7 +1166,10 @@ async def _resolve_named_token(request: str, capabilities: set[str], user_chains
     # about whichever wrapped copy sits on which chain: no chain question,
     # the coin id goes into the request and the listed-asset tool answers.
     lead = await _listed_leader(ticker)
-    if lead and listed_asset.LISTED_ASK.search(request):
+    if lead and listed_asset.LISTED_ASK.search(request) and not contracts._HOLDERS.search(request):
+        # "Who owns ANSEM supply?" is a holders ask on the contract, not a
+        # question about the listing (run 5: the listed id went to four
+        # holders tools that need an address, all "nothing usable").
         return _TokenResolution(f"{request} (CoinGecko id {lead['id']})",
                                 note=f"_Read **{ticker}** as {lead['name']}, CoinGecko rank {lead['rank']}._")
     # A native coin (BTC, ETH, ZEC) has no contract on any chain the tools

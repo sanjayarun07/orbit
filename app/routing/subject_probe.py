@@ -131,11 +131,24 @@ _REFERENT = re.compile(r"^\s*(?:and\s+|so\s+|but\s+|ok,?\s+)?(?:(?:(?:what|which
                        r"|(?:what|anything)(?:'s|\s+is|\s+has)?\s+(?:changed|new|different|happened|moved)\s*[?.!]?\s*$)", re.I)     # a bare "What changed?" points at the previous subject; with none it is a question (2026-09-24: it explained DeFi yields)     # "What is different since then?" points at the previous answer     # "Which part was in the order and which is your inference?" partitions the previous answer
 
 
+# "What does this mean for the market: Bitcoin and Ethereum ETFs see $592
+# million outflows": the referent is explained after the colon, so the
+# sentence carries its own subject even when no ticker in it is recognised
+# (a Home tile tap asked "which token do you mean?", 2026-09-24).
+_INLINE_REFERENT = re.compile(r"[:\u2014-]\s*\S+(?:\s+\S+){2,}")
+
+
+def is_referent(text: str) -> bool:
+    """A pronoun question that points at the previous answer, with nothing
+    after a colon or dash that explains the pronoun itself."""
+    return bool(_REFERENT.match(text or "")) and not _INLINE_REFERENT.search(text or "")
+
+
 def continues_subject(request: str) -> bool:
     """Whether a message that names nothing of its own reads as a follow-up
     on the conversation's subject rather than a new topic or small talk."""
     text = request or ""
-    if _REFERENT.match(text) and not _NEW_TOPIC.search(text):
+    if is_referent(text) and not _NEW_TOPIC.search(text):
         return True
     if len(text.split()) < 3 or has_own_subject(text) or _NEW_TOPIC.search(text) or _INDEFINITE.search(text):
         return False

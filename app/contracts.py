@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 import dspy
@@ -180,7 +180,7 @@ _EXPLANATION_ASK = re.compile(r"^\s*(?:how\s+(?:does|do|is|to)|what\s+is|what\s+
 _TRADES_ON = re.compile(r"\b(?:trades?|trading|traded|volume|pairs?|pools?|dex(?:es)?)\s+on\b|\bon[- ]venue\b|\bvenue\b", re.I)
 _ECOSYSTEM = re.compile(r"\becosystem\b|\bassociated\s+with\b|\bglobal\b", re.I)
 _WINDOW = re.compile(r"\b(?:last|past|previous)\s+(\d+)\s*(h(?:ours?)?|d(?:ays?)?|w(?:eeks?)?|m(?:in(?:utes?)?)?)\b|\b(?:over|in|within)?\s*(\d+)\s*(h|d|w|m)\b|\b(24\s*h(?:ours)?|this\s+week|past\s+week|last\s+week|today|this\s+morning|this\s+month|7d|30d|"
-                     r"(?:past|last|previous)[- ]hour|(?:one|an)\s+hour\s+ago|hourly|60\s*m)\b", re.I)
+                     r"(?:past|last|previous)[- ]hour|(?:one|an)\s+hour\s+ago|hourly|60\s*m|since\s+yesterday|yesterday)\b", re.I)
 _STOCKS = re.compile(r"\b(?:tokeni[sz]ed\s+)?(?:stocks?|equit(?:y|ies)|shares)\b", re.I)
 # "Aster perpetual contracts, not Nasdaq shares" contrasts the instrument
 # (perps on stocks) with the shares themselves: the tokenized-stock reading
@@ -221,6 +221,11 @@ def _window_hours(text: str) -> float | None:
         if word == "this morning":
             now = datetime.now(timezone.utc)
             return max(1.0, (now - now.replace(hour=0, minute=0, second=0, microsecond=0)).total_seconds() / 3600)
+        if "yesterday" in word:
+            # "since yesterday" starts at yesterday's midnight UTC, not 24 hours
+            # ago (an event dated yesterday was "outside the last day", run 5).
+            now = datetime.now(timezone.utc)
+            return (now - (now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1))).total_seconds() / 3600
         return None
     return float(n * (1 if u == "h" else 24 if u == "d" else 168 if u == "w" else 1 / 60))
 
@@ -394,8 +399,8 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
     # previous answer; "today" is not a window and the ask is not a list of
     # events (expanded journeys, 2026-09-24: gated as "no event in the last
     # day"). A referent question is open research on the carried subject.
-    from app.routing.subject_probe import _REFERENT
-    referent = bool(_REFERENT.match(text))
+    from app.routing.subject_probe import is_referent
+    referent = is_referent(text)
     if _EVENTS.search(text) and not _RANKING.search(text) and not referent:
         return QuestionContract(kind="recent_events", subject=Subject(kind="topic", symbol=symbol, name=None, chain=chain), scope="any", metric="events",
                                 window_hours=window or 24 * 30, freshness_seconds=3 * 86400, evidence_order="discovery_first",

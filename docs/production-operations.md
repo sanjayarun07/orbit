@@ -3149,3 +3149,20 @@ shares themselves, not stocks against crypto (`_SHARES_VS_PERPS` in `tequity` an
 it the other way). Two narrower ones: "50 bps slippage" is a parameter, not a stated amount, so "estimate a full exit
 of ANSEM with 50 bps slippage" is the exit control (`exit_controls._STATED_AMOUNT`); and the verified-mint lookup
 never takes a lone unverified namesake (`nodes/portfolio._verified_mint`).
+
+Run 5 (build 81c8d0c3, wallet in, 77 turns, no outage) confirmed the review fixes live ("perpetual contracts, not
+Nasdaq shares" kept the tokenized stocks; "Can your feed really support that interval?" answered from the ledger's
+own span; SPX6900 read on Ethereum; hour windows led with their real coverage). Three more, fixed the same day: a
+Home tile tap -- "What does this mean for the market: Bitcoin and Ethereum ETFs see $592 million outflows" -- was
+asked "which token do you mean?" because the sentence opens with a pronoun question and no ticker in the headline
+is recognised; a referent explained after a colon or dash is never bare and never a continuation
+(`subject_probe.is_referent`, `_INLINE_REFERENT`; the user hit this live); a holders ask resolves its ticker whatever
+capabilities the speech layer routed it with ("Any whales in ANSEM?" went out as wallet intelligence, the mint was
+never found, and four holders tools reported nothing usable; `_resolve_named_token`), and "who owns X supply" is a
+holders ask on the contract, not a question about the listing; "since yesterday" starts at yesterday's midnight UTC,
+not 24 hours ago (`contracts._window_hours`). Two harness facts to keep in mind when reading a run: the A and N
+families use `fresh:` per probe, so "Is that safe?" or "Is this old news?" asking there is correct; and the tick
+ledger on the dev box has gaps whenever `--reload` restarts the server during edits (08:42 to 10:09 on 2026-09-24),
+so short-window coverage leads in a run made during editing are the ledger's, not the mechanism's. Open after run 5:
+labelling holder addresses (J1.4), two subjects in one ask (J9.2), and "ASTER on Hyperliquid" answered from the web in
+the harness process because the feed snapshot lives in the server process only.

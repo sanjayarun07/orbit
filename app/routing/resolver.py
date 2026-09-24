@@ -279,9 +279,9 @@ async def _model_first(request: str, candidate: CapabilityRoute | None, call_lm,
 
 def _bare_referent(request: str, state: dict) -> bool:
     """A pronoun question with nothing in the conversation for it to point at."""
-    from app.routing.subject_probe import _REFERENT, has_own_subject
+    from app.routing.subject_probe import has_own_subject, is_referent
     context = state.get("session_context") or {}
-    if not _REFERENT.match(request or "") or has_own_subject(request or ""):
+    if not is_referent(request or "") or has_own_subject(request or ""):
         return False
     from app.user_memory import conversation_only
     return not (context.get("focus") or context.get("last_contract") or context.get("pending_token") or conversation_only(state.get("history") or "").strip())
