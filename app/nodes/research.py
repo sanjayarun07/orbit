@@ -1905,6 +1905,14 @@ async def research_node(state: AgentState) -> dict:
     if web_part:
         streaming.emit("card", markdown=web_part[0], tool=WEB_CONTEXT_TOOL)
     clauses, ask_note = composition.plan_asks(request)
+    if (len(clauses) >= 2 and contracts.is_open_research(_ask(request)) and not _DATA_ASK.search(_ask(request))
+            and not any(why_moving.match(_ask(c)) or _MARKET_OVERVIEW.search(_ask(c)) for c in clauses)):
+        # "Research on projects with two tokens like Venice VVV and DIEM. What
+        # mechanism mints the second token. What speculative ideas exist": one
+        # research question in three sentences, not three asks -- split, each
+        # sentence resolved DIEM and ran the market tools twice while the web
+        # never ran (live, 2026-09-24 14:05).
+        clauses = [request]
     if len(clauses) >= 2:
         # A compound message: every ask answered, each through the same
         # path, the cards combined and read together. One card and silence
@@ -2210,6 +2218,14 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
                            "or name the token with a $ticker, and I'll run the security checks."),
                 "trajectory": None,
             }
+    if settings.contract_pipeline_enabled and contracts.is_open_research(_ask(request)) and not _DATA_ASK.search(_ask(request)) and not _TOKEN_ADDRESS.search(_ask(request)):
+        # Open research is planned before a named ticker is resolved: once
+        # "DIEM token" became "DIEM 0x… on base", the contract read the address
+        # as exact state and the legacy path answered with pools and a price
+        # (the first turn of the Minara comparison, and again live 2026-09-24).
+        piped = await evidence_pipeline.answer(state, request, tuple(state.get("chains") or ()))
+        if piped is not None:
+            return piped
     resolution = await _resolve_named_token(
         request, set(state.get("capabilities", [])), tuple(state.get("chains", []))
     )

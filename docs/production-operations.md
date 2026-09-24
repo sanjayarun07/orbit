@@ -3249,3 +3249,13 @@ lock-to-mint projected onto Akash), GPT-5.6 Sol at high effort 20/20 with no fab
 in `.env`; staging needs the same). The objective update is one extra model call per research turn, awaited before
 the context is saved so the next turn can read it; if latency matters more than continuity on a deployment, a lower
 effort for that one call is the first thing to try.
+
+Live, 2026-09-24 14:05: "Research on projects which had 2 tokens like Venice project VVV and DIEM token. and what
+mechinism should be used to mint the 2nd token. what are all the different speculative ideas in crypto to achieve
+this" came back with two Birdeye DIEM cards, two pools tables and "cannot find verified live data", and the web never
+ran. Two mechanisms: a multi-sentence research ask is one ask -- the compound-ask splitter had made three, each
+resolving "DIEM token" and running the market tools (the split stays for clauses that are data asks: a market
+overview, a why-is-X-moving); and open research is planned before a named ticker is resolved to a contract -- once
+"DIEM token" became "DIEM 0x… on base", the contract read the address as exact state and the legacy path answered
+with pools and a price. This was also the first turn of the Minara comparison. The same prompt now runs the web
+search only and opens with the lock-and-mint flow (`nodes/research`, before `_resolve_named_token`).

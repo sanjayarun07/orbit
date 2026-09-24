@@ -156,3 +156,36 @@ def test_the_open_research_note_is_a_brief_without_internals():
     assert "Brief for the answer" in note and "organise by mechanism" in note
     for internal in ("Question contract", "window asked", "Accepted facts", "metric"):
         assert internal not in note
+
+
+def test_a_multi_sentence_research_ask_is_one_ask():
+    from app import composition, contracts
+    request = ("Research on projects which had 2 tokens like Venice project VVV and DIEM token. and what mechinism should be used to mint "
+               "the 2nd token. what are all the different speculative ideas in crypto to achieve this")
+    clauses, _ = composition.plan_asks(request)
+    assert len(clauses) >= 2                       # the splitter alone sees three sentences
+    assert contracts.is_open_research(request)     # ... but the research node keeps it whole
+    from app.nodes import research
+    assert not research._DATA_ASK.search(research._ask(request))
+
+
+def test_open_research_runs_before_a_ticker_is_resolved(monkeypatch):
+    from app.nodes import research
+    from app import evidence_pipeline as ep
+    seen = {}
+
+    async def fake_answer(state, request, chains, **kw):
+        seen["request"] = request
+        return {"answer": "web research", "trajectory": None}
+
+    async def never(*a, **k):
+        raise AssertionError("the ticker must not be resolved before open research")
+
+    monkeypatch.setattr(ep, "answer", fake_answer)
+    monkeypatch.setattr(research, "_resolve_named_token", never)
+    monkeypatch.setattr(research.settings, "contract_pipeline_enabled", True, raising=False)
+    monkeypatch.setattr(research, "_web_context_part", lambda state: None)
+    state = {"request": "Research on projects which had 2 tokens like Venice project VVV and DIEM token. and what mechinism should be used to mint the 2nd token",
+             "contextual_request": None, "capabilities": ["web_research"], "chains": [], "session_context": {}, "history": "", "routing_decision": {}}
+    out = asyncio.run(research._research_node(state, {}))
+    assert out.get("answer") == "web research" and "DIEM token" in seen["request"]
