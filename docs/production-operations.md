@@ -3242,3 +3242,10 @@ objective had made an unlock clarification), a clarification never updates the o
 never splits the notes (`composition.split_notes`), the web search is asked the question with the objective as a
 short context (`evidence_pipeline.research_query`), and the open-research note is a brief with no internals (Sol had
 led with "the requested window is '-'"). One to three runs per configuration; five each is the next measurement.
+
+Five runs per configuration (same file): gpt-4.1-mini on the research tier 18/20 with one wrong mechanism (Venice's
+lock-to-mint projected onto Akash), GPT-5.6 Sol at high effort 20/20 with no fabrication, median 60 s per turn against
+44 s. Sol is the research tier from 2026-09-24 (`RESEARCH_MODEL=openai/gpt-5.6-sol`, `RESEARCH_REASONING_EFFORT=high`
+in `.env`; staging needs the same). The objective update is one extra model call per research turn, awaited before
+the context is saved so the next turn can read it; if latency matters more than continuity on a deployment, a lower
+effort for that one call is the first thing to try.
