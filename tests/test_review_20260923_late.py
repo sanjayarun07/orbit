@@ -272,3 +272,32 @@ def test_expired_tiles_are_served_while_one_background_rebuild_runs(monkeypatch)
     gate.set(); time.sleep(0.3)
     assert calls == [1] and hh.get_highlights()["cards"][0]["id"] == "new", "one background rebuild, then the new tiles"
     hh.reset()
+
+
+def test_a_tile_is_verified_only_by_a_sourced_read_and_a_failed_read_is_never_labelled_verified(monkeypatch):
+    from app import home_highlights, perplexity_tools
+    def read(headline, recency_days=None):
+        if headline.startswith("A"):
+            return {"text": "A happened with 5%.", "sources": [{"n": 1, "title": "t", "url": "https://x", "date": "2026-09-24"}]}
+        if headline.startswith("B"):
+            return {"text": "B happened with 7%.", "sources": []}
+        raise RuntimeError("provider down")
+    monkeypatch.setattr(perplexity_tools, "perplexity_search_with_sources", read)
+    parsed = {"crypto": [{"headline": "A moves 5%", "summary": "", "source": "x"}, {"headline": "B moves 7%", "summary": "", "source": "y"}], "stocks": [{"headline": "C moves 9%", "summary": "", "source": "z"}]}
+    out = home_highlights._verified(parsed)
+    assert [i["headline"][0] for i in out["crypto"]] == ["A"] and out["crypto"][0]["verified"] is True and out["stocks"] == []
+    all_down = home_highlights._verified({"crypto": [{"headline": "C moves 9%", "summary": "", "source": "z"}]})
+    assert all_down["crypto"][0]["verified"] is False, "with every read failed the tile shows, flagged unverified"
+
+
+def test_a_failed_proof_withholds_the_written_answer():
+    from app import contracts, evidence_pipeline
+    W = "3aHLqHsvw3gPxnq1fVEYG6P3pCcxkGo3ETSkQGE4KZkS"
+    card = "# Wallet token balances — 0x6982…1933\n**Provider**: Orbit · **Priced total**: $100.00 (1 priced, 0 without a Jupiter price)\n\n| Token | Balance | Price | USD Value | Share |\n|---|---:|---:|---:|---:|\n| SOL | 1.0 | $100.00 | $100.00 | 100.0% |\n"
+    out = evidence_pipeline.prove(contracts.plan_by_rules("Analyze my portfolio"), "**Your portfolio** holds $100 in SOL.", [card], wallet=W)
+    assert not out["gate"]["ok"] and out["answer"].startswith("**Not established: holdings of the wallet asked") and "**Your portfolio** holds" not in out["answer"]
+
+
+def test_knowledge_link_titles_with_brackets_render_as_links():
+    from app.knowledge import tool
+    assert tool._link_text("[ARFC] Liquidation Protocol Fee") == "\\[ARFC\\] Liquidation Protocol Fee" and tool._RETRIEVE > tool._SHOW

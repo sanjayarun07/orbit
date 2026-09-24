@@ -118,11 +118,17 @@ def prove(contract: contracts.QuestionContract, answer_text: str, cards: list[st
     # and is never displayed.
     gate = fact_gate.check(contract, fact_rows, answer_text, evidence_text=evidence_text + ("\n\n" + extra_evidence if extra_evidence else ""))
     text = answer_text
+    lead = gate.gap_sentence(contract)
     if gate.unsupported:
         text = ("**I withheld the written summary: it stated figures no card carries (" + ", ".join(gate.unsupported) +
                 "). The cards below are the evidence as fetched.**\n\n---\n\n" + evidence_text)
-    lead = gate.gap_sentence(contract)
-    if lead and not text.startswith("**"):
+    elif not gate.ok:
+        # A requirement the cards do not meet (the holdings shown are another
+        # wallet's, no quote row): the written answer is withheld, never shown
+        # under a warning (review of 360c88f9: "**Your portfolio** holds $100"
+        # stood unchanged over a wrong-wallet card).
+        text = f"**{lead or 'The cards do not establish what was asked.'}** The written answer is withheld; the cards below are the evidence as fetched.\n\n---\n\n" + evidence_text
+    elif lead:
         text = f"**{lead}**\n\n{text}"
     return {"answer": text, "contract": contract.model_dump(), "gate": gate.model_dump(), "facts": [f.label() for f in fact_rows[:40]], "pipeline": "contract"}
 

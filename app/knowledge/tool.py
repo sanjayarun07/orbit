@@ -188,6 +188,12 @@ def _uncovered_terms(hits, request: str, plan) -> list[str]:
     return sorted(t for t in _question_terms(request) if t not in names and t not in haystack)
 
 
+def _link_text(title: str) -> str:
+    """A title inside a Markdown link: brackets in it ("[ARFC] …") break the
+    link, so they are escaped (review of 360c88f9: raw Markdown on the card)."""
+    return (title or "").replace("[", "\\[").replace("]", "\\]")
+
+
 def knowledge_base_search(request: str) -> str:
     """Retrieve passages with citations for a protocol / concept question."""
     hits, plan = _run(_search_with_resolver(request))
@@ -196,7 +202,7 @@ def knowledge_base_search(request: str) -> str:
         # list that cannot mention the subject is not an answer.
         raise RuntimeError("No indexed knowledge matched this question")
     uncovered = _uncovered_terms(hits, request, plan)
-    context, citations = build_context(_rank_hits(hits, request))
+    context, citations = build_context(_rank_hits(hits, request)[:_SHOW])
     entities = ", ".join(f"{r.entity.canonical_name} ({r.entity.entity_type}, {r.confidence:.2f})" for r in plan.entities[:6]) or "none resolved"
     # The card is what the user sees as well as what the model reads: the
     # passages, each cut to a readable length, and the sources -- never an
@@ -214,13 +220,17 @@ def knowledge_base_search(request: str) -> str:
         passages,
         "",
         "## Sources",
-        *[f"[{c['n']}] [{c['title']}{' › ' + c['heading'] if c['heading'] else ''}]({c['url']})" + (f" · {c['protocol']}" if c['protocol'] else "") + f" ({'/'.join(c['sources'])})" for c in citations],
+        *[f"[{c['n']}] [{_link_text(c['title'] + (' › ' + c['heading'] if c['heading'] else ''))}]({c['url']})" + (f" · {c['protocol']}" if c['protocol'] else "") + f" ({'/'.join(c['sources'])})" for c in citations],
     ]
     return "\n".join(lines)
 
 
+_RETRIEVE = 12      # candidates pulled; the question's terms pick the six shown (ranking six cannot recover a passage retrieval left out, review of 360c88f9)
+_SHOW = 6
+
+
 async def _search_with_resolver(request: str):
-    return await search(request, limit=6, resolver=await resolver())
+    return await search(request, limit=_RETRIEVE, resolver=await resolver())
 
 
 def get_embedder_name() -> str:

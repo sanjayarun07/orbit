@@ -3031,3 +3031,11 @@ one background thread rebuilds them (`_build_into_cache`, single in-flight guard
 all builds in the caller's thread, and `force=True` still rebuilds inline. The contract note also tells the writer to
 name the window as asked ("24 days", never "24 hours"), and the trust judge carries the three readings it got wrong
 in every run (today's dates, the "first trade" expectation, a stop confirmation) so they stop costing a read.
+
+**Review of 360c88f9 (2026-09-24), three findings closed.** A Home tile is verified only by a read that returned at
+least one source, a read with no sources drops the tile, and a tile whose read failed is never labelled verified: it
+is held aside and shown, flagged unverified, only when nothing in the strip could be verified. A failed portfolio or
+transaction proof withholds the written answer (the holdings shown were another wallet's; no quote row) and shows the
+cards with the reason, whatever the answer's first characters. The knowledge tool retrieves twelve candidates and
+shows the six that mention the question's terms, since ranking six cannot recover a passage retrieval left out (the
+E-mode passages now lead for the E-mode question), and bracketed titles are escaped so every source renders as a link.

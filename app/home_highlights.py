@@ -89,16 +89,24 @@ def _verified(parsed: dict) -> dict:
     from app import fact_gate
     from app.perplexity_tools import perplexity_search_with_sources
     out: dict = {}
+    unread: dict[str, list] = {}
     for kind, items in parsed.items():
         kept = []
         for item in items:
             try:
                 found = perplexity_search_with_sources(item["headline"], recency_days=3)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("home highlights: verification read failed for %r (%s); tile kept unverified", item["headline"][:60], str(exc)[:80])
-                kept.append(item)
+                # Not verified and not shown as such: kept aside, used only
+                # when nothing at all verified (review of 360c88f9: a tile
+                # whose read failed carried on as if checked).
+                logger.warning("home highlights: verification read failed for %r (%s)", item["headline"][:60], str(exc)[:80])
+                unread.setdefault(kind, []).append({**item, "verified": False})
                 continue
             text = found.get("text") or ""
+            sourced = [s for s in found.get("sources") or [] if s.get("url")]
+            if not sourced:
+                logger.warning("home highlights: dropped %r: the read had no sources", item["headline"][:80])
+                continue
             # The headline's own figures must be printed at the same value in the
             # read (a close off by one point is a wrong close); the summary's
             # secondary figures pass the tolerant check the answers use.
@@ -120,6 +128,11 @@ def _verified(parsed: dict) -> dict:
                 item = {**item, "date": dated[0]["date"][:10]}
             kept.append({**item, "verified": True})
         out[kind] = kept
+    if not any(out.values()) and unread:
+        # Every read failed (the provider is down): the strip shows the
+        # unverified tiles rather than nothing, each flagged as unverified.
+        logger.warning("home highlights: no tile could be verified; showing %d unverified", sum(len(v) for v in unread.values()))
+        return unread
     return out
 
 
