@@ -25,19 +25,37 @@ _ITEM_LINE = re.compile(r"^\s*(?:\d{1,2}[.)]|[-*•])\s+(.+?)\s*$")
 
 
 def answer_items(answer: str, limit: int = 8) -> list[str]:
-    """The listed items of an answer (numbered or bulleted lines, the
-    written summary only), for the next turn's "which of those" (live UI
-    test 2026-09-25: "which of those events happened in the last 24 hours"
-    brought a different set of events)."""
-    prose = (answer or "").split("\n---\n", 1)[0]
-    items = []
-    for line in prose.splitlines():
-        m = _ITEM_LINE.match(line)
-        if m:
-            text = re.sub(r"\*\*|`|\[(\d+)\]", "", m.group(1)).strip()
-            if len(text) >= 12 and not text.lower().startswith(("time:", "web_discovery", "knowledge", "finance_discovery")):
-                items.append(text[:160])
-    return items[:limit]
+    """Items the user actually saw, for a later "which of those".
+
+    Prefer the written answer. When its summary was withheld, the visible
+    numbered items live in the first evidence card instead. Read that card's
+    answer section, stopping before its bibliography so source numbers do not
+    become conversation referents.
+    """
+    written, _, evidence = (answer or "").partition("\n---\n")
+
+    def listed(text: str) -> list[str]:
+        found = []
+        for line in text.splitlines():
+            m = _ITEM_LINE.match(line)
+            if not m:
+                continue
+            item = re.sub(r"\*\*|`|\[(\d+)\]", "", m.group(1)).strip()
+            if len(item) >= 12 and not item.lower().startswith(("time:", "web_discovery", "knowledge", "finance_discovery")):
+                found.append(item[:320])
+        return found[:limit]
+
+    items = listed(written)
+    if not evidence:
+        return items
+    first_card = re.split(r"(?m)^#{1,6}\s+", evidence, maxsplit=2)
+    body = first_card[1] if len(first_card) > 1 else evidence
+    body = re.split(r"(?im)^\s*(?:sources?|references?)\s*:\s*$", body, maxsplit=1)[0]
+    card_items = listed(body)
+    # Some generated summaries put "1. ... 2. ... 3. ..." on one line.
+    # The numbered evidence card then represents the actual visible set more
+    # faithfully than a single truncated summary-line match.
+    return card_items if len(items) < 2 and len(card_items) > len(items) else items
 
 
 _THOSE = re.compile(r"\b(?:which|what|how many)\s+of\s+(?:those|these|them)\b|\b(?:those|these)\s+(?:events?|items?|projects?|candidates?|sources?|headlines?|tokens?|ones)\b|\b(?:for|of|about)\s+each\s+(?:candidate|item|one|of\s+(?:those|these|them))\b", re.I)
@@ -460,7 +478,11 @@ def resolve_contextual_request(
         return themed
     those = items_note(request, session_context)
     if those:
-        return f"{request}\n{those}"
+        # Keep the user's question as the contract planner's body. A prior
+        # headline may mention a whale or ticker without asking for holders;
+        # promoting that list into the ask changes the route. The web query
+        # explicitly incorporates the resolved set separately.
+        return f"{request.strip()}\n{those}"
     if focus.get("label") and continues_subject(request):
         if focus.get("kind") == "token" and focus.get("address"):
             chain = f" on {focus['chain']}" if focus.get("chain") else ""

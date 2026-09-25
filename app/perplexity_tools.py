@@ -222,7 +222,10 @@ def perplexity_search_with_sources(query: str, *, recency_days: int | None = Non
     if not settings.perplexity_api_key:
         raise RuntimeError("PERPLEXITY_API_KEY is not configured")
     instructions = ("Answer with dated facts; after each claim put the number of the source that supports it in square brackets, [1], [2]; "
-                    "keep exact figures and dates as the sources print them; distinguish the day an event happened from the day it was reported."
+                    "keep exact figures and dates as the sources print them; distinguish the day an event happened from the day it was reported. "
+                    "For a rolling hours window, a publication or update date does not prove the event happened inside it. "
+                    "If an event lacks a clock time and timezone needed to test that boundary, mark its exact-window status unknown. "
+                    "Cite a direct article or primary document for a specific claim; a homepage, rolling feed, or topic index is only a discovery lead."
                     + (" Report each instrument unambiguously (full legal name, exchange, ticker) from primary or exchange sources; never as investment advice." if finance else "")
                     + (f" Prefer sources from the last {recency_days} days." if recency_days else ""))
     increment("perplexity_web_search_calls")

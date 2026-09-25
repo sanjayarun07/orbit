@@ -38,7 +38,7 @@ Scope = Literal["venue_trades", "global", "on_chain", "any"]
 CONTRACT_KINDS: tuple[str, ...] = ("market_ranking", "holders", "recent_events", "yields")
 OPEN_RESEARCH_KIND = "open_research"
 # Exact state the web must never answer first: an address, a wallet, a quote, a price now, an exit, a position.
-_EXACT_STATE = re.compile(r"(?<![A-Za-z0-9])(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])|\b(?:wallet|balance|balances|portfolio|position|exit|quote|swap|bridge|price\s+of|price\s+now|current\s+price|how\s+much\s+is|holders?|liquidity\s+of|tvl\s+of|apy|yield)\b", re.I)
+_EXACT_STATE = re.compile(r"(?<![A-Za-z0-9])(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])|\b(?:my\s+wallet|connected\s+wallet|this\s+wallet|that\s+wallet|wallet\s+(?:address|balance|holdings|activity|transactions?)|balance|balances|portfolio|position|exit|quote|swap|bridge|price\s+of|price\s+now|current\s+price|how\s+much\s+is|holders?|liquidity\s+of|tvl\s+of|apy|yield)\b", re.I)
 _OPEN_RESEARCH = re.compile(r"\b(?:why|how|what|who|which|explain|compare|analy[sz]e|diligence|competitors?|investors?|backers?|revenue|risks?|outlook|history|background|roadmap|tokenomics|governance|research|deep\s+dive|overview|"
                             r"mean(?:s|ing)?|guarantee[sd]?|impl(?:y|ies)|does\s+that)\b", re.I)     # "does that mean I cannot get rugged?" asks what a concept means, not for a token check (2026-09-24)
 
@@ -118,8 +118,12 @@ class QuestionPlan(dspy.Signature):
     losers, most traded, trending tokens by a metric), holders (who holds a
     token, concentration), recent_events (news, votes, launches, what happened
     recently), yields (APY, where to earn), or other. Name the subject (a
-    token with its chain when stated, a protocol, a chain, a venue, the whole
-    market). Decide the scope of a chain word: "trades on Base" means
+    token with its chain when stated, a protocol, a chain, a venue, or a topic).
+    Use open_research for explanations, historical designs, comparisons, or
+    investigations that need source-page evidence, even when the question
+    mentions a wallet or token conceptually rather than asking for its current
+    state. Use other only when none of the listed kinds fits. Decide the scope
+    of a chain word: "trades on Base" means
     venue_trades (only data from venues on Base can satisfy it); "tokens in
     the Base ecosystem" means global. When the words do not settle it, choose
     venue_trades for "on <chain>" with a ranking metric, and say so in
@@ -160,6 +164,7 @@ _POOL_LISTING = re.compile(r"\b(?:pools?|pairs?|liquidity\s+pools?|markets?\s+fo
 # The connected wallet's own holdings, in the user's words and in the Home
 # cards' words ("Analyze my portfolio", "Wallet health check", "What if my
 # portfolio drops 20%?"): a portfolio contract, proved against the wallet's card.
+_WALLET_HOLDINGS = re.compile(r"\b(?:assets?|holdings?|holds?|balances?|positions?|portfolio|allocation|exposure)\b|\bwhat(?:'s|\s+is)\s+in\b", re.I)
 _PORTFOLIO_ASK = re.compile(r"\b(?:my|connected)\b.{0,30}\b(?:portfolio|wallet|holdings?|balances?|allocation|positions?|assets?|health)\b"
                             r"|\bwallet\s+health(?:\s+check)?\b|\banaly[sz]e\s+(?:my\s+)?portfolio\b", re.I)
 # A swap, sell, buy or bridge with an amount or a pair: a transaction intent,
@@ -342,6 +347,12 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
     body, notes = split_notes(text)
     headline = re.search(r'Home news headline "([^"]+)"', notes or "")
     text = body or text
+    tap = re.match(r"^\s*What does this mean for (?:the market|memecoins):\s*(.+?)\s*$", text, re.I | re.S)
+    if tap and not headline:
+        # A Home headline tap: the headline is a story to research, never an
+        # ask made of its words ("S&P 500 falls 0.75% as yields hit
+        # multi-decade highs" planned the DeFi yields table, trust re-run 2026-09-25).
+        headline = tap
     from app.routing.subject_probe import _REFERENT, ask_sentences, is_referent
     referent = is_referent(text)
     if referent and not _REFERENT.match(text):
@@ -441,8 +452,15 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
                                 scope="on_chain", metric="quote", unit="usd",
                                 filters={**{k: v for k, v in draft.as_dict().items() if v is not None}, **({"amount_usd": usd_amount} if usd_amount else {})},
                                 freshness_seconds=120, evidence_order="state_first", required_facts=["quote_row"], ambiguity=ambiguity, confidence=0.7, planner="rules")
-    if _PORTFOLIO_ASK.search(text) and not _HOLDERS.search(text) and not _TRANSACTION.search(text):
-        return QuestionContract(kind="portfolio", subject=Subject(kind="wallet", chain=chain), scope="on_chain", metric="holdings", unit="usd",
+    # "Which assets does it hold?" after a wallet was pinned: the resolution
+    # note binds the wallet, so this is a portfolio read (exact state, the
+    # wallet tools), never open research (expanded run 2026-09-25: the web
+    # was asked what a Solana wallet holds, three runs of three).
+    wallet_note = re.search(r"\bwallet\s+(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})\b", notes or "")
+    wallet_bound = bool(wallet_note and _WALLET_HOLDINGS.search(text) and not _HOLDERS.search(text))
+    if (_PORTFOLIO_ASK.search(text) or wallet_bound) and not _HOLDERS.search(text) and not _TRANSACTION.search(text):
+        return QuestionContract(kind="portfolio", subject=Subject(kind="wallet", id=wallet_note.group(1) if wallet_note else None, chain=chain or (_chain_of(notes) if wallet_note else None)),
+                                scope="on_chain", metric="holdings", unit="usd",
                                 filters={"scenario_pct": float(m2.group(1))} if (m2 := re.search(r"(?:drops?|falls?|rises?|up|down|gains?|loses?)\s+(?:by\s+)?([+-]?\d+(?:\.\d+)?)\s*%", text, re.I)) else {},
                                 freshness_seconds=3600, evidence_order="state_first", required_facts=["holding_row"], confidence=0.7, planner="rules")
     if _POOL_LISTING.search(text) and (symbol or address) and not _HOLDERS.search(text) and not _YIELDS.search(text.split(".")[0]):
@@ -527,8 +545,12 @@ def _parse_model_contract(raw: str) -> QuestionContract | None:
     subject = data.get("subject") or {}
     if not isinstance(subject, dict):
         subject = {}
-    data["subject"] = {k: v for k, v in subject.items() if k in Subject.model_fields}
-    data = {k: v for k, v in data.items() if k in QuestionContract.model_fields}
+    # The planner commonly emits JSON null for optional schema members. Null
+    # is absence, not an invalid value for enum fields whose model defaults
+    # already express the safe state. Keep the rest of the object so one null
+    # does not discard an otherwise usable contract and restart rule routing.
+    data["subject"] = {k: v for k, v in subject.items() if k in Subject.model_fields and v is not None}
+    data = {k: v for k, v in data.items() if k in QuestionContract.model_fields and v is not None}
     try:
         return QuestionContract(**data, planner="model") if "planner" not in data else QuestionContract(**data)
     except Exception:
@@ -542,6 +564,14 @@ async def plan(request: str, context: str = "") -> QuestionContract:
     where the model left them empty; the rules planner alone otherwise."""
     rules = plan_by_rules(request, context)
     from app.nodes import runtime
+
+    # A Home headline tap already states its subject and task. Letting the
+    # model reinterpret headline vocabulary (for example, bond "yields") can
+    # route an event explanation into an unrelated data contract.
+    from app.composition import split_notes, _HEADLINE_TAP
+    body, notes = split_notes(request)
+    if _HEADLINE_TAP.match(body or "") or re.search(r'Home news headline "[^"]+"', notes or ""):
+        return rules
 
     if not runtime.planner_available():
         return rules

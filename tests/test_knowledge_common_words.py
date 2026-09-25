@@ -60,3 +60,16 @@ def test_passages_that_never_mention_the_subject_are_no_card():
     assert not tool._mentions_subject(hits, 'What is the full name and description of the stock labeled "NBIS" on Hyperliquid?')
     assert tool._mentions_subject(hits, "What is Hyperliquid's HLP vault?")
     assert tool._mentions_subject(hits, "how do onchain order books work")      # no subject named: nothing to require
+
+
+def test_a_ticker_inside_an_address_is_not_a_mention_and_an_address_in_the_ask_must_appear():
+    from types import SimpleNamespace
+    from app.knowledge import tool
+    maple = [SimpleNamespace(protocol_name="Maple", document_title="Mainnet Addresses", chunk=SimpleNamespace(heading="syrupUSDC",
+                             content="Pool HrTBpF3LqSxXnjnYdR4htnBLyMHNZ6eNaDZGPundvHbm on Solana; token AvZZF1YaZDziPY2RCK4oJrRVrbN3mTD9NL24hPeaZeUj"))]
+    ask = "What is driving the 51.62% price surge in BP today? BPxxfRCXkUVhig4HS1Lh7kZqV6SPJhzfEk4x6fVBjPCy on solana"
+    assert not tool._mentions_subject(maple, ask)                                   # "bp" sits inside a pool address: not a mention (live, 2026-09-25)
+    assert not tool._mentions_subject(maple, "What is driving the price surge in BP today?")
+    backpack = [SimpleNamespace(protocol_name="Backpack", document_title="BP token", chunk=SimpleNamespace(heading="", content="BP (BPxxfRCXkUVhig4HS1Lh7kZqV6SPJhzfEk4x6fVBjPCy) is Backpack's token"))]
+    assert tool._mentions_subject(backpack, ask)
+    assert tool._mentions_subject(backpack, "What is BP staking for equity?")

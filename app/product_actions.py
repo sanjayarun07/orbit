@@ -191,12 +191,14 @@ def home_headlines_answer(request: str) -> str:
         order = {"first": 0, "1st": 0, "second": 1, "2nd": 1, "third": 2, "3rd": 2, "fourth": 3, "4th": 3, "last": len(cards) - 1}
         c = cards[min(order.get(pick.group(1).lower(), 0), len(cards) - 1)]
         return (f"**{c['title']}**\n\n{c.get('summary') or ''}\n\n"
-                f"Event date: {c.get('date') or 'not stated by the source'} · Source: {c.get('source') or 'not stated'} · "
-                f"Checked: {str(data.get('as_of') or '')[:16].replace('T', ' ')} UTC · {'Verified against its source' if c.get('verified') else 'Not verified against a source'}.\n\n"
+                f"Event date: {c.get('date') or 'not stated by the source'} · Source: "
+                f"{('[' + str(c.get('source')) + '](' + str(c.get('source_url')) + ')') if c.get('source_url') else (c.get('source') or 'not stated')} · "
+                f"Checked: {str(data.get('as_of') or '')[:16].replace('T', ' ')} UTC · {'Headline cross-checked by search; article reviewed when opened' if c.get('verified') else 'Headline not cross-checked'}.\n\n"
                 f"For the market read, tap the tile or ask: `{c.get('prompt') or 'What does this mean for the market: ' + c['title']}`")
     lines = ["**Today's Home headlines** (event date · source · checked)", ""]
     for i, c in enumerate(cards, start=1):
-        lines.append(f"{i}. **{c['title']}** · {c.get('date') or 'no date'} · {c.get('source') or 'no source'} · {'verified' if c.get('verified') else 'unverified'}")
+        source = f"[{c.get('source')}]({c.get('source_url')})" if c.get('source_url') else (c.get('source') or 'no source')
+        lines.append(f"{i}. **{c['title']}** · {c.get('date') or 'no date'} · {source} · {'search-checked' if c.get('verified') else 'not checked'}")
     lines += ["", f"Checked at {str(data.get('as_of') or '')[:16].replace('T', ' ')} UTC. The date is the day the event happened as the source printed it; the tiles are re-read every 30 minutes, so the publication time of each source is on the source's own page."]
     return "\n".join(lines)
 

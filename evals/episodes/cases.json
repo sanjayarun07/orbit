@@ -596,9 +596,10 @@
     }
    },
    "goal": {
-    "tools_count": {
+    "replay_tools_count": {
      "perplexity_web_search": 2
     },
+    "live_verified_candidate": "Synthetix",
     "must_contain": [
      "Synthetix"
     ],

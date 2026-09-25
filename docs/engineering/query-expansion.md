@@ -1,0 +1,13 @@
+# Bounded discovery for open research
+
+The research planner may return `sub_queries`: a JSON list of one to four independently answerable evidence questions. Each entry names a facet, capability, search query, `general` or `news` topic, an optional news recency window in days, and up to two known source domains. Simple questions should use fewer entries. `queries` retains the existing line format as a fallback when the model does not produce valid JSON.
+
+`RESEARCH_QUERY_EXPANSION_ENABLED` is off by default while the expanded path is compared with the existing research loop. The flag affects open research only. Home-news taps keep their separate event-and-market path and the card's own source. Exact state, wallet and execution tools remain subject to the same tool-eligibility gate.
+
+Initial searches run concurrently and share the five-call turn cap. Duplicate capability/query pairs and duplicate facets are removed. Domain constraints are applied to the search and then to returned URLs; if no source matches, that sub-query contributes no evidence. The combined source pool is deduplicated by URL before candidate page inspection. Search prose and social posts remain discovery leads. The existing direct-page passage checks, claim audit and abstention rules decide the answer. News `days` is a search recency instruction, not proof of the event date; the page check must establish that separately.
+
+Compare the flag off and on with the same prompts, model, provider settings and clean caches. Record verified-answer rate and missing-fact rate separately from tool-call success, plus latency, model calls, web calls and cost. Repeat runs before changing the default; a single live success does not establish consistency.
+
+## First live pilot, 2026-09-25
+
+The `dual-token-4-second-axis` episode failed its goal in both single runs: the required Synthetix relationship lacked complete page-backed coverage. With the flag off it took 169 seconds, 11 model calls, 9 web calls and about $0.036 in web cost; with the flag on it took 88 seconds, 10 model calls, 6 web calls and about $0.030. The expanded planner chose two similar web searches and a knowledge-base search that found no indexed match. These timings are exploratory: the runs preceded planner-signature isolation, so the off arm still saw the new `sub_queries` field. The off arm now uses its original signature, but it has not been remeasured. The flag remains off. Next evaluation should constrain initial expansion to distinct discovery facets and run at pass^5 on a fixed provider fixture plus repeated live samples before considering a default change.

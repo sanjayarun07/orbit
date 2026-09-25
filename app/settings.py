@@ -68,9 +68,13 @@ class Settings(BaseSettings):
     # docs/engineering/claude-code-evidence-loop.md): plan the evidence on the
     # research tier over the capability catalog, retrieve, review the gaps,
     # call again or stop, then check every named example against its source.
-    # Off = the pipeline's fixed sequence (one discovery read, the knowledge
-    # base, the gate). One flag; the old path is the fallback when the plan fails.
-    research_loop_enabled: bool = False
+    # Enabled for open research: source-page passages must substantiate claims.
+    # Off selects the fixed search-first sequence; a planning failure also
+    # falls back to that sequence for availability.
+    research_loop_enabled: bool = True
+    # Bounded, typed multi-query discovery for complex open research. Keep
+    # independently switchable so the existing loop is a measurable baseline.
+    research_query_expansion_enabled: bool = False
     research_loop_seconds: int = 75           # wall-clock budget for the loop's retrieval rounds; the turn must fit the chat timeout
     # The loop's structured calls (plan, gap review, example support) run at
     # this effort on the research model; the synthesis keeps
@@ -81,7 +85,7 @@ class Settings(BaseSettings):
     # it earns a longer wall clock than a price check (the brief, step 3). Used
     # for every turn while the flag is on; the loop's own budgets bound the work.
     research_loop_timeout_seconds: float = 240.0
-    research_loop_inspect_pages: int = 4       # cited pages read per turn to check candidates against the conditions
+    research_loop_inspect_pages: int = 12      # cited pages read per turn; unresolved candidates can receive up to seven targeted follow-ups
     contract_pipeline_enabled: bool = True     # market rankings, holders, recent events and yields go through the contract pipeline
     # Open-ended research (not exact on-chain state) starts with a dated,
     # source-linked web read, then targeted tools, then the evidence check.

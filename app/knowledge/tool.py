@@ -129,13 +129,20 @@ def _mentions_subject(hits, request: str) -> bool:
     question names something: a ticker or a name that a venue or chain word
     in the same sentence must not stand in for."""
     from app.routing.subject_probe import subject_of
+    # An address in the ask is the subject's identity: a passage that carries
+    # the address is about it, a passage that only shares its ticker is not.
+    # The ticker matches as a whole word: "BP" had matched inside a Maple pool
+    # address (HrTBpF3Lq…) and a Maple card was rendered under a Backpack
+    # price question (live, 2026-09-25).
+    address = re.search(r"(?<![A-Za-z0-9])(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])", request or "")
     subject = subject_of(request or "")
-    if not subject:
+    if not subject and not address:
         return True
-    key = subject.lower()
+    keys = [re.escape(k.lower()) for k in ([address.group(1)] if address else [subject])]
+    pattern = re.compile(r"(?<![a-z0-9])(?:" + "|".join(keys) + r")(?![a-z0-9])")
     for hit in hits:
         haystack = " ".join([hit.protocol_name or "", hit.document_title or "", getattr(hit.chunk, "heading", "") or "", hit.chunk.content or ""]).lower()
-        if key in haystack:
+        if pattern.search(haystack):
             return True
     return False
 

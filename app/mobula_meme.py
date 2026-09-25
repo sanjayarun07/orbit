@@ -214,7 +214,7 @@ def token_trades(request: str) -> str:
                                 [evidence.source("mobula", "token/trades")])
         for r in trade_rows[:25]:
             if r.get("transactionHash"):
-                env.add_anchor(evidence.tx(r["transactionHash"], "mobula", chain, at=r.get("date"),
+                env.add_anchor(evidence.tx(r["transactionHash"], "mobula", chain, at=_when_time(r["date"]) if r.get("date") is not None else None,     # Mobula sends the time as epoch ms (an int crashed the anchor, regression run 2026-09-25)
                                            note=f"{str(r.get('type') or '').lower()} {_usd(r.get('baseTokenAmountUSD'))} on {r.get('platform') or '?'}"))
     rows = [r for r in (rows or []) if isinstance(r, dict)]
     if not rows:

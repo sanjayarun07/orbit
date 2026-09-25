@@ -28,22 +28,74 @@ the fact gate one decision loop:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
+from dataclasses import dataclass
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import dspy
 
-from app import composition, contracts, fact_gate, streaming, tool_catalog
+from app import composition, contracts, fact_gate, research_ledger, streaming, tool_catalog
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
 
 MAX_ROUNDS = 2          # the plan's round, then one gap review and its call (a third round put turns past 170 s live, 2026-09-24)
 MAX_CALLS = 5           # provider calls per turn, whatever the model asks for
-MAX_INITIAL = 2         # queries from the plan itself
-MAX_MODEL_CALLS = 6     # plan + reviews + support check + one repair
+MAX_INITIAL = 4         # distinct evidence questions from the plan, run concurrently
+MAX_MODEL_CALLS = 18    # includes inspection, audits, synthesis support and one repair
+
+
+class TurnBudget:
+    """One deadline and call ledger shared by every stage of a research turn."""
+
+    def __init__(self, seconds: float, model_limit: int = MAX_MODEL_CALLS):
+        self.deadline = time.monotonic() + seconds
+        self.model_limit = model_limit
+        self.calls: dict[str, int] = {"model": 0, "provider": 0, "page": 0, "synthesis": 0}
+        self.exhausted = ""
+
+    def remaining(self) -> float:
+        return max(0.0, self.deadline - time.monotonic())
+
+    def can_run(self, reserve: float = 0) -> bool:
+        return self.remaining() > reserve
+
+    async def call(self, kind: str, awaitable, timeout: float, reserve: float = 0):
+        limits = {"model": self.model_limit, "provider": 7, "page": 6, "synthesis": 2}
+        if self.calls.get(kind, 0) >= limits[kind]:
+            self.exhausted = f"{kind} calls"
+            if hasattr(awaitable, "close"):
+                awaitable.close()
+            raise TimeoutError(f"research {kind}-call budget exhausted")
+        available = self.remaining() - reserve
+        if available <= 0:
+            self.exhausted = "deadline"
+            if hasattr(awaitable, "close"):
+                awaitable.close()
+            raise TimeoutError("research deadline exhausted")
+        self.calls[kind] = self.calls.get(kind, 0) + 1
+        try:
+            return await asyncio.wait_for(awaitable, timeout=min(timeout, available))
+        except asyncio.TimeoutError:
+            if self.remaining() <= reserve + 0.1:
+                self.exhausted = "deadline"
+            raise
+
+    def record(self) -> dict:
+        return {"calls": dict(self.calls), "remaining_seconds": round(self.remaining(), 1), "exhausted": self.exhausted}
+
+
+class BudgetedRuntime:
+    def __init__(self, runtime, budget: TurnBudget):
+        self.runtime = runtime
+        self.budget = budget
+
+    async def _call_research_loop_lm(self, program, **kwargs):
+        return await self.budget.call("model", self.runtime._call_research_loop_lm(program, **kwargs), 45, reserve=12)
 
 # What each capability group does and the inputs it needs: group metadata.
 # Which tools belong to a group, and their coverage and freshness, come from
@@ -97,48 +149,82 @@ def catalog_summary() -> str:
 
 
 class EvidencePlan(dspy.Signature):
-    """Plan the evidence for one research turn. Read the request and the
-    notes under it (the conversation's research objective, the resolved
-    subject). State the subject, the user's actual question in one sentence,
-    the conditions a correct answer must meet (each a short phrase), and the
-    facts a supported answer needs (each a short phrase; three to six). The
-    conditions are the user's stated constraints plus the ones a comparison
-    implies: when the question asks for projects like a reference design,
-    spell out each property of that design a match must share -- whose asset
-    is the collateral (the project's own native token, not a third-party
-    asset deposited by users), what is minted, whether the minted token is
-    separately transferable, what redemption does -- so that receipt tokens,
-    wrapped assets, stablecoins against external collateral and
-    non-transferable credits fail a condition explicitly. Then shortlist
-    the capabilities from the catalog that can supply those facts -- never by
-    matching words, by the job each does -- and write the first search
-    queries as natural questions, one per line in the form
-    "capability: query", at most two. A follow-up in a conversation shares
-    the topic but changes the facts needed: "how does it work in Akash" needs
-    Akash's own mechanism; "which other projects use this exact mechanism"
-    needs named projects with first-party sources. When the request needs a
-    contract address the conversation has not resolved, say so in
-    `constraints` rather than planning a state read."""
+    """Plan one research turn from the user's question and the conversation
+    notes. State the actual question, its subject, the conditions a correct
+    answer must meet, and three to six facts needed to answer it. Preserve
+    every user constraint and distinguish event time from publication time,
+    venue from ecosystem, and exact mechanism from thematic similarity.
+    For a comparison, spell out the reference design's necessary properties
+    as conditions on proposed matches rather than accepting projects that
+    merely share keywords. Do NOT make verification of the user's reference
+    example a condition on a different candidate. Conditions are qualifying
+    facts about the proposed match, not instructions to collect sources,
+    quotes, publication dates or launch dates. Add time or date as a condition
+    only when the user explicitly requests a period or event date. Shortlist
+    capabilities by their declared job. Give two targeted first discovery
+    queries as `capability: query` lines. For news and market-impact questions,
+    separate what the original announcement or data release establishes from
+    what a dated market observation shows. Neither a contemporaneous price move
+    nor a plausible mechanism alone proves the event caused the move. A follow-up changes the facts to
+    verify while keeping its resolved referents. If a state read needs an
+    unresolved contract address, put that gap in constraints; do not guess."""
 
     request: str = dspy.InputField()
     catalog: str = dspy.InputField()
     subject: str = dspy.OutputField()
     question: str = dspy.OutputField()
-    constraints: str = dspy.OutputField(desc="the conditions a match must meet, precise about whose asset and what is minted; semicolon-separated, or 'none'")
+    constraints: str = dspy.OutputField(desc="only the necessary qualifying conditions for a proposed answer; semicolon-separated, or 'none'; exclude evidence tasks and unrequested dates")
     required_facts: str = dspy.OutputField(desc="one per line")
     capabilities: str = dspy.OutputField(desc="comma-separated capability names from the catalog")
     queries: str = dspy.OutputField(desc='one per line, "capability: query"')
 
 
+class ExpandedEvidencePlan(dspy.Signature):
+    """Plan one research turn from the user's question and conversation notes.
+    State the subject, actual question, necessary qualifying conditions and
+    three to six required facts. Preserve user constraints and distinguish
+    event time from publication time, venue from ecosystem, and exact mechanism
+    from thematic similarity. For comparisons, state the reference design's
+    necessary properties as conditions on proposed matches. Do not require
+    verification of the reference example as a condition on another candidate.
+    Conditions describe qualifying facts, not evidence tasks or unrequested
+    dates. Shortlist capabilities by their declared job. Return one to four
+    independently answerable discovery questions in sub_queries JSON. Each has
+    facet, capability, query, topic ('general' or 'news'), days (a positive
+    number only for news), and domains (known first-party domains or an explicit
+    user restriction, otherwise []). Do not paraphrase the same question across
+    facets or invent candidates and domains. One or two facets suffice for a
+    simple question. Also supply legacy `capability: query` lines as fallback.
+    For news, separate the original event from dated market observations; a
+    price move alone does not prove causation. A follow-up keeps resolved
+    referents while changing the facts to verify. Never guess an unresolved
+    contract address."""
+
+    request: str = dspy.InputField()
+    catalog: str = dspy.InputField()
+    subject: str = dspy.OutputField()
+    question: str = dspy.OutputField()
+    constraints: str = dspy.OutputField(desc="only necessary qualifying conditions; semicolon-separated or 'none'; exclude evidence tasks and unrequested dates")
+    required_facts: str = dspy.OutputField(desc="one per line")
+    capabilities: str = dspy.OutputField(desc="comma-separated capability names from the catalog")
+    sub_queries: str = dspy.OutputField(desc='JSON array of up to four objects: {"facet":"distinct fact to establish","capability":"web_discovery","query":"specific search","topic":"general|news","days":3|null,"domains":[]}')
+    queries: str = dspy.OutputField(desc='one per line, "capability: query"')
+
+
 class GapReview(dspy.Signature):
-    """After a round of retrieval, decide the next call. Read the facts the
-    answer needs, the evidence gathered so far (cards with sources), and the
-    calls already made. List the required facts still missing or only
-    partly supported. Then either name one more call -- "capability: query",
-    a different query from the ones made, aimed at the most important
-    missing fact -- or write "stop" when the facts are supported or the
-    remaining gap cannot be resolved by any capability in the catalog (say
-    which in `reason`). Never repeat a query already made."""
+    """After reading the source pages, decide the next call from the verified
+    evidence state. Search prose is a lead, never proof. A candidate labelled
+    `not_established` still has a gap even if the search card sounds certain.
+    Target one missing condition or required fact with a different query, or
+    stop when the cited pages settle the question or no capability can close
+    the gap. For a discovery query, emphasize the *rarest relationship* in
+    the requirements (who owns the collateral, what is minted, where the
+    minted asset can move) using natural synonyms for its mechanism. Search
+    for the relationship across original documentation, not broad topical
+    neighbours. Do not repeat a query or restrict it to a site unless the
+    user explicitly requested that site. Never put a hoped-for candidate
+    name into the query unless an inspected page already supports part of
+    that candidate's relationship."""
 
     question: str = dspy.InputField()
     required_facts: str = dspy.InputField()
@@ -151,15 +237,13 @@ class GapReview(dspy.Signature):
 
 
 class ExampleSupport(dspy.Signature):
-    """Check the named examples and relationships in a research answer
-    against the evidence cards it cites. For each project, token or entity
-    the answer names as an example of the mechanism or relationship the
-    question asks about, decide from the cited cards only: supported (a
-    source establishes that specific mechanism for it), related but a
-    different design (the source shows a different mechanism), or not
-    established (no cited source shows it). Names used only as contrasts or
-    non-matches are not examples. Output each list comma-separated, or
-    "none"."""
+    """Check material examples and relationships in the answer against the
+    inspected source-page verdicts. A search snippet is a lead, not support.
+    A named entity, event or project is supported only when its page verdict
+    establishes the exact claim; otherwise mark it related but different or
+    not established. Do not treat an answer's citation marker as proof that
+    the linked page says the same thing. Output each list comma-separated,
+    or `none`."""
 
     question: str = dspy.InputField()
     answer: str = dspy.InputField()
@@ -169,49 +253,153 @@ class ExampleSupport(dspy.Signature):
     not_established: str = dspy.OutputField()
 
 
+class ClaimSupport(dspy.Signature):
+    """Audit every material factual statement in the written summary against
+    the directly fetched, verbatim source-page passages. A plausible inference,
+    a search snippet, a project-level verdict, or a citation marker is not
+    enough. List each unsupported or overstated claim on its own line, copied
+    from the summary. An explicitly labelled unknown is not an assertion.
+    Return `none` only when every asserted claim follows from the passages."""
+
+    question: str = dspy.InputField()
+    summary: str = dspy.InputField()
+    evidence: str = dspy.InputField()
+    unsupported_claims: str = dspy.OutputField(desc="one unsupported summary claim per line, or none")
+
+
 class CandidateCheck(dspy.Signature):
-    """Check one candidate against the explicit conditions of the question,
-    from the text of its cited source page only. State for each condition
-    whether the page shows it met, shows it not met, or does not state it,
-    with a short quote where the page settles it. Read each condition
-    literally: "the project's own token as collateral" is not met by a
-    receipt for a third-party asset users deposit (liquid staking, wrapped
-    assets, vault shares), and "separately transferable" is not met by a
-    non-transferable credit. The verdict is "qualifies" only when the page
-    shows every condition met; "related_but_different" when the page shows
-    the candidate's design differs on a condition; "not_established" when
-    the page does not settle the conditions. A page that merely mentions the
-    candidate proves nothing."""
+    """Check the named claim or candidate against the fetched pages together.
+    Apply the supplied qualifying conditions literally, including identity,
+    mechanism, scope, amount and event time when asked. Do not invent extra
+    conditions from background search text, the reference example or an
+    unrequested documentation date. `qualifies` means
+    the page establishes the claim and every required condition;
+    `related_but_different` means it explicitly shows a different answer;
+    `not_established` means the pages do not settle it. Put every condition
+    that is missing or contradicted in `conditions_failed`, so the next
+    search can target that gap. Return a short VERBATIM primary quote and
+    additional VERBATIM supporting passages, one per line, covering the
+    independent conditions the pages establish. Use exact text from the
+    fetched pages, not a paraphrase. Map every established condition to an
+    exact passage in evidence_map, including partial matches. A qualifying
+    verdict must map ALL semicolon-separated conditions, numbered from 1.
+    If any condition cannot be mapped, use not_established and name the gap.
+    Treat related properties as separate conditions: exchange trading proves
+    tradability, but wallet-to-wallet transferability needs a passage about
+    transfers between independent addresses or an actual token transfer
+    interface. Sending only to one protocol-controlled deposit address does
+    not establish unrestricted transfers. Likewise,
+    minting does not itself prove redemption, and collateral does not itself
+    prove who owns or controls the minted token.
+    Merely mentioning a name, a publication date without the event time,
+    or a search snippet citing the page does not establish the claim."""
 
     question: str = dspy.InputField()
     conditions: str = dspy.InputField(desc="the conditions a match must meet, semicolon-separated")
     candidate: str = dspy.InputField()
-    page: str = dspy.InputField(desc="the cited page's text, as fetched")
+    page: str = dspy.InputField(desc="the fetched pages' text, with source URLs")
     verdict: str = dspy.OutputField(desc='"qualifies" | "related_but_different" | "not_established"')
     conditions_met: str = dspy.OutputField(desc="semicolon-separated, or 'none'")
     conditions_failed: str = dspy.OutputField(desc="semicolon-separated, or 'none'")
     quote: str = dspy.OutputField(desc="the sentence that settles it, or 'none'")
+    supporting_passages: str = dspy.OutputField(desc="one exact page passage per line for the other established conditions, or 'none'")
+    evidence_map: str = dspy.OutputField(desc='JSON array [{"condition": 1, "url": "source URL", "quote": "exact page text"}, ...] for every established condition; [] only when none is established')
+
+
+class ConditionSupportAudit(dspy.Signature):
+    """Independently check whether each quoted passage logically proves its
+    assigned condition. Use ONLY that condition's quoted page text, not the
+    search result or project-level reputation. A quote about exchange trading
+    or sending to one protocol-controlled deposit address does not prove
+    arbitrary wallet transferability; minting does not prove redemption;
+    a current page does not by itself prove historical behavior. List the
+    one-based numbers of every unsupported condition, or `none`."""
+
+    conditions: str = dspy.InputField(desc="semicolon-separated conditions, numbered from 1")
+    evidence_map: str = dspy.InputField(desc="JSON: exact quote and URL assigned to each condition")
+    unsupported_conditions: str = dspy.OutputField(desc="comma-separated one-based numbers, or none")
 
 
 class CandidateList(dspy.Signature):
-    """From the evidence cards, list every candidate the cards discuss for
-    the mechanism or relationship asked about -- projects, tokens or
-    entities named as examples, near-matches, proposals or partial matches;
-    inspection decides, not this list -- each with the URL of the cited
-    source that describes it, one per line as "name | url". Exclude only the
-    reference project the question compares against. Output "none" only when
-    the cards discuss no candidate at all."""
+    """From the evidence cards, list the material entities, events, examples
+    or proposed answers that must be checked for this question. List each
+    entity only once under its canonical name: several claims or source
+    pages about Synthetix are one Synthetix candidate, not separate rows.
+    Include
+    near-matches and uncertain leads. Order candidates by likelihood of
+    satisfying every requested condition and by strength of first-party
+    evidence; place known different designs and speculative names later.
+    Use the URL actually cited for each,
+    one per line as `name or short claim | url`. Inspection decides whether
+    it qualifies. Exclude only a reference example used solely to define a
+    comparison. Output `none` only if no specific claim or candidate appears
+    in the cards."""
 
     question: str = dspy.InputField()
     evidence: str = dspy.InputField()
     candidates: str = dspy.OutputField(desc='one per line, "name | url", or "none"')
 
 
+class NewsSourcePick(dspy.Signature):
+    """Choose source pages for two separate facts about a news headline.
+    For the event, prefer the original announcement, filing, release, or
+    official data on a directly readable HTML page when available. For the market response, choose a dated report with actual
+    observed prices or volumes, not commentary about what might happen.
+    A source may cover only one side. Choose `event_url` from the
+    original-event search and `market_url` from the market-response search.
+    Copy URLs exactly from the supplied list; return `none` when that side
+    has no relevant page."""
+
+    headline: str = dspy.InputField()
+    sources: str = dspy.InputField(desc="URLs, titles and dates discovered in two independent searches")
+    event_url: str = dspy.OutputField(desc="one exact URL from sources, or none")
+    market_url: str = dspy.OutputField(desc="one exact URL from sources, or none")
+
+
+class NewsPassages(dspy.Signature):
+    """Extract up to four exact, short passages from one directly fetched
+    source page for the requested facet. Copy each passage verbatim on its
+    own line. For `event`, capture what happened, the event date, who is
+    covered, and whether it is a proposal or final action. For `market`,
+    capture time-stamped observed prices, volumes or flows, with the asset or
+    instrument named in the passage rather than a standalone pronoun, and any distinct
+    driver the page actually reports. Exclude bare publication timestamps,
+    unrelated historical statistics and market facts from a different region
+    or period. Do not turn the page's inference into an observed fact. Return
+    `none` when the page does not cover the facet."""
+
+    headline: str = dspy.InputField()
+    facet: str = dspy.InputField(desc="event or market")
+    page: str = dspy.InputField()
+    passages: str = dspy.OutputField(desc="one verbatim page passage per line, or none")
+
+
+class FollowupSource(dspy.Signature):
+    """Pick the most relevant already-cited source page for the missing
+    condition. Prefer a page about the exact missing fact over a generic
+    home or token page. A page proving another condition does not close this
+    gap. The short search context is only for choosing which
+    page to read; it is never evidence for the verdict. Return only one URL
+    copied from `sources`, or `none`.
+    The caller validates the URL and reads the page before using any claim."""
+
+    candidate: str = dspy.InputField()
+    missing_condition: str = dspy.InputField()
+    sources: str = dspy.InputField(desc="numbered titles, URLs and nearby search context cited by retrieval")
+    url: str = dspy.OutputField(desc="one URL exactly as supplied, or none")
+
+
 _plan_program = dspy.Predict(EvidencePlan)
+_expanded_plan_program = dspy.Predict(ExpandedEvidencePlan)
 _candidates_program = dspy.Predict(CandidateList)
+_news_source_program = dspy.Predict(NewsSourcePick)
+_news_passages_program = dspy.Predict(NewsPassages)
 _check_program = dspy.Predict(CandidateCheck)
+_condition_audit_program = dspy.Predict(ConditionSupportAudit)
+_followup_program = dspy.Predict(FollowupSource)
 _review_program = dspy.Predict(GapReview)
 _support_program = dspy.Predict(ExampleSupport)
+_claim_support_program = dspy.Predict(ClaimSupport)
 
 
 def _parse_calls(text: str) -> list[tuple[str, str]]:
@@ -224,6 +412,92 @@ def _parse_calls(text: str) -> list[tuple[str, str]]:
         if m and m.group(1).lower() in CAPABILITY_JOBS:
             out.append((m.group(1).lower(), m.group(2).strip().strip('"')))
     return out
+
+
+@dataclass(frozen=True)
+class DiscoveryCall:
+    capability: str
+    query: str
+    facet: str = ""
+    topic: str = "general"
+    days: int | None = None
+    domains: tuple[str, ...] = ()
+
+
+def _expanded_calls(plan, contract: contracts.QuestionContract, request: str) -> list[DiscoveryCall]:
+    """Accept bounded typed discovery, retaining the old planner as fallback."""
+    if _news_headline(contract, request):
+        return [DiscoveryCall(cap, query, facet="event" if i == 0 else "market", topic="news", days=7)
+                for i, (cap, query) in enumerate(_opening_calls(plan, contract, request))]
+    if not settings.research_query_expansion_enabled:
+        return [DiscoveryCall(cap, query) for cap, query in _opening_calls(plan, contract, request)[:2]]
+    try:
+        raw = json.loads(getattr(plan, "sub_queries", "") or "")
+        if isinstance(raw, dict):
+            raw = raw.get("sub_queries")
+    except (TypeError, ValueError):
+        raw = None
+    if not isinstance(raw, list):
+        raw = []
+    calls: list[DiscoveryCall] = []
+    seen: set[tuple[str, str]] = set()
+    seen_facets: set[tuple[str, str]] = set()
+    for item in raw[:MAX_INITIAL]:
+        if not isinstance(item, dict):
+            continue
+        capability = str(item.get("capability") or "").strip().lower()
+        query = re.sub(r"\s+", " ", str(item.get("query") or "")).strip()[:300]
+        if capability not in CAPABILITY_JOBS or len(query) < 8:
+            continue
+        key = capability, query.casefold()
+        facet = str(item.get("facet") or "").strip()[:100]
+        facet_key = capability, facet.casefold()
+        if key in seen or (facet and facet_key in seen_facets):
+            continue
+        seen.add(key)
+        if facet:
+            seen_facets.add(facet_key)
+        topic = item.get("topic") if item.get("topic") in ("general", "news") else "general"
+        days = item.get("days")
+        days = max(1, min(30, days)) if topic == "news" and type(days) is int else (7 if topic == "news" else None)
+        domains = tuple(dict.fromkeys(str(d).lower().removeprefix("www.") for d in (item.get("domains") or [])[:2]
+                                      if isinstance(d, str) and re.fullmatch(r"(?:[a-z0-9-]+\.)+[a-z]{2,24}", d.lower().removeprefix("www."))))
+        calls.append(DiscoveryCall(capability, query, facet, topic, days, domains))
+    if calls:
+        return calls
+    return [DiscoveryCall(cap, query) for cap, query in _opening_calls(plan, contract, request)]
+
+
+def _opening_calls(plan, contract: contracts.QuestionContract, request: str) -> list[tuple[str, str]]:
+    """Open an event investigation on independent source and reaction axes.
+
+    A Home news headline is an open-research question about one event. The
+    model may propose only a topical summary search; that cannot establish
+    both the announcement and the market response. These two broad searches
+    discover leads in parallel. Direct page reads determine what is supported;
+    a missing facet gets a bounded fallback to another lead on the same axis.
+    Other research keeps the model's planned calls and its existing budget.
+    """
+    planned = _parse_calls(getattr(plan, "queries", ""))[:MAX_INITIAL]
+    headline = _news_headline(contract, request)
+    if not headline:
+        return planned or [("web_discovery", (getattr(plan, "question", "") or request).strip())]
+    return [
+        ("web_discovery", f"{headline} original announcement official release or primary data exact event date and terms"),
+        ("web_discovery", f"{headline} dated market reaction observed prices volumes affected assets and alternative drivers"),
+    ]
+
+
+def _news_headline(contract: contracts.QuestionContract, request: str) -> str:
+    """The Home news event, excluding ordinary research about a named topic."""
+    if contract.kind != contracts.OPEN_RESEARCH_KIND:
+        return ""
+    body, notes = composition.split_notes(request)
+    tap = re.match(r"^\s*What does this mean for (?:the market|memecoins):\s*(.+?)\s*$", body or "", re.I | re.S)
+    if tap:
+        return tap.group(1).strip()
+    note = re.search(r'Home news headline "([^"]+)"', notes or "")
+    return note.group(1).strip() if note else ""
 
 
 def tool_for(capability: str, contract: contracts.QuestionContract, enabled_tools: set[str]) -> tuple[str | None, str]:
@@ -254,76 +528,453 @@ def _compact(cards: str, limit: int = 9000) -> str:
     return cards if len(cards) <= limit else cards[:limit] + "\n…"
 
 
+def _coverage_brief(verdicts: list[dict] | None, conditions: str, required_facts: str) -> str:
+    """The gap planner sees only checked pages and explicit unknowns.
+
+    This is the hand-off between discovery and reasoning. It intentionally
+    excludes the provider's answer-shaped search prose, which may assert the
+    very relationship we are trying to verify.
+    """
+    if verdicts is None:
+        return "Page inspection failed; no candidate is established."
+    brief = research_ledger.CoverageLedger.from_verdicts(conditions, required_facts, verdicts).brief()
+    for verdict in verdicts:
+        for passage in (verdict.get("passages") or [])[:5]:
+            if passage.get("url") and passage.get("quote"):
+                brief += f"\nChecked but not necessarily sufficient [{passage['url']}]: {passage['quote']}"
+    return brief
+
+
+def _condition_discovery_query(conditions: str) -> str:
+    """Search the qualifying relationship itself, without a speculative name
+    or an optional fact from the plan becoming a new search constraint."""
+    terms = [part.strip() for part in conditions.split(";") if part.strip()]
+    return "historical projects " + "; ".join(terms[:3]) + " original primary documentation examples"
+
+
+def _verified_partial(ledger: research_ledger.CoverageLedger, verdicts: list[dict]) -> str:
+    """A safe, useful answer when there is no time for audited synthesis."""
+    lines = ["**Checked source passages so far**"]
+    for verdict in verdicts:
+        name = verdict.get("name") or "Candidate"
+        if ledger.complete(name) and verdict.get("verdict") == "qualifies":
+            lines.append(f"- **{name}** has passages mapped to the checked conditions; the final relationship audit did not finish:")
+            for row in ledger.records:
+                if row.candidate == name and row.status == "supported":
+                    lines.append(f"  - {row.requirement}: [source]({row.source_url}) says “{row.passage}”")
+        elif verdict.get("provenance") == "page" and verdict.get("passages"):
+            passage = verdict["passages"][0]
+            missing = ", ".join(ledger.missing(name)) or "the full relationship"
+            lines.append(f"- **{name}** remains unverified for {missing}. [Inspected source]({passage['url']}) says “{passage['quote']}”")
+    if len(lines) == 1:
+        lines.append("No checked source passage yet establishes the requested relationship.")
+    return "\n".join(lines)
+
+
+def _news_sources(result) -> list[dict]:
+    """Source metadata is a discovery lead, never a verified citation."""
+    found = getattr(result, "structured", None) or {}
+    rows = found.get("sources") or []
+    if rows:
+        return [row for row in rows if isinstance(row, dict) and str(row.get("url") or "").startswith("https://")]
+    return [{"title": title, "url": url, "date": ""} for _, title, url in _SOURCE_LINE.findall(result.output or "")]
+
+
+def _recent_news_lead(row: dict, *, max_age_days: int = 14) -> bool:
+    """A dated Home-news lead must belong to the current event window.
+
+    Older coverage can explain the mechanism, but it cannot be cited as the
+    observed response to today's headline. Unknown dates remain leads and
+    still require a direct page passage to establish their event time.
+    """
+    from datetime import date, timedelta
+    match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", str(row.get("date") or ""))
+    if not match:
+        return True
+    try:
+        published = date.fromisoformat(match.group(1))
+    except ValueError:
+        return True
+    return published >= date.today() - timedelta(days=max_age_days)
+
+
+def _news_fallbacks(leads: list[dict], axis: int, used: set[str]) -> list[str]:
+    """Readable, specific leads before home pages and PDFs on the same axis."""
+    ranked = []
+    used_domains = {_source_domain(url) for url in used}
+    for order, row in enumerate(leads):
+        url = row["url"]
+        if row["axis"] != axis or url in used:
+            continue
+        path = urlsplit(url).path.lower().strip("/")
+        title = row["title"].lower()
+        score = (3 if path and not path.endswith(".pdf") else -3)
+        score += 2 if row.get("date") else 0
+        score -= 8 if _source_domain(url) in used_domains else 0
+        if axis == 0:
+            score += 4 if _source_domain(url).endswith(".gov") else 0
+            score += 2 if any(word in path for word in ("pressrelease", "press-releases", "announcement", "filing")) else 0
+        else:
+            score += 2 if any(word in title for word in ("market", "price", "bitcoin", "crypto", "stocks", "trading")) else 0
+        ranked.append((-score, order, url))
+    return [url for _, _, url in sorted(ranked)]
+
+
+async def _run_headline(request: str, contract: contracts.QuestionContract, router, chains: tuple[str, ...],
+                        plan, runtime: BudgetedRuntime, budget: TurnBudget, timings: dict) -> dict:
+    """Broad discovery, then fact-level convergence for a Home news event.
+
+    A regulatory event and a market reaction are separate facts that may live
+    on separate pages. The comparison verifier asks one candidate to meet all
+    conditions and can reject a correct primary page for not also proving
+    market causation. This path checks each facet independently against exact
+    source-page passages, then audits the combined answer.
+    """
+    from app import evidence_pipeline, home_highlights
+
+    headline = _news_headline(contract, request)
+    calls = _opening_calls(plan, contract, request)
+    made: list[str] = []
+    t0 = time.monotonic()
+
+    async def search(capability: str, query: str):
+        tool, _ = tool_for(capability, contract, {t.name for t in router.tools() if (router._enabled(t) if hasattr(router, "_enabled") else True)})
+        if not tool:
+            return None
+        return await budget.call("provider", evidence_pipeline._invoke(router, tool, query, chains, contract), 45, reserve=40)
+
+    streaming.emit("status", text="Searching the original event and market response")
+    results = await asyncio.gather(*(search(cap, query) for cap, query in calls), return_exceptions=True)
+    leads: list[dict] = []
+    home_card = home_highlights.cached_card_for_prompt(composition.split_notes(request)[0])
+    if home_card and _recent_news_lead(home_card):
+        leads.append({"axis": 0, "url": home_card["source_url"], "title": home_card.get("title") or headline,
+                      "date": home_card.get("date") or "", "home_card": True})
+    for axis, ((capability, query), result) in enumerate(zip(calls, results)):
+        made.append(f"{capability}: {query}")
+        if isinstance(result, Exception) or result is None or not getattr(result, "output", ""):
+            continue
+        for row in _news_sources(result):
+            if not _recent_news_lead(row):
+                continue
+            url = row["url"]
+            if (axis, url) not in {(lead["axis"], lead["url"]) for lead in leads}:
+                leads.append({"axis": axis, "url": url, "title": str(row.get("title") or url), "date": str(row.get("date") or "")})
+    timings["discovery"] = round(time.monotonic() - t0, 1)
+    gate = fact_gate.check(contract, [], scope_satisfied=True)
+    if not leads:
+        gate.ok = False
+        return {"answer": "I could not retrieve source pages for this headline, so its details and market effect remain unverified.",
+                "trajectory": {"research_loop": {"question": headline, "calls": made, "budget": budget.record(), "timings": timings}},
+                "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "research_loop"}
+
+    source_lines = "\n".join(f"{'original-event search' if row['axis'] == 0 else 'market-response search'} | {row['url']} | {row['title']} | {row['date'] or 'date unknown'}" for row in leads[:30])
+    try:
+        choice = await runtime._call_research_loop_lm(_news_source_program, headline=headline, sources=source_lines)
+    except Exception:
+        choice = SimpleNamespace(event_url="none", market_url="none")
+    allowed = {"event": {row["url"] for row in leads if row["axis"] == 0},
+               "market": {row["url"] for row in leads if row["axis"] == 1}}
+    selected = {facet: (getattr(choice, facet + "_url", "") or "").strip() for facet in ("event", "market")}
+    # A tap starts with the article Orbit itself placed on Home. It remains a
+    # lead until read and checked; the model cannot replace it with a broad
+    # results page or a different story bearing a similar headline.
+    if home_card and any(row.get("home_card") for row in leads):
+        selected["event"] = home_card["source_url"]
+    # A failed picker does not erase the discovery result. A government page
+    # is a reasonable event lead; other facets use the source order only as a
+    # lead, and still need direct passages to be accepted.
+    for facet in ("event", "market"):
+        candidates = [row for row in leads if row["axis"] == (0 if facet == "event" else 1)]
+        if selected[facet] not in allowed[facet]:
+            fallback = next((row["url"] for row in candidates if facet == "event" and _source_domain(row["url"]).endswith(".gov")), None)
+            selected[facet] = fallback or next((row["url"] for row in candidates if urlsplit(row["url"]).path.strip("/")), "")
+    # A direct, dated government release is stronger event evidence than a
+    # search summary that repeats it. This is source-type priority, not a
+    # headline-specific domain allowlist; its page must still be read.
+    government_release = next((row["url"] for row in leads if row["axis"] == 0
+                               and _source_domain(row["url"]).endswith(".gov")
+                               and any(word in urlsplit(row["url"]).path.lower() for word in ("pressrelease", "press-releases", "announcement"))
+                               and not urlsplit(row["url"]).path.lower().endswith(".pdf")), None)
+    if government_release and not (home_card and selected["event"] == home_card["source_url"]):
+        selected["event"] = government_release
+    if selected["market"] == selected["event"]:
+        selected["market"] = next((row["url"] for row in leads if row["axis"] == 1 and row["url"] != selected["event"]), "")
+
+    t_read = time.monotonic()
+    page_cache: dict[str, dict] = {}
+
+    async def fetch(url: str) -> tuple[str, dict]:
+        try:
+            page = await budget.call("page", asyncio.to_thread(read_page, url), 40, reserve=30)
+        except Exception:
+            page = {"url": url, "text": "", "provenance": "unreadable", "fetched_at": ""}
+        return url, page
+
+    page_cache.update(await asyncio.gather(*(fetch(url) for url in dict.fromkeys(url for url in selected.values() if url))))
+    made.extend(f"page_read: {url}" for url in page_cache)
+
+    async def inspect(facet: str, url: str) -> list[dict]:
+        if not url:
+            return []
+        page = page_cache[url]
+        if page.get("provenance") != "page" or not page.get("text"):
+            return []
+        try:
+            extracted = await runtime._call_research_loop_lm(_news_passages_program, headline=headline, facet=facet,
+                                                               page=page["text"][:14000])
+        except Exception:
+            return []
+        accepted = []
+        for raw in (getattr(extracted, "passages", "") or "").splitlines()[:5]:
+            quote = _clean_quote(raw)
+            if _verbatim_passage(quote, page["text"][:14000]) and quote not in {r["quote"] for r in accepted}:
+                accepted.append({"facet": facet, "url": url, "quote": quote, "fetched_at": page.get("fetched_at", "")})
+        return accepted[:4]
+
+    # The two pages and their passage reads run independently. A page can be
+    # the source for both facets; the cache prevents a duplicate fetch.
+    event_rows, market_rows = await asyncio.gather(inspect("event", selected["event"]), inspect("market", selected["market"]))
+    for facet, rows, axis in (("event", event_rows, 0), ("market", market_rows, 1)):
+        if rows or not budget.can_run(45):
+            continue
+        for url in _news_fallbacks(leads, axis, set(page_cache))[:4]:
+            found_url, page = await fetch(url)
+            page_cache[found_url] = page
+            made.append(f"page_read: {url}")
+            replacement = await inspect(facet, url)
+            if replacement:
+                selected[facet] = url
+                if facet == "event":
+                    event_rows = replacement
+                else:
+                    market_rows = replacement
+                break
+            if not budget.can_run(45):
+                break
+    timings["inspection"] = round(time.monotonic() - t_read, 1)
+    accepted = event_rows + market_rows
+    coverage = {"event": bool(event_rows), "market": bool(market_rows), "selected": selected,
+                "source_leads": leads[:30], "passages": accepted}
+    trajectory = {"research_loop": {"question": headline, "calls": made, "coverage": coverage,
+                                    "budget": budget.record(), "timings": timings}}
+    if not event_rows:
+        gate.ok = False
+        return {"answer": "I found coverage of this headline but could not verify the original event from a directly read page. Its market impact is not established.",
+                "trajectory": trajectory, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "research_loop"}
+    card = "# Checked source passages\n\n" + "\n".join(
+        f"- **{row['facet']}** · [source]({row['url']}) · fetched {row['fetched_at'] or 'time unknown'}: “{row['quote']}”" for row in accepted)
+    note = ("Answer the Home news question directly and briefly. State what the original source confirms, including whether an action is proposed or final. "
+            "Then give only market observations supported by checked market passages, with their time. "
+            "If no market passage was verified, state that the market response was not verified. "
+            "Separate possible transmission mechanisms from observed reactions; timing alone does not prove this event caused a price move. "
+            "Do not offer a trade recommendation or use unverified search snippets as evidence.")
+    t_synth = time.monotonic()
+    try:
+        with streaming.muted("delta"):
+            answer = await budget.call("synthesis", composition.synthesize(f"{request}\n{note}", card, trajectory, research=True), 55, reserve=12)
+    except Exception:
+        answer = "**What the original source establishes**\n\n" + "\n".join(f"- [Source]({row['url']}): “{row['quote']}”" for row in event_rows)
+        if not market_rows:
+            answer += "\n\nI could not verify a market response from a directly read source."
+        gate.ok = False
+        trajectory["research_loop"]["budget"] = budget.record()
+        return {"answer": answer, "trajectory": trajectory, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "research_loop"}
+    timings["synthesis"] = round(time.monotonic() - t_synth, 1)
+    unsupported = fact_gate.unsupported_figures(answer.split("\n\n---\n\n", 1)[0], [], evidence_text=card)
+    claims = await _unsupported_claims(headline, answer, card, runtime) if budget.can_run(14) else None
+    if (unsupported or claims) and budget.can_run(25):
+        repair_note = (f"{request}\n{note}\nRemove or qualify these claims that the checked passages do not establish: "
+                       + "; ".join((claims or [])[:6] + unsupported[:6])
+                       + ". Preserve the verified facts and source links. Do not replace the removed claims with new unverified ones.")
+        try:
+            with streaming.muted("delta"):
+                repaired = await budget.call("synthesis", composition.synthesize(repair_note, card, trajectory, research=True), 40, reserve=12)
+            repaired_figures = fact_gate.unsupported_figures(repaired.split("\n\n---\n\n", 1)[0], [], evidence_text=card)
+            repaired_claims = await _unsupported_claims(headline, repaired, card, runtime) if budget.can_run(12) else None
+            if not repaired_figures and repaired_claims == []:
+                answer, unsupported, claims = repaired, [], []
+        except Exception:
+            logger.info("headline answer repair failed; retaining checked facts", exc_info=True)
+    coverage["answer_audit"] = {"unsupported_figures": unsupported, "unsupported_claims": claims,
+                                "claim_check_available": claims is not None}
+    if unsupported or claims is None or claims:
+        # A useful verified partial is safer than an unverified causal story.
+        answer = "**Checked facts**\n\n" + "\n".join(f"- [Source]({row['url']}): “{row['quote']}”" for row in accepted)
+        if not market_rows:
+            answer += "\n\nThe market response could not be verified from the pages read."
+        gate.ok = False
+    else:
+        gate.ok = True
+        gate.missing = []
+    timings["total"] = round(time.monotonic() - t0, 1)
+    trajectory["research_loop"].update(budget=budget.record(), timings=timings)
+    return {"answer": answer, "trajectory": trajectory, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "research_loop"}
+
+
 async def run(state: dict, request: str, contract: contracts.QuestionContract, router, chains: tuple[str, ...]) -> dict:
     """The loop, returning the pipeline's answer shape."""
     from app import evidence_pipeline
     from app.nodes import runtime
 
+    turn_budget = TurnBudget(max(30.0, min(180.0, float(getattr(settings, "research_loop_timeout_seconds", 240) or 240) - 15.0)))
+    runtime = BudgetedRuntime(runtime, turn_budget)
+
     enabled_tools = {t.name for t in router.tools() if (router._enabled(t) if hasattr(router, "_enabled") else True)}
     catalog = catalog_summary()
     body, notes = composition.split_notes(request)
+    if _news_headline(contract, request):
+        # The question contract already identifies the Home news event. This
+        # fact-based lane does not use the comparison planner's conditions;
+        # skipping that call also prevents a planner failure from falling
+        # back to unchecked search prose.
+        return await _run_headline(request, contract, router, chains, SimpleNamespace(), runtime, turn_budget, {})
     streaming.emit("status", text="Planning the evidence")
     timings: dict[str, float] = {}
     t_plan = time.monotonic()
     try:
-        plan = await asyncio.wait_for(runtime._call_research_loop_lm(_plan_program, request=request, catalog=catalog), timeout=60)
+        program = _expanded_plan_program if settings.research_query_expansion_enabled else _plan_program
+        plan = await runtime._call_research_loop_lm(program, request=request, catalog=catalog)
     except Exception:
         logger.warning("research loop: plan failed; the pipeline's fixed sequence answers", exc_info=True)
         return None
     timings["plan"] = round(time.monotonic() - t_plan, 1)
     question = (getattr(plan, "question", "") or body.splitlines()[0] if body else request).strip()
     required = (getattr(plan, "required_facts", "") or "").strip()
-    calls = _parse_calls(getattr(plan, "queries", ""))[:MAX_INITIAL] or [("web_discovery", question)]
+    calls: list[DiscoveryCall | tuple[str, str]] = _expanded_calls(plan, contract, request)
+    initial_queries = {call.query for call in calls if isinstance(call, DiscoveryCall)}
+    if _news_headline(contract, request):
+        required = "\n".join(filter(None, [required,
+            "Original event or primary data source, with event time and proposed versus final status",
+            "Dated observed market response, or an explicit statement that it could not be verified",
+            "Causal interpretation labelled separately from observed facts"]))
     parts: list[tuple[str, dict]] = []
     fact_rows: list = []
     made: list[str] = []
     skipped: list[str] = []
-    model_calls = 1
     started = time.monotonic()
-    # The retrieval budget: the loop's own setting, capped so the whole turn
-    # (plan, reads, synthesis, support check, objective update) fits the chat timeout.
-    budget = min(float(getattr(settings, "research_loop_seconds", 75) or 75), max(30.0, float(getattr(settings, "chat_execution_timeout_seconds", 120) or 120) - 60.0))
+    verdicts: list[dict] | None = []
+    page_cache: dict[str, dict] = {}
+    check_cache: dict[tuple, dict] = {}
+    inspect_seconds = 0.0
+    retrieval_count = 0
+    retrieval_budget = min(float(getattr(settings, "research_loop_seconds", 75) or 75), turn_budget.remaining() - 25.0)
 
-    async def one(capability: str, query: str, tool: str):
-        text = f"{query}\n{notes}" if notes else query
-        streaming.emit("status", text=f"Reading {capability}: {query[:80]}")
-        return await evidence_pipeline._invoke(router, tool, text, chains, contract)
+    async def one(job: DiscoveryCall, tool: str):
+        text = f"{job.query}\n{notes}" if notes else job.query
+        streaming.emit("status", text=f"Reading {job.capability}: {job.facet or job.query[:80]}")
+        options = {"recency_days": job.days, "domains": job.domains} if job.days or job.domains else None
+        return await turn_budget.call("provider", evidence_pipeline._invoke(router, tool, text, chains, contract,
+                                                                             **({"search_options": options} if options else {})), 45, reserve=25)
 
     for round_no in range(MAX_ROUNDS):
         batch = []
-        for capability, query in calls:
-            if len(made) + len(batch) >= MAX_CALLS:
+        for call in calls:
+            if retrieval_count + len(batch) >= MAX_CALLS:
                 break
-            tool, reason = tool_for(capability, contract, enabled_tools)
+            job = call if isinstance(call, DiscoveryCall) else DiscoveryCall(*call)
+            tool, reason = tool_for(job.capability, contract, enabled_tools)
             if tool is None:
-                skipped.append(f"{capability}: {reason}")
-                made.append(f"{capability}: skipped ({reason})")
+                skipped.append(f"{job.capability}: {reason}")
+                made.append(f"{job.capability}: skipped ({reason})")
                 continue
-            batch.append((capability, query, tool))
+            batch.append((job, tool))
         # Independent eligible calls run together (the brief, step 3).
-        results = await asyncio.gather(*(one(c, q, t) for c, q, t in batch), return_exceptions=True)
-        for (capability, query, tool), result in zip(batch, results):
-            made.append(f"{capability} ({tool}): {query}")
+        results = await asyncio.gather(*(one(job, tool) for job, tool in batch), return_exceptions=True)
+        retrieval_count += len(batch)
+        for (job, tool), result in zip(batch, results):
+            made.append(f"{job.capability} ({tool}){f' [{job.facet}]' if job.facet else ''}: {job.query}")
             if isinstance(result, Exception) or result is None or not result.output:
                 continue
-            streaming.emit("card", markdown=result.output, tool=result.tool)
-            parts.append((result.output, {"tool_name_0": result.tool, "tool_args_0": {"request": query}, "observation_0": result.output}))
+            # Search cards are leads until their pages are checked. Emitting
+            # them here shows authoritative-looking prose before the gate.
+            parts.append((result.output, {"tool_name_0": result.tool, "tool_args_0": {"request": job.query, "facet": job.facet,
+                                                                                          "topic": job.topic, "days": job.days, "domains": job.domains},
+                                          "observation_0": result.output}))
             fact_rows.extend(evidence_pipeline._facts_of(result, contract.kind))
-        if len(made) >= MAX_CALLS or round_no == MAX_ROUNDS - 1 or model_calls >= MAX_MODEL_CALLS - 2 or time.monotonic() - started > budget:
+        if parts:
+            # Read the sources before deciding what to search next. The old
+            # order asked the gap model to judge search snippets, so a fluent
+            # but wrong provider summary could prematurely end the research.
+            cards_so_far, _ = composition.combine(parts)
+            t_inspect = time.monotonic()
+            inspected, inspect_calls = await _inspect_candidates(
+                question, (getattr(plan, "constraints", "") or "").strip(),
+                cards_so_far, runtime, router, page_cache=page_cache,
+                followup_reads=0 if round_no < MAX_ROUNDS - 1 else 4,
+                budget=turn_budget, check_cache=check_cache)
+            # A later inspection can exhaust the budget after earlier pages
+            # were checked. Keep the last accepted evidence state.
+            if inspected is not None:
+                verdicts = inspected
+            elif not verdicts:
+                verdicts = None
+            inspect_seconds += time.monotonic() - t_inspect
+            made.extend(inspect_calls)
+        if (not parts or verdicts is None or retrieval_count >= MAX_CALLS
+                or round_no == MAX_ROUNDS - 1 or not turn_budget.can_run(30)
+                or time.monotonic() - started > retrieval_budget):
             break
-        cards_so_far, _ = composition.combine(parts) if parts else ("", {})
         try:
-            model_calls += 1
-            review = await asyncio.wait_for(runtime._call_research_loop_lm(_review_program, question=question, required_facts=required or "none stated",
-                                                                       evidence=_compact(cards_so_far) or "nothing yet", calls_made="\n".join(made), catalog=catalog), timeout=60)
+            review = await runtime._call_research_loop_lm(_review_program, question=question, required_facts=required or "none stated",
+                                                                       evidence=_compact(_coverage_brief(verdicts, (getattr(plan, "constraints", "") or "").strip() or question, required)),
+                                                                       calls_made="\n".join(made), catalog=catalog)
         except Exception:
             logger.info("research loop: gap review failed; stopping", exc_info=True)
             break
         nxt = (getattr(review, "next_call", "") or "stop").strip()
         calls = [c for c in _parse_calls(nxt)[:1] if c[1] not in {m.split(": ", 1)[-1] for m in made}]
+        # The second axis comes from observed coverage, rather than another
+        # paraphrase of a search card. When no condition has an accepted
+        # passage, search broadly for the mechanism; when some conditions are
+        # proved, seek the missing condition across first-party publications.
+        if calls and "site:" not in request.lower():
+            coverage = research_ledger.CoverageLedger.from_verdicts((getattr(plan, "constraints", "") or question), required, verdicts)
+            supported = [row for row in coverage.records if row.status == "supported"]
+            if supported and "site:" in calls[0][1].lower():
+                candidate = max(verdicts, key=lambda v: len(v.get("condition_evidence") or []))
+                calls = [("web_discovery", f"{candidate['name']} {_missing_conditions((getattr(plan, 'constraints', '') or question), candidate)} official original documentation blog historical")]
+            elif not supported:
+                unproved = [v.get("name") or "" for v in verdicts]
+                query = calls[0][1]
+                if "site:" in query.lower() or any(name and name.casefold() in query.casefold() for name in unproved):
+                    query = _condition_discovery_query((getattr(plan, "constraints", "") or question))
+                    calls = [("web_discovery", query)]
+            if supported and any(v.get("verdict") != "qualifies" for v in verdicts):
+                # A partially supported candidate deserves a targeted read,
+                # but it must not monopolize discovery of other candidates.
+                # Run the independent condition query alongside it.
+                broad = _condition_discovery_query((getattr(plan, "constraints", "") or question))
+                prior = initial_queries | {q for _, q in _parse_calls(getattr(plan, "queries", ""))}
+                if broad not in prior and broad not in {q for _, q in calls}:
+                    calls = [("web_discovery", broad)] + calls
+        elif not calls and round_no == 0 and verdicts and "site:" not in request.lower():
+            coverage = research_ledger.CoverageLedger.from_verdicts((getattr(plan, "constraints", "") or question), required, verdicts)
+            if not any(v.get("verdict") == "qualifies" for v in verdicts) and _tools_of("web_discovery"):
+                alternate = _condition_discovery_query((getattr(plan, "constraints", "") or question))
+                if alternate not in initial_queries | {query for _, query in _parse_calls(getattr(plan, "queries", ""))}:
+                    calls = [("web_discovery", alternate)]
         if not calls:
+            # A stop decision should not strand a partially checked named
+            # candidate when one cited or first-party page may close the
+            # specific gap. Spend a small final read allowance, then answer
+            # from that verdict; do not return to a broad search.
+            if (verdicts and not any(v.get("verdict") == "qualifies" for v in verdicts)
+                    and turn_budget.can_run(30)):
+                t_inspect = time.monotonic()
+                inspected, inspect_calls = await _inspect_candidates(
+                    question, (getattr(plan, "constraints", "") or "").strip(),
+                    cards_so_far, runtime, router, page_cache=page_cache,
+                    followup_reads=4, budget=turn_budget, check_cache=check_cache)
+                if inspected is not None:
+                    verdicts = inspected
+                elif not verdicts:
+                    verdicts = None
+                inspect_seconds += time.monotonic() - t_inspect
+                made.extend(inspect_calls)
             break
-    timings["retrieval"] = round(time.monotonic() - started - timings.get("plan", 0), 1)
+    timings["retrieval"] = round(max(0.0, time.monotonic() - started - inspect_seconds), 1)
+    timings["inspect"] = round(inspect_seconds, 1)
     if not parts:
         gate = fact_gate.check(contract, [], scope_satisfied=True)
         text = "The sources for this returned nothing usable right now. " + gate.gap_sentence(contract) + ("\n\n" + "; ".join(skipped) if skipped else "")
@@ -332,15 +983,16 @@ async def run(state: dict, request: str, contract: contracts.QuestionContract, r
     gate = fact_gate.check(contract, fact_rows, scope_satisfied=True)
     note = evidence_pipeline._contract_note(contract, gate, fact_rows, None)
     constraints = (getattr(plan, "constraints", "") or "").strip()
+    ledger = research_ledger.CoverageLedger.from_verdicts(constraints if constraints.lower() != "none" else question, required, verdicts)
+    if _news_headline(contract, request):
+        note += ("\nFor this news question, first explain the original event and its status from an inspected source page. "
+                 "Then describe any observed market response with its timestamp and source. "
+                 "A market move around an event does not establish causation; label proposed mechanisms and implications as interpretation. "
+                 "If the market response was not verified, say so rather than presenting an impact or trading conclusion as fact.")
     if constraints and constraints.lower() != "none":
         note += f"\nConstraints the user stated, to apply strictly: {constraints}"
-    # Source inspection (the brief, step 4; the user's increment 1): the
-    # candidates the cards name are checked against the conditions from
-    # their cited pages, not from the search snippet that mentioned them.
-    t_inspect = time.monotonic()
-    verdicts, inspect_calls = await _inspect_candidates(question, constraints, cards, runtime, router)
-    made.extend(inspect_calls)                          # every page read and follow-up search counts as a provider call
-    timings["inspect"] = round(time.monotonic() - t_inspect, 1)
+    # Inspection already happened at the end of each retrieval round; use
+    # that same evidence state for synthesis and the user-visible trail.
     if verdicts is None:
         # The candidate check could not run: nothing named can be verified, so no written summary (review of 0b360f9e).
         timings["total"] = round(time.monotonic() - started, 1)
@@ -348,15 +1000,69 @@ async def run(state: dict, request: str, contract: contracts.QuestionContract, r
         trajectory = dict(trajectory or {})
         trajectory["research_loop"] = {"subject": getattr(plan, "subject", ""), "question": question, "constraints": constraints, "required_facts": required,
                                        "calls": made, "skipped": skipped, "verdicts": [], "timings": timings, "withheld": "candidate check failed"}
+        gate.ok = False
         return {"answer": withheld, "trajectory": trajectory, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "research_loop"}
     if verdicts:
         note += "\nCandidates checked against the conditions from their cited pages (state these verdicts, never upgrade one): " + "; ".join(
             f"{v['name']}: {v['verdict']}" + (f" ({v['conditions_failed']})" if v["verdict"] == "related_but_different" and v.get("conditions_failed") not in (None, "", "none") else "")
             for v in verdicts)
+    verified = [v for v in verdicts if v["verdict"] in ("qualifies", "related_but_different")
+                and v.get("provenance") == "page" and v.get("quote") not in (None, "", "none")
+                and (v["verdict"] != "qualifies" or ledger.complete(v["name"]))]
+    if not verified:
+        # Search prose is a discovery lead. Without one directly inspected
+        # passage the research tier cannot turn it into an asserted answer.
+        timings["total"] = round(time.monotonic() - started, 1)
+        partial = []
+        for v in verdicts:
+            if v.get("provenance") == "page" and v.get("quote") not in (None, "", "none"):
+                gap = v.get("conditions_failed") or ""
+                detail = f"; still unverified: {gap}" if gap.lower() != "none" else "; the full requested relationship remains unverified"
+                partial.append(f"- **{v['name']}**: [inspected page]({v['url']}) says “{v['quote']}”{detail}.")
+        reason = "no cited page passage established every condition needed for a match"
+        preface = "**No fully verified match yet.** The inspected pages support only these narrower observations:\n\n" + "\n".join(partial) + "\n\n" if partial else ""
+        withheld = _with_trail(preface + _withheld(reason, cards), made, skipped, verdicts, timings)
+        trajectory = dict(trajectory or {})
+        trajectory["research_loop"] = {"subject": getattr(plan, "subject", ""), "question": question, "constraints": constraints, "required_facts": required,
+                                       "calls": made, "skipped": skipped, "verdicts": verdicts, "coverage": ledger.as_dict(),
+                                       "budget": turn_budget.record(), "timings": timings, "withheld": "no verified page passage"}
+        gate.ok = False
+        return {"answer": withheld, "trajectory": trajectory, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "research_loop"}
+    verified_lines = []
+    for v in verified:
+        passages = v.get("passages") or [{"url": v["url"], "quote": _clean_quote(v["quote"]), "fetched_at": v.get("fetched_at", "")}]
+        for passage in passages:
+            verified_lines.append(f"- **{v['name']}** — {v['verdict']} · [page]({passage['url']}) · "
+                                  f"fetched {passage.get('fetched_at') or 'time unknown'}: “{passage['quote']}”")
+    verified_cards = "# Reviewed source-page passages\n\n" + "\n".join(verified_lines)
+    note += "\nWrite factual claims from the reviewed page passages below, not from the unverified search snippets. An unverified candidate may be mentioned only as not established."
+    if not turn_budget.can_run(35):
+        turn_budget.exhausted = turn_budget.exhausted or "insufficient time for audited synthesis"
+        final = fact_gate.check(contract, fact_rows, scope_satisfied=True)
+        final.ok = False
+        answer = _with_trail(_verified_partial(ledger, verdicts), made, skipped, verdicts, timings)
+        trajectory = dict(trajectory or {})
+        trajectory["research_loop"] = {"question": question, "calls": made, "verdicts": verdicts,
+                                       "coverage": ledger.as_dict(), "budget": turn_budget.record(), "timings": timings}
+        return {"answer": answer, "trajectory": trajectory, "contract": contract.model_dump(), "gate": final.model_dump(), "pipeline": "research_loop"}
     t_synth = time.monotonic()
-    synthesized = await composition.synthesize(f"{request}\n{note}", cards, trajectory, research=True)
+    try:
+        with streaming.muted("delta"):
+            synthesized = await turn_budget.call("synthesis", composition.synthesize(f"{request}\n{note}", verified_cards, trajectory, research=True), 65, reserve=12)
+    except TimeoutError:
+        final = fact_gate.check(contract, fact_rows, scope_satisfied=True)
+        final.ok = False
+        trajectory = dict(trajectory or {})
+        trajectory["research_loop"] = {"question": question, "calls": made, "verdicts": verdicts,
+                                       "coverage": ledger.as_dict(), "budget": turn_budget.record()}
+        return {"answer": _with_trail(_verified_partial(ledger, verdicts), made, skipped, verdicts, timings),
+                "trajectory": trajectory, "contract": contract.model_dump(), "gate": final.model_dump(), "pipeline": "research_loop"}
     timings["synthesis"] = round(time.monotonic() - t_synth, 1)
-    final = fact_gate.check(contract, fact_rows, synthesized, scope_satisfied=True, evidence_text=cards)
+    final = fact_gate.check(contract, fact_rows, synthesized, scope_satisfied=True, evidence_text=verified_cards)
+    # Source snippets and their parsed facts are not evidence for a figure in
+    # the written answer. Only the inspected passage may support that figure.
+    final.unsupported = fact_gate.unsupported_figures(synthesized.split("\n\n---\n\n", 1)[0], [], evidence_text=verified_cards)
+    final.ok = final.ok and not final.unsupported
     if final.unsupported or final.contradictions:
         # Repair once (the brief, step 4), then withhold what still fails.
         redo = f"{request}\n{note}\n"
@@ -364,28 +1070,59 @@ async def run(state: dict, request: str, contract: contracts.QuestionContract, r
             redo += f"Do not state these figures, no fact card carries them: {', '.join(final.unsupported)}. State only figures that appear in the cards, or describe without the number. "
         if final.contradictions:
             redo += f"These comparisons contradict their own numbers, rewrite them correctly or drop them: {'; '.join(final.contradictions)}."
-        rewritten = await composition.synthesize(redo, cards, trajectory, research=True)
+        with streaming.muted("delta"):
+            rewritten = await turn_budget.call("synthesis", composition.synthesize(redo, verified_cards, trajectory, research=True), 45) if turn_budget.can_run(12) else ""
         if rewritten:
-            again = fact_gate.check(contract, fact_rows, rewritten, scope_satisfied=True, evidence_text=cards)
+            again = fact_gate.check(contract, fact_rows, rewritten, scope_satisfied=True, evidence_text=verified_cards)
+            again.unsupported = fact_gate.unsupported_figures(rewritten.split("\n\n---\n\n", 1)[0], [], evidence_text=verified_cards)
+            again.ok = again.ok and not again.unsupported
             if len(again.unsupported) + len(again.contradictions) < len(final.unsupported) + len(final.contradictions):
                 synthesized, final = rewritten, again
     if final.unsupported or final.contradictions:
         what = ("figures no source card carries (" + ", ".join(final.unsupported[:6]) + ")") if final.unsupported else ("a comparison the numbers deny (" + "; ".join(final.contradictions[:3]) + ")")
-        synthesized = (f"**I withheld the written summary: it stated {what}. The cards below are the evidence as fetched; ask for one figure and I will read it from a card.**\n\n---\n\n{cards}")
+        synthesized = _withheld(f"it stated {what}", verified_cards)
     else:
         t_support = time.monotonic()
-        synthesized = await _verify_examples(question, synthesized, cards, request, note, trajectory, runtime, verdicts)
+        if not turn_budget.can_run(20):
+            turn_budget.exhausted = turn_budget.exhausted or "insufficient time for claim audit"
+            synthesized = _verified_partial(ledger, verdicts)
+            final.ok = False
+        else:
+            synthesized = await _verify_examples(question, synthesized, verified_cards, request, note, trajectory, runtime, verdicts)
+            if not turn_budget.can_run(12):
+                synthesized = _verified_partial(ledger, verdicts)
+                final.ok = False
+        if not synthesized.startswith(("**I withheld", "**Checked source passages so far")):
+            unsupported = await _unsupported_claims(question, synthesized, verified_cards, runtime)
+            if unsupported is None:
+                synthesized = _withheld("the claim-to-passage check could not run", verified_cards)
+            elif unsupported:
+                redo = (f"{request}\n{note}\nThe following claims are not established by the reviewed page passages: "
+                        + "; ".join(unsupported[:8])
+                        + ". Remove them or explicitly say they are not established. Write only what the quoted passages prove.")
+                with streaming.muted("delta"):
+                    rewritten = await turn_budget.call("synthesis", composition.synthesize(redo, verified_cards, trajectory, research=True), 45) if turn_budget.can_run(12) else ""
+                again = await _unsupported_claims(question, rewritten, verified_cards, runtime) if rewritten else None
+                figures = fact_gate.unsupported_figures(rewritten.split("\n\n---\n\n", 1)[0], [], evidence_text=verified_cards) if rewritten else []
+                synthesized = rewritten if again == [] and not figures else _withheld("the summary still asserted claims its reviewed passages do not establish", verified_cards)
         timings["support"] = round(time.monotonic() - t_support, 1)
+    # Discovery cards are retained in the trajectory for review, but their
+    # provider-written prose must not appear below a page-checked answer or
+    # abstention. It can contradict the verdict and reads like a second,
+    # authoritative answer in the chat UI.
+    if synthesized.startswith("**I withheld"):
+        final.ok = False
     timings["total"] = round(time.monotonic() - started, 1)
     synthesized = _with_trail(synthesized, made, skipped, verdicts, timings)
     trajectory = dict(trajectory or {})
     trajectory["research_loop"] = {"subject": getattr(plan, "subject", ""), "question": question, "constraints": constraints, "required_facts": required,
-                                   "calls": made, "skipped": skipped, "verdicts": verdicts, "timings": timings}
+                                   "calls": made, "skipped": skipped, "verdicts": verdicts, "coverage": ledger.as_dict(),
+                                   "budget": turn_budget.record(), "timings": timings}
     logger.info("research loop record: %s", trajectory["research_loop"])
     return {"answer": synthesized, "trajectory": trajectory, "contract": contract.model_dump(), "gate": final.model_dump(), "pipeline": "research_loop"}
 
 
-_LABELLED = re.compile(r"not established|different design|does not qualify|not a match|not verified|not confirmed|related but|no first-party|cannot be confirmed"
+_LABELLED = re.compile(r"not[_ ]established|different[_ ]design|does not qualify|not a match|not verified|not confirmed|related[_ ]but|no first-party|cannot be confirmed"
                        r"|not documented|unverified|receipt(?:s| token| design)?|wrapped|non-transferable|external collateral|does not meet|fails the|not the same mechanism|differs", re.I)
 
 
@@ -410,6 +1147,22 @@ def unlabelled_names(summary: str, verdicts: list[dict]) -> list[str]:
     return out
 
 
+def _new_named_examples(groups: tuple[str, str], known: set[str]) -> list[dict]:
+    """The example checker may return unsupported claims in its name fields.
+    Leave those to the claim audit; only compact names need an entity gate."""
+    out = []
+    for group in groups:
+        for raw in group.split(","):
+            name = raw.strip()
+            words = name.split()
+            first = words[0] if words else ""
+            if (name and name.casefold() not in known and 1 <= len(words) <= 4
+                    and (first[0].isupper() or bool(re.match(r"^[a-z][A-Z]", first)))
+                    and not any(char in name for char in ":;?!")):
+                out.append({"name": name, "verdict": "not_established"})
+    return out
+
+
 async def _verify_examples(question: str, synthesized: str, cards: str, request: str, note: str, trajectory: dict, runtime, verdicts: list[dict] | None = None) -> str:
     """The central promise: a name the cited evidence does not establish never
     stands as a claim. The page verdicts gate first, deterministically: a
@@ -424,24 +1177,48 @@ async def _verify_examples(question: str, synthesized: str, cards: str, request:
     if checked is None:
         return _withheld("the example check could not run, so no named example is verified", cards)
     related, missing = checked
-    if gated:
-        missing = ", ".join(x for x in [missing, *gated] if x)
-    if not related and not missing:
+    # The support model classifies exclusions as related/not established even
+    # when the prose has already labelled them honestly. That classification
+    # is not a failure; only an unlabelled use as a positive example is.
+    known = {v.get("name", "").casefold() for v in verdicts}
+    extra = _new_named_examples((related, missing), known)
+    gated.extend(unlabelled_names(synthesized, extra))
+    if not gated:
         return synthesized
     redo = (f"{request}\n{note}\nThe cited sources do not establish these names as examples of the mechanism -- "
-            + (f"related but a different design: {related}; " if related else "") + (f"not established: {missing}; " if missing else "")
+            + f"unlabelled names: {', '.join(gated)}; "
             + "state each of them only as such, or leave it out; never present it as a match.")
-    rewritten = await composition.synthesize(redo, cards, trajectory, research=True)
-    if rewritten and not unlabelled_names(rewritten, verdicts):
+    with streaming.muted("delta"):
+        rewritten = await composition.synthesize(redo, cards, trajectory, research=True)
+    if rewritten and not unlabelled_names(rewritten, verdicts + extra):
         again = await _support_check(question, rewritten, cards, runtime, verdicts)
-        if again is not None and not again[0] and not again[1]:
-            return rewritten
-    return _withheld("it presented as examples names the cited sources do not establish (" + ", ".join(x for x in (related, missing) if x) + ")", cards)
+        if again is not None:
+            fresh = _new_named_examples(again, set())
+            if not unlabelled_names(rewritten, verdicts + fresh):
+                return rewritten
+    return _withheld("it presented as examples names the cited sources do not establish (" + ", ".join(gated) + ")", cards)
 
 
 def _withheld(reason: str, cards: str) -> str:
-    return (f"**I withheld the written summary: {reason}. The cards below are the evidence as fetched; the research trail shows what was read "
-            f"and how each candidate fared.**\n\n---\n\n{cards}")
+    reviewed = []
+    if cards.startswith("# Reviewed source-page passages"):
+        reviewed = [line for line in cards.splitlines() if line.startswith("- **")][:4]
+    observed = ("\n\n**Directly checked passages:**\n\n" + "\n".join(reviewed)
+                + "\n\nThese passages establish only what they say; the full requested conclusion remains unverified.") if reviewed else ""
+    return (f"**I withheld the written summary: {reason}. The research trail shows what was checked "
+            f"and how each candidate fared.**{observed}")
+
+
+async def _unsupported_claims(question: str, answer: str, cards: str, runtime) -> list[str] | None:
+    summary = answer.split("\n\n---\n\n", 1)[0]
+    try:
+        result = await asyncio.wait_for(runtime._call_research_loop_lm(
+            _claim_support_program, question=question, summary=summary[:6500], evidence=_compact(cards, 14000)), timeout=45)
+    except Exception:
+        logger.info("research loop: claim support check failed", exc_info=True)
+        return None
+    raw = (getattr(result, "unsupported_claims", "") or "none").strip()
+    return [] if raw.lower() == "none" else [line.strip().lstrip("-* ") for line in raw.splitlines() if line.strip()]
 
 
 async def _support_check(question: str, synthesized: str, cards: str, runtime, verdicts: list[dict] | None = None) -> tuple[str, str] | None:
@@ -484,6 +1261,132 @@ async def _label_examples(question: str, synthesized: str, cards: str, runtime) 
 
 
 _URL = re.compile(r"https?://[^\s)\]]+")
+_SOURCE_LINE = re.compile(r"(?m)^\s*\[(\d{1,3})\]\s+\[([^\]]{3,160})\]\((https?://[^)\s]+)\)")
+
+
+def _cited_source_leads(cards: str) -> list[tuple[str, str]]:
+    """Cited pages to inspect when the model supplies no candidate names.
+
+    Only numbered URLs present in the actual evidence are eligible. A search
+    card's unnumbered URL or a model-invented URL never becomes a page read.
+    """
+    leads: list[tuple[str, str]] = []
+    for card in cards.split("\n\n---\n\n"):
+        section = re.split(r"(?m)^\s*Sources:\s*$", card, maxsplit=1)
+        if len(section) != 2:
+            continue
+        body, sources = section
+        cited = {int(n) for n in re.findall(r"\[(\d{1,3})\]", body)}
+        for number, title, url in _SOURCE_LINE.findall(sources):
+            if int(number) in cited and url not in {u for _, u in leads}:
+                leads.append((title.strip(), url))
+    return leads
+
+
+def _cited_source_context(cards: str) -> dict[str, str]:
+    """Nearby search prose guides page selection; only page reads prove facts."""
+    context: dict[str, str] = {}
+    for card in cards.split("\n\n---\n\n"):
+        section = re.split(r"(?m)^\s*Sources:\s*$", card, maxsplit=1)
+        if len(section) != 2:
+            continue
+        body, sources = section
+        for number, _, url in _SOURCE_LINE.findall(sources):
+            marker = re.search(r"\[" + re.escape(number) + r"\]", body)
+            if marker:
+                snippet = re.sub(r"\s+", " ", body[max(0, marker.start() - 220):marker.end() + 80]).strip()
+                if len(snippet) > len(context.get(url, "")):
+                    context[url] = snippet
+    return context
+
+
+def _verbatim_passage(quote: str, page: str) -> bool:
+    """A verdict cannot be verified by an invented or paraphrased quotation."""
+    compact = lambda value: re.sub(r"\s+", " ", value).strip().casefold()
+    passage = compact(quote.strip().strip('"\'“”‘’'))
+    return len(passage) >= 20 and "..." not in passage and passage in compact(page)
+
+
+def _clean_quote(quote: str) -> str:
+    return re.sub(r"^\s*(?:[-*]|\d+\.)\s+", "", quote).strip().strip('"\'“”‘’')
+
+
+def _validated_condition_map(raw: str, conditions: str, pages: list[dict]) -> list[dict] | None:
+    """Validate every supplied condition-to-page passage, including partial maps."""
+    try:
+        items = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(items, list):
+        return None
+    needed = len([part for part in conditions.split(";") if part.strip()]) or 1
+    seen: set[int] = set()
+    passages = []
+    by_url = {page["url"]: page for page in pages}
+    for item in items:
+        if not isinstance(item, dict) or type(item.get("condition")) is not int:
+            return None
+        number, url, quote = item["condition"], item.get("url"), _clean_quote(str(item.get("quote") or ""))
+        page = by_url.get(url)
+        if number < 1 or number > needed or number in seen or not page or not _verbatim_passage(quote, page["text"][:7000]):
+            return None
+        seen.add(number)
+        passages.append({"condition": number, "url": url, "quote": quote, "fetched_at": page.get("fetched_at", "")})
+    return passages
+
+
+def _mapped_passages(raw: str, conditions: str, pages: list[dict]) -> list[dict] | None:
+    """A qualifying verdict needs a validated passage for every condition."""
+    passages = _validated_condition_map(raw, conditions, pages)
+    needed = len([part for part in conditions.split(";") if part.strip()]) or 1
+    return passages if passages is not None and {p["condition"] for p in passages} == set(range(1, needed + 1)) else None
+
+
+def _missing_conditions(conditions: str, verdict: dict) -> str:
+    """Aim the next read at an unmet fact, not the whole original question."""
+    parts = [part.strip() for part in conditions.split(";") if part.strip()]
+    covered = set(verdict.get("supported_condition_indices") or [])
+    if covered:
+        missing = [part for index, part in enumerate(parts, 1) if index not in covered]
+        if missing:
+            return "; ".join(missing)
+    failed = (verdict.get("conditions_failed") or "").strip()
+    if failed and failed.lower() != "none":
+        return failed
+    met = {part.strip().casefold() for part in (verdict.get("conditions_met") or "").split(";") if part.strip()}
+    missing = [part.strip() for part in conditions.split(";") if part.strip() and part.strip().casefold() not in met]
+    return "; ".join(missing) or conditions
+
+
+def _source_domain(url: str) -> str:
+    host = (urlsplit(url).hostname or "").lower().removeprefix("www.")
+    return ".".join(host.split(".")[-2:])
+
+
+def _candidate_first_party_url(name: str, cited: list[tuple[str, str]]) -> str | None:
+    """Prefer a candidate's own cited page over an aggregator's cited page."""
+    key = re.sub(r"[^a-z0-9]", "", re.split(r"\s+[—–-]\s+|\s*/\s*", name, maxsplit=1)[0].lower())[:12]
+    if len(key) < 4:
+        return None
+    return next((url for _, url in cited if key in (_source_domain(url).split(".")[0]).replace("-", "")), None)
+
+
+def _group_focused_candidates(question: str, candidates: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Merge claim rows about the same protocol named in the question."""
+    question_key = re.sub(r"[^a-z0-9]", "", question.lower())
+    grouped: list[tuple[str, str]] = []
+    focused_domains: set[str] = set()
+    for name, url in candidates:
+        domain = _source_domain(url)
+        root = domain.split(".")[0]
+        if len(root) >= 4 and root in question_key:
+            if domain in focused_domains:
+                continue
+            focused_domains.add(domain)
+            grouped.append((root.capitalize(), url))
+        else:
+            grouped.append((name, url))
+    return grouped
 
 
 def read_page(url: str) -> dict:
@@ -511,13 +1414,19 @@ def read_page(url: str) -> dict:
     return {"url": url, "title": "", "text": "", "provenance": "unreadable", "fetched_at": fetched_at}
 
 
-async def _inspect_candidates(question: str, constraints: str, cards: str, runtime, router) -> tuple[list[dict] | None, list[str]]:
+async def _inspect_candidates(question: str, constraints: str, cards: str, runtime, router,
+                              page_cache: dict[str, dict] | None = None,
+                              followup_reads: int | None = None,
+                              budget: TurnBudget | None = None,
+                              check_cache: dict[tuple, dict] | None = None) -> tuple[list[dict] | None, list[str]]:
     """Read the cited page of each candidate the cards name and check it
     against the conditions; bounded by `research_loop_inspect_pages`.
     (verdicts, the calls made): verdicts is None when the candidate listing
     could not run, which withholds the answer; [] when the cards discuss no
     candidate."""
     calls: list[str] = []
+    page_cache = page_cache if page_cache is not None else {}
+    check_cache = check_cache if check_cache is not None else {}
     limit = int(getattr(settings, "research_loop_inspect_pages", 4) or 0)
     if limit <= 0 or not cards.strip():
         return [], calls
@@ -546,14 +1455,29 @@ async def _inspect_candidates(question: str, constraints: str, cards: str, runti
             if chosen:
                 logger.info("research loop: candidate URL not in the cited sources, looked up instead: %s", chosen[:120])
             named_only.append(name)                     # no cited URL for it: its page comes from a first-party search's results
-    initial_cap = max(1, limit - 2)                     # room for follow-up reads inside the same page budget
-    listed_all = [(n, u) for n, u in candidates] + [(n, "") for n in named_only]
+    cited_leads = _cited_source_leads(cards)
+    cited_context = _cited_source_context(cards)
+    candidates = [(name, _candidate_first_party_url(name, cited_leads) or url) for name, url in candidates]
+    # Do this before and after named-only URLs are resolved: several claim
+    # rows can otherwise spend separate searches and page slots on one site.
+    candidates = _group_focused_candidates(question, candidates)
+    initial_cap = min((3 if followup_reads else 2) if budget else 4, max(1, limit - 2))
+    if not candidates and not named_only:
+        candidates = _cited_source_leads(cards)
+    all_cited = candidates[:]
     candidates = candidates[:initial_cap]
-    for name in named_only[: max(0, initial_cap - len(candidates))]:
-        url = await asyncio.to_thread(first_party_url, name, conditions)
+    attempted_named = named_only[: max(0, initial_cap - len(candidates))]
+    for name in attempted_named:
+        try:
+            url = await (budget.call("provider", asyncio.to_thread(first_party_url, name, conditions), 30, reserve=25)
+                         if budget else asyncio.to_thread(first_party_url, name, conditions))
+        except TimeoutError:
+            url = None
         calls.append(f"first_party_search (perplexity_web_search): {name}")
         if url:
             candidates.append((name, url))
+    candidates = _group_focused_candidates(question, candidates)
+    listed_all = _group_focused_candidates(question, all_cited + candidates) + [(n, "") for n in named_only[len(attempted_named):]]
     # A candidate the budget leaves unread is not established, explicitly:
     # the gate then covers a claim about it (review of f603a871).
     inspected_names = {n for n, _ in candidates}
@@ -565,71 +1489,206 @@ async def _inspect_candidates(question: str, constraints: str, cards: str, runti
         return uninspected, calls
     streaming.emit("status", text=f"Reading {len(candidates)} cited page{'s' if len(candidates) != 1 else ''} to check the candidates")
 
-    async def check(name: str, url: str) -> dict:
+    async def check(name: str, url: str, prior: dict | None = None) -> dict:
+        cache_key = (name, url, tuple(p.get("url") for p in (prior.get("_pages", []) if prior else [])))
+        if cache_key in check_cache:
+            return check_cache[cache_key].copy()
         base = {"name": name, "url": url, "conditions_met": "none", "conditions_failed": "none", "quote": "none"}
-        try:
-            page = await asyncio.wait_for(asyncio.to_thread(read_page, url), timeout=40)
-        except Exception as exc:
-            page = {"url": url, "title": "", "text": "", "provenance": "unreadable", "fetched_at": "", "note": type(exc).__name__}
-        base.update(provenance=page["provenance"], title=page.get("title", ""), fetched_at=page.get("fetched_at", ""))
-        calls.append(f"page_read ({'url_reader' if page['provenance'] == 'page' else 'perplexity_fetch_url' if page['provenance'] == 'reader' else 'unreadable'}): {url}")
-        if page["provenance"] == "unreadable" or not page.get("text"):
+        cached = url in page_cache
+        if cached:
+            page = page_cache[url]
+        else:
+            try:
+                page = await (budget.call("page", asyncio.to_thread(read_page, url), 40, reserve=20)
+                              if budget else asyncio.wait_for(asyncio.to_thread(read_page, url), timeout=40))
+            except Exception as exc:
+                page = {"url": url, "title": "", "text": "", "provenance": "unreadable", "fetched_at": "", "note": type(exc).__name__}
+            page_cache[url] = page
+        pages = [*(prior.get("_pages", []) if prior else []), page]
+        direct = [p for p in pages if p.get("provenance") == "page" and p.get("text")]
+        base.update(provenance=page["provenance"], title=page.get("title", ""), fetched_at=page.get("fetched_at", ""), _pages=pages)
+        if not cached:
+            calls.append(f"page_read ({'url_reader' if page['provenance'] == 'page' else 'perplexity_fetch_url' if page['provenance'] == 'reader' else 'unreadable'}): {url}")
+        if not direct:
             return {**base, "verdict": "not_established", "note": page.get("note") or "page unreadable: a search lead, not verified evidence"}
+        # A mechanism may be documented across complementary first-party
+        # pages. Keep the source boundary explicit; never promote reader text.
+        page_text = "\n\n".join(f"Source: {p['url']}\n{p['text'][:7000]}" for p in direct)
         try:
-            result = await asyncio.wait_for(runtime._call_research_loop_lm(_check_program, question=question, conditions=conditions, candidate=name, page=page["text"][:6000]), timeout=45)
+            # Keep every fetched page in the check. The former 22k cap cut
+            # off the fourth source just when a later page supplied the
+            # missing transfer condition; the answer then withheld despite
+            # having read the decisive first-party document.
+            result = await asyncio.wait_for(runtime._call_research_loop_lm(_check_program, question=question, conditions=conditions, candidate=name, page=page_text[:85000]), timeout=45)
         except Exception as exc:
             return {**base, "verdict": "not_established", "note": f"check failed ({type(exc).__name__})"}
         verdict = (getattr(result, "verdict", "") or "not_established").strip().strip('"').lower().replace(" ", "_")
         if verdict not in ("qualifies", "related_but_different", "not_established"):
             verdict = "not_established"
-        return {**base, "verdict": verdict, "conditions_met": (getattr(result, "conditions_met", "") or "none").strip(),
-                "conditions_failed": (getattr(result, "conditions_failed", "") or "none").strip(), "quote": (getattr(result, "quote", "") or "none").strip()}
+        quote = _clean_quote((getattr(result, "quote", "") or "none"))
+        raw_passages = [quote, *((getattr(result, "supporting_passages", "") or "").splitlines())]
+        passages = []
+        for raw in raw_passages:
+            clean = _clean_quote(raw)
+            if not clean or clean.lower() == "none":
+                continue
+            source = next((p for p in direct if _verbatim_passage(clean, p["text"][:7000])), None)
+            if source and clean not in {item["quote"] for item in passages}:
+                passages.append({"url": source["url"], "quote": clean, "fetched_at": source.get("fetched_at", "")})
+        raw_map = getattr(result, "evidence_map", None)
+        validated = _validated_condition_map(raw_map, conditions, direct) if raw_map is not None else None
+        if validated is not None:
+            base["supported_condition_indices"] = [item["condition"] for item in validated]
+            base["condition_evidence"] = validated
+        mapped = _mapped_passages(raw_map, conditions, direct) if raw_map is not None else None
+        if verdict == "qualifies" and raw_map is not None and mapped is None:
+            return {**base, "verdict": "not_established",
+                    "conditions_met": (getattr(result, "conditions_met", "") or "none").strip(),
+                    "conditions_failed": (getattr(result, "conditions_failed", "") or "none").strip(),
+                    "quote": quote, "passages": passages,
+                    "note": "not every qualifying condition has a validated page passage"}
+        if mapped:
+            passages = list({(item["url"], item["quote"]): item for item in mapped}.values())
+            quote = passages[0]["quote"]
+        if verdict == "qualifies" and mapped:
+            try:
+                audit = await asyncio.wait_for(runtime._call_research_loop_lm(
+                    _condition_audit_program, conditions=conditions,
+                    evidence_map=json.dumps(mapped, ensure_ascii=False)), timeout=45)
+                raw_unsupported = (getattr(audit, "unsupported_conditions", "") or "").strip().lower()
+                if raw_unsupported == "none":
+                    unsupported_indices: list[int] = []
+                else:
+                    tokens = [part.strip() for part in raw_unsupported.split(",")]
+                    if not tokens or any(not token.isdigit() for token in tokens):
+                        raise ValueError("invalid condition audit")
+                    unsupported_indices = [int(token) for token in tokens]
+                    if any(index < 1 or index > len(mapped) for index in unsupported_indices):
+                        raise ValueError("invalid condition index")
+            except Exception:
+                unsupported_indices = [item["condition"] for item in mapped]
+            if unsupported_indices:
+                parts = [part.strip() for part in conditions.split(";") if part.strip()]
+                return {**base, "verdict": "not_established", "conditions_met": "none",
+                        "conditions_failed": "; ".join(parts[index - 1] for index in unsupported_indices),
+                        "quote": quote, "passages": passages,
+                        "supported_condition_indices": [index for index in base.get("supported_condition_indices", []) if index not in unsupported_indices],
+                        "condition_evidence": [row for row in base.get("condition_evidence", []) if row["condition"] not in unsupported_indices],
+                        "note": "independent quote-to-condition check rejected the claimed support"}
+        quoted_page = next((p for p in direct if _verbatim_passage(quote, p["text"][:7000])), None)
+        if verdict != "not_established" and quoted_page is None:
+            return {**base, "verdict": "not_established", "conditions_met": "none", "conditions_failed": "none", "quote": "none",
+                    "note": "no direct page passage verifies the claimed relationship"}
+        if quoted_page:
+            base.update(url=quoted_page["url"], provenance="page", fetched_at=quoted_page.get("fetched_at", ""))
+        accepted = {**base, "verdict": verdict, "conditions_met": (getattr(result, "conditions_met", "") or "none").strip(),
+                    "conditions_failed": (getattr(result, "conditions_failed", "") or "none").strip(), "quote": quote,
+                    "passages": passages}
+        check_cache[cache_key] = accepted
+        return accepted.copy()
 
     verdicts = list(await asyncio.gather(*(check(n, u) for n, u in candidates)))
     # A candidate whose cited page does not settle the conditions gets one
     # more read: a search for its first-party documentation of the mechanism,
     # then that page is checked (the search's URL was a blog or a deposit
     # guide, not the mechanism page, live 2026-09-24). Bounded by the page limit.
-    unresolved = [v for v in verdicts if v["verdict"] == "not_established"][: max(0, limit - len(candidates))]     # inside the page budget, never beyond it
-    if unresolved:
+    remaining = max(0, limit - len(candidates))
+    if followup_reads is not None:
+        remaining = min(remaining, max(0, followup_reads))
+    attempts: dict[str, int] = {}
+    for _ in range(min(7, limit, remaining)):
+        unresolved = [v for v in verdicts if v["verdict"] == "not_established" and not v.get("_followup_exhausted")]
+        # Sequential reads preserve the chance to complete a relationship
+        # spread across several original pages. Rotate after an attempt so a
+        # weak early candidate cannot consume every remaining read.
+        unresolved = sorted(unresolved, key=lambda v: (-len(v.get("condition_evidence") or []),
+                                                       attempts.get(v["name"], 0),
+                                                       -sum(p.get("provenance") == "page" for p in v.get("_pages", []))))[:1]
+        if not unresolved:
+            break
         streaming.emit("status", text=f"Looking for first-party documentation of {', '.join(v['name'] for v in unresolved)}")
 
-        async def follow_up(v: dict) -> dict:
-            url = await asyncio.to_thread(first_party_url, v["name"], conditions)
-            calls.append(f"first_party_search (perplexity_web_search): {v['name']}")
-            if not url or url == v["url"]:
-                return v
-            again = await check(v["name"], url)
+        async def follow_up(v: dict) -> tuple[dict, bool]:
+            target = _missing_conditions(conditions, v)
+            already = {p["url"] for p in v.get("_pages", [])}
+            # Search already returned dated, cited source URLs. Ask which of
+            # those addresses the missing fact, then verify the choice against
+            # the allowlist before fetching it. Only search again if the cited
+            # set contains no usable page for this candidate.
+            domain = _source_domain(v["url"])
+            leads = [(title, source_url) for title, source_url in _cited_source_leads(cards)
+                     if source_url not in already and domain and _source_domain(source_url) == domain][:20]
+            url = None
+            if leads:
+                try:
+                    picked = await asyncio.wait_for(runtime._call_research_loop_lm(
+                        _followup_program, candidate=v["name"], missing_condition=target,
+                        sources="\n".join(f"{title} | {source_url} | search context: {cited_context.get(source_url, '')}"
+                                          for title, source_url in leads)), timeout=30)
+                    proposed = (getattr(picked, "url", "") or "").strip()
+                    if proposed in {source_url for _, source_url in leads}:
+                        url = proposed
+                        calls.append(f"cited_source_selection: {v['name']} → {url}")
+                except Exception:
+                    logger.info("research loop: cited follow-up selection failed for %s", v["name"], exc_info=True)
+            if not url:
+                try:
+                    url = await (budget.call("provider", asyncio.to_thread(first_party_url, v["name"], target, already), 30, reserve=20)
+                                 if budget else asyncio.to_thread(first_party_url, v["name"], target, already))
+                except TimeoutError:
+                    url = None
+                calls.append(f"first_party_search (perplexity_web_search): {v['name']}")
+            if not url or url in already:
+                return {**v, "_followup_exhausted": True}, False
+            again = await check(v["name"], url, v)
             again["note"] = "first-party page found by a follow-up search" + (f"; the cited page ({v['url']}) did not settle it" if again["verdict"] != "not_established" else "")
-            return again if again["verdict"] != "not_established" else {**v, "note": (v.get("note") or "not settled by the cited page") + f"; a follow-up read of {url} did not settle it either"}
+            result = again if again["verdict"] != "not_established" else {**again, "note": (v.get("note") or "not settled by the cited page") + f"; a follow-up read of {url} did not settle it either"}
+            return result, True
 
         replaced = await asyncio.gather(*(follow_up(v) for v in unresolved))
-        by_name = {r["name"]: r for r in replaced}
+        for v in unresolved:
+            attempts[v["name"]] = attempts.get(v["name"], 0) + 1
+        remaining -= sum(read for _, read in replaced)
+        by_name = {r["name"]: r for r, _ in replaced}
         verdicts = [by_name.get(v["name"], v) for v in verdicts]
-    verdicts = verdicts + uninspected
+    verdicts = [{k: value for k, value in v.items() if k not in ("_pages", "_followup_exhausted")} for v in verdicts] + uninspected
     logger.info("research loop: inspected %d candidates: %s", len(verdicts), [(v["name"], v["verdict"], v.get("provenance")) for v in verdicts])
     return verdicts, calls
 
 
-def first_party_url(name: str, conditions: str) -> str | None:
+def first_party_url(name: str, conditions: str, exclude: set[str] | None = None) -> str | None:
     """The URL of a candidate's own documentation of the mechanism, from one
     discovery search; None when the search returns nothing that looks
-    first-party (the candidate's name in the host, or a docs host)."""
+    first-party. Rank the returned first-party URLs by the unresolved fact,
+    not provider order: a generic staking page often precedes the page about
+    the transfer or redemption condition that prompted this follow-up."""
     from app import perplexity_tools
     if not perplexity_tools.perplexity_available():
         return None
+    exclude = exclude or set()
     try:
         found = perplexity_tools.perplexity_search_with_sources(f"{name} official documentation: {conditions[:300]}")
     except Exception:
         logger.info("first-party search failed for %s", name, exc_info=True)
         return None
     key = re.sub(r"[^a-z0-9]", "", name.lower())[:8]
+    stop = {"first", "party", "official", "source", "sources", "document", "documentation", "protocol",
+            "historical", "current", "condition", "conditions", "token", "tokens", "whether", "which", "against"}
+    wanted = {word[:5] for word in re.findall(r"[a-z]{5,}", conditions.lower()) if word not in stop}
+    ranked: list[tuple[int, int, str]] = []
     for source in found.get("sources") or []:
         url = source.get("url") or ""
         host = re.sub(r"^https?://", "", url).split("/")[0].lower()
-        if key and (key in host.replace("-", "").replace(".", "") or host.startswith("docs.")):
-            return url
-    return None
+        path = urlsplit(url).path
+        if url not in exclude and key and (key in host.replace("-", "").replace(".", "")
+                                       or (host.startswith("docs.") and key in re.sub(r"[^a-z0-9]", "", path.lower()))):
+            title = str(source.get("title") or "")
+            subject = (title + " " + path).lower()
+            terms = {word[:5] for word in re.findall(r"[a-z]{5,}", subject)}
+            score = len(wanted & terms)
+            # More specific paths break ties against a site home page.
+            ranked.append((score, len(urlsplit(url).path.strip("/")), url))
+    return max(ranked)[2] if ranked else None
 
 
 def _with_trail(answer: str, made: list[str], skipped: list[str], verdicts: list[dict], timings: dict | None = None) -> str:

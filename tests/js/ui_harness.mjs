@@ -759,6 +759,15 @@ const CASES = {
       uncovered: { heading: uncovered?.querySelector(".research-work-heading strong").textContent,
         status: uncovered?.querySelector(".research-work-source-status").textContent } };
   },
+  async research_work_counts_every_fetched_page_and_marks_abstention() {
+    const { sandbox } = load();
+    const panel = sandbox.renderResearchWork({ research_progress: {
+      provider_calls: 3, checked_pages: 2,
+      sources: [{ name: "Example", url: "https://docs.example.org/two", verdict: "not_established", provenance: "page" }],
+    } }, "**I withheld the written summary: transferability was not established.", "research");
+    return { heading: panel.querySelector(".research-work-heading strong").textContent,
+      status: panel.querySelector(".research-work-source-status").textContent };
+  },
   // A stream that breaks mid-turn is reported as interrupted, not as an error,
   // and recoverTurn finds the finished answer in the conversation's history.
   async a_broken_stream_is_recovered_from_history() {

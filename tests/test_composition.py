@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app import composition
+from app import composition, streaming
 from app.nodes import research as research_mod
 from app.routing import intent_router
 
@@ -27,6 +27,16 @@ from app.routing import intent_router
 ])
 def test_asks_split_at_sentence_boundaries_and_connectors_only(text, expected):
     assert composition.split_asks(text) == expected
+
+
+def test_research_source_instruction_is_not_dispatched_as_a_second_ask():
+    request = ("Research the historical Synthetix mechanism: did locking its native SNX directly enable "
+               "minting sUSD, and could sUSD trade as a separate transferable token? "
+               "Use first-party pages for each condition, and distinguish historical from current mechanics.")
+    asks, note = composition.plan_asks(request)
+    assert len(asks) == 1
+    assert "Synthetix mechanism" in asks[0]
+    assert "first-party pages" in note
 
 
 def test_combine_merges_cards_and_renumbers_their_trajectories():
@@ -65,6 +75,25 @@ def test_synthesis_failure_still_returns_the_cards(monkeypatch):
     monkeypatch.setattr(composition.runtime, "_call_synthesis_lm", AsyncMock(side_effect=RuntimeError("model down")))
     answer = asyncio.run(composition.synthesize("q", "# Card\nfacts", {}))
     assert answer == "# Card\nfacts"
+
+
+def test_muted_research_synthesis_never_streams_unverified_prose(monkeypatch):
+    monkeypatch.setattr(composition.runtime, "stream_synthesis", AsyncMock(side_effect=AssertionError("must not stream")))
+    monkeypatch.setattr(composition.runtime, "_call_research_lm", AsyncMock(return_value=SimpleNamespace(summary="review me first")))
+
+    async def run():
+        queue = asyncio.Queue()
+        token = streaming.attach(queue)
+        try:
+            with streaming.muted("delta"):
+                answer = await composition.synthesize("q", "# Card\nfacts", {}, research=True)
+            return answer, list(queue._queue)
+        finally:
+            streaming.detach(token)
+
+    answer, events = asyncio.run(run())
+    assert "review me first" in answer
+    assert not any(event["event"] == "delta" for event in events)
 
 
 # --- whale activity with no subject is asked about ----------------------------------

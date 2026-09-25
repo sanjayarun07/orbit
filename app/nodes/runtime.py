@@ -143,6 +143,13 @@ class CompositeSynthesis(dspy.Signature):
     says so; say "not in the evidence". A request that asks to compare
     dates when the cards are current data only describes the current data
     as current, never as a change or as "no change" between those dates.
+    For a rolling elapsed-time question such as "happened in the last 24
+    hours", distinguish event time from publication or page-update time.
+    A date without a clock time and timezone cannot prove that an event is
+    inside the exact rolling window when the date overlaps its boundary.
+    Say "unknown from these sources" for that item; do not turn a source's
+    date-only "yes" into a verified yes. An announced future event is not
+    an event that already happened.
     If a card asks the user a question instead of answering, repeat the
     question; never pick a subject the question did not name. When the request states a word
     limit, or opens with "What does this mean for the market:" (a headline

@@ -37,6 +37,10 @@ def active() -> bool:
 _muted: ContextVar[frozenset] = ContextVar("turn_stream_muted", default=frozenset())
 
 
+def is_muted(event: str) -> bool:
+    return event in _muted.get()
+
+
 @contextmanager
 def muted(*events: str):
     """Drop these events for the code inside: concurrent clauses of a

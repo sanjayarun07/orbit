@@ -1048,16 +1048,22 @@ function renderResearchWork(trajectory,answer="",intent=""){
   }
   if(!record||typeof record!=="object")return null;
   const sources=Array.isArray(record.sources)?record.sources:Array.isArray(record.verdicts)?record.verdicts:[];
-  const checked=sources.filter(source=>source?.provenance==="page").length;
+  const readPages=new Set((Array.isArray(record.calls)?record.calls:[]).flatMap(call=>{
+    const match=String(call).match(/^page_read \(url_reader\): (https?:\/\/\S+)/);return match?[match[1]]:[];
+  }));
+  const checked=Math.max(record.checked_pages!=null?Math.max(0,Number(record.checked_pages)||0):readPages.size,
+    sources.filter(source=>source?.provenance==="page").length);
   const limited=sources.filter(source=>source?.provenance==="reader").length;
   const unreadable=sources.filter(source=>source?.provenance==="unreadable").length;
   const cited=sources.filter(source=>source?.provenance==="citation").length;
   const calls=Number(record.provider_calls??record.calls?.length??0);
   const hasEvidence=calls>0||sources.length>0;
+  const inconclusive=String(answer||"").includes("**I withheld")||String(answer||"").includes("**No fully verified match yet.**");
   const panel=document.createElement("section");panel.className="research-work";panel.setAttribute("aria-label","Research work status");
   panel.innerHTML='<div class="research-work-heading"><span class="research-work-mark">✓</span><strong>Work complete</strong><span class="research-work-count"></span></div><div class="research-work-stages"><span>Plan complete</span><span>Sources gathered</span><span>Evidence reviewed</span></div><div class="research-work-source-status"></div>';
   $(".research-work-count",panel).textContent=`${calls} evidence ${calls===1?"call":"calls"}`;
   const stages=$(".research-work-stages",panel);if(!hasEvidence){$(".research-work-heading strong",panel).textContent="No evidence available";$(".research-work-mark",panel).textContent="—";$(".research-work-mark",panel).classList.add("unavailable");}
+  else if(inconclusive){$(".research-work-heading strong",panel).textContent="Research inconclusive";$(".research-work-mark",panel).textContent="—";$(".research-work-mark",panel).classList.add("unavailable");}
   if(stages?.children[1]&&!hasEvidence){stages.children[1].textContent="No sources gathered";stages.children[1].className="unavailable";}
   if(stages?.lastElementChild){stages.lastElementChild.textContent=checked||limited?"Evidence reviewed":hasEvidence?"Page review unavailable":"No evidence to review";if(!checked&&!limited)stages.lastElementChild.className="unavailable";}
   const status=$(".research-work-source-status",panel);

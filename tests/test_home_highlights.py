@@ -69,6 +69,18 @@ def test_placeholder_news_is_not_a_tile():
     assert home_highlights._parse_news('{"crypto":[],"stocks":[]}') is None
 
 
+def test_home_card_displays_the_domain_of_its_actual_source(monkeypatch):
+    from app import perplexity_tools
+    monkeypatch.setattr(perplexity_tools, "perplexity_search_with_sources", lambda *args, **kwargs: {
+        "text": "The Fed proposed new stablecoin rules under the GENIUS Act.",
+        "sources": [{"url": "https://bankingjournal.aba.com/2026/09/fed-proposes-rules/", "date": "2026-09-24"}],
+    })
+    parsed = {"crypto": [{"headline": "Fed proposes new stablecoin rules", "summary": "A proposed framework.", "source": "reuters.com"}]}
+    card = home_highlights._verified(parsed)["crypto"][0]
+    assert card["source"] == "bankingjournal.aba.com"
+    assert card["source_url"] == "https://bankingjournal.aba.com/2026/09/fed-proposes-rules/"
+
+
 def test_unparseable_news_and_dead_market_fall_back_to_static(monkeypatch):
     monkeypatch.setattr(home_highlights, "perplexity_available", lambda: True)
     monkeypatch.setattr(home_highlights, "perplexity_invoke", lambda *a: "Sorry, I can't help with that.")

@@ -54,6 +54,68 @@ def test_the_previous_answers_items_are_the_referent():
     assert '"those" are the items the previous answer listed -- (1) Solana validators' in resolved and "never substitute a different set" in resolved
 
 
+def test_withheld_news_items_remain_the_referent_not_the_new_search_results():
+    answer = ("I withheld the written summary: it stated figures no source card carries.\n\n---\n\n"
+              "# From the web (dated, with sources)\n**Provider**: Perplexity\n\n"
+              "1. Federal Reserve proposed new stablecoin rules\nPublication: September 25\n\n"
+              "2. Senate vote on the CLARITY Act happened September 15\nPublication: September 16\n\n"
+              "Sources:\n[1] A story\n[2] Another story")
+    items = context_entities.answer_items(answer)
+    assert items == ["Federal Reserve proposed new stablecoin rules", "Senate vote on the CLARITY Act happened September 15"]
+    ctx = experience.advance_session_context({}, "What is the newest crypto market news?", None, "research", [], [], None, answer=answer)
+    resolved = context_entities.resolve_contextual_request("Which of those events happened in the last 24 hours?", "", ctx)
+    assert "Federal Reserve proposed new stablecoin rules" in resolved
+    assert "Senate vote on the CLARITY Act happened September 15" in resolved
+    assert "A story" not in resolved
+
+
+def test_prose_summary_still_carries_numbered_items_from_the_visible_web_card():
+    answer = ("**Taken together**\n\nThe newest news covers the Fed and a Senate vote.\n\n---\n\n"
+              "# From the web (dated, with sources)\n**Provider**: Perplexity\n\n"
+              "1. Federal Reserve proposed new stablecoin rules\nPublication: September 25\n\n"
+              "2. Senate vote on the CLARITY Act happened September 15\nPublication: September 16\n\n"
+              "Sources:\n[1] First source\n[2] Second source")
+    ctx = experience.advance_session_context({}, "What is the newest crypto market news?", None, "research", [], [], None, answer=answer)
+    assert ctx["last_items"] == ["Federal Reserve proposed new stablecoin rules", "Senate vote on the CLARITY Act happened September 15"]
+    resolved = context_entities.resolve_contextual_request("Which of those events actually happened in the last 24 hours?", "", ctx)
+    assert resolved.startswith("Which of those events actually happened in the last 24 hours?\nResolved from conversation context:")
+    from app.composition import plan_asks
+    assert len(plan_asks(resolved)[0]) == 1
+    from app.evidence_pipeline import research_query
+    query = research_query(resolved)
+    assert "Federal Reserve proposed new stablecoin rules" in query
+    assert "Senate vote on the CLARITY Act happened September 15" in query
+    assert "UTC" in query and "exact previous 24 hours" in query
+
+
+def test_inline_numbered_summary_uses_the_full_visible_card_list():
+    answer = ("1. First event happened. 2. Second event happened. 3. Third event happened.\n\n---\n\n"
+              "# From the web\n1. First event happened\n2. Second event happened\n3. Third event happened\nSources:\n[1] Source")
+    assert context_entities.answer_items(answer) == ["First event happened", "Second event happened", "Third event happened"]
+
+
+def test_written_list_remains_the_referent_when_card_lists_more_leads():
+    answer = ("1. First verified event\n2. Second verified event\n\n---\n\n"
+              "# From the web\n1. First verified event\n2. Second verified event\n3. Third discovery lead\nSources:\n[1] Source")
+    assert context_entities.answer_items(answer) == ["First verified event", "Second verified event"]
+
+
+def test_prior_item_amount_keeps_its_decimal_in_the_followup():
+    ctx = {"last_items": ["ETF inflows reached $351.6M on September 24", "Bitget reported a breach"]}
+    resolved = context_entities.resolve_contextual_request("Which of those happened today?", "", ctx)
+    assert "$351.6M" in resolved
+    from app.composition import plan_asks
+    assert len(plan_asks(resolved)[0]) == 1
+    from app.evidence_pipeline import research_query
+    assert "$351.6M" in research_query(resolved)
+
+
+def test_news_referent_does_not_route_a_whale_headline_to_holders():
+    ctx = {"last_items": ["A whale address moved 4,500 BTC after four years of inactivity"]}
+    resolved = context_entities.resolve_contextual_request("Which of those happened in the last 24 hours?", "", ctx)
+    assert plan_by_rules(resolved).kind == "open_research"
+
+
 def test_what_do_you_actually_know_points_back():
     assert _REFERENT.match("Do not substitute a token on Base. What do you actually know?") is None     # not at the start
     assert continues_subject("What do you actually know?")
@@ -235,12 +297,21 @@ def test_the_previous_answer_is_audited_from_the_session_not_the_web():
                 "# Bonk (Bonk)\n**Provider**: Birdeye · **Data freshness**: 2026-09-25 06:02 UTC\n| Metric | Value |\n|---|---|\n| Liquidity | $9.3M |\n")
     text = answer_audit.audit(previous)
     assert "- **Bonk (Bonk)** -- Provider: Birdeye · Data freshness: 2026-09-25 06:02 UTC" in text
-    assert '"BONK has about $9.3 million of liquidity per Birdeye." -- figures observed' in text
-    assert '"Most of it sits on Orca." -- interpretation' in text
+    assert '"BONK has about $9.3 million of liquidity per Birdeye." -- the figure appears in a card, but this audit has not verified' in text
+    assert '"Most of it sits on Orca." -- interpretation or paraphrase' in text
     assert '"The largest pool holds $12.0M." -- no card carries exactly $12.0M' in text
     assert "no previous answer" in answer_audit.audit(None)
     ctx = experience.advance_session_context({}, "liquidity of BONK", None, "research", [], [], None, answer=previous)
     assert ctx["last_answer"] == previous
+
+
+def test_a_matching_number_cannot_verify_a_different_metric():
+    from app.answer_audit import audit
+    previous = ("**Taken together**\n\nThe largest BONK pool holds $9.7M.\n\n---\n\n"
+                "# BONK overview\n**Provider**: Birdeye\n| Metric | Value |\n|---|---|\n| Overall liquidity | $9.7M |")
+    result = audit(previous)
+    assert "the figure appears in a card, but this audit has not verified that the source supports this specific claim" in result
+    assert "direct source passage reproduced" not in result
 
 
 def test_a_conditional_instruction_is_not_a_second_ask():
@@ -248,5 +319,112 @@ def test_a_conditional_instruction_is_not_a_second_ask():
     clauses, note = composition.plan_asks("Top 10 holders of MUSEBOOK on Robinhood Chain. If several contracts share the ticker, tell me which contract you selected.")
     assert clauses == ["Top 10 holders of MUSEBOOK on Robinhood Chain"] and "tell me which contract you selected" in note
     assert not composition.is_format_clause("If BONK drops 10%, tell me when it happens")
+    clauses, note = composition.plan_asks("Give three crypto headlines from today. Number them; for each distinguish publication time from event time.")
+    assert len(clauses) == 1
+    assert "Number them" in note
     assert composition.pipeline_of([{"answer": "a", "pipeline": "contract", "contract": {"kind": "holders"}}, {"answer": "b", "pipeline": "contract"}]) == {"pipeline": "contract", "contract": {"kind": "holders"}}
+    assert composition.pipeline_of([{"answer": "a", "pipeline": "research_loop", "contract": {"kind": "open_research"}}, {"answer": "b", "pipeline": "contract"}]) == {"pipeline": "research_loop", "contract": {"kind": "open_research"}}
     assert composition.pipeline_of([{"answer": "a", "pipeline": "contract"}, {"answer": "b"}]) == {}
+
+
+# --- the trust re-run on 2807c358 (reports/trust-rerun-2807c358) --------------
+
+def test_a_topic_follow_up_is_never_asked_which_token(monkeypatch):
+    from tests.test_routing_rules_20260918 import _security_state, _stub_downstream
+    from app.nodes import research as research_mod
+    seen = {}
+    _stub_downstream(monkeypatch, seen)
+    monkeypatch.setattr(research_mod.settings, "contract_pipeline_enabled", True)
+    calls = []
+
+    async def piped(state, request, chains, context=""):
+        calls.append(request)
+        return {"answer": "**Taken together**\n\nfunding rounds from the web", "trajectory": None, "pipeline": "contract"} if "funding" in request else None
+    monkeypatch.setattr(research_mod.evidence_pipeline, "answer", piped)
+    note = "\nResolved from conversation context: this continues the discussion about EigenLayer (the subject of the previous turns: a protocol, company or topic, not a token symbol to look up)."
+    focus = {"kind": "topic", "label": "EigenLayer"}
+    out = asyncio.run(research_mod.research_node(_security_state("List funding rounds by date, amount, instrument, investors and primary source. Mark database-only claims." + note, session_context={"focus": focus})))
+    assert "funding rounds from the web" in out["answer"]
+    out = asyncio.run(research_mod.research_node(_security_state("Separate deposits or TVL, fees paid, protocol revenue, incentives and value accruing to token holders." + note, session_context={"focus": focus})))
+    assert "Which token should I check" not in out["answer"]                    # the pipeline did not plan it; the legacy path reads the note
+    out = asyncio.run(research_mod.research_node(_security_state("is it audited?")))
+    assert "Which token should I check" in out["answer"]                        # nothing in the conversation: still asked
+
+
+def test_a_headline_tap_is_research_on_the_story_not_its_words():
+    contract = plan_by_rules("What does this mean for the market: S&P 500 falls 0.75% as yields hit multi-decade highs")
+    assert contract.kind == "open_research" and contract.subject.name == "S&P 500 falls 0.75% as yields hit multi-decade highs"
+    assert plan_by_rules("What does this mean for memecoins: Solana gainers lead as BONK rallies").kind == "open_research"
+    assert plan_by_rules("yields on base for USDC").kind == "yields"
+
+
+# --- the expanded journeys x3 on 2807c358 (reports/journeys-expanded-2807c358) ---
+
+def test_a_generic_capitalised_word_is_not_a_subject():
+    from app.routing.subject_probe import subject_of
+    assert subject_of("Anything breaking for meme traders in the past 24h?") is None
+    assert subject_of("Something is off with BONK") == "BONK"
+
+
+def test_an_exact_state_ask_in_question_form_is_not_planned_before_its_ticker_resolves():
+    from app import contracts
+    from app.nodes import research
+    q = "Back to BONK: what percent do the top 10 hold, and what counts in that denominator?"
+    assert research._DATA_ASK.search(q) and contracts.plan_by_rules(q).kind == "holders"
+    assert contracts.plan_by_rules("Research projects with two tokens like Venice VVV and DIEM").kind == "open_research"
+
+
+def test_a_hyphenated_minute_span_is_not_an_unsupported_figure():
+    from app import fact_gate
+    assert fact_gate.unsupported_figures("Over a 48-minute span from 07:04 to 07:52 UTC, NIL rose 8.07%.", [], evidence_text="| NIL/USDC | +8.07% |") == []
+
+
+def test_a_wallet_bound_holdings_follow_up_is_a_portfolio_read():
+    from app import contracts
+    q = "Which assets does it hold?\nResolved from canonical session context: wallet 3aHLqHsvw3gPxnq1fVEYG6P3pCcxkGo3ETSkQGE4KZkS on solana."
+    c = contracts.plan_by_rules(q)
+    assert (c.kind, c.subject.kind, c.subject.id, c.subject.chain) == ("portfolio", "wallet", "3aHLqHsvw3gPxnq1fVEYG6P3pCcxkGo3ETSkQGE4KZkS", "solana")
+    assert contracts.plan_by_rules("Which assets does it hold?").kind != "portfolio"                       # nothing bound: not a wallet read
+    assert contracts.plan_by_rules("Who holds the most?\nResolved from canonical session context: wallet 3aHLqHsvw3gPxnq1fVEYG6P3pCcxkGo3ETSkQGE4KZkS on solana.").kind != "portfolio"
+
+
+def test_an_epoch_trade_time_from_mobula_is_a_stamp_not_a_crash(monkeypatch):
+    import importlib.util
+    from app import evidence
+    assert evidence.tx("0xabc", "mobula", "solana", at=1790325099906).at == "1790325099906"
+    # conftest replaces app.mobula_meme.token_trades with an offline stub; a fresh load of the module keeps the real function.
+    spec = importlib.util.spec_from_file_location("mobula_meme_fresh", "app/mobula_meme.py")
+    fresh = importlib.util.module_from_spec(spec)
+    import sys
+    sys.modules[spec.name] = fresh                          # dataclasses resolve the defining module through sys.modules
+    spec.loader.exec_module(fresh)
+    row = {"transactionHash": "5xyz", "date": 1790325099906, "type": "buy", "baseTokenAmountUSD": 12.5, "platform": "Raydium",
+           "tokenAmount": 100, "tokenPrice": 0.125, "maker": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"}
+    monkeypatch.setattr(fresh, "_get", lambda path, params: [row])
+    monkeypatch.setattr(fresh, "_subject", lambda request: ("9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump", "solana"))
+    out = fresh.token_trades("recent trades for 9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump on solana")
+    assert "2026-09-25" in out and "buy" in out.lower()
+
+
+def test_an_events_answer_may_quote_figures_from_its_web_card(monkeypatch):
+    from tests.test_contract_pipeline import FakeRouter
+    from app import evidence_pipeline
+    monkeypatch.setattr(evidence_pipeline.settings, "contract_pipeline_enabled", True)
+    from app.nodes import runtime
+    monkeypatch.setattr(runtime, "planner_available", lambda: False)
+
+    async def synth(request, cards, trajectory, advice=False, research=False):
+        return f"**Taken together**\n\nOn 2026-09-24 spot Solana ETFs recorded $13.77 million in net inflows and SOL open interest reached $6.94B, up 8.54%. [1]\n\n---\n\n{cards}"
+
+    monkeypatch.setattr(evidence_pipeline.composition, "synthesize", synth)
+    web = ("# From the web (dated, with sources)\n**Query**: q\n\nOn September 24, 2026 U.S. spot Solana ETF products recorded $13.77 million in net inflows; "
+           "SOL futures open interest reached $6.94B, up 8.54% over seven days. [1]\n\nSources:\n[1] [report](https://x) · 2026-09-24")
+    router = FakeRouter({"perplexity_web_search": web})
+    saved = evidence_pipeline.get_provider_router
+    evidence_pipeline.get_provider_router = lambda: router
+    try:
+        out = asyncio.run(evidence_pipeline.answer({}, "What happened to Solana in the last 24 hours? Give event times, not just article update times.", ()))
+    finally:
+        evidence_pipeline.get_provider_router = saved
+    assert out is not None and out["contract"]["kind"] == "recent_events"
+    assert "withheld" not in (out.get("answer") or "") and "$13.77 million" in (out.get("answer") or "").split("\n---\n")[0]

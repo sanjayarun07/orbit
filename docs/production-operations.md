@@ -3272,7 +3272,7 @@ each named example's mechanism claim against its cited source, which the fact ga
 Live, 2026-09-24 evening: "What is the full name and description of the stock labeled NBIS on Hyperliquid?" carried a
 knowledge-base card of Hyperliquid bridge and HLP descriptions with a line admitting NBIS was not in them, and went
 to the generic web search. Mechanisms: the knowledge card is dropped when its passages never mention the question's
-subject (`knowledge/tool._mentions_subject`; a venue or chain word in the sentence is not the subject); a stock ask
+subject (`knowledge/tool._mentions_subject`; a venue or chain word in the sentence is not the subject; the subject matches as a whole word, and an address in the ask must itself appear in a passage -- "BP" had matched inside a Maple pool address and a Maple card was rendered under a Backpack price question, live 2026-09-25); a stock ask
 leads discovery with the finance-tuned search, which now runs through the structured, dated-sources call
 (`tool_catalog` marks it `stocks`, `evidence_pipeline` orders it first only for `stocks_only`); and an identity
 question about a symbol the feed lists ("what is / full name of the stock labeled X on Hyperliquid") is a feed quote
@@ -3283,9 +3283,9 @@ position is a subject and the symbol (`subject_probe._LOWER_TOKEN`), and a stand
 request that refers back or names no new subject (`research_objective.attach`). Coverage gap left as stated: no
 holders source declares Robinhood Chain.
 
-## The bounded evidence loop for open research (first slice, 2026-09-24, behind a flag)
+## The bounded evidence loop for open research (first slice, 2026-09-24)
 
-`app/research_loop.py`, per `docs/engineering/claude-code-evidence-loop.md`; `research_loop_enabled` (off by default; the
+`app/research_loop.py`, per `docs/engineering/claude-code-evidence-loop.md`; `research_loop_enabled` (on by default since 2026-09-25; the
 fixed sequence in `evidence_pipeline.answer` is the fallback, also when the loop's plan call fails). One question
 contract drives a bounded cycle:
 
@@ -3298,20 +3298,36 @@ contract drives a bounded cycle:
    and inputs. `tool_for` is the deterministic boundary: a contract-kind tool serves only its kinds (a ranking is not
    research), a state read needs a resolved contract address, wallet and execution groups are never research.
 2. **Retrieve** the round's calls concurrently, then a **gap review** (which required fact is missing, which capability
-   can supply it, one more "capability: query" or stop; never a query already made). Limits: 3 rounds, 5 provider
+   can supply it, one more "capability: query" or stop; never a query already made). Limits: 2 rounds, 5 retrieval
    calls, 6 model calls, `research_loop_seconds` (75 s, capped to the chat timeout minus 60); a research turn runs
    under `research_loop_timeout_seconds` (240 s) while the flag is on.
 3. **Inspect**: the candidates the cards discuss are listed with their cited URLs, and each cited page is read
    directly (`url_reader.fetch`: title, text, fetched-at -- passage-level provenance), with Perplexity's reader as
    the one bounded alternative labelled "search-index view", else "page unreadable: a search lead, not verified
    evidence". Each page is checked against the conditions (`CandidateCheck`: qualifies / related but a different
-   design / not established, with the settling quote). A candidate not settled by its cited page gets one follow-up
-   read of its first-party documentation found by a discovery search (`first_party_url`). Bounded by
-   `research_loop_inspect_pages` (4).
-4. **Write** on the research brief with the verdicts ("state these verdicts, never upgrade one"), repair once on the
+   design / not established), with a verbatim quote checked against directly fetched page text. Unresolved candidates
+   get up to seven targeted follow-up reads: first select an already-cited page for the missing condition from an
+   allowlist, then search first-party documentation if needed. First-party search results are ranked against the
+   missing condition instead of taking the first protocol-owned URL. A candidate's cited first-party page takes precedence
+   over a cited aggregator article, and up to four candidates receive an initial read before follow-ups. A single
+   subject's claim variants are grouped under its protocol domain so repeated claims do not consume separate page
+   slots. The follow-up selector sees nearby search context to pick a page; that context never verifies a claim.
+   Complementary direct page texts are checked together; each accepted verbatim passage retains its own page URL
+   and is passed into synthesis, so a multi-page verdict does not become a one-quote answer. Search-index views cannot
+   verify a verdict. Bounded by
+   `research_loop_inspect_pages` (12).
+4. **Write** using verified page passages only. If no page establishes the full claim, show the directly observed
+   passages as partial evidence and state that no match is fully verified. The legacy answer gate cannot replace this
+   abstention with web prose; the outer search-first card is also held back until the pipeline is known. Draft
+   synthesis is not streamed to the user before its gate passes. With verified
+   evidence, write on the research brief with the verdicts, repair once on the
    figure gate, else withhold; then the example-support check labels any name the synthesis introduces without a
    source. The answer carries a **research trail**: timings per phase, every call and why it was skipped, and each
    candidate's verdict with its URL, provenance, fetched-at and quote.
+
+   A final claim-to-passage check now reads every material summary statement against only the reviewed passages.
+   It repairs once, then withholds a summary that still asserts unverified facts (for example current protocol
+   mechanics inferred from a historical blog page).
 
 Replay: episodes carry a `loop` fixture (scripted plan, reviews, candidates, page verdicts, support labels) and
 `pages` fixtures, so `scripts/episode_eval.py` runs the loop with no model and no network; `tests/test_research_loop.py`
@@ -3320,9 +3336,9 @@ follow-up. Measured on the four-turn dual-token sequence: see `reports/research-
 
 Measured (`reports/research-loop-2026-09-24/report.md`): flag off 1/5 runs name a reviewed true match on the fourth
 turn, flag on 3/5, false matches 0/5 both ways, median 60 s against 149 s per turn; 60 candidate pages read across
-the 20 loop turns. Rollout stays off: latency and cost roughly double, and discovery still bounds recall (AI Surplus
-was never surfaced). Next: the candidate lister names without URLs (added after the measurement), then extend the
-loop to the other contract kinds where it removes special cases.
+the 20 loop turns. That was an early measurement, before the 2026-09-25 hardening below. Discovery still bounds recall
+(AI Surplus was never surfaced). The loop is now enabled by default for development/UAT evaluation; production rollout
+requires a fresh comparison on the hardened build.
 
 Review of the uncommitted loop (2026-09-24 evening) held four points, fixed the same evening: only cited or
 first-party-search URLs are read and the reader refuses non-public destinations on every redirect hop
@@ -3338,6 +3354,33 @@ are recorded calls, so the public provider-call count is complete.
 
 Review of f603a871 (2026-09-25): a candidate the page budget leaves unread is `not_established` with provenance
 `uninspected`, so the gate covers it; the label check works per clause, not per sentence.
+
+2026-09-25 hardening: repeated live dual-token prompts showed that search snippets could claim a match even when
+page reads did not establish every required condition. The loop now validates literal passages, combines direct
+pages for a candidate, targets missing conditions and labels partial evidence. A qualifying verdict must map each
+condition to a verbatim passage and source URL; an independent check rejects a quote that does not entail its assigned
+condition. Partial maps guide follow-up reads to conditions still unproved. Undated open research no longer applies a default 30-day search
+filter, and the page-check model sees all fetched pages rather than losing later ones to a 22k-character truncation.
+The named-example gate ignores claim phrases mistakenly returned in a name field; the separate claim-to-passage audit
+still checks those assertions, avoiding a false full abstention on a supported partial answer.
+An answer-format instruction following a research question remains part of that question; it no longer launches a
+second research task whose unchecked synthesis could contradict an abstention. The UI counts each directly fetched
+page and labels a withheld answer "Research inconclusive"; the public work status survives history reloads without
+exposing the model's plan or raw page text. The recorded 24 research episodes pass at k=5. A live
+Synthetix run on the hardened path returned one coherent summary with directly read historical staking and trading
+passages in 88 seconds; its current-mechanics conclusion was explicitly limited by the inspected pages. The exact
+claim that sUSD was transferable between wallets still needs a direct transfer passage; exchange trading alone is
+insufficient. Production/UAT evaluation must measure answered-with-evidence rate, false-match rate, latency and cost
+over varied live research questions. `research_loop_enabled=false` remains the rollback switch.
+
+A stricter live prompt asking whether sUSD could be sent to another address made the loop withhold twice, at 101 and
+192 seconds. In the latter run, four first-party pages were directly read and the draft still generalized a passage
+about sending sUSD to Synthetix's Depot into broader wallet transferability; the claim audit rejected the summary.
+The first-party follow-up selector now ranks pages by the missing condition, and the verifier explicitly distinguishes
+a protocol-controlled deposit from unrestricted wallet transfers. A withheld answer now places up to four verbatim,
+linked reviewed passages before the research trail. This is safer and more useful than the earlier contradictory
+answer, but live recall and long-turn latency remain an open UAT acceptance check; these runs do not prove that the
+loop will always find an existing authoritative page.
 
 ## Live mobile UI edge-case run (2026-09-25): subject-and-scope corrections
 
@@ -3391,3 +3434,31 @@ identified") and the chart embed's instrument identity; the dual-token "cite a p
 follow-up now points at the listed candidates but is not re-measured; the news referent stability is covered by the
 same `last_items` mechanism and needs its live check; "Now switch to Robinhood Chain memes" is answered by the legacy
 web path as a chatty summary and is not yet a contract.
+
+## Regression run before UAT (2026-09-25, build 2807c358)
+
+`reports/regression-2807c358/report.md`: the frozen trust re-run (96 turns), the expanded journeys three times (231
+turns) and the UI-edge matrix three times from a git worktree pinned to the build. Read by hand; the judge is a
+first pass only. Mechanisms fixed from it, regressions in the third and fourth blocks of `tests/test_ui_edge_20260925.py`:
+
+- A topic focus never yields "which token?": "List funding rounds…" and "Separate deposits or TVL…" in an EigenLayer
+  conversation are answered by the pipeline or the legacy path with the note; the question is asked only when the
+  conversation holds nothing (`nodes/research.py`, the security branch).
+- A Home headline tap ("What does this mean for the market: <headline>") is open research on the headline, never an
+  ask made of its words (a TradFi yields headline had planned the DeFi yields table; `contracts.plan_by_rules`).
+- The early open-research entry in `_research_node` never plans an exact-state kind before the ticker resolves, and
+  `_DATA_ASK` knows hold/holds/held: "Back to BONK: what percent do the top 10 hold?" had run four holder tools without
+  the mint ("nothing usable", three of three).
+- A holdings ask whose resolution note binds a wallet is a `portfolio` contract, left to the wallet tools: "Which
+  assets does it hold?" after a pinned wallet had asked the web what a Solana wallet holds (three of three).
+- A capitalised generic word is not a subject ("Anything breaking for meme traders?" looked up a token ANYTHING;
+  `subject_probe.subject_of`), and "48-minute" is a span like "48 minutes" (`fact_gate`).
+- The state-only figure check (exact-state kinds take figures from state cards, a web card is context) applies to
+  holders, rankings, yields and portfolio only (`evidence_pipeline.EXACT_STATE_KINDS`): it had also covered
+  `recent_events`, so "What happened to Solana in the last 24 hours" was withheld over figures its own web card
+  carried (two runs of three). Mobula's trade time arrives as epoch milliseconds; the evidence anchor now accepts it.
+
+Still open after the run: "which of those" over a holders table (list items only), two-subject comparisons, "How is
+ASTER trading on Hyperliquid?" and "Are HOOD tokens up?" going to the web instead of the feed, the deployer question
+answered from the web rather than the security card's creator field, and two withheld summaries over figures the
+cards did not carry.

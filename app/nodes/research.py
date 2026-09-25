@@ -882,7 +882,7 @@ _SYMBOL_STOP = {"I", "A", "OK", "ETF", "ETFS", "USD", "USDT", "USDC", "AI", "DEF
 # A question that wants a token's data: with one of these words, a bare
 # all-caps symbol is the token ("ANSEM top holders on solana" went to the
 # web and came back as a smart-money aggregate, 2026-09-18).
-_DATA_ASK = re.compile(r"\b(?:holders?|holding|whales?|price|prices|liquidity|volume|market\s*cap|mcap|fdv|supply|security|safe|rug\w*|honeypot|"
+_DATA_ASK = re.compile(r"\b(?:holders?|holding|holds?|held|whales?|price|prices|liquidity|volume|market\s*cap|mcap|fdv|supply|security|safe|rug\w*|honeypot|"
                        r"unlocks?|vesting|trades?|swaps?|buyers?|bundl\w+|snip\w+|insiders?|chart|deployer|dev\b|concentration|distribution)\b", re.I)
 
 
@@ -1901,11 +1901,14 @@ async def research_node(state: AgentState) -> dict:
         streaming.emit("status", text=f"Reading the link as {page.name or page.symbol or page.slug or 'a token'}")
         state = {**state, "request": request, "contextual_request": None, "capabilities": ["market_data", "token_discovery"],
                  "chains": [page.chain] if page.chain else list(state.get("chains") or [])}
-    web_part = _web_context_part(state)
-    if web_part:
-        streaming.emit("card", markdown=web_part[0], tool=WEB_CONTEXT_TOOL)
+    # The contract/research loop performs its own dated discovery and source
+    # gate. The outer search-first card would otherwise be synthesized over a
+    # vetted (or withheld) answer, streaming new unchecked prose above it.
+    contract_research = (settings.contract_pipeline_enabled and contracts.is_open_research(_ask(request))
+                         and not _TOKEN_ADDRESS.search(_ask(request)))
+    web_part = None if contract_research else _web_context_part(state)
     clauses, ask_note = composition.plan_asks(request)
-    if (len(clauses) >= 2 and contracts.is_open_research(_ask(request)) and not _DATA_ASK.search(_ask(request))
+    if (len(clauses) >= 2 and contracts.is_open_research(_ask(request))
             and not any(why_moving.match(_ask(c)) or _MARKET_OVERVIEW.search(_ask(c)) for c in clauses)):
         # "Research on projects with two tokens like Venice VVV and DIEM. What
         # mechanism mints the second token. What speculative ideas exist": one
@@ -1981,7 +1984,8 @@ async def research_node(state: AgentState) -> dict:
         result = {"answer": answer, "trajectory": trajectory or None, **extras}
     else:
         result = await _research_node(state, sink)
-    if web_part and result.get("answer") and not result.get("pending_token") and not is_clarification(result.get("answer")):
+    if web_part and result.get("pipeline") not in ("contract", "research_loop") and result.get("answer") and not result.get("pending_token") and not is_clarification(result.get("answer")):
+        streaming.emit("card", markdown=web_part[0], tool=WEB_CONTEXT_TOOL)
         # Search first, then the tools, read together: the web's answer is the
         # first card unless the tools' turn was that same answer already. A
         # clarifying question from the tools' path stays a question.
@@ -2005,7 +2009,7 @@ async def research_node(state: AgentState) -> dict:
     # asked it (app/answer_gate.py) -- a wrong subject or a missing answer
     # never ships. The link note goes on after, so the check reads the answer
     # the tools produced.
-    if result.get("pipeline") != "contract":
+    if result.get("pipeline") not in ("contract", "research_loop"):
         # The contract pipeline already proved or stated its coverage; the
         # topical gate must not replace an honest gap with web prose.
         # The check and its web fallback read the request with the subject the
@@ -2201,29 +2205,41 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         # token in the conversation's focus is the subject (2026-09-18: the
         # question was asked back although ANSEM had just been resolved).
         focus = _focus_token(state)
+        # "List funding rounds…" / "Separate deposits or TVL, fees paid…" in a
+        # conversation about EigenLayer: the subject is the conversation's
+        # topic, so there is no token to ask for (trust re-run 2026-09-25: both
+        # were asked "which token?" when the router read them as security asks).
+        # A referential phrase alone is not evidence of a prior topic. With
+        # no topic focus, "is it audited?" must still ask which token.
+        about_topic = ((state.get("session_context") or {}).get("focus") or {}).get("kind") == "topic"
         if focus and focus.get("address"):
             request = f"{request} {focus['address']}" + (f" on {focus['chain']}" if focus.get("chain") else "")
             if focus.get("chain"):
                 state = {**state, "chains": [focus["chain"]]}
-        elif settings.contract_pipeline_enabled and contracts.is_open_research(request):
+        elif settings.contract_pipeline_enabled and (contracts.is_open_research(request) or about_topic):
             # No token anywhere and a question about what a safety concept
             # means ("Jupiter says verified and no mint authority: does that
             # mean I cannot get rugged?"): open research, never "which token?"
-            # (frozen trust run, 2026-09-24).
+            # (frozen trust run, 2026-09-24). A topic follow-up the pipeline
+            # does not plan falls through to the legacy path, which reads the note.
             piped = await evidence_pipeline.answer(state, request, tuple(state.get("chains") or ()))
             if piped is not None:
                 return piped
-        else:
+        elif not about_topic:
             return {
                 "answer": ("Which token should I check? Paste its contract address (or mint) and the chain it is on, "
                            "or name the token with a $ticker, and I'll run the security checks."),
                 "trajectory": None,
             }
-    if settings.contract_pipeline_enabled and contracts.is_open_research(_ask(request)) and not _DATA_ASK.search(_ask(request)) and not _TOKEN_ADDRESS.search(_ask(request)):
+    if (settings.contract_pipeline_enabled and contracts.is_open_research(_ask(request)) and not _DATA_ASK.search(_ask(request)) and not _TOKEN_ADDRESS.search(_ask(request))
+            and contracts.plan_by_rules(request).kind not in contracts.CONTRACT_KINDS):
         # Open research is planned before a named ticker is resolved: once
         # "DIEM token" became "DIEM 0x… on base", the contract read the address
         # as exact state and the legacy path answered with pools and a price
         # (the first turn of the Minara comparison, and again live 2026-09-24).
+        # An exact-state ask in question form ("what percent do the top 10
+        # hold?") is not planned here: it needs its ticker resolved first
+        # (expanded run 2026-09-25: BONK holders ran without the mint, "nothing usable").
         piped = await evidence_pipeline.answer(state, request, tuple(state.get("chains") or ()))
         if piped is not None:
             return piped
@@ -2383,7 +2399,7 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         # Plan the evidence, gather it, prove coverage, then answer: the four
         # contract kinds (rankings, holders, recent events, yields) leave the
         # rank-and-accept path here (2026-09-23). None means "not one of them".
-        piped = await evidence_pipeline.answer(state, request, chains, context=resolution.note or "")
+        piped = await evidence_pipeline.answer(state, request, chains, context=getattr(resolution, "note", None) or "")
         if piped is not None:
             if piped.get("contract", {}).get("subject", {}).get("id"):
                 sink["resolved_token"] = sink.get("resolved_token") or {"symbol": piped["contract"]["subject"].get("symbol"), "address": piped["contract"]["subject"]["id"], "chain": piped["contract"]["subject"].get("chain")}

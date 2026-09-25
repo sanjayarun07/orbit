@@ -81,6 +81,10 @@ def eligible(answer: str | None, result: dict) -> bool:
     the user, not trade cards, not errors, not tiny replies."""
     if not settings.answer_gate_enabled:
         return False
+    if result.get("pipeline") in ("contract", "research_loop"):
+        # These paths already proved or explicitly withheld their claims.
+        # A topical web fallback must not turn an abstention into prose.
+        return False
     text = (answer or "").strip()
     if len(text) < 80 or is_clarification(text) or result.get("pending_token") or result.get("trade_plan"):
         return False

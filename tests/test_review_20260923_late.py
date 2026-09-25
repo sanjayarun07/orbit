@@ -286,6 +286,7 @@ def test_a_tile_is_verified_only_by_a_sourced_read_and_a_failed_read_is_never_la
     parsed = {"crypto": [{"headline": "A moves 5%", "summary": "", "source": "x"}, {"headline": "B moves 7%", "summary": "", "source": "y"}], "stocks": [{"headline": "C moves 9%", "summary": "", "source": "z"}]}
     out = home_highlights._verified(parsed)
     assert [i["headline"][0] for i in out["crypto"]] == ["A"] and out["crypto"][0]["verified"] is True and out["stocks"] == []
+    assert out["crypto"][0]["source_url"] == "https://x" and out["crypto"][0]["source"] == "x"
     all_down = home_highlights._verified({"crypto": [{"headline": "C moves 9%", "summary": "", "source": "z"}]})
     assert all_down["crypto"][0]["verified"] is False, "with every read failed the tile shows, flagged unverified"
 

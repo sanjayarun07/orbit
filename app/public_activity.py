@@ -9,11 +9,13 @@ _SENSITIVE_QUERY_KEY = re.compile(r"^(?:api[_-]?key|access[_-]?token|auth(?:oriz
 
 def _research_progress(trajectory: dict) -> dict | None:
     """Public, bounded work status; never expose model plans or page text."""
-    raw = trajectory.get("research_loop")
+    # A turn stores the allowlisted form; history applies this function again.
+    # Preserve and revalidate that public form instead of dropping its status.
+    raw = trajectory.get("research_loop") or trajectory.get("research_progress")
     if not isinstance(raw, dict):
         return None
     verdicts = []
-    for item in (raw.get("verdicts") or [])[:8]:
+    for item in (raw.get("verdicts") or raw.get("sources") or [])[:8]:
         if not isinstance(item, dict):
             continue
         verdict = item.get("verdict")
@@ -35,8 +37,14 @@ def _research_progress(trajectory: dict) -> dict | None:
         public_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, safe_query, ""))[:2048]
         verdicts.append({"name": name[:100], "url": public_url, "verdict": verdict, "provenance": provenance})
     calls = raw.get("calls")
-    completed_calls = sum(isinstance(call, str) and ": skipped (" not in call for call in calls) if isinstance(calls, list) else 0
-    return {"status": "complete", "provider_calls": min(completed_calls, 20), "sources": verdicts}
+    completed_calls = (sum(isinstance(call, str) and ": skipped (" not in call for call in calls)
+                       if isinstance(calls, list) else raw.get("provider_calls", 0))
+    checked_pages = (len({call.split(": ", 1)[1] for call in calls
+                          if isinstance(call, str) and call.startswith("page_read (url_reader): ")})
+                     if isinstance(calls, list) else raw.get("checked_pages", 0))
+    bounded = lambda value: min(max(value, 0), 20) if type(value) is int else 0
+    return {"status": "complete", "provider_calls": bounded(completed_calls),
+            "checked_pages": bounded(checked_pages), "sources": verdicts}
 
 
 def public_activity(trajectory: dict | None) -> dict | None:

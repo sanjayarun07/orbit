@@ -118,12 +118,12 @@ def collected() -> list[Evidence]:
     return list(_registry.get() or [])
 
 
-def tx(ref: str, provider: str, chain: str | None, at: str | None = None, note: str | None = None) -> Anchor:
-    return Anchor(kind="tx", ref=str(ref), provider=provider, chain=chain, at=at, note=note)
+def tx(ref: str, provider: str, chain: str | None, at: str | int | float | None = None, note: str | None = None) -> Anchor:
+    return Anchor(kind="tx", ref=str(ref), provider=provider, chain=chain, at=None if at is None else str(at), note=note)     # a provider's epoch int is still a stamp, never a crash
 
 
-def record(ref: str, provider: str, chain: str | None, at: str | None = None, note: str | None = None) -> Anchor:
-    return Anchor(kind="record", ref=str(ref), provider=provider, chain=chain, at=at, note=note)
+def record(ref: str, provider: str, chain: str | None, at: str | int | float | None = None, note: str | None = None) -> Anchor:
+    return Anchor(kind="record", ref=str(ref), provider=provider, chain=chain, at=None if at is None else str(at), note=note)
 
 
 def slot(ref: int | str, provider: str, chain: str | None, at: str | None = None, note: str | None = None) -> Anchor:

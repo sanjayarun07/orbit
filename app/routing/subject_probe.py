@@ -244,8 +244,8 @@ def subject_of(request: str) -> str | None:
     starters = sentence_starters(request)
     for dollar, upper, capital in _SUBJECT.findall(request or ""):
         name = dollar or upper or capital
-        if capital and capital in starters:
-            continue
+        if capital and (capital in starters or capital.lower() in _GENERIC_WORDS or capital.lower() in _NOT_A_NAME):
+            continue                                   # "Anything breaking for meme traders?" names nothing (expanded run 2026-09-25: a token called ANYTHING was looked up)
         if not dollar and fuzzy_venue(name) and name.lower() != fuzzy_venue(name):
             continue                                   # a venue typed a letter off is not a token ("hyperloquid", 2026-09-23); the venue itself is a subject
         if name and name.upper() not in _STOP:

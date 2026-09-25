@@ -8,7 +8,8 @@ that "the previous answer is not visible"). The audit reads the answer the
 session kept: the cards under the rule are what was fetched, with their
 provider and time stamps; each sentence of the written summary is labelled
 by what supports it -- figures the cards carry, a cited source, or nothing
-(the model's own interpretation). Nothing is fetched for it.
+(the model's own interpretation). Nothing is fetched for it; repeating a
+line from a search card does not verify the cited page.
 """
 from __future__ import annotations
 
@@ -75,6 +76,20 @@ def _has_figure(sentence: str) -> bool:
     return False
 
 
+def _direct_passage(sentence: str, evidence: str) -> bool:
+    """Only an actual card line can be called directly reproduced by this audit.
+
+    A number appearing in a different metric or row is not support for the
+    sentence's relationship. Paraphrases require a separate claim-to-passage
+    judgment, so this deliberately does not certify them.
+    """
+    clean = lambda value: re.sub(r"\s+", " ", re.sub(r"[*`#]", "", value)).strip().casefold()
+    claim = clean(re.sub(r"\[\d{1,3}\]", "", sentence)).rstrip(".!? ")
+    if len(claim) < 20:
+        return False
+    return any(claim == clean(line).rstrip(".!? ") for line in evidence.splitlines())
+
+
 def audit(previous: str | None) -> str:
     """The audit text for the previous answer; a plain statement when the
     session holds none."""
@@ -100,14 +115,16 @@ def audit(previous: str | None) -> str:
             unsupported = fact_gate.unsupported_figures(s, [], evidence_text=evidence) if cards else []
             if markers:
                 label = f"cited to source {', '.join(f'[{m}]' for m in markers)} of the web card: a source's claim, not a live observation"
-            elif not _has_figure(s):
-                label = "interpretation: the model's wording over the cards, no figure of its own"
             elif unsupported:
                 label = f"no card carries exactly {', '.join(unsupported)} -- treat that figure as unsupported"
+            elif cards and _direct_passage(s, evidence):
+                label = "direct card passage reproduced in the answer; its cited page was not checked by this audit"
+            elif _has_figure(s) and cards:
+                label = "the figure appears in a card, but this audit has not verified that the source supports this specific claim"
             elif cards:
-                label = "figures observed: each number in it is in a card above"
+                label = "interpretation or paraphrase; this audit has not verified the claim against a source passage"
             else:
-                label = "figures with no card behind them"
+                label = "no evidence card behind this statement"
             quoted = s if len(s) <= 300 else s[:300].rsplit(" ", 1)[0] + " …"
             lines.append(f"- \"{quoted}\" -- {label}")
     return "\n".join(lines)

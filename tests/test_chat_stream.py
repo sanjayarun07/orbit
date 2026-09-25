@@ -159,6 +159,12 @@ def test_research_work_shows_progress_and_checked_sources():
                                    "status": "No answer evidence was gathered"}
 
 
+def test_research_work_counts_pages_and_does_not_mark_abstention_complete():
+    from tests.test_ui_swap_flow import run_case
+    result = run_case("research_work_counts_every_fetched_page_and_marks_abstention")
+    assert result == {"heading": "Research inconclusive", "status": "2 pages checked"}
+
+
 def test_the_client_falls_back_to_the_json_route_without_a_stream():
     from tests.test_ui_swap_flow import run_case
     assert run_case("stream_falls_back_to_json_when_the_response_is_not_a_stream")["fallback"] is True

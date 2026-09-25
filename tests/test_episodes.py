@@ -16,3 +16,17 @@ EPISODES = [e for e in json.load(open(ROOT / "evals" / "episodes" / "cases.json"
 def test_episode_passes_twice(episode):
     runs = [episode_eval.run_episode(episode) for _ in range(2)]
     assert all(r["ok"] for r in runs), [r["failures"] for r in runs if not r["ok"]]
+
+
+def test_live_goal_does_not_count_a_name_only_in_the_research_trail():
+    episode = {"goal": {"pipeline": "research_loop", "must_contain": ["Synthetix"],
+                        "live_verified_candidate": "Synthetix"}}
+    out = {"pipeline": "research_loop", "answer": "No verified answer. Research trail: Synthetix was a lead.",
+           "trajectory": {"research_loop": {"coverage": {"conditions": ["native collateral"],
+                                                          "records": [{"candidate": "Synthetix", "requirement": "native collateral",
+                                                                       "status": "unknown", "source_url": "", "passage": ""}]}}}}
+    assert "lacks complete page-backed condition coverage" in " ".join(episode_eval._judge(episode, out, [], live=True))
+    out["trajectory"]["research_loop"]["coverage"]["records"][0].update(
+        candidate="Synthetix (historical V2)", status="supported",
+        source_url="https://docs.example.org/primary", passage="The native token is locked as collateral.")
+    assert episode_eval._judge(episode, out, [], live=True) == []

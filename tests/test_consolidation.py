@@ -35,10 +35,23 @@ def test_public_research_progress_shows_source_status_without_model_text():
         ],
     }}
     exposed = public_activity(raw)
-    assert exposed == {"research_progress": {"status": "complete", "provider_calls": 1, "sources": [
+    assert exposed == {"research_progress": {"status": "complete", "provider_calls": 1, "checked_pages": 0, "sources": [
         {"name": "Akash", "url": "https://akash.network/docs?id=42", "verdict": "related_but_different", "provenance": "page"},
     ]}}
     assert "private" not in str(exposed)
+
+
+def test_public_research_progress_counts_distinct_direct_page_reads():
+    from app.public_activity import public_activity
+    raw = {"research_loop": {"calls": [
+        "page_read (url_reader): https://docs.example.org/one",
+        "page_read (url_reader): https://docs.example.org/two",
+        "page_read (url_reader): https://docs.example.org/two",
+        "page_read (perplexity_fetch_url): https://docs.example.org/three",
+    ], "verdicts": []}}
+    public = public_activity(raw)
+    assert public["research_progress"]["checked_pages"] == 2
+    assert public_activity(public) == public
 
 
 def test_wallet_leverage_action_keeps_wallet_capability(monkeypatch):

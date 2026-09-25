@@ -80,6 +80,29 @@ def test_the_rules_planner_reads_scope_window_and_filters():
     assert plan_by_rules("price of BONK").kind == "other"
 
 
+def test_planner_null_optional_fields_keep_the_valid_contract():
+    raw = ('{"kind":"open_research","subject":{"kind":null,"id":null,"symbol":null,'
+           '"name":"Synthetix","chain":null},"venue":null,"scope":null,'
+           '"metric":null,"window_hours":null,"direction":null,"filters":null,'
+           '"required_facts":["original protocol documentation"],"confidence":0.8}')
+    contract = contracts._parse_model_contract(raw)
+    assert contract is not None
+    assert contract.kind == "open_research"
+    assert contract.subject.name == "Synthetix"
+    assert contract.subject.kind == "none"
+    assert contract.scope == "any"
+    assert contract.filters == {}
+    assert contract.required_facts == ["original protocol documentation"]
+
+
+def test_conceptual_wallet_transfer_is_research_but_account_state_is_not():
+    question = ("Which projects lock a native token to mint a separate token "
+                "that users can transfer to another wallet and trade?")
+    assert plan_by_rules(question).kind == "open_research"
+    assert plan_by_rules("What is in my wallet?").kind != "open_research"
+    assert plan_by_rules("Analyze wallet transactions for 3aHLqHsvw3gPxnq1fVEYG6P3pCcxkGo3ETSkQGE4KZkS").kind != "open_research"
+
+
 def test_eligibility_is_hard():
     base = plan_by_rules("top gainers on Base in the last 24h")
     assert tool_catalog.eligible("coingecko_gainers_losers", base) == (False, "scope is global, the ask needs trades on the venue")
@@ -179,6 +202,42 @@ def test_a_structured_search_keeps_claim_to_source_links():
     from app import perplexity_tools
     card = perplexity_tools.render_search_card("q", found)
     assert "[1] [research.lido.fi](https://research.lido.fi/t/x) · 2026-09-21" in card and "opened on 2026-09-21 [1]" in card
+
+
+def test_undated_open_research_searches_historical_sources(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from app import evidence_pipeline
+
+    searches = []
+    monkeypatch.setattr(evidence_pipeline.perplexity_tools, "perplexity_available", lambda: True)
+    monkeypatch.setattr(evidence_pipeline.perplexity_tools, "perplexity_search_with_sources",
+                        lambda query, recency_days=None, finance=False: (searches.append(recency_days) or {"text": "found", "sources": []}))
+    router = SimpleNamespace(replay=False)
+    historical = plan_by_rules("Research the historical Synthetix mechanism")
+    recent = plan_by_rules("What happened to Synthetix in the past 24 hours?")
+    asyncio.run(evidence_pipeline._invoke(router, "perplexity_web_search", "historical Synthetix", (), historical))
+    asyncio.run(evidence_pipeline._invoke(router, "perplexity_web_search", "recent Synthetix", (), recent))
+    assert searches == [None, 1]
+
+
+def test_typed_search_honors_window_and_source_domain(monkeypatch):
+    from app import evidence_pipeline
+    from types import SimpleNamespace
+    calls = []
+    monkeypatch.setattr(evidence_pipeline.perplexity_tools, "perplexity_available", lambda: True)
+    def search(query, recency_days=None, finance=False):
+        calls.append((query, recency_days))
+        return {"text": "The Fed proposed a rule [1]. An unrelated post disagreed [2].", "sources": [
+            {"n": 1, "title": "Fed", "url": "https://www.federalreserve.gov/newsevents/pressreleases/rule.htm", "date": "2026-09-24"},
+            {"n": 2, "title": "Other", "url": "https://example.com/post", "date": "2026-09-24"},
+        ]}
+    monkeypatch.setattr(evidence_pipeline.perplexity_tools, "perplexity_search_with_sources", search)
+    contract = plan_by_rules("Why did the Fed propose stablecoin rules?")
+    out = asyncio.run(evidence_pipeline._invoke(SimpleNamespace(replay=False), "perplexity_web_search", "Fed stablecoin proposal", (), contract,
+                                                search_options={"recency_days": 3, "domains": ("federalreserve.gov",)}))
+    assert calls[0][1] == 3 and "site:federalreserve.gov" in calls[0][0]
+    assert [s["url"] for s in out.structured["sources"]] == ["https://www.federalreserve.gov/newsevents/pressreleases/rule.htm"]
 
 
 def test_open_research_is_taken_only_behind_the_flag(monkeypatch):

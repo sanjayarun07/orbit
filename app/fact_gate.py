@@ -149,7 +149,7 @@ def unsupported_figures(answer: str, facts: list[Fact], evidence_text: str = "")
     answer_prose = _DATETIME.sub(" ", prose_of(answer))
     for m in _FIGURE.finditer(answer_prose):
         token = m.group(0).strip().rstrip(",.")           # "2025," is the year 2025 (a withheld summary over that comma, 2026-09-24)
-        if re.match(r"\s*(?:minutes?|mins?|seconds?|secs?)\b", answer_prose[m.end():]):
+        if re.match(r"\s*-?\s*(?:minutes?|mins?|seconds?|secs?|hours?)\b", answer_prose[m.end():]):     # "48-minute span" as well as "48 minutes" (expanded run 2026-09-25: a correct summary withheld over 48)
             continue                                      # "1 hour and 42 minutes" is the window's span, computed from the card's own stamps
         n = _parse(token)
         if n is None or _YEARLIKE.match(token) or (abs(n) <= 12 and "%" not in token and "$" not in token and not token[-1:].lower() in "kmb"):

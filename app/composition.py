@@ -92,7 +92,7 @@ _RESOLUTION_NOTE = re.compile(r"\n(?:Resolved (?:from|subject)[^\n]*)$", re.S)
 _FORMAT_CLAUSE = re.compile(
     r"^\s*(?:(?:please\s+)?(?:mark|label|flag|cite|include|exclude|separate|distinguish|treat|note|state|say|show|list|link|report|present|format|"
     r"explain\s+(?:in|with|using)|keep|use|do\s+not|don'?t|never|avoid|if\s+.*?(?:say\s+so|say\s+unknown|say\s+that))\b[^.?!]*"
-    r"\b(?:claims?|assumptions?|sources?|evidence|links?|timestamps?|coverage|gaps?|units?|as\s+unknown|say\s+so|unknown|plain\s+language|"
+    r"\b(?:claims?|assumptions?|sources?|evidence|pages?|documents?|citations?|links?|timestamps?|coverage|gaps?|units?|as\s+unknown|say\s+so|unknown|plain\s+language|"
     r"do\s+not\s+(?:invent|prepare|execute|trade)|not\s+(?:invent|prepare|execute)|no\s+trade|without\s+predicting|database-only|primary\s+source)\b"
     r"|^\s*(?:do\s+not|don'?t|never)\s+[^.?!]*$|^\s*if\s+[^.?!]*\bsay\s+so\b[^.?!]*$"
     # "If several contracts share the ticker, tell me which contract you selected": a
@@ -120,6 +120,10 @@ def is_format_clause(clause: str) -> bool:
     """An instruction about the answer, not an ask: "Mark database-only
     claims", "Label assumptions; do not invent valuation multiples", "If
     snapshots are unavailable, say so"."""
+    if re.match(r"^\s*(?:number|enumerate)\s+(?:them|the\s+(?:items|results|headlines|steps|list))\b", clause or "", re.I):
+        return True
+    if re.match(r"^\s*for\s+each\s+(?:item|one|result|headline|source)?\s*(?:distinguish|mark|label|cite|include|show|state|note|give)\b", clause or "", re.I):
+        return True
     return bool(_FORMAT_CLAUSE.match(clause or ""))
 
 
@@ -263,10 +267,11 @@ def pipeline_of(results: list[dict]) -> dict:
     contract answer too (its coverage is proved or stated, and the topical
     gate must not send it to the web), carrying the first clause's contract."""
     answered = [r for r in results if r.get("answer")]
-    if not answered or any(r.get("pipeline") != "contract" for r in answered):
+    if not answered or any(r.get("pipeline") not in ("contract", "research_loop") for r in answered):
         return {}
     first = next((r["contract"] for r in answered if r.get("contract")), None)
-    return {"pipeline": "contract", **({"contract": first} if first else {})}
+    pipeline = "research_loop" if any(r.get("pipeline") == "research_loop" for r in answered) else "contract"
+    return {"pipeline": pipeline, **({"contract": first} if first else {})}
 
 
 def combine(parts: list[tuple[str, dict]]) -> tuple[str, dict]:
@@ -288,7 +293,7 @@ async def synthesize(request: str, cards: str, trajectory: dict, advice: bool = 
         return cards
     try:
         stance = "a market read, not a recommendation" if advice else "a factual summary"
-        if streaming.active():
+        if streaming.active() and not streaming.is_muted("delta"):
             streaming.emit("status", text="Reading the cards together")
             result = await runtime.stream_synthesis(runtime.composite_synthesizer, "summary", lambda text: streaming.emit("delta", text=text),
                                                     research=research, request=request, evidence=cards, stance=stance)

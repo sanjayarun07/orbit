@@ -25,6 +25,7 @@ from app.settings import settings
 logger = logging.getLogger(__name__)
 
 MAX_TOOLS = 3
+EXACT_STATE_KINDS = ("market_ranking", "holders", "yields", "portfolio")     # figures must come from a state card, never a web card
 
 
 def _contract_note(contract: contracts.QuestionContract, gate: fact_gate.GateResult, fact_rows: list[facts_mod.Fact], scope_note: str | None) -> str:
@@ -76,15 +77,21 @@ def research_query(request: str) -> str:
     plainly (the dual-token runs, 2026-09-24)."""
     from app.routing.subject_probe import market_scoped
     body, notes = composition.split_notes(request)
+    rolling = re.search(r"\b(?:last|past|previous)\s+(\d{1,3})\s*(?:h|hours?)\b", body or "", re.I)
+    as_of = (f" As of {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}, test event times against the exact previous {rolling.group(1)} hours; publication time is separate."
+             if rolling else "")
+    prior_items = re.search(r'"those" are the items the previous answer listed -- (.*?) -- answer about exactly these', notes or "", re.S)
+    if prior_items:
+        return f"{market_scoped(body)} (Verify only these previously listed items in order: {prior_items.group(1)}. Do not replace them with new items.{as_of})"
     objective = _OBJECTIVE_LINE.search(notes or "")
     if objective:
         # Every line the user wrote is the question ("Only include transferable
         # tokens" / "Exclude wrapped assets" on later lines had been dropped,
         # review of c03378b1); only the notes fold into the context.
         question = " ".join(line.strip() for line in (body or request).splitlines() if line.strip())
-        return f"{question} (Context: this continues research on {objective.group(1).strip()}; answer for that context, not the general case.)"
+        return f"{question} (Context: this continues research on {objective.group(1).strip()}; answer for that context, not the general case.{as_of})"
     # "PUMP revenue" came back as ProPetro (NYSE: PUMP): the ticker reads as a crypto asset first.
-    return market_scoped(request)
+    return market_scoped(request) + as_of
 
 
 def unsourced_examples(summary: str, cards: str) -> list[str]:
@@ -118,17 +125,36 @@ def _near_tools(contract: contracts.QuestionContract, ranked: list[tuple[str, st
             and not (contract.venue and (tool_catalog.CONTRACT_COVERAGE.get(name) or {}).get("venues"))]
 
 
-async def _invoke(router, name: str, request: str, chains: tuple[str, ...], contract=None):
+async def _invoke(router, name: str, request: str, chains: tuple[str, ...], contract=None, *, search_options: dict | None = None):
     """One tool. The web discovery tool runs through the structured search so
     claims keep their [n] markers and numbered, dated sources; everything
     else through the router (quota, cache, breaker as usual)."""
     if name in ("perplexity_web_search", "perplexity_finance_search") and contract is not None and perplexity_tools.perplexity_available() and not getattr(router, "replay", False):
         try:
-            days = int((contract.window_hours or 24 * 30) / 24) or 1 if contract.kind in ("recent_events", "open_research") else None
+            # Open research without an explicit window includes historical
+            # primary documents. A default 30-day search filter made the
+            # decisive original protocol pages much harder to retrieve.
+            days = (max(1, int((contract.window_hours or 24 * 30) / 24))
+                    if contract.kind == "recent_events" else
+                    max(1, int(contract.window_hours / 24))
+                    if contract.kind == "open_research" and contract.window_hours else None)
+            if search_options and search_options.get("recency_days"):
+                days = search_options["recency_days"]
             finance = name == "perplexity_finance_search"
-            found = await asyncio.to_thread(perplexity_tools.perplexity_search_with_sources, research_query(request), recency_days=days, finance=finance)
-            card = perplexity_tools.render_search_card(request, found, title="From the web (finance, dated, with sources)" if finance else "From the web (dated, with sources)")
-            result = SimpleNamespace(output=card, tool=name, provider="perplexity", structured=found)
+            query = research_query(request)
+            domains = tuple((search_options or {}).get("domains") or ())
+            domain_clause = " OR ".join(f"site:{domain}" for domain in domains)
+            search_query = query + (f" ({domain_clause})" if domains else "")
+            found = await asyncio.to_thread(perplexity_tools.perplexity_search_with_sources, search_query, recency_days=days, finance=finance)
+            if domains:
+                from urllib.parse import urlsplit
+                found = {**found, "sources": [source for source in found.get("sources") or []
+                         if any((host := (urlsplit(str(source.get("url") or "")).hostname or "").lower()) == domain
+                                or host.endswith("." + domain) for domain in domains)]}
+                if not found["sources"]:
+                    return SimpleNamespace(output="", tool=name, provider="perplexity", structured=found, query=search_query)
+            card = perplexity_tools.render_search_card(query, found, title="From the web (finance, dated, with sources)" if finance else "From the web (dated, with sources)")
+            result = SimpleNamespace(output=card, tool=name, provider="perplexity", structured=found, query=search_query)
             return result
         except Exception:
             logger.info("structured web search failed; plain call", exc_info=True)
@@ -384,7 +410,13 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
     # context, never a source of figures: ten web-derived holder percentages
     # were written under a line saying no holder source was queried (live UI
     # test 2026-09-25). The figure check reads state cards only.
-    state_cards = "\n\n".join(text for text, traj in parts if not (cov.get(traj.get("tool_name_0")) or {}).get("discovery")) if contract.kind != contracts.OPEN_RESEARCH_KIND else cards
+    # Exact-state kinds take their figures from state cards only (a web card
+    # is context); an events or open-research answer is discovery by design,
+    # so its web card is its evidence (regression run 2026-09-25: "What
+    # happened to Solana in the last 24 hours" was withheld over figures its
+    # own web card carried, two runs of three).
+    state_cards = ("\n\n".join(text for text, traj in parts if not (cov.get(traj.get("tool_name_0")) or {}).get("discovery"))
+                   if contract.kind in EXACT_STATE_KINDS else cards)
     final = fact_gate.check(contract, fact_rows, synthesized, scope_satisfied=scope_satisfied, evidence_text=state_cards)
     if final.unsupported or final.contradictions:
         # The claim check found figures no fact carries, or a comparison the

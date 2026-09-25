@@ -37,6 +37,7 @@ CALENDAR = "# Market events · 2026-09-18 → 2026-09-25\n- State Employment and
 
 def test_which_answers_are_checked():
     assert answer_gate.eligible("A" * 100, {})
+    assert not answer_gate.eligible("I withheld the written summary: no cited page established the claim." * 2, {"pipeline": "research_loop"})
     assert not answer_gate.eligible("Which token's unlock? Name it and I'll pull its schedule.", {})
     assert not answer_gate.eligible("A" * 100, {"pending_token": {"symbol": "OPEN"}})
     assert not answer_gate.eligible("A" * 100, {"trade_plan": object()})

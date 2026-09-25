@@ -18,6 +18,7 @@ import re
 import threading
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from app import market_overview
 from app.perplexity_tools import _invoke as perplexity_invoke, perplexity_available
@@ -103,7 +104,7 @@ def _verified(parsed: dict) -> dict:
                 unread.setdefault(kind, []).append({**item, "verified": False})
                 continue
             text = found.get("text") or ""
-            sourced = [s for s in found.get("sources") or [] if s.get("url")]
+            sourced = [s for s in found.get("sources") or [] if str(s.get("url") or "").startswith("https://")]
             if not sourced:
                 logger.warning("home highlights: dropped %r: the read had no sources", item["headline"][:80])
                 continue
@@ -126,7 +127,16 @@ def _verified(parsed: dict) -> dict:
             dated = [s for s in found.get("sources") or [] if s.get("date")]
             if not item.get("date") and dated:
                 item = {**item, "date": dated[0]["date"][:10]}
-            kept.append({**item, "verified": True})
+            # Keep the article that supported the Home tile. The display-only
+            # domain from the JSON generator is not evidence; the URL comes
+            # from the separate sourced verification read.
+            domain = (item.get("source") or "").removeprefix("www.")
+            matching = next((s for s in sourced if domain and (
+                (host := (urlsplit(str(s["url"])).hostname or "").removeprefix("www.")) == domain
+                or host.endswith("." + domain))), None)
+            source = matching or sourced[0]
+            source_domain = (urlsplit(str(source["url"])).hostname or "").removeprefix("www.")
+            kept.append({**item, "source": source_domain, "source_url": source["url"], "verified": True})
         out[kind] = kept
     if not any(out.values()) and unread:
         # Every read failed (the provider is down): the strip shows the
@@ -157,7 +167,7 @@ def _news_cards() -> list[dict] | None:
         for index, item in enumerate(parsed.get(kind) or []):
             cards.append({
                 "id": f"{kind}-{index}", "kind": kind, "tone": tone if index == 0 else ("violet" if kind == "crypto" else "amber"),
-                "title": item["headline"], "summary": item["summary"], "source": item["source"], "date": item.get("date"), "verified": bool(item.get("verified")),
+                "title": item["headline"], "summary": item["summary"], "source": item["source"], "source_url": item.get("source_url"), "date": item.get("date"), "verified": bool(item.get("verified")),
                 # The tile's own words; a headline tap is answered briefly by the
                 # research node (composition.word_limit knows this prefix).
                 "prompt": (f"What does this mean for memecoins: {item['headline']}" if kind == "memes"
@@ -341,6 +351,15 @@ def get_highlights(force: bool = False) -> dict:
                 threading.Thread(target=_build_into_cache, name="home-highlights-rebuild", daemon=True).start()
         return _cached[1]
     return _build_into_cache(force)
+
+
+def cached_card_for_prompt(prompt: str) -> dict | None:
+    """The source attached to a displayed Home tile, without a new provider call."""
+    cached = _cached[1] if _cached else None
+    if not cached:
+        return None
+    return next((card for card in (cached.get("cards") or []) + (cached.get("meme_cards") or [])
+                 if card.get("prompt") == prompt and card.get("source_url")), None)
 
 
 def reset() -> None:

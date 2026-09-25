@@ -153,7 +153,8 @@ def _judge(episode: dict, out: dict | None, calls: list[str], answer_override: s
     gate = out.get("gate") or {}
     if goal.get("tools_any") and not any(t in calls for t in goal["tools_any"]):
         failures.append(f"none of {goal['tools_any']} ran (ran {calls})")
-    for tool, count in (goal.get("tools_count") or {}).items():
+    for tool, count in {**(goal.get("tools_count") or {}),
+                        **((goal.get("replay_tools_count") or {}) if not live else {})}.items():
         if calls.count(tool) != count:
             failures.append(f"{tool} ran {calls.count(tool)} times, expected {count}")
     if goal.get("pipeline") == "research_loop" and (out or {}).get("pipeline") != "research_loop":
@@ -181,6 +182,17 @@ def _judge(episode: dict, out: dict | None, calls: list[str], answer_override: s
     for text in goal.get("must_not_contain") or []:
         if text in answer:
             failures.append(f"forbidden text present: {text!r}")
+    if live and goal.get("live_verified_candidate"):
+        wanted = goal["live_verified_candidate"].casefold()
+        research = ((out.get("trajectory") or {}).get("research_loop") or {})
+        coverage = research.get("coverage") or {}
+        conditions = coverage.get("conditions") or []
+        rows = [row for row in coverage.get("records") or []
+                if row.get("candidate", "").casefold() == wanted
+                or row.get("candidate", "").casefold().startswith((wanted + " (", wanted + " —", wanted + " - "))]
+        if (not conditions or len(rows) != len(conditions)
+                or any(row.get("status") != "supported" or not row.get("source_url") or not row.get("passage") for row in rows)):
+            failures.append(f"{goal['live_verified_candidate']} lacks complete page-backed condition coverage")
     return failures
 
 
@@ -247,10 +259,13 @@ def run_live(episode: dict) -> dict:
     trajectory = out.get("trajectory") or {}
     calls = [v for k, v in trajectory.items() if k.startswith("tool_name")]
     failures = _judge(episode, out, calls, live=True)
+    research = trajectory.get("research_loop") or {}
     return {"id": episode["id"], "ok": not failures, "failures": failures, "ms": ms, "tools": calls,
             "llm_calls": delta.get("llm_calls", 0), "perplexity_calls": sum(v for k, v in delta.items() if k.startswith("perplexity_") and k.endswith("_calls")),
             "perplexity_cost_usd": delta.get("perplexity_estimated_cost_microusd", 0) / 1e6, "pipeline": out.get("pipeline", "legacy"),
-            "answer_head": (out.get("answer") or "")[:240]}
+            "answer_head": (out.get("answer") or "")[:240],
+            "research_trace": {"calls": research.get("calls", []), "budget": research.get("budget", {}),
+                               "coverage": research.get("coverage", {}), "timings": research.get("timings", {})} if research else {}}
 
 
 def main() -> int:
@@ -296,9 +311,10 @@ def main() -> int:
         report.append({"id": episode["id"], "pass_k": ok_k, "pass_1": runs[0]["ok"], "passes": sum(r["ok"] for r in runs), "failures": sorted({f for r in runs for f in r["failures"]}),
                        "ms_mean": sum(r["ms"] for r in runs) / len(runs), "tools": runs[0]["tools"],
                        "llm_calls": sum(r.get("llm_calls", 0) for r in runs) / len(runs), "perplexity_calls": sum(r.get("perplexity_calls", 0) for r in runs) / len(runs),
-                       "cost_usd": sum(r.get("perplexity_cost_usd", 0) for r in runs) / len(runs), "pipeline": runs[0].get("pipeline"), "answer_head": runs[0].get("answer_head")})
+                       "cost_usd": sum(r.get("perplexity_cost_usd", 0) for r in runs) / len(runs), "pipeline": runs[0].get("pipeline"),
+                       "answer_head": runs[0].get("answer_head"), "research_trace": runs[0].get("research_trace", {})})
         print(f"{episode['id']:32} {'PASS' if ok_k else 'FAIL':4} {report[-1]['passes']}/{args.k} {report[-1]['ms_mean']:7.0f} ms  {runs[0]['tools'][:3]}" + ("" if ok_k else "  " + " | ".join(report[-1]["failures"])[:220]), flush=True)
-    print(f"\nepisodes {len(episodes)} · pass^{args.k} {passed_k}/{len(episodes)} · wrong-answer rate {wrong / max(1, len(episodes)):.0%}"
+    print(f"\nepisodes {len(episodes)} · pass^{args.k} {passed_k}/{len(episodes)} · goal-failure rate {wrong / max(1, len(episodes)):.0%}"
           + (f" · mean {sum(r['ms_mean'] for r in report) / max(1, len(report)):.0f} ms · mean LLM calls {sum(r['llm_calls'] for r in report) / max(1, len(report)):.1f} · mean web cost ${sum(r['cost_usd'] for r in report) / max(1, len(report)):.3f}" if args.live else ""))
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
