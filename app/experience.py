@@ -259,7 +259,7 @@ def build_gas_advisory(draft: CrossChainSwapDraft | None) -> GasAdvisory | None:
     status = "not_required" if output == native else "check_required"
     message = (
         f"You are receiving {output or 'a token'} on {draft.destination_chain.title()}. "
-        f"Keep some {native} there for later transactions. Orbit will verify the destination gas balance before submission."
+        f"Keep some {native} there for later transactions. Anvaya will verify the destination gas balance before submission."
         if status == "check_required" else
         f"The received {native} can pay destination-chain gas."
     )

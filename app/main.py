@@ -187,7 +187,7 @@ async def lifespan(_app: FastAPI):
         await asyncio.to_thread(close_mcp_gateway)
 
 
-app = FastAPI(title="Orbit Web3 Copilot", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Anvaya Web3 Copilot", version="0.3.0", lifespan=lifespan)
 
 
 @app.exception_handler(ServiceError)
@@ -225,6 +225,12 @@ async def auth_admission(request: Request, call_next):
 STATIC_DIR = Path(__file__).parent / "static"
 
 
+@app.get("/", include_in_schema=False)
+async def landing_page():
+    """Public product front door; the research workspace remains at /ui/."""
+    return FileResponse(STATIC_DIR / "landing.html")
+
+
 @app.middleware("http")
 async def ui_revalidation(request: Request, call_next):
     # The UI is a handful of hand-edited files that change with every deploy.
@@ -232,7 +238,7 @@ async def ui_revalidation(request: Request, call_next):
     # stale page (seen live: the admin page rendered its previous design for a
     # day). no-cache + the ETag StaticFiles already sends = one cheap 304 per load.
     response = await call_next(request)
-    if request.url.path.startswith("/ui") and response.status_code == 200:
+    if (request.url.path == "/" or request.url.path.startswith("/ui")) and response.status_code == 200:
         response.headers["Cache-Control"] = "no-cache"
     return response
 
@@ -498,7 +504,7 @@ async def coinbase_auth_challenge(body: WalletAuthChallengeRequest, request: Req
     coinbase.js) calls this by name right after every connect, with no
     server-side change needed on the frontend -- keep the path and body
     shape exactly as it expects. Other wallets go through /auth/wallet/*."""
-    host = request.headers.get("host", request.url.hostname or "Orbit").split("/", 1)[0]
+    host = request.headers.get("host", request.url.hostname or "Anvaya").split("/", 1)[0]
     uri = f"{request.url.scheme}://{host}"
     try:
         return await create_challenge(body.address, host, uri, body.chain_id)
@@ -526,7 +532,7 @@ async def coinbase_auth_verify(body: WalletAuthVerifyRequest, response: Response
 async def wallet_auth_challenge(body: WalletChallengeRequest, request: Request):
     """The general pair: any wallet, EVM or Solana. No sign-in required to
     call this -- proving control of an address is itself how you sign in."""
-    host = request.headers.get("host", request.url.hostname or "Orbit").split("/", 1)[0]
+    host = request.headers.get("host", request.url.hostname or "Anvaya").split("/", 1)[0]
     # Behind a TLS-terminating proxy (ngrok, Caddy) the app itself is spoken to
     # over http, so request.url.scheme says "http" while the browser is on
     # https. The URI inside a sign-in message is shown to the user by their
@@ -1250,8 +1256,8 @@ async def me(request: Request):
 
 @app.get("/integrations/tradingview/connect")
 async def tradingview_connect(identity: Identity = Depends(require_browser_session)):
-    """Send the signed-in user to TradingView to approve Orbit on their own
-    account (OAuth 2.1 with PKCE). Orbit registers itself as an OAuth client
+    """Send the signed-in user to TradingView to approve Anvaya on their own
+    account (OAuth 2.1 with PKCE). Anvaya registers itself as an OAuth client
     on first use."""
     if identity.api_key is not None:
         raise HTTPException(403, "Connect TradingView from a signed-in browser session")
@@ -1404,7 +1410,7 @@ async def revoke_my_sessions(request: Request, identity: Identity = Depends(requ
 
 @app.get("/me/export")
 async def export_my_data(identity: Identity = Depends(require_browser_session)):
-    """Everything Orbit holds about the account, as one JSON document."""
+    """Everything Anvaya holds about the account, as one JSON document."""
     user = identity.user
     conversations = []
     for session_id in await accounts.list_chat_sessions(user["id"]):
@@ -1435,7 +1441,7 @@ async def export_my_data(identity: Identity = Depends(require_browser_session)):
 
 @app.get("/me/memory")
 async def my_memory(identity: Identity = Depends(require_browser_session)):
-    """Every fact Orbit remembers about the signed-in user, with its source."""
+    """Every fact Anvaya remembers about the signed-in user, with its source."""
     return {"facts": await user_memory.list_facts(identity.user["id"]),
             "enabled": user_memory.enabled() and not user_memory.opted_out(identity.user)}
 
@@ -1468,7 +1474,7 @@ async def set_memory_preference(body: MemoryPreference, identity: Identity = Dep
 async def my_decisions(limit: int = 20, identity: Identity = Depends(require_browser_session)):
     """The signed-in user's decision receipts, newest first: every analyst's
     vote or abstention behind a verdict, what was not seen, and the verdict
-    as given. Answers "why did Orbit say that" from the record alone."""
+    as given. Answers "why did Anvaya say that" from the record alone."""
     rows = await decision_records.list_for(identity.user["id"], limit=max(1, min(int(limit), 100)))
     return {"decisions": [{**decision_records.public(r), "receipt": decision_records.why(r)} for r in rows]}
 
@@ -2014,7 +2020,7 @@ def _public_base(request: Request) -> str:
 
 @app.post("/billing/checkout")
 async def billing_checkout(body: CheckoutRequest, request: Request, identity: Identity = Depends(require_browser_session)):
-    """A Stripe-hosted Checkout URL. Orbit never handles the card or wallet."""
+    """A Stripe-hosted Checkout URL. Anvaya never handles the card or wallet."""
     if identity.api_key is not None:
         raise HTTPException(403, "Billing is managed from a signed-in browser session")
     try:
@@ -2043,7 +2049,7 @@ async def billing_portal(request: Request, identity: Identity = Depends(require_
 
 @app.post("/billing/webhook")
 async def billing_webhook(request: Request):
-    """Stripe -> Orbit. Verified with the signing secret, recorded by event id,
+    """Stripe -> Anvaya. Verified with the signing secret, recorded by event id,
     applied idempotently; always 200 once verified so Stripe stops retrying."""
     payload = await request.body()
     signature = request.headers.get("stripe-signature", "")

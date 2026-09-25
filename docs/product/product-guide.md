@@ -4,7 +4,7 @@
 
 ## Product purpose
 
-Orbit helps a user investigate a market question, understand a wallet, and prepare a transaction without treating conversation as permission to move funds. The workspace brings together answers, sources, portfolio cards, trade reviews, history, and follow-up tasks.
+Anvaya helps a user investigate a market question, understand a wallet, and prepare a transaction without treating conversation as permission to move funds. The workspace brings together answers, sources, portfolio cards, trade reviews, history, and follow-up tasks.
 
 Its primary users are individual researchers and wallet holders. Paid accounts can also integrate through API keys and MCP. Max accounts can invite members to share a plan and credit pool. Administrators operate the provider catalogue, account support, billing tools, and Knowledge Base.
 
@@ -79,7 +79,7 @@ The Knowledge Base page uses the same administration HTML shell; it is a separat
 ### Research a topic
 
 1. Ask a question or choose an example.
-2. Orbit resolves the request's subject and intent. Ambiguous chains or tokens can trigger a clarification.
+2. Anvaya resolves the request's subject and intent. Ambiguous chains or tokens can trigger a clarification.
 3. It selects eligible live tools or Knowledge Base retrieval and builds the answer.
 4. Review cited sources, dates, coverage, and warnings. A cached answer may be returned where the router considers reuse suitable.
 5. Ask a follow-up or rate the answer. Feedback contributes to tool-outcome scoring.
@@ -98,7 +98,7 @@ Disconnecting removes the wallet binding from the chat. A public address alone d
 ### Review a Solana swap
 
 1. Name the input asset, output asset, amount, chain, and optional slippage.
-2. Orbit resolves tokens, obtains a quote, checks platform caps, simulates the prepared transaction, and evaluates the risk charter.
+2. Anvaya resolves tokens, obtains a quote, checks platform caps, simulates the prepared transaction, and evaluates the risk charter.
 3. Review the card, including amount, slippage, warnings, and expiry. The default plan lifetime is 120 seconds.
 4. Confirm through the wallet flow. Typing `CONFIRM` in chat does not sign a transaction.
 5. The browser wallet signs; the server validates the signed message against the reviewed plan before submission.
@@ -110,7 +110,7 @@ Default platform limits are $25 per trade, 100 basis points of slippage, and 5% 
 
 ### Review a cross-chain swap
 
-Orbit prepares a Relay draft. The browser resolves the route and presents the quote, receiving wallet, and destination-gas considerations. The reviewed request is tied to the conversation and revision. A persisted Relay claim precedes wallet execution, and the backend checks provider status independently.
+Anvaya prepares a Relay draft. The browser resolves the route and presents the quote, receiving wallet, and destination-gas considerations. The reviewed request is tied to the conversation and revision. A persisted Relay claim precedes wallet execution, and the backend checks provider status independently.
 
 Some charter restrictions cannot be established for a cross-chain route; for example, a Jupiter-verified-only requirement cannot simply be presumed true. The UI rejects unsupported checks rather than treating them as satisfied. Relay browser checks and Jupiter server checks are separate implementations.
 

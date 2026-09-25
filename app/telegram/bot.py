@@ -45,7 +45,7 @@ _BOT_USERNAME: str | None = None
 _ADDRESS = re.compile(r"^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$")
 
 HELP = (
-    "<b>Orbit</b> — a Web3 copilot with live on-chain evidence.\n\n"
+    "<b>Anvaya</b> — a Web3 copilot with live on-chain evidence.\n\n"
     "Just ask, in your own words:\n"
     "• <i>deep dive on BONK</i>\n"
     "• <i>is 0x… safe?</i> — paste any contract address\n"
@@ -60,19 +60,19 @@ HELP = (
     "/charter — show the risk rules in force\n"
     "/tasks — your alerts, reminders and briefs\n"
     "/account — your plan, credits and whether you are connected\n"
-    "/link — use your existing Orbit account\n"
-    "/app — open Orbit\n"
+    "/link — use your existing Anvaya account\n"
+    "/app — open Anvaya\n"
     "/unlink — detach this Telegram account\n\n"
-    "<i>Orbit never asks for a private key or seed phrase, and nothing here can sign.</i>"
+    "<i>Anvaya never asks for a private key or seed phrase, and nothing here can sign.</i>"
 )
 
 # Said on first contact and again when credits run out -- the two moments a
-# user who ALREADY has an Orbit account would otherwise quietly build a second
+# user who ALREADY has an Anvaya account would otherwise quietly build a second
 # one. There is no automatic mapping between a Telegram id and a web account
 # (Telegram knows neither your email nor your wallet), so the only way one
 # account stays one account is to say so before the fork happens.
 LINK_HINT = (
-    "Already use Orbit on the web? Send /link to use the same account — "
+    "Already use Anvaya on the web? Send /link to use the same account — "
     "same plan, credits, wallets and risk charter."
 )
 
@@ -199,8 +199,8 @@ async def _handle_command(message: dict, text: str, chat_id: int, thread_id: int
         return
     if command == "app":
         await client.send_message(
-            chat_id, "Open Orbit to connect a wallet, review a quote and sign it.", thread_id=thread_id,
-            reply_markup={"inline_keyboard": [[{"text": "Open Orbit", "url": app_url(session_id)}]]},
+            chat_id, "Open Anvaya to connect a wallet, review a quote and sign it.", thread_id=thread_id,
+            reply_markup={"inline_keyboard": [[{"text": "Open Anvaya", "url": app_url(session_id)}]]},
         )
         return
     if command == "wallet":
@@ -210,7 +210,7 @@ async def _handle_command(message: dict, text: str, chat_id: int, thread_id: int
         removed = await tg_identity.unlink(tg_user)
         await client.send_message(
             chat_id,
-            "This Telegram account is detached. Your next message starts a new Orbit account."
+            "This Telegram account is detached. Your next message starts a new Anvaya account."
             if removed else "This Telegram account was not linked.",
             thread_id=thread_id,
         )
@@ -248,14 +248,14 @@ async def _handle_start(chat_id: int, thread_id: int | None, tg_user: dict, payl
             await client.send_message(chat_id, "That account no longer exists.", thread_id=thread_id)
             return
         await client.send_message(
-            chat_id, "✅ Linked. This chat now shares your Orbit account — same plan, credits, "
+            chat_id, "✅ Linked. This chat now shares your Anvaya account — same plan, credits, "
             "wallets and risk charter.\n\nSend /account any time to check.",
             thread_id=thread_id,
         )
         return
     account, created = await tg_identity.account_for(tg_user)
     opening = (
-        "👋 <b>Orbit</b> is ready. Ask me anything about a token, a wallet or a market — "
+        "👋 <b>Anvaya</b> is ready. Ask me anything about a token, a wallet or a market — "
         "I answer with live on-chain evidence and name my sources.\n\n"
         if created else "Welcome back.\n\n"
     )
@@ -289,7 +289,7 @@ async def _handle_account(chat_id: int, thread_id: int | None, tg_user: dict) ->
     context = await sessions.get_session_context(await _session_for(chat_id, thread_id, tg_user, identity))
 
     lines = [
-        "<b>Your Orbit account</b>",
+        "<b>Your Anvaya account</b>",
         f"Plan: {html.escape(identity.plan.name)}",
         f"Credits: <b>{balance:,}</b>",
     ]
@@ -309,13 +309,13 @@ async def _handle_account(chat_id: int, thread_id: int | None, tg_user: dict) ->
     lines.append(
         "🔗 <b>Connected to your web account.</b> Same credits and plan on both."
         if linked else
-        "⚠️ <b>Not connected to a web account.</b> This chat has an Orbit account of "
+        "⚠️ <b>Not connected to a web account.</b> This chat has an Anvaya account of "
         "its own. Send /link to use the same one everywhere."
     )
     base = settings.public_base_url.rstrip("/")
     await client.send_message(
         chat_id, "\n".join(lines), thread_id=thread_id,
-        reply_markup={"inline_keyboard": [[{"text": "Open Orbit", "url": f"{base}/ui/"}]]},
+        reply_markup={"inline_keyboard": [[{"text": "Open Anvaya", "url": f"{base}/ui/"}]]},
     )
 
 
@@ -326,7 +326,7 @@ async def _handle_link(chat_id: int, thread_id: int | None, tg_user: dict) -> No
     account, _ = await tg_identity.account_for(tg_user)
     if await _is_linked(account):
         await client.send_message(
-            chat_id, "✅ This chat is already on your Orbit account — same plan, credits and wallets.",
+            chat_id, "✅ This chat is already on your Anvaya account — same plan, credits and wallets.",
             thread_id=thread_id,
         )
         return
@@ -337,7 +337,7 @@ async def _handle_link(chat_id: int, thread_id: int | None, tg_user: dict) -> No
     base = settings.public_base_url.rstrip("/")
     await client.send_message(
         chat_id,
-        "<b>Use one Orbit account everywhere</b>\n\n"
+        "<b>Use one Anvaya account everywhere</b>\n\n"
         "Tap below and sign in however you like — a wallet such as MetaMask or "
         "Phantom, or an email. <i>Email is not required.</i>\n\n"
         "The moment you are signed in, this chat joins that account: same credits, "
@@ -358,7 +358,7 @@ async def _handle_wallet(chat_id: int, thread_id: int | None, tg_user: dict, arg
     if len(address) >= 60 or address.count(" ") >= 11:
         await client.send_message(
             chat_id,
-            "⛔ That looks like key material, not a public address. Orbit only ever accepts a public wallet "
+            "⛔ That looks like key material, not a public address. Anvaya only ever accepts a public wallet "
             "address, and never a private key or seed phrase. If you pasted a seed phrase here, treat it as "
             "compromised and move your funds now.",
             thread_id=thread_id,

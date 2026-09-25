@@ -4,31 +4,31 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="color-scheme" content="dark light" />
-<title>Orbit — Research & markets</title>
+<title>Anvaya — Research & markets</title>
 <!-- Installable app: manifest + icons for Android/desktop Chrome, the apple-* tags for iOS Safari's Add to Home Screen (standalone, no browser chrome, translucent status bar over the app's own topbar). -->
 <link rel="manifest" href="/ui/manifest.webmanifest">
-<meta name="theme-color" content="#111214" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="application-name" content="Orbit">
+<meta name="theme-color" content="#101820" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f8f7f2" media="(prefers-color-scheme: light)">
+<meta name="application-name" content="Anvaya">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Orbit">
+<meta name="apple-mobile-web-app-title" content="Anvaya">
 <meta name="format-detection" content="telephone=no">
-<link rel="apple-touch-icon" href="/ui/icons/apple-touch-icon.png">
-<link rel="icon" type="image/png" sizes="192x192" href="/ui/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/ui/icons/anvaya-apple-touch-icon.png">
+<link rel="icon" type="image/svg+xml" href="/ui/icons/anvaya-mark.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <script>(function(){try{var p=JSON.parse(localStorage.getItem("orbit_theme_v1")||'"system"');var t=p==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):p;document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t;}catch(e){}})();</script>
-<link rel="stylesheet" href="/ui/theme.css?v=1">
-<link rel="stylesheet" href="/ui/chat.css?v=9">
-<link rel="stylesheet" href="/ui/product.css?v=8">
+<link rel="stylesheet" href="/ui/theme.css?v=2">
+<link rel="stylesheet" href="/ui/chat.css?v=10">
+<link rel="stylesheet" href="/ui/product.css?v=10">
 <link rel="stylesheet" href="/ui/mobile.css?v=7">
 </head>
 <body>
 <div class="app">
   <aside class="sidebar" id="sidebar">
-    <div class="side-brand"><span class="mark"><svg class="icon" viewBox="0 0 24 24"><path d="M5 15.5 9.5 11l3 3L19 7.5"/><path d="M19 12v7H5V5h8"/></svg></span>Orbit</div>
+    <div class="side-brand"><span class="mark"><img src="/ui/icons/anvaya-mark.svg" alt="" aria-hidden="true"></span>Anvaya</div>
     <button class="new-chat" id="newChatBtn"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New chat</button>
     <nav class="side-nav" aria-label="Primary">
       <button class="nav-item active" id="navHome" type="button"><svg class="icon" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9Z"/></svg>Home</button>
@@ -39,7 +39,7 @@
     <div class="history-heading"><button class="history-view" id="historyView" type="button" aria-haspopup="menu" aria-expanded="false"><span id="historyViewLabel">Recents</span><svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button></div>
     <div class="history" id="chatList"></div>
     <div class="install-card" id="installCard" hidden>
-      <strong>Add Orbit to your Home Screen</strong>
+      <strong>Add Anvaya to your Home Screen</strong>
       <span id="installHint">Tap <kbd>Share</kbd> in Safari, then <kbd>Add to Home Screen</kbd> for a full-screen app.</span>
       <div class="install-actions"><button type="button" class="primary" id="installBtn" hidden>Install app</button><button type="button" id="installDismiss">Not now</button></div>
     </div>
@@ -73,9 +73,9 @@
     <section class="conversation" id="conversation">
       <div class="thread" id="messages">
         <div class="welcome" id="welcome">
-          <div class="welcome-mark" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M5 15.5 9.5 11l3 3L19 7.5"/><path d="M19 12v7H5V5h8"/></svg></div>
+          <div class="welcome-mark" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M4 19 12 4l8 15M7 14h10"/><circle cx="12" cy="4" r="1.4"/><circle cx="4" cy="19" r="1.4"/><circle cx="20" cy="19" r="1.4"/></svg></div>
           <h1 class="tagline">Research. Trade. Stay ahead.</h1>
-          <p class="tagline-sub">Ask about any token, wallet or protocol. Orbit checks the data first, then answers.</p>
+          <p class="tagline-sub">Ask about any token, wallet or protocol. Anvaya checks the data first, then answers.</p>
         </div>
       </div>
     </section>
@@ -85,7 +85,7 @@
     <div class="composer-shell">
       <form class="composer" id="composer">
         <div class="mention-menu" id="mentionMenu" hidden role="listbox"></div>
-        <textarea aria-label="Message Orbit" id="messageInput" rows="1" maxlength="2000" placeholder="Ask about a token, wallet, protocol or trade — type $ to mention a token"></textarea>
+        <textarea aria-label="Message Anvaya" id="messageInput" rows="1" maxlength="2000" placeholder="Ask about a token, wallet, protocol or trade — type $ to mention a token"></textarea>
         <div class="composer-tools">
           <button class="composer-plus" id="composerPlus" type="button" aria-label="Connect a wallet" title="Connect a wallet"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
           <span class="composer-context"><svg class="icon" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg><span>Live tools</span></span>
@@ -99,7 +99,7 @@
         <div class="mono-cap" id="highlightsCaption" hidden></div>
         <div class="prompts" id="homePrompts" hidden></div>
         <section class="explore" id="exploreMore">
-          <button class="explore-toggle" id="exploreToggle" type="button" aria-expanded="false" aria-controls="exploreBody"><span class="explore-spark" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.2 2.2M16.2 16.2l2.2 2.2M5.6 18.4l2.2-2.2M16.2 7.8l2.2-2.2"/></svg></span><span class="explore-label"><b>Explore more</b><small>What Orbit can do: trending tokens, whale moves, deep dives, swaps</small></span><svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+          <button class="explore-toggle" id="exploreToggle" type="button" aria-expanded="false" aria-controls="exploreBody"><span class="explore-spark" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.2 2.2M16.2 16.2l2.2 2.2M5.6 18.4l2.2-2.2M16.2 7.8l2.2-2.2"/></svg></span><span class="explore-label"><b>Explore more</b><small>What Anvaya can do: trending tokens, whale moves, deep dives, swaps</small></span><svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
           <div class="explore-body" id="exploreBody">
             <div class="explore-inner">
               <div class="chips" id="homeChips" hidden></div>
@@ -220,9 +220,9 @@
             <div class="key-row connection-row"><span><b>TradingView</b><br><span class="muted" id="tvStatus">Not connected</span></span><span class="connection-actions"><button class="secondary" id="tvConnectBtn" type="button">Connect</button><button class="secondary" id="tvDisconnectBtn" type="button" hidden>Disconnect</button></span></div>
             <div class="key-row connection-row" id="tgRow" hidden><span><b>Telegram</b><br><span class="muted" id="tgStatus">Not connected</span></span><span class="connection-actions"><button class="secondary" id="tgConnectBtn" type="button">Connect</button><button class="secondary" id="tgDisconnectBtn" type="button" hidden>Disconnect</button></span></div>
           </div>
-          <div class="field-help" id="tgHelp" hidden>Use the same Orbit account in Telegram: same credits, plan, wallets and risk charter, and alerts arrive as messages instead of sitting in the inbox. Connecting works however you signed in here — a wallet is fine, an email is not required.</div>
+          <div class="field-help" id="tgHelp" hidden>Use the same Anvaya account in Telegram: same credits, plan, wallets and risk charter, and alerts arrive as messages instead of sitting in the inbox. Connecting works however you signed in here — a wallet is fine, an email is not required.</div>
           <div class="field-help" id="tgNotice" hidden></div>
-          <div class="field-help">Link your own TradingView account (Essential plan or higher) and research reads its live quotes, technicals, fundamentals, news and earnings calendars on your behalf. Orbit never holds a shared TradingView login.</div>
+          <div class="field-help">Link your own TradingView account (Essential plan or higher) and research reads its live quotes, technicals, fundamentals, news and earnings calendars on your behalf. Anvaya never holds a shared TradingView login.</div>
           <div class="field-help" id="tvNotice" hidden></div>
         </div>
         <div class="settings-section" id="teamInvitesSection" hidden><h3>Team invitations</h3><div class="row-list" id="teamInvites"></div></div>
@@ -247,7 +247,7 @@
       <section class="tab-panel" data-panel="keys" hidden>
         <div class="keys-section" id="apiKeysSection" style="margin-top:0;border-top:0;padding-top:0">
           <h3>API keys</h3>
-          <div class="field-help" id="apiKeysHelp">Connect Orbit to your tools with an API key. Keys provide data access and cannot sign transactions.</div>
+          <div class="field-help" id="apiKeysHelp">Connect Anvaya to your tools with an API key. Keys provide data access and cannot sign transactions.</div>
           <div id="apiKeysList"></div>
           <div class="key-create"><input id="apiKeyName" aria-label="API key name" placeholder="Key name (e.g. Claude Desktop)" maxlength="60" /><button class="secondary" id="createApiKeyBtn" type="button">Create key</button></div>
           <div class="key-secret" id="apiKeySecret" hidden></div>
@@ -295,7 +295,7 @@
       <section class="tab-panel" data-panel="data" hidden>
         <div class="settings-section"><h3>Export</h3><div class="field-help">Download your profile, wallet links, API key names, credit history, and conversations as a JSON file.</div><div class="account-actions" style="margin-top:8px"><button class="secondary" id="exportDataBtn" type="button">Export my data</button></div></div>
         <div class="settings-section"><h3>Conversations</h3><div class="danger-link" style="margin-top:0;padding-top:0;border-top:0"><button class="secondary danger" id="deleteAllChatsBtn" type="button">Delete all conversations</button><div class="field-help">Permanently delete your conversations from your account and this device. This cannot be undone.</div><div class="inline-note" id="deleteAllStatus" role="status"></div></div></div>
-        <div class="settings-section" id="memorySection" hidden><h3>Memory</h3><div class="field-help">What Orbit remembers about you from earlier conversations: holdings, chains and venues you use, preferences. Used as context for answers, never to decide whether a trade is allowed. Delete any line, or clear all.</div>
+        <div class="settings-section" id="memorySection" hidden><h3>Memory</h3><div class="field-help">What Anvaya remembers about you from earlier conversations: holdings, chains and venues you use, preferences. Used as context for answers, never to decide whether a trade is allowed. Delete any line, or clear all.</div>
           <label class="memory-switch"><input type="checkbox" id="memoryEnabled" role="switch" /> Remember facts from my conversations</label>
           <ul class="memory-list" id="memoryList" aria-live="polite"></ul>
           <div class="inline-note" id="memoryStatus"></div>
@@ -843,7 +843,7 @@ const HIGHLIGHT_ICONS={crypto:'<svg class="icon" viewBox="0 0 24 24"><path d="M4
 let highlights=null;
 async function loadHighlights(){try{const res=await fetch("/home/highlights");if(!res.ok)throw new Error();highlights=await res.json();}catch{highlights=null;}renderHighlights();}
 function renderHighlights(){const grid=$("#homePrompts");const cap=$("#highlightsCaption");if(!grid)return;grid.hidden=!highlights||!(highlights.cards||[]).length;if(grid.hidden){if(cap)cap.hidden=true;return;}
-  grid.innerHTML=highlights.cards.map(c=>{const attrs=c.action?`data-action="${escapeHtml(c.action)}"`:`data-msg="${escapeHtml(c.prompt||c.title)}"`;return `<button class="prompt-card" ${attrs} data-tone="${escapeHtml(c.tone||"teal")}" data-kind="${escapeHtml(c.kind||"action")}"><span class="prompt-tile">${HIGHLIGHT_ICONS[c.kind]||HIGHLIGHT_ICONS.action}</span><strong>${escapeHtml(c.title)}</strong><span class="prompt-desc">${escapeHtml(c.summary||"")}</span><span class="prompt-source"><span>${escapeHtml(c.source||(c.kind==="action"?"Orbit":""))}</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></button>`;}).join("");
+  grid.innerHTML=highlights.cards.map(c=>{const attrs=c.action?`data-action="${escapeHtml(c.action)}"`:`data-msg="${escapeHtml(c.prompt||c.title)}"`;return `<button class="prompt-card" ${attrs} data-tone="${escapeHtml(c.tone||"teal")}" data-kind="${escapeHtml(c.kind||"action")}"><span class="prompt-tile">${HIGHLIGHT_ICONS[c.kind]||HIGHLIGHT_ICONS.action}</span><strong>${escapeHtml(c.title)}</strong><span class="prompt-desc">${escapeHtml(c.summary||"")}</span><span class="prompt-source"><span>${escapeHtml(c.source||(c.kind==="action"?"Anvaya":""))}</span><svg class="icon prompt-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></button>`;}).join("");
   if(cap){const when=highlights.as_of?new Date(highlights.as_of):null;cap.hidden=false;cap.textContent=highlights.source==="news"?`Market updates · ${when?when.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"now"}`:highlights.source==="market"?`Market updates · ${when?when.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"now"}`:"";}}
 let homeSuggestions=null,activeChip="trending";
 async function loadSuggestions(){try{const res=await fetch("/home/suggestions");if(!res.ok)throw new Error();homeSuggestions=(await res.json()).categories||[];}catch{homeSuggestions=null;}renderHomeSuggestions();}
@@ -1297,7 +1297,7 @@ let closedBeta=null;
 // becomes a short note about the beta plan instead of a checkout.
 function applyClosedBeta(cfg){closedBeta=cfg?.accounts?.closed_beta?{credits:cfg.accounts.closed_beta_monthly_credits}:null;const hide=Boolean(closedBeta);for(const id of ["plansBtn","buyCreditsBtn","changePlanBtn","billingPortalBtn"]){const el=$("#"+id);if(el)el.hidden=hide||el.hidden&&id==="billingPortalBtn";}const chip=$("#creditsChip");if(chip)chip.title=hide?"Closed beta: your plan is free. Click for details.":"View your plan and credit balance.";}
 async function loadX402Config(){try{const res=await fetch("/config/public");if(!res.ok)throw new Error("config unavailable");const cfg=await res.json();applyClosedBeta(cfg);x402Config=cfg.x402||null;executionEnabled=cfg.execution_enabled===true||cfg.deployment?.execution_enabled===true;executionConfigLoaded=true;}catch{x402Config=null;executionEnabled=false;executionConfigLoaded=false;}syncPayChip();try{renderCapabilities();}catch{}}
-async function syncPayChip(){const chip=$("#payChip");if(!x402Config?.enabled){chip.hidden=true;return;}chip.hidden=false;const ready=await (window.OrbitX402?.hasEvmWallet?.()??Promise.resolve(false));chip.classList.toggle("ready",ready);$("#payChipText").textContent=`${x402Config.price}/message · ${ready?"pays from your wallet":"connect an EVM wallet to pay"}`;chip.title=`This Orbit charges ${x402Config.price} per message via x402 (USDC on ${x402Config.network}). ${ready?"Each message is paid from your connected wallet.":"Connect Coinbase Wallet, Privy or WalletConnect to pay."}`;}
+async function syncPayChip(){const chip=$("#payChip");if(!x402Config?.enabled){chip.hidden=true;return;}chip.hidden=false;const ready=await (window.OrbitX402?.hasEvmWallet?.()??Promise.resolve(false));chip.classList.toggle("ready",ready);$("#payChipText").textContent=`${x402Config.price}/message · ${ready?"pays from your wallet":"connect an EVM wallet to pay"}`;chip.title=`This Anvaya charges ${x402Config.price} per message via x402 (USDC on ${x402Config.network}). ${ready?"Each message is paid from your connected wallet.":"Connect Coinbase Wallet, Privy or WalletConnect to pay."}`;}
 async function chatFetch(url,init){
   init={...init,headers:{...(init?.headers||{}),"X-Orbit-Device":deviceId}};
   if(!x402Config?.enabled)return fetch(url,init);
@@ -1764,7 +1764,7 @@ async function connectAndSignIn(chain,address,label,signMessage,addresses=[]){
   return ok;
 }
 async function connectPhantom(){const provider=getPhantomProvider();if(!provider){$("#connectedProvider").textContent="Phantom was not found";window.open("https://phantom.app/","_blank","noopener");return;}try{const response=await provider.connect();activeProvider="phantom";const address=response.publicKey.toString();await connectAndSignIn("solana",address,"Phantom",phantomSignMessage);}catch(error){console.error(error);}}
-async function connectMetaMask(){const btn=$("#connectMetaMaskBtn");btn.disabled=true;try{const{createSolanaClient}=await import("https://esm.sh/@metamask/connect-solana@2");const client=await createSolanaClient({dapp:{name:"Orbit",url:location.origin},api:{supportedNetworks:{mainnet:`${location.origin}/rpc/solana`}}});const wallet=client.getWallet();const{accounts}=await wallet.features["standard:connect"].connect();if(!accounts?.length)throw new Error("No account returned");metamaskWallet=client;metamaskAccount=accounts[0];window.OrbitSolanaWallet={address:accounts[0].address,signAndSendTransaction:signAndSendMetaMaskSolanaTransaction};activeProvider="metamask";await connectAndSignIn("solana",accounts[0].address,"MetaMask",msg=>solanaStandardSignMessage(wallet,accounts[0],msg));}catch(error){$("#walletLabel").textContent="Connection failed";console.error(error);}finally{btn.disabled=false;}}
+async function connectMetaMask(){const btn=$("#connectMetaMaskBtn");btn.disabled=true;try{const{createSolanaClient}=await import("https://esm.sh/@metamask/connect-solana@2");const client=await createSolanaClient({dapp:{name:"Anvaya",url:location.origin},api:{supportedNetworks:{mainnet:`${location.origin}/rpc/solana`}}});const wallet=client.getWallet();const{accounts}=await wallet.features["standard:connect"].connect();if(!accounts?.length)throw new Error("No account returned");metamaskWallet=client;metamaskAccount=accounts[0];window.OrbitSolanaWallet={address:accounts[0].address,signAndSendTransaction:signAndSendMetaMaskSolanaTransaction};activeProvider="metamask";await connectAndSignIn("solana",accounts[0].address,"MetaMask",msg=>solanaStandardSignMessage(wallet,accounts[0],msg));}catch(error){$("#walletLabel").textContent="Connection failed";console.error(error);}finally{btn.disabled=false;}}
 async function disconnectWallet(){try{if(activeProvider==="privy")await window.OrbitPrivy.logout();else if(activeProvider==="coinbase")await window.OrbitCoinbase.disconnect();else if(activeProvider==="reown")await window.OrbitReown.disconnect();else if(activeProvider==="phantom")await getPhantomProvider()?.disconnect();else if(activeProvider==="metamask")await metamaskWallet?.disconnect();}catch{}setWalletDisconnected();if(sessionId)fetch(`/chat/wallet/${encodeURIComponent(sessionId)}`,{method:"DELETE"}).catch(()=>{});}
 $("#walletButton").addEventListener("click",()=>openDialog("walletDialog"));   // read-only wallet connection never requires signing in -- chat already tells anonymous users to do exactly this
 $("#relayQuoteBtn").addEventListener("click",requestRelayQuote);
@@ -1818,10 +1818,10 @@ let account=null;
 let telegramConfigured=false,telegramLinked=[];
 // A link started in Telegram (/link -> ?tglink=). It is held until the user is
 // signed in -- with anything: a wallet, an email -- and then claimed. That way
-// the person who met Orbit in Telegram never has to find a Connect button, and
+// the person who met Anvaya in Telegram never has to find a Connect button, and
 // never accidentally builds a second account by signing in the ordinary way.
 // localStorage, not sessionStorage: Telegram opens the link in a NEW browser
-// tab, and people sign in wherever they already had Orbit open. A per-tab
+// tab, and people sign in wherever they already had Anvaya open. A per-tab
 // stash meant the tab holding the token was not the tab that signed in, and
 // the claim never fired -- the connection silently did nothing. The token is
 // single-use and expires server side, so sharing it across this origin's tabs
@@ -1877,7 +1877,7 @@ function renderAccount(){
   $("#accountHelp").textContent=signedIn?`${account.plan?.monthly_credits?.toLocaleString()||0} credits are added every month on the ${account.plan?.name} plan.`:"Sign in to access your history, connect wallets, and receive 300 monthly credits.";
   if(signedIn){const prefs=user.preferences||{};profile={name:user.display_name||profile.name||"",riskProfile:prefs.risk_profile||profile.riskProfile||"balanced",defaultWallet:prefs.default_wallet??profile.defaultWallet??""};writeStorage(PROFILE_KEY,profile);initProfile();}
   const keys=$("#apiKeysSection");keys.hidden=!signedIn;
-  if(signedIn){if(account.plan?.entitlements?.api_keys){$("#apiKeysHelp").textContent="Connect Orbit to your tools with an API key. Keys cannot sign transactions.";$("#createApiKeyBtn").disabled=false;loadApiKeys();}else{$("#apiKeysHelp").textContent="API keys and MCP access for Claude / ChatGPT are included in Pro and Max.";$("#apiKeysList").innerHTML="";$("#createApiKeyBtn").disabled=true;}}
+  if(signedIn){if(account.plan?.entitlements?.api_keys){$("#apiKeysHelp").textContent="Connect Anvaya to your tools with an API key. Keys cannot sign transactions.";$("#createApiKeyBtn").disabled=false;loadApiKeys();}else{$("#apiKeysHelp").textContent="API keys and MCP access for Claude / ChatGPT are included in Pro and Max.";$("#apiKeysList").innerHTML="";$("#createApiKeyBtn").disabled=true;}}
   $("#profileRisk").textContent=signedIn?`${account.plan?.name} · ${Number(account.credits?.balance??0).toLocaleString()} credits`:`Trial · ${Number(account?.credits?.balance??0)} credits left`;
   const notif=account?.notifications||{};$("#notifLowCredit").checked=notif.low_credit_alert!==false;$("#notifThreshold").value=notif.low_credit_threshold??20;$("#notifReceipts").checked=notif.receipts!==false;$("#notifUpdates").checked=Boolean(notif.product_updates);
   $("#sessionsSection").hidden=!signedIn;$("#deleteAccountZone").hidden=!signedIn;$("#memorySection").hidden=!signedIn;if(signedIn)loadMemory();
@@ -1916,7 +1916,7 @@ async function loadUsage(){try{const data=await (await fetch("/me/usage?days=30"
 function renderUsageChart(data){const svg=$("#usageChart");const days=data.by_day||[];svg.toggleAttribute("hidden",!days.length);const W=600,H=130,pad=4,bottom=18;const max=Math.max(1,...days.map(d=>d.charged));const bw=(W-pad*2)/Math.max(1,days.length);let out="";days.forEach((d,i)=>{let y=H-bottom;const x=pad+i*bw+1;for(const [kind,amount] of Object.entries(d.by_kind||{})){const h=(amount/max)*(H-bottom-6);y-=h;out+=`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1,bw-2).toFixed(1)}" height="${h.toFixed(1)}" fill="${USAGE_COLORS[kind]||"#999"}"><title>${d.date}: ${amount} (${kind})</title></rect>`;}if(i===days.length-1||(i%7===0&&i<days.length-3))out+=`<text x="${(x+bw/2).toFixed(1)}" y="${H-4}" font-size="9" text-anchor="middle" fill="currentColor" opacity=".6">${d.date.slice(5)}</text>`;});out+=`<line x1="${pad}" y1="${H-bottom+.5}" x2="${W-pad}" y2="${H-bottom+.5}" stroke="currentColor" opacity=".2"/>`;svg.innerHTML=out;
   const kinds=Object.entries(data.by_kind||{});$("#usageLegend").innerHTML=(kinds.length?kinds.map(([k,v])=>`<span><i style="background:${USAGE_COLORS[k]||"#999"}"></i>${escapeHtml(USAGE_LABELS[k]||k.replaceAll("_"," "))} · ${v}</span>`).join(""):"<span>Your credit usage will appear here.</span>")+`<span style="margin-left:auto"><b>${data.total||0}</b> credits · ${data.turns||0} messages</span>`;}
 function renderKeyUsage(data){const rows=data.by_api_key||[];$("#apiKeyUsage").innerHTML=rows.length?rows.map(r=>`<div class="key-row"><span>${escapeHtml(r.name)}</span><b>${r.charged} credits</b></div>`).join(""):'<div class="field-help">No key usage in the last 30 days.</div>';}
-async function loadInvoices(){const list=$("#invoicesList");try{const data=await (await fetch("/me/invoices")).json();const rows=data.invoices||[];list.innerHTML=rows.length?rows.map(inv=>`<div class="key-row"><span>${inv.created?new Date(inv.created*1000).toLocaleDateString():""} · ${escapeHtml(inv.description||"Orbit")} <code>${escapeHtml(inv.number||inv.id||"")}</code></span><span>${inv.amount_paid!=null?`$${(inv.amount_paid/100).toFixed(2)}`:""} <span class="muted">${escapeHtml(inv.status||"")}</span> ${inv.hosted_invoice_url?`<a href="${inv.hosted_invoice_url}" target="_blank" rel="noopener">view</a>`:""}</span></div>`).join(""):`<div class="field-help">${data.configured===false?"Invoices will appear here after your first purchase.":"No invoices yet."}</div>`;}catch{list.innerHTML='<div class="field-help">Invoices are unavailable right now.</div>';}}
+async function loadInvoices(){const list=$("#invoicesList");try{const data=await (await fetch("/me/invoices")).json();const rows=data.invoices||[];list.innerHTML=rows.length?rows.map(inv=>`<div class="key-row"><span>${inv.created?new Date(inv.created*1000).toLocaleDateString():""} · ${escapeHtml(inv.description||"Anvaya")} <code>${escapeHtml(inv.number||inv.id||"")}</code></span><span>${inv.amount_paid!=null?`$${(inv.amount_paid/100).toFixed(2)}`:""} <span class="muted">${escapeHtml(inv.status||"")}</span> ${inv.hosted_invoice_url?`<a href="${inv.hosted_invoice_url}" target="_blank" rel="noopener">view</a>`:""}</span></div>`).join(""):`<div class="field-help">${data.configured===false?"Invoices will appear here after your first purchase.":"No invoices yet."}</div>`;}catch{list.innerHTML='<div class="field-help">Invoices are unavailable right now.</div>';}}
 async function loadSessions(){const list=$("#sessionsList");try{const data=await (await fetch("/me/sessions")).json();list.innerHTML=(data.sessions||[]).map(sess=>`<div class="key-row"><span>${escapeHtml(describeAgent(sess.user_agent))}${sess.current?' <span class="plan-badge">this device</span>':""}<br><span class="inline-note">${sess.ip?escapeHtml(sess.ip)+" · ":""}signed in ${sess.created_at?new Date(sess.created_at).toLocaleString():""}</span></span></div>`).join("")||'<div class="field-help">No active sessions.</div>';}catch{list.innerHTML="";}}
 function describeAgent(ua){ua=ua||"";const browser=/Edg\//.test(ua)?"Edge":/Chrome\//.test(ua)?"Chrome":/Safari\//.test(ua)&&!/Chrome/.test(ua)?"Safari":/Firefox\//.test(ua)?"Firefox":"Browser";const os=/iPhone|iPad/.test(ua)?"iOS":/Android/.test(ua)?"Android":/Mac OS X/.test(ua)?"macOS":/Windows/.test(ua)?"Windows":/Linux/.test(ua)?"Linux":"";return `${browser}${os?" on "+os:""}`;}
 // ---- Tasks & inbox ----
@@ -1996,7 +1996,7 @@ async function openPlans(){openDialog("plansDialog");const body=$("#plansBody");
     const planCards=data.plans.map(p=>`<div class="account-panel"><div class="account-row"><b>${escapeHtml(p.name)}</b><span class="plan-badge">${p.price_usd_month?`$${p.price_usd_month}/mo`:"Free"}</span></div><div class="account-row"><span>${p.monthly_credits.toLocaleString()} credits / month</span>${current===p.id?'<span class="muted">Current plan</span>':(p.price_usd_month&&p.purchasable&&data.configured?`<button class="secondary" type="button" data-checkout="subscription" data-item="${p.id}">Choose ${escapeHtml(p.name)}</button>`:(p.price_usd_month?'<span class="muted">Currently unavailable</span>':''))}</div><div class="field-help">${p.features.map(escapeHtml).join(" · ")}</div></div>`).join("");
     const packCards=(data.packs||[]).map(k=>`<div class="account-row" style="padding:6px 0;border-bottom:1px dashed var(--border)"><span><b>${k.credits.toLocaleString()} credits</b> <span class="muted">· ${escapeHtml(k.name)}</span></span>${k.purchasable&&data.configured?`<button class="secondary" type="button" data-checkout="pack" data-item="${k.id}">Buy · $${k.price_usd}</button>`:`<span class="muted">$${k.price_usd} · soon</span>`}</div>`).join("");
     const methods=(data.payment_methods||[]).map(m=>m==="crypto"?"USDC":"card").join(" or ");
-    body.innerHTML=planCards+`<div class="keys-section"><h3>Credit packs</h3><div class="field-help">One-time top-ups that never expire. ${data.configured?`Pay by ${methods} on Stripe's hosted checkout.`:"Purchases are currently unavailable. Please try again later."}</div>${packCards}</div>`+(signedIn&&account?.billing?.has_billing_account?'<div class="account-actions" style="margin-top:12px"><button class="secondary" type="button" id="portalBtn">Manage billing</button></div>':'')+'<div class="field-help" style="margin-top:10px">Orbit never sees your card or wallet: payment pages are hosted by Stripe.</div>';
+    body.innerHTML=planCards+`<div class="keys-section"><h3>Credit packs</h3><div class="field-help">One-time top-ups that never expire. ${data.configured?`Pay by ${methods} on Stripe's hosted checkout.`:"Purchases are currently unavailable. Please try again later."}</div>${packCards}</div>`+(signedIn&&account?.billing?.has_billing_account?'<div class="account-actions" style="margin-top:12px"><button class="secondary" type="button" id="portalBtn">Manage billing</button></div>':'')+'<div class="field-help" style="margin-top:10px">Anvaya never sees your card or wallet: payment pages are hosted by Stripe.</div>';
     body.querySelectorAll("[data-checkout]").forEach(b=>b.addEventListener("click",()=>startCheckout(b.dataset.checkout,b.dataset.item,b)));
     $("#portalBtn")?.addEventListener("click",async()=>{try{const res=await fetch("/billing/portal",{method:"POST"});const d=await res.json();if(!res.ok)throw new Error(normalizeError(d,res.status));location.href=d.url;}catch(error){body.insertAdjacentHTML("beforeend",`<div class="field-help" style="color:var(--red)">${escapeHtml(error.message)}</div>`);}});
   }catch{body.innerHTML='<div class="field-help">Plans are unavailable right now.</div>';}}
@@ -2019,7 +2019,7 @@ async function createApiKey(){const name=$("#apiKeyName").value.trim()||"API key
   catch(error){secretBox.hidden=false;secretBox.textContent=error.message;}}
 $("#signinBtn").addEventListener("click",()=>openSignin());
 $("#signoutBtn").addEventListener("click",signOut);
-// --- Telegram: one Orbit account on both surfaces -------------------------
+// --- Telegram: one Anvaya account on both surfaces -------------------------
 // There is no automatic mapping between a Telegram id and a web account --
 // Telegram knows neither your email nor your wallet -- so linking is always
 // this one deliberate act. The token is minted HERE, from a signed-in
@@ -2041,7 +2041,7 @@ $("#tgConnectBtn").addEventListener("click",async()=>{const b=$("#tgConnectBtn")
 $("#tgDisconnectBtn").addEventListener("click",async()=>{const b=$("#tgDisconnectBtn"),notice=$("#tgNotice");const linked=telegramLinked[0];if(!linked)return;b.disabled=true;
   try{const res=await fetch(`/me/telegram/${encodeURIComponent(linked.external_id)}`,{method:"DELETE"});
     if(!res.ok)throw new Error(normalizeError(await res.json().catch(()=>({})),res.status));
-    notice.hidden=false;notice.textContent="Telegram disconnected. That chat starts a separate Orbit account on its next message.";
+    notice.hidden=false;notice.textContent="Telegram disconnected. That chat starts a separate Anvaya account on its next message.";
     await refreshTelegram();renderTelegram(true);
   }catch(error){notice.hidden=false;notice.textContent=error.message;}finally{b.disabled=false;}});
 $("#walletSigninBtn").addEventListener("click",async()=>{const btn=$("#walletSigninBtn"),help=$("#walletSigninHelp");
@@ -2081,7 +2081,7 @@ document.documentElement.classList.toggle("standalone",STANDALONE);
 if("serviceWorker" in navigator&&/^https?:$/.test(location.protocol)){addEventListener("load",()=>{navigator.serviceWorker.register("/ui/sw.js",{scope:"/ui/"}).catch(()=>{});});}
 let installPrompt=null;
 function installDismissed(){try{return Number(localStorage.getItem("orbit_install_dismissed")||0)>Date.now()-30*864e5;}catch{return false;}}
-function showInstallCard(){const card=$("#installCard");if(!card||STANDALONE||installDismissed())return;const ios=/iP(hone|ad|od)/.test(navigator.userAgent)&&!window.MSStream;if(installPrompt){$("#installHint").textContent="Install Orbit for a full-screen app with its own icon.";$("#installBtn").hidden=false;}else if(!ios)return;card.hidden=false;card.classList.add("show");}
+function showInstallCard(){const card=$("#installCard");if(!card||STANDALONE||installDismissed())return;const ios=/iP(hone|ad|od)/.test(navigator.userAgent)&&!window.MSStream;if(installPrompt){$("#installHint").textContent="Install Anvaya for a full-screen app with its own icon.";$("#installBtn").hidden=false;}else if(!ios)return;card.hidden=false;card.classList.add("show");}
 window.addEventListener("beforeinstallprompt",(e)=>{e.preventDefault();installPrompt=e;showInstallCard();});
 $("#installBtn").addEventListener("click",async()=>{if(!installPrompt)return;installPrompt.prompt();const choice=await installPrompt.userChoice.catch(()=>null);installPrompt=null;if(choice?.outcome==="accepted"){$("#installCard").hidden=true;}});
 $("#installDismiss").addEventListener("click",()=>{try{localStorage.setItem("orbit_install_dismissed",String(Date.now()));}catch{}$("#installCard").hidden=true;$("#installCard").classList.remove("show");});

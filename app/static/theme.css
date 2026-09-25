@@ -1,33 +1,33 @@
-/* Shared Orbit design tokens. Keep product and administration on one palette. */
+/* Shared Anvaya design tokens. Keep product and administration on one palette. */
 :root {
   color-scheme: dark;
   --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --serif: var(--font-sans);
-  --bg: #111214; --sidebar: #161719; --card-main: #111214;
-  --surface: #191a1d; --surface-2: #212226; --surface-hover: #292a2f;
-  --text: #e5e5e8; --text-strong: #fafafa; --text-2: #d6d6dc; --text-3: #b9bac3;
-  --muted: #a0a1ad; --subtle: #92939f;
-  --border: #2b2c32; --hover-border: #444650;
-  --brand: #a5b4fc; --brand-2: var(--brand); --brand-strong: #6366f1; --brand-hover: #b9c5ff;
-  --brand-soft: #a5b4fc12; --brand-soft-strong: #a5b4fc24;
-  --brand-border: #a5b4fc40; --brand-border-strong: #a5b4fc80; --brand-ring: #a5b4fc18;
-  --brand-grad: var(--brand); --brand-text: var(--brand); --brand-text-2: #c7d2fe;
-  --on-brand: #17192c; --link: #b3bfff;
+  --bg: #101820; --sidebar: #141e26; --card-main: #101820;
+  --surface: #19252d; --surface-2: #223039; --surface-hover: #293943;
+  --text: #e4e9e7; --text-strong: #f6f5f0; --text-2: #d1dcd9; --text-3: #b9c8c5;
+  --muted: #aab9b9; --subtle: #91a5a7;
+  --border: #30414a; --hover-border: #536b70;
+  --brand: #ff9b78; --brand-2: var(--brand); --brand-strong: #ff8b68; --brand-hover: #ffb18f;
+  --brand-soft: #ff9b7818; --brand-soft-strong: #ff9b782b;
+  --brand-border: #ff9b7848; --brand-border-strong: #ff9b7890; --brand-ring: #ff9b7820;
+  --brand-grad: var(--brand); --brand-text: var(--brand); --brand-text-2: #b8e9df;
+  --on-brand: #231710; --link: #ffb18f;
   --green: #75d6a4; --red: #fb8c97; --amber: #e8bc73;
   --green-soft: #75d6a410; --green-border: #75d6a438; --green-border-strong: #75d6a466;
   --red-soft: #fb8c9710; --red-border: #fb8c9738; --amber-soft: #e8bc7310; --amber-border: #e8bc7338;
   --caution-text: #e8bc73; --caution-text-2: #edce9c; --error-text: #fba4ad; --error-text-2: #fba4ad;
-  --card: var(--surface); --card-2: var(--surface-2); --code-bg: #202126; --code-text: #d6d6dc;
+  --card: var(--surface); --card-2: var(--surface-2); --code-bg: #17232b; --code-text: #d1dcd9;
   --overlay-fill: #ffffff04; --overlay-fill-2: #ffffff06; --overlay-fill-3: #ffffff08; --overlay-fill-4: #ffffff0a;
   --overlay-backdrop: #00000080; --topbar-bg: var(--bg); --composer-shell-from: var(--bg);
-  --composer-bg: var(--surface); --composer-border: #383a43; --jump-bg: var(--surface-2);
+  --composer-bg: var(--surface); --composer-border: #40535b; --jump-bg: var(--surface-2);
   --faint-line: var(--border); --faint-line-2: var(--border); --hover-fill: #ffffff05; --dash-line: var(--border);
   --send-bg: var(--brand); --send-fg: var(--on-brand); --send-hover: var(--brand-hover);
-  --scroll-thumb: #42434c; --disclaimer: var(--subtle);
+  --scroll-thumb: #506269; --disclaimer: var(--subtle);
   --shadow-1: transparent; --shadow-2: #00000030; --shadow-3: #00000050;
   --source-card-bg: var(--surface); --source-card-hover: var(--surface-2);
   --portfolio-grad-a: var(--surface); --portfolio-grad-b: var(--surface);
-  --avatar-grad-a: #30313a; --avatar-grad-b: #30313a;
+  --avatar-grad-a: #34454b; --avatar-grad-b: #34454b;
   --radius: 12px; --shell-radius: 0px; --app-height: 100dvh; --composer-height: 108px; --content-width: 820px;
   --ease-out: cubic-bezier(.16,1,.3,1); --motion-fast: 140ms; --motion-enter: 180ms;
   /* Admin aliases share the exact product colors. */
@@ -37,31 +37,31 @@
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #ffffff; --sidebar: #f8f8fa; --card-main: #ffffff;
-  --surface: #ffffff; --surface-2: #f4f4f6; --surface-hover: #eeeef2;
-  --text: #292a31; --text-strong: #18191f; --text-2: #3d3e48; --text-3: #555763;
-  --muted: #676976; --subtle: #6e707c;
-  --border: #e6e6eb; --hover-border: #c5c6d0;
-  --brand: #5357cf; --brand-strong: #484bb8; --brand-hover: #4448b6;
-  --brand-soft: #5357cf09; --brand-soft-strong: #5357cf15;
-  --brand-border: #5357cf30; --brand-border-strong: #5357cf80; --brand-ring: #5357cf10;
-  --brand-text-2: #484bb8; --on-brand: #ffffff; --link: #484bb8;
+  --bg: #f8f7f2; --sidebar: #f1f3ee; --card-main: #f8f7f2;
+  --surface: #ffffff; --surface-2: #f0f3f0; --surface-hover: #e8eeeb;
+  --text: #25343a; --text-strong: #14242b; --text-2: #34484d; --text-3: #4c6063;
+  --muted: #5b7074; --subtle: #62777a;
+  --border: #dce4df; --hover-border: #a9c0b9;
+  --brand: #a43f26; --brand-strong: #8f341d; --brand-hover: #893018;
+  --brand-soft: #a43f260d; --brand-soft-strong: #a43f261e;
+  --brand-border: #a43f2640; --brand-border-strong: #a43f2680; --brand-ring: #a43f2617;
+  --brand-text-2: #1b6862; --on-brand: #ffffff; --link: #96391f;
   --green: #18794e; --red: #c83449; --amber: #976012;
   --green-soft: #18794e09; --green-border: #18794e30; --green-border-strong: #18794e60;
   --red-soft: #c8344908; --red-border: #c8344930; --amber-soft: #97601209; --amber-border: #97601230;
   --caution-text: #895510; --caution-text-2: #895510; --error-text: #b4273b; --error-text-2: #b4273b;
-  --code-bg: #f4f4f6; --code-text: #3d3e48;
+  --code-bg: #eef3ef; --code-text: #34484d;
   --overlay-fill: #18191f03; --overlay-fill-2: #18191f05; --overlay-fill-3: #18191f06; --overlay-fill-4: #18191f08;
-  --overlay-backdrop: #16182245; --composer-border: #dcdde4; --hover-fill: #18191f03;
-  --scroll-thumb: #c5c6ce; --shadow-2: #1618220c; --shadow-3: #16182220;
-  --avatar-grad-a: #eeeef2; --avatar-grad-b: #eeeef2;
+  --overlay-backdrop: #14242b45; --composer-border: #cfddd6; --hover-fill: #14242b05;
+  --scroll-thumb: #acc0ba; --shadow-2: #14242b0c; --shadow-3: #14242b20;
+  --avatar-grad-a: #e8eeeb; --avatar-grad-b: #e8eeeb;
 }
 :focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
 button, a, input, select, textarea, summary { -webkit-tap-highlight-color: transparent; }
 button, a, summary { transition: background-color var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast); }
 button:disabled { cursor: not-allowed; }
 input, select, textarea { accent-color: var(--brand); }
-@keyframes orbit-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes anvaya-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }

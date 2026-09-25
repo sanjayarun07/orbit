@@ -2,27 +2,27 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Orbit — Administration</title>
+<title>Anvaya — Administration</title>
 <link rel="manifest" href="/ui/manifest.webmanifest">
-<meta name="theme-color" content="#111214" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101820" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f8f7f2" media="(prefers-color-scheme: light)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Orbit">
-<link rel="apple-touch-icon" href="/ui/icons/apple-touch-icon.png">
-<link rel="icon" type="image/png" sizes="192x192" href="/ui/icons/icon-192.png">
+<meta name="apple-mobile-web-app-title" content="Anvaya">
+<link rel="apple-touch-icon" href="/ui/icons/anvaya-apple-touch-icon.png">
+<link rel="icon" type="image/svg+xml" href="/ui/icons/anvaya-mark.svg">
 <script>(function(){try{var p=JSON.parse(localStorage.getItem("orbit_theme_v1")||'"system"');var t=p==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):p;document.documentElement.dataset.theme=t;}catch(e){document.documentElement.dataset.theme="dark";}})();</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="/ui/theme.css?v=1">
-<link rel="stylesheet" href="/ui/admin-theme.css?v=4">
+<link rel="stylesheet" href="/ui/theme.css?v=2">
+<link rel="stylesheet" href="/ui/admin-theme.css?v=6">
 <link rel="stylesheet" href="/ui/mobile.css?v=7">
 </head>
 <body>
 <a class="skip-link" href="#mainContent">Skip to content</a>
 <aside class="admin-sidebar">
- <a class="brand" href="/ui/" aria-label="Orbit home"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 15.5 9.5 11l3 3L19 7.5M19 12v7H5V5h8"/></svg></span>Orbit</a>
+ <a class="brand" href="/ui/" aria-label="Anvaya home"><span class="brand-mark" aria-hidden="true"><img src="/ui/icons/anvaya-mark.svg" alt=""></span>Anvaya</a>
  <div class="nav-label">Administration</div>
  <nav class="admin-nav" aria-label="Administration sections">
   <a href="/ui/admin.html#opsPanel" data-section="opsPanel"><span aria-hidden="true">01</span>Accounts &amp; billing</a>
@@ -183,7 +183,7 @@ $("#turnsRefresh").onclick=loadTurns;$("#turnsSearch").onclick=loadTurns;$("#tur
 const _load=load;load=async function(){await _load();if($("#connectionStatus").textContent==="Connected")await Promise.all([loadOps(),searchUsers(),loadKb(),loadTurns()]);};
 $("#adminAuth").onsubmit=async e=>{e.preventDefault();const b=$("#connect");b.disabled=true;b.textContent="Connecting…";$("#connectionStatus").textContent="Loading workspace…";try{await load()}finally{b.disabled=false;b.textContent="Reconnect"}};$("#refresh").onclick=load;$("#preview").onclick=preview;$("#testIntent").onclick=()=>testIntent(false);$("#liveIntent").onclick=()=>testIntent(true);$("#dryProvider").onclick=()=>testProvider(false);$("#liveProvider").onclick=()=>testProvider(true);
 const sectionCopy={opsPanel:["Accounts & billing","Monitor usage, manage accounts, and review payments."],kbPanel:["Knowledge base","Review coverage, refresh sources, and explore relationships."],providersPanel:["Data providers","Manage available tools, usage limits, and provider health."],testingPanel:["Testing","Preview routing and validate provider responses."],turnsPanel:["Turns","Every request and response, with errors, flags and ratings, for review."]};
-function showSection(){if(location.hash==="#mainContent")return;const id=location.pathname.endsWith("/knowledge.html")?"kbPanel":Object.hasOwn(sectionCopy,location.hash.slice(1))?location.hash.slice(1):"opsPanel";for(const key of Object.keys(sectionCopy))document.getElementById(key).hidden=key!==id;document.querySelectorAll("[data-admin-section]").forEach(el=>el.hidden=el.dataset.adminSection!==id);document.querySelectorAll(".admin-nav a").forEach(a=>{if(a.dataset.section===id)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current")});$("#pageTitle").textContent=sectionCopy[id][0];$("#pageDescription").textContent=sectionCopy[id][1];document.title="Orbit — "+sectionCopy[id][0];}
+function showSection(){if(location.hash==="#mainContent")return;const id=location.pathname.endsWith("/knowledge.html")?"kbPanel":Object.hasOwn(sectionCopy,location.hash.slice(1))?location.hash.slice(1):"opsPanel";for(const key of Object.keys(sectionCopy))document.getElementById(key).hidden=key!==id;document.querySelectorAll("[data-admin-section]").forEach(el=>el.hidden=el.dataset.adminSection!==id);document.querySelectorAll(".admin-nav a").forEach(a=>{if(a.dataset.section===id)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current")});$("#pageTitle").textContent=sectionCopy[id][0];$("#pageDescription").textContent=sectionCopy[id][1];document.title="Anvaya — "+sectionCopy[id][0];}
 window.addEventListener("hashchange",showSection);showSection();
 let appearance="system";try{appearance=JSON.parse(localStorage.getItem("orbit_theme_v1")||'"system"')}catch(e){};$("#themeChoice").value=["system","light","dark"].includes(appearance)?appearance:"system";
 function applyAppearance(){const choice=$("#themeChoice").value;document.documentElement.dataset.theme=choice==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):choice;}

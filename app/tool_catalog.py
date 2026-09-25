@@ -39,6 +39,10 @@ from app.routing.lexicon import SECURITY_WORDS
 from dataclasses import dataclass, field
 
 DIMENSION_PATTERNS: dict[str, re.Pattern] = {
+    "insider_activity": re.compile(r"\binsider\b|\bform 4\b|\bexecutive (?:buys?|sells?|sales?)\b", re.I),
+    "filings": re.compile(r"\b(?:sec )?filings?\b|\b(?:10-k|10-q|8-k)\b", re.I),
+    "institutional_holdings": re.compile(r"\b13f\b|\binstitutional holdings?\b|\bfiler\s+cik\b", re.I),
+    "macro": re.compile(r"\b(?:inflation|cpi|interest rates?|fed funds|yield curve)\b", re.I),
     "forecast": re.compile(r"\b(?:predict(?:ion)?|forecast|outlook|price\s+target|where\s+(?:will|could)\s+\w+\s+(?:go|be)|will\s+\w+\s+(?:go|move)\s+(?:up|down))\b", re.I),
     "volume": re.compile(r"\bvolumes?\b|\bmost\s+traded\b|\bturnover\b", re.I),
     "price_change": re.compile(r"\bgainers?\b|\blosers?\b|\bmovers?\b|\bwinners?\b|\bperformers?\b|%\s*change|\bup\s+the\s+most\b|\bdown\s+the\s+most\b|\bpump(?:ing|ed)?\b|\bdump(?:ing|ed)?\b|\bbiggest\s+(?:moves?|drops?|jumps?)\b", re.I),
@@ -412,7 +416,7 @@ TOOL_SPECS: dict[str, ToolSpec] = {spec.name: spec for spec in [
           coverage="major centralized exchanges", freshness="hours", answers=["is XYZ listed on Binance", "recent delistings"],
           summary="Official exchange listing and delisting announcements for a token"),
     # ---------------------------------------------------------------- knowledge / research
-    _spec("knowledge_base_search", "Orbit knowledge service", ["hybrid FTS + pgvector retrieval over protocol docs, GitHub, governance, incidents, stablecoins"], ["query"],
+    _spec("knowledge_base_search", "Anvaya knowledge service", ["hybrid FTS + pgvector retrieval over protocol docs, GitHub, governance, incidents, stablecoins"], ["query"],
           ["passages with citations", "entities", "relations"], {"docs", "projects"}, not_for={"volume", "price_change", "boosts", "balances", "transactions"},
           coverage="200 protocols in the registry, PLUS a dedicated ingested history of past security incidents/hacks, governance "
                     "votes and proposals, and investor/funder and stablecoin-backing records for those protocols -- these are real, "
@@ -457,7 +461,7 @@ TOOL_SPECS: dict[str, ToolSpec] = {spec.name: spec for spec in [
     _spec("perplexity_people_search", "Perplexity Sonar (people)", ["POST /chat/completions (people-tuned prompt)"], ["query"], ["cited summary"],
           {"people"}, not_for={"balances", "transactions"}, coverage="the open web", freshness="live web",
           answers=["who is Anatoly Yakovenko"], summary="Web-grounded profile of a person with citations"),
-    _spec("url_reader", "Orbit page reader", ["GET <url> (direct, browser-like)", "Perplexity fetch_url", "Perplexity web_search about the link"], ["url"],
+    _spec("url_reader", "Anvaya page reader", ["GET <url> (direct, browser-like)", "Perplexity fetch_url", "Perplexity web_search about the link"], ["url"],
           ["summary of the page against the user's ask", "source link"], {"url"}, not_for={"balances", "transactions", "holders"},
           coverage="any public page or post; token pages are turned into token questions before this runs", freshness="live",
           answers=["summarize https://...", "what does this article say https://...", "tl;dr https://x.com/..."],
@@ -469,6 +473,36 @@ TOOL_SPECS: dict[str, ToolSpec] = {spec.name: spec for spec in [
           {"news", "url", "people"}, not_for={"balances", "transactions", "holders"}, coverage="the open web (failover)", freshness="live web",
           answers=["fallback web research when Perplexity is unavailable"], summary="Web search with citations via OpenAI (failover for Perplexity)"),
 ]}
+
+# The equities-data endpoint catalog is also the registration source. Keeping
+# these specs generated from it makes every exposed HTTP read visible to the
+# provider selector and the tool-catalog invariant test.
+from app.equities_data import ENDPOINTS as _EQUITIES_ENDPOINTS
+
+_EQUITIES_DIMENSIONS = {
+    "news": {"news"}, "earnings_history": {"earnings", "fundamentals"},
+    "earnings_feed": {"earnings", "news"}, "earnings_upcoming": {"earnings"},
+    "insider_trades": {"insider_activity"}, "price_history": {"price_change"},
+    "price_snapshot": {"price_change"}, "ratings": {"fundamentals"},
+    "ratings_consensus": {"fundamentals"}, "most_active": {"volume"},
+    "interest_rates": {"macro"}, "inflation": {"macro"}, "yield_curve": {"macro"},
+    "filings": {"filings"}, "filings_feed": {"filings"},
+    "institutional_holdings": {"institutional_holdings"},
+    "popular_investors": {"institutional_holdings"}, "ticker_details": {"fundamentals"},
+    "venue_movers": {"price_change", "volume"},
+}
+for _endpoint in _EQUITIES_ENDPOINTS:
+    _kind = _endpoint.name.removeprefix("equities_")
+    _dims = _EQUITIES_DIMENSIONS.get(_kind, {"news"})
+    TOOL_SPECS[_endpoint.name] = _spec(
+        _endpoint.name, f"equities-data ({_endpoint.source})", ["GET /api/v1/internal" + _endpoint.path],
+        ["stock ticker"] if _endpoint.ticker else ["query"], ["dated provider records, as returned by the gateway"], _dims,
+        not_for={"holders", "security", "balances", "transactions"},
+        coverage="cash equities and macro" if _kind != "venue_movers" else "Aster / Hyperliquid venue pairs",
+        freshness="gateway response timestamp; cached allowlist feeds are labelled" if "feed" in _kind or _kind == "insider_trades" else "on request",
+        answers=[_kind.replace("_", " ")],
+        not_answers=[_endpoint.note] if _endpoint.note else (), summary=_endpoint.note or _kind.replace("_", " "),
+    )
 
 
 def attach_specs(router) -> None:

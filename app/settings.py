@@ -110,7 +110,7 @@ class Settings(BaseSettings):
     # Telegram bot (app/telegram/). Off until TELEGRAM_BOT_TOKEN is set: no
     # route is registered, no webhook is claimed, nothing changes.
     #
-    # A Telegram user is a way in to an ordinary Orbit account, created on
+    # A Telegram user is a way in to an ordinary Anvaya account, created on
     # their first message and keyed on their numeric Telegram id, so plans,
     # credits, quotas, conversation retention and deletion are the same code
     # paths the web uses. "Anonymous" here means no sign-in screen, not no
@@ -137,7 +137,7 @@ class Settings(BaseSettings):
     # TradingView connector (app/integrations/tradingview.py): each user links
     # their own TradingView account (OAuth 2.1, Essential plan or higher) so
     # research can read live quotes, technicals, fundamentals, news and
-    # calendars from TradingView's MCP server on their behalf. Orbit registers
+    # calendars from TradingView's MCP server on their behalf. Anvaya registers
     # itself as an OAuth client at first use; the redirect is
     # PUBLIC_BASE_URL + /integrations/tradingview/callback.
     tradingview_enabled: bool = True
@@ -168,7 +168,7 @@ class Settings(BaseSettings):
     x402_pay_to: str | None = None
     x402_network: str = "eip155:84532"
     x402_price: str = "$0.01"
-    x402_description: str = "One Orbit chat turn"
+    x402_description: str = "One Anvaya chat turn"
     x402_max_timeout_seconds: int = 300
     x402_facilitator_url: str = "https://x402.org/facilitator"
     x402_sync_facilitator_on_start: bool = True
@@ -212,7 +212,7 @@ class Settings(BaseSettings):
     # keyless JSON and RSS paths answered HTML block pages live (2026-09-22).
     reddit_client_id: str | None = None
     reddit_client_secret: str | None = None
-    reddit_user_agent: str = "Orbit/1.0 (crypto research; by u/orbit-copilot)"
+    reddit_user_agent: str = "Anvaya/1.0 (crypto research; by u/orbit-copilot)"
     reddit_subreddits: str = "CryptoCurrency,solana,memecoins,SatoshiStreetBets,CryptoMoonShots,altcoin,ethtrader,Bitcoin,CryptoMarkets"
     # Polymarket's Gamma API (free, no key). The developer network's resolver
     # returned no address for it (2026-09-22); the host can be pinned by IP
@@ -382,6 +382,10 @@ class Settings(BaseSettings):
     # stats. Not a secret; wss only (ws:// is rejected upstream).
     tequity_enabled: bool = True
     tequity_ws_url: str | None = "wss://tequity-dn.i5.xyz/ws"
+    # Internal equities-data HTTP gateway (FMP + financialdatasets.ai). Its
+    # token stays server-side; it is unrelated to the public Tequity stream.
+    equities_data_base_url: str | None = None
+    equities_data_internal_token: str | None = None
     # The tick ledger (app/tequity_ledger.py): one row per pair per tick,
     # recorded by the lease holder every interval; rows older than the
     # retention are pruned daily. 0 disables recording.
@@ -611,12 +615,12 @@ class Settings(BaseSettings):
     allow_memory_fallback: bool = True
 
     # --- Accounts, credits and billing (app/accounts.py, app/credits.py) ---
-    product_name: str = "Orbit"
+    product_name: str = "Anvaya"
     # Resend transactional email (magic links, receipts). Unset -> no email is
     # sent; with dev_expose_magic_links the sign-in link is returned to the UI
     # instead, which is how local development signs in.
     resend_api_key: str | None = None
-    email_from: str = "Orbit <no-reply@example.com>"
+    email_from: str = "Anvaya <no-reply@example.com>"
     magic_link_ttl_minutes: int = 15
     dev_expose_magic_links: bool = True
     # Credits per finished chat turn, by what the turn did (see credits.turn_cost).

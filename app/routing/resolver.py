@@ -36,7 +36,7 @@ from .intent_router import route_capabilities, plan_execution_route, default_cap
 from .instruments import equity_instruments
 from .model import speech_classifier
 from .semantic import SpeechUnderstanding, embedding_router
-from app import answer_audit, deployment, listed_asset, product_actions, snapshot_compare
+from app import answer_audit, deployment, hedge_prediction, listed_asset, product_actions, snapshot_compare
 from .speech import CONDITIONAL_ORDER_ANSWER, has_competing_speech, is_conditional_order, is_parameter_fragment
 from .trade_parser import extract_cross_chain_draft
 from app.clarify import is_clarification, is_market_text
@@ -376,11 +376,15 @@ async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> d
     # Content intents the desk handles: a real swap (trade), asset research
     # (research), and a hypothetical of the user's own position (portfolio/
     # trade_simulation) -- the latter two are analysis to the desk.
+    # An explicit single-asset forecast has a dedicated, typed prediction
+    # provider. The desk rewrites forecasts as tape questions, losing that
+    # intent before the prediction tool can see it.
+    specialist_prediction = intent0 == "research" and hedge_prediction.matches(request)
     is_content = intent0 in {"trade", "research"} or (intent0 == "portfolio" and "trade_simulation" in caps0)
-    if team_mode and is_content and update.get("route_source") != "quick_action":
+    if team_mode and is_content and not specialist_prediction and update.get("route_source") != "quick_action":
         update["team_subintent"] = "trade" if intent0 == "trade" else "analysis"
         update["intent"] = "team"
-    elif _desk_wanted(update, metadata, contextual):
+    elif not specialist_prediction and _desk_wanted(update, metadata, contextual):
         # The desk on its own (user, 2026-09-18: "make it auto in the backend
         # whenever required"): an opinion about an asset gets Market Research,
         # a conviction and a risk read; a fact, a security check or a swap

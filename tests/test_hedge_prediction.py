@@ -95,6 +95,72 @@ def test_chat_forecast_uses_prediction_before_tape(monkeypatch):
     assert "prediction_card" not in out["trajectory"]["observation_0"]
 
 
+def test_explicit_near_prediction_survives_model_downgrade(monkeypatch):
+    from app.nodes import runtime
+
+    monkeypatch.setattr(runtime, "planner_available", lambda: True)
+    async def model(*_args, **_kwargs):
+        return Mock(contract='{"kind":"other","symbol":null,"ambiguity":null}')
+    monkeypatch.setattr(runtime, "_call_planner_lm", model)
+    decision = asyncio.run(route.plan("price prediction on NEAR token"))
+    assert decision and decision.kind == "futures_scenario"
+    assert decision.symbol == "NEAR"
+
+
+@pytest.mark.parametrize("team_mode", [False, True])
+def test_explicit_near_prediction_stays_on_research_path(monkeypatch, team_mode):
+    from app.routing import resolver
+
+    async def classified(_request, _candidate, _call_lm, _embedding_factory, _source):
+        return ({"intent": "research", "capabilities": ["market_data"], "chains": [], "route_source": "speech_model"},
+                {"method": "speech_model", "speech_act": "advice", "domain": "crypto", "confidence": .99})
+    monkeypatch.setattr(resolver, "_model_first", classified)
+    monkeypatch.setattr(resolver.settings, "team_desk_auto", True)
+    out = asyncio.run(resolver.resolve(
+        {"request": "price prediction on NEAR token", "session_context": {"team_mode": team_mode}},
+        lambda *_args, **_kwargs: None,
+    ))
+    assert out["intent"] == "research"
+    assert "team_subintent" not in out
+
+
+@pytest.mark.parametrize("listed", [False, None])
+def test_near_prediction_does_not_drift_when_directory_unavailable(monkeypatch, listed):
+    from app.nodes import research
+
+    monkeypatch.setattr(hedge, "enabled", lambda: True)
+    async def decision(_request):
+        return route.PredictionContract(kind="futures_scenario", symbol="NEAR")
+    monkeypatch.setattr(route, "plan", decision)
+    monkeypatch.setattr(route, "listed_usdt_perpetual", lambda _symbol: listed)
+    monkeypatch.setattr(research, "tape_for", lambda _: (_ for _ in ()).throw(AssertionError("tape must not run")))
+    monkeypatch.setattr(research, "get_provider_router", lambda: (_ for _ in ()).throw(AssertionError("provider must not run")))
+    out = asyncio.run(research.research_node({"request": "price prediction on NEAR token",
+                                             "capabilities": ["market_data"], "chains": [], "session_context": {}}))
+    assert "couldn't verify" in out["answer"]
+    assert "No prediction was produced" in out["answer"]
+    assert out["trajectory"] is None
+
+
+def test_near_prediction_provider_failure_is_explicit(monkeypatch):
+    from app.nodes import research
+
+    monkeypatch.setattr(hedge, "enabled", lambda: True)
+    async def decision(_request):
+        return route.PredictionContract(kind="futures_scenario", symbol="NEAR")
+    monkeypatch.setattr(route, "plan", decision)
+    monkeypatch.setattr(route, "listed_usdt_perpetual", lambda _symbol: True)
+    monkeypatch.setattr(research, "tape_for", lambda _: (_ for _ in ()).throw(AssertionError("tape must not run")))
+    def fail(*_args):
+        raise RuntimeError("provider offline")
+    monkeypatch.setattr(research, "get_provider_router", lambda: Mock(invoke=fail))
+    out = asyncio.run(research.research_node({"request": "price prediction on NEAR token",
+                                             "capabilities": ["market_data"], "chains": [], "session_context": {}}))
+    assert "prediction service did not return" in out["answer"]
+    assert "No prediction was produced" in out["answer"]
+    assert out["trajectory"] is None
+
+
 def test_prediction_card_keeps_only_typed_result_fields():
     data = {"status": "done", "generatedAt": "2026-09-25T14:00:00Z",
             "defaultsApplied": ["side", "leverage"], "private": "discard me",

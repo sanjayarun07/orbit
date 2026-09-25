@@ -174,7 +174,7 @@ def render_card(snapshot: dict, limit: int = 20) -> str | None:
     total = snapshot.get("total_usd_value")
     lines = [
         "# Wallet token balances",
-        f"**Provider**: Orbit (Solana RPC balances, Jupiter prices) · **Priced total**: {_usd(total)} "
+        f"**Provider**: Anvaya (Solana RPC balances, Jupiter prices) · **Priced total**: {_usd(total)} "
         f"({len(priced) + (1 if sol.get('usd_value') is not None else 0)} priced, {unpriced} without a Jupiter price)",
         "",
         "| Token | Balance | Price | USD Value | Share |",

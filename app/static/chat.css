@@ -25,7 +25,7 @@
     display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; z-index: 20;
   }
   .side-brand { height: 48px; padding: 0 9px; display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 680; }
-  .mark { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; color: var(--on-brand); background: linear-gradient(145deg,#ad8cff,#6e56cf); box-shadow: 0 5px 18px rgba(124,92,231,.24); }
+  .mark { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; color: var(--on-brand); background: var(--brand); box-shadow: 0 5px 18px var(--brand-soft); }
   .mark svg { width: 16px; height: 16px; }
   .new-chat {
     width: 100%; height: 42px; margin-top: 5px; border-radius: 10px; border: 1px solid var(--border);
@@ -51,7 +51,7 @@
   .account-tier { display: block; font-size: 11px; color: var(--subtle); margin-top: 2px; }
 
   /* Main chat shell */
-  .main { min-width: 0; min-height: 0; height: var(--app-height); overflow: hidden; position: relative; display: flex; flex-direction: column; background: radial-gradient(circle at 50% -20%,rgba(155,135,245,.055),transparent 34%),var(--bg); }
+  .main { min-width: 0; min-height: 0; height: var(--app-height); overflow: hidden; position: relative; display: flex; flex-direction: column; background: var(--bg); }
   .topbar { height: 60px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom: 1px solid var(--faint-line); background: var(--topbar-bg); backdrop-filter: blur(14px); z-index: 8; }
   .model-label { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 14px; font-weight: 600; }
   .network-pill { border: 1px solid var(--border); border-radius: 999px; padding: 5px 9px; font-size: 10px; color: var(--muted); font-weight: 600; display: flex; align-items: center; gap: 6px; }
@@ -89,7 +89,7 @@
   .conversation { position: relative; flex: 1 1 0; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; scrollbar-gutter: stable; scroll-padding-bottom: 32px; }
   .thread { width: 100%; max-width: var(--content-width); margin: 0 auto; padding: 18px 24px 40px; }
   .welcome { min-height: calc(100vh - 250px); display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 40px 0; }
-  .welcome-mark { width: 48px; height: 48px; border-radius: 15px; margin-bottom: 20px; display: grid; place-items: center; background: linear-gradient(145deg,#ad8cff,#6e56cf); box-shadow: 0 10px 30px rgba(124,92,231,.2); }
+  .welcome-mark { width: 48px; height: 48px; border-radius: 15px; margin-bottom: 20px; display: grid; place-items: center; background: var(--brand); box-shadow: 0 10px 30px var(--brand-soft); }
   .welcome h1 { margin: 0; font-size: clamp(26px,4vw,34px); letter-spacing: -.035em; font-weight: 680; }
   .welcome p { max-width: 520px; margin: 12px auto 28px; color: var(--muted); font-size: 14px; line-height: 1.6; }
   .prompts { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -100,7 +100,7 @@
 
   .message { display: grid; grid-template-columns: 30px minmax(0,1fr); gap: 13px; padding: 20px 0; }
   .message.user { grid-template-columns: minmax(0,1fr); justify-items: end; }
-  .avatar { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-size: 11px; font-weight: 750; background: linear-gradient(145deg,#ad8cff,#6e56cf); }
+  .avatar { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-size: 11px; font-weight: 750; background: var(--brand); color: var(--on-brand); }
   .message-body { min-width: 0; font-size: 14px; line-height: 1.65; color: var(--text-2); }
   .answer { white-space: pre-wrap; overflow-wrap: anywhere; }
   .answer a, .rendered-result a { color: var(--link); text-decoration: none; }
@@ -419,7 +419,7 @@
   .dialog-body { padding: 17px 18px; }
   .wallet-option { width: 100%; height: 52px; margin-bottom: 9px; border: 1px solid var(--border); background: var(--surface); border-radius: 11px; display: flex; align-items: center; padding: 0 13px; gap: 12px; cursor: pointer; text-align: left; }
   .wallet-option:hover { background: var(--surface-hover); }
-  .wallet-logo { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-weight: 800; background: #6e56cf; }
+  .wallet-logo { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-weight: 800; background: var(--brand); color: var(--on-brand); }
   .wallet-option span { font-size: 12px; font-weight: 600; }
   .wallet-option small { display: block; color: var(--subtle); font-size: 10px; font-weight: 400; margin-top: 2px; }
   .wallet-option:disabled { opacity: .5; cursor: not-allowed; }
@@ -547,7 +547,7 @@
   .prompt-tile { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; margin-bottom: 16px; background: var(--brand-soft); color: var(--brand); }
   .prompt-tile .icon { width: 20px; height: 20px; }
   .prompt-card[data-tone="blue"] .prompt-tile { background: rgba(47,107,255,.14); color: #6d9bff; }
-  .prompt-card[data-tone="violet"] .prompt-tile { background: rgba(155,135,245,.16); color: #b8a8ff; }
+  .prompt-card[data-tone="violet"] .prompt-tile { background: var(--brand-soft); color: var(--brand); }
   .prompt-card[data-tone="amber"] .prompt-tile { background: rgba(251,191,36,.14); color: #fbbf24; }
   .prompt-card strong { font-size: 14px; line-height: 1.4; margin-bottom: 4px; }
   .prompt-card > span:not(.prompt-tile):not(.prompt-desc):not(.prompt-source) { display: none; }
@@ -569,7 +569,7 @@
   .mention-menu[hidden] { display: none; }
   /* A turn rendered as it happens: a quiet status line, the synthesis growing token by token, cards as they land. */
   .answer.streaming .stream-status { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--muted); margin-bottom: 8px; min-height: 20px; }
-  /* The working mark: a small orbit -- a ring with one bright point going round. */
+  /* Compact progress indicator while the answer streams. */
   .answer.streaming .stream-status::before { content: ""; flex: none; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--brand); animation: orbit-spin .9s linear infinite; }
   @keyframes orbit-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .answer.streaming .stream-status::before { animation: none; border-color: var(--brand); } }
@@ -637,7 +637,7 @@
   .primary:hover { background: var(--brand-grad); filter: brightness(1.06); }
   .dialog { border-radius: 22px; }
   .field input, .field select, .charter-grid textarea { border-radius: 12px; }
-  /* "What Orbit can do": the capability catalogue on the home screen (replaced the Explore dialog). */
+  /* The capability catalogue on the home screen (replaced the Explore dialog). */
   .capabilities { width: 100%; margin-top: 34px; }
   .cap-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
   .cap-head h2 { margin: 0; font-family: var(--serif, Georgia, serif); font-weight: 400; font-size: 22px; color: var(--text-strong); }

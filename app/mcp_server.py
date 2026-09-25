@@ -1,4 +1,4 @@
-"""Orbit as an MCP server -- the whole copilot as a skill for Claude, ChatGPT
+"""Anvaya as an MCP server -- the whole copilot as a skill for Claude, ChatGPT
 and any MCP host, with the same surface the web UI has.
 
 Mounted at /mcp (Streamable HTTP) by app/main.py, and runnable over stdio with
@@ -16,7 +16,7 @@ Mounted at /mcp (Streamable HTTP) by app/main.py, and runnable over stdio with
 
 Everything conversational goes through the same chat turn as POST /chat
 (admission, per-session lock, budgets, validation, persistence), so an MCP
-session is an ordinary Orbit session the web UI can open by id -- that is the
+session is an ordinary Anvaya session the web UI can open by id -- that is the
 wallet hand-off: the host binds a public address for read-only work, and
 anything that must be signed is confirmed by the user in the browser with
 their own wallet. No key ever passes through this server, and nothing here can
@@ -38,7 +38,7 @@ from app.settings import settings
 from app.service_errors import ServiceError
 
 _SKILL_PATH = Path(__file__).resolve().parent.parent / "skills" / "orbit" / "SKILL.md"
-_SKILL_TEXT = _SKILL_PATH.read_text(encoding="utf-8") if _SKILL_PATH.exists() else "Orbit Web3 copilot."
+_SKILL_TEXT = _SKILL_PATH.read_text(encoding="utf-8") if _SKILL_PATH.exists() else "Anvaya Web3 copilot."
 _INSTRUCTIONS = _SKILL_TEXT.split("---", 2)[-1].strip() if _SKILL_TEXT.startswith("---") else _SKILL_TEXT
 
 _EVM = re.compile(r"^0x[0-9a-fA-F]{40}$")
@@ -73,7 +73,7 @@ def validate_address(address: str) -> tuple[str, str]:
         except Exception:
             pass
     if len(value) >= 60 or value.count(" ") >= 11:
-        raise ValueError("That looks like key material, not a public address. Orbit only accepts public wallet addresses.")
+        raise ValueError("That looks like key material, not a public address. Anvaya only accepts public wallet addresses.")
     raise ValueError("Not a recognised public wallet address (expected Solana base58 or EVM 0x…).")
 
 
@@ -156,7 +156,7 @@ def _response_payload(response: Any) -> dict:
         out["handoff_url"] = handoff_url(data["session_id"])
         out["next_step"] = (
             "Nothing has been signed. Show the user handoff_url: it opens this session in the "
-            "Orbit web UI where they connect their wallet, review the card and confirm."
+            "Anvaya web UI where they connect their wallet, review the card and confirm."
         )
     return out
 
@@ -165,7 +165,7 @@ def _response_payload(response: Any) -> dict:
 
 @mcp.tool()
 async def orbit_chat(message: str, session_id: str | None = None, wallet_address: str | None = None) -> dict:
-    """One turn of the Orbit Web3 copilot: research, portfolio, policy or a swap
+    """One turn of the Anvaya Web3 copilot: research, portfolio, policy or a swap
     quote -- exactly what the web chat does. Reuse the returned session_id on
     follow-ups. wallet_address is an optional PUBLIC address for this turn;
     otherwise the session's bound wallet (orbit_connect_wallet) is used."""
@@ -276,7 +276,7 @@ async def orbit_risk_charter_limits() -> dict:
 
 @mcp.tool()
 async def orbit_policy(session_id: str | None = None) -> dict:
-    """The risk rules Orbit enforces for this session: built-in caps and the
+    """The risk rules Anvaya enforces for this session: built-in caps and the
     user's risk charter if one is set."""
     from app.nodes.general import policy_summary
 
@@ -328,7 +328,7 @@ async def orbit_delete_history(session_id: str) -> dict:
 
 @mcp.tool()
 async def orbit_handoff_url(session_id: str) -> dict:
-    """A link that opens this session in the Orbit web UI, where the user can
+    """A link that opens this session in the Anvaya web UI, where the user can
     connect a wallet and confirm any pending quote with their own signature."""
     try:
         await _guard(session_id)
@@ -407,7 +407,7 @@ async def orbit_market_overview(session_id: str | None = None) -> dict:
 async def orbit_token_deep_dive(token: str, chain: str | None = None, session_id: str | None = None) -> dict:
     """Ten-dimension token due diligence with anti-hallucination rules and
     role-memory lessons. token is a symbol, name or contract; chain narrows an
-    ambiguous symbol (otherwise Orbit asks which chain)."""
+    ambiguous symbol (otherwise Anvaya asks which chain)."""
     return await _turn(f"deep dive on {token}" + (f" on {chain}" if chain else ""), session_id, await _session_wallet(session_id))
 
 
@@ -456,7 +456,7 @@ async def orbit_relay_status(request_id: str) -> dict:
 
 @mcp.tool()
 async def orbit_capabilities() -> dict:
-    """Every provider and MCP tool Orbit can route to, with configuration,
+    """Every provider and MCP tool Anvaya can route to, with configuration,
     quota, reliability and latency (GET /capabilities)."""
     from app.mcp_tools import get_mcp_registry
     from app.provider_registry import get_provider_router
@@ -467,7 +467,7 @@ async def orbit_capabilities() -> dict:
 
 @mcp.tool()
 async def orbit_route_preview(request: str, capability: str, chains: list[str] | None = None) -> dict:
-    """Which provider tools Orbit would try, in order, for a request and
+    """Which provider tools Anvaya would try, in order, for a request and
     capability -- a dry run, no provider is called."""
     from app.provider_registry import get_provider_router
 
@@ -527,7 +527,7 @@ PROVIDER_TOOL_NAMES = _register_provider_tools()
 
 @mcp.tool()
 async def orbit_mcp_catalog() -> dict:
-    """Tools discovered from Orbit's own MCP servers (e.g. Nansen): name,
+    """Tools discovered from Anvaya's own MCP servers (e.g. Nansen): name,
     capabilities, chains, risk, reliability. Call one with orbit_mcp_call."""
     from app.mcp_tools import get_mcp_registry
 
@@ -558,13 +558,13 @@ async def orbit_mcp_call(tool_name: str, arguments: dict | None = None) -> dict:
 
 @mcp.resource("orbit://skill")
 def skill_document() -> str:
-    """The Orbit skill playbook (SKILL.md): tools, working rules, wallet flow."""
+    """The Anvaya skill playbook (SKILL.md): tools, working rules, wallet flow."""
     return _SKILL_TEXT
 
 
 @mcp.resource("orbit://capabilities")
 async def capabilities_resource() -> str:
-    """JSON catalog of every provider and MCP tool Orbit can route to."""
+    """JSON catalog of every provider and MCP tool Anvaya can route to."""
     return json.dumps(await orbit_capabilities(), default=str)
 
 
@@ -590,21 +590,21 @@ async def policy_resource(session_id: str) -> str:
 
 @mcp.prompt()
 def orbit_skill() -> str:
-    """Load the Orbit skill guidance into the conversation."""
+    """Load the Anvaya skill guidance into the conversation."""
     return _INSTRUCTIONS
 
 
 @mcp.prompt()
 def orbit_deep_dive(token: str, chain: str | None = None) -> str:
-    """Ask Orbit for a full due-diligence deep dive on a token."""
+    """Ask Anvaya for a full due-diligence deep dive on a token."""
     where = f" on {chain}" if chain else ""
-    return (f"Use the orbit_token_deep_dive tool for {token}{where}. Report the dimensions Orbit covered, the "
-            "evidence gaps it named, its confidence and the single variable that would flip its rating. Do not add figures Orbit did not return.")
+    return (f"Use the orbit_token_deep_dive tool for {token}{where}. Report the dimensions Anvaya covered, the "
+            "evidence gaps it named, its confidence and the single variable that would flip its rating. Do not add figures Anvaya did not return.")
 
 
 @mcp.prompt()
 def orbit_market_brief() -> str:
-    """Ask Orbit for the current crypto market overview."""
+    """Ask Anvaya for the current crypto market overview."""
     return "Call orbit_market_overview and summarise the regime, leaders and laggards, and the data time it reports."
 
 

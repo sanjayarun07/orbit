@@ -1,7 +1,7 @@
 """The holder snapshot ledger: what a meme token's structure looked like, when.
 
 Mobula answers "what is the holder structure NOW". It has no yesterday. So
-today Orbit can say whether a token is clean now, not whether it was clean
+today Anvaya can say whether a token is clean now, not whether it was clean
 when a buyer had to decide, and any "buy when top-10 < 20% and LP locked"
 idea could only be tested with today's state on past prices -- lookahead
 that makes a backtest look good and mean nothing (ai-hedge-fund discussion,
@@ -506,7 +506,7 @@ def _age(delta: timedelta) -> str:
 
 async def history_card(subject: Subject) -> str | None:
     """The `history` dimension for a deep-dive: how the structure moved since
-    Orbit first recorded this token. None with fewer than two rows -- a single
+    Anvaya first recorded this token. None with fewer than two rows -- a single
     row is a present state the other dimensions already show, not history."""
     rows = await history(subject.key)
     if len(rows) < 2:
@@ -514,7 +514,7 @@ async def history_card(subject: Subject) -> str | None:
     first, last = rows[0], rows[-1]
     span = _age(_dt(last["taken_at"]) - _dt(first["taken_at"]))
     lines = [f"# Holder history — {subject.label()}",
-             f"**Provider**: Orbit snapshot ledger (Mobula data) · **Rows**: {len(rows)} · **Span**: {span} · "
+             f"**Provider**: Anvaya snapshot ledger (Mobula data) · **Rows**: {len(rows)} · **Span**: {span} · "
              f"**First**: {_dt(first['taken_at']).strftime('%Y-%m-%d %H:%M UTC')} · **Latest**: {_dt(last['taken_at']).strftime('%Y-%m-%d %H:%M UTC')}", ""]
     changes = diff(first, last)
     if changes:
@@ -529,7 +529,7 @@ async def history_card(subject: Subject) -> str | None:
     missing = (last.get("flags") or {}).get("missing") or []
     if missing:
         lines += ["", f"Latest row is missing: {', '.join(missing)} (Mobula returned nothing for those parts)."]
-    lines += ["", "Rows are Orbit's own periodic snapshots; nothing before the first row is known. Labels are Mobula's classifications, evidence not proof."]
+    lines += ["", "Rows are Anvaya's own periodic snapshots; nothing before the first row is known. Labels are Mobula's classifications, evidence not proof."]
     return "\n".join(lines)
 
 

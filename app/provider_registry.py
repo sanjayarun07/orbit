@@ -25,6 +25,7 @@ from app.exchange_listings import ExchangeListingsProvider
 from app.listed_asset import ListedAssetProvider
 from app.polymarket_odds import PolymarketProvider
 from app.tequity import TequityProvider
+from app.equities_data import EquitiesDataProvider
 from app.reddit_crowd import RedditCrowdProvider
 from app.perplexity_tools import (
     perplexity_available,
@@ -265,7 +266,7 @@ def get_provider_router() -> ProviderRouter:
         cache_ttl_seconds=30, quota_per_minute=10, priority=12,
         description="Read-only Binance USDT futures scenario with signal, assumptions, confidence and factor scores",
     ))
-    for provider_type in (MobulaWalletProvider, MobulaSecurityProvider, MobulaMemeProvider, ExchangeListingsProvider, ListedAssetProvider, RedditCrowdProvider, PolymarketProvider, TequityProvider):
+    for provider_type in (MobulaWalletProvider, MobulaSecurityProvider, MobulaMemeProvider, ExchangeListingsProvider, ListedAssetProvider, RedditCrowdProvider, PolymarketProvider, TequityProvider, EquitiesDataProvider):
         provider_type().register(router)
     for provider_type in MARKET_PROVIDERS:
         provider_type().register(router)

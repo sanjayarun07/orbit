@@ -4,7 +4,7 @@ import type {EIP1193Provider} from "viem";
 type State = {configured: true; connected: boolean; authenticated: boolean; address?: string; chainId?: number};
 
 const sdk = createCoinbaseWalletSDK({
-  appName: "Orbit",
+  appName: "Anvaya",
   appChainIds: [1, 8453, 42161, 10, 137, 43114, 56],
   preference: {options: "all", attribution: {auto: true}},
 });

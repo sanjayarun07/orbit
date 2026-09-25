@@ -155,7 +155,12 @@ async def plan(request: str) -> PredictionContract | None:
             answer = await runtime._call_planner_lm(planner, request=ask)
             modelled = _model_contract(getattr(answer, "contract", ""), ask)
             if modelled is not None:
-                result = modelled
+                # An explicit, single-asset forecast already has a typed
+                # contract. The model may enrich that contract, but a
+                # stochastic "other" classification must not turn the same
+                # request into unrelated market research on another run.
+                if result.kind != "futures_scenario" or modelled.kind == "futures_scenario":
+                    result = modelled
         except Exception:
             logger.info("Prediction planner unavailable; using rules contract", exc_info=True)
     if result.kind != "futures_scenario":

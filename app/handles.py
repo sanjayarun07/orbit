@@ -1,6 +1,6 @@
 """Social handles in wallet asks.
 
-Live, 2026-09-21: a beta user asked "@frankdegods wallet analysis". Orbit
+Live, 2026-09-21: a beta user asked "@frankdegods wallet analysis". Anvaya
 has no way to turn an X or Telegram handle into a wallet, and instead of
 saying so it ran the portfolio tools on the user's own connected wallet and
 then explained that "the address you provided appears to be an
@@ -32,6 +32,6 @@ def social_handle(request: str) -> str | None:
 
 
 def answer_for(handle: str) -> str:
-    return (f"I can't turn **@{handle}** into a wallet yet: Orbit doesn't resolve X or Telegram handles to addresses. "
+    return (f"I can't turn **@{handle}** into a wallet yet: Anvaya doesn't resolve X or Telegram handles to addresses. "
             "Paste the wallet address (fomo.family, GMGN and most trackers show it on the profile) and I'll run the full portfolio "
             "and trading analysis on it.")

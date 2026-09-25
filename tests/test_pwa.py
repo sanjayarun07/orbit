@@ -72,7 +72,7 @@ def test_a_navigation_is_network_first_with_the_shell_as_offline_fallback():
 def test_install_precaches_the_shell_the_pages_actually_load():
     r = _sw_case("install_precaches_the_shell_and_activate_drops_old_caches")
     html = (STATIC / "index.html").read_text()
-    for sheet in ("/ui/theme.css?v=1", "/ui/chat.css?v=9", "/ui/product.css?v=8", "/ui/mobile.css?v=7"):
+    for sheet in ("/ui/theme.css?v=2", "/ui/chat.css?v=10", "/ui/product.css?v=10", "/ui/mobile.css?v=7"):
         assert sheet in html and sheet in r["precached"], sheet
 
 

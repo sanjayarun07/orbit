@@ -129,7 +129,7 @@ def test_the_authorization_url_carries_pkce_state_and_the_mcp_resource(monkeypat
     assert q["client_id"] == ["orbit-client-1"] and q["code_challenge_method"] == ["S256"] and q["resource"] == [settings.tradingview_mcp_url]
     assert q["redirect_uri"] == [tv.redirect_uri()] and q["scope"] == [tv.SCOPE] and len(q["state"][0]) > 20
     registration = calls["json"][0][1]
-    assert registration["client_name"] == "Orbit" and registration["token_endpoint_auth_method"] == "none" and registration["redirect_uris"] == [tv.redirect_uri()]
+    assert registration["client_name"] == "Anvaya" and registration["token_endpoint_auth_method"] == "none" and registration["redirect_uris"] == [tv.redirect_uri()]
     assert len(calls["json"]) == 1, "registered once"
     asyncio.run(tv.begin("user-2"))
     assert len(calls["json"]) == 1, "the registered client is reused"

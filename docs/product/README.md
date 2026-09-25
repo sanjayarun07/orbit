@@ -1,8 +1,8 @@
-# Orbit product documentation
+# Anvaya product documentation
 
 **Code baseline:** `0dc35f6d` · **Reviewed:** 16 September 2026.
 
-Orbit is a conversational research and transaction-preparation workspace. It combines live market and wallet tools, a cited protocol Knowledge Base, reviewable swap workflows, scheduled tasks, accounts, and metered access. The current implementation is finance-specific; the broader business products discussed separately are possible adaptations, not shipped features.
+Anvaya is a conversational research and transaction-preparation workspace. It combines live market and wallet tools, a cited protocol Knowledge Base, reviewable swap workflows, scheduled tasks, accounts, and metered access. The current implementation is finance-specific; the broader business products discussed separately are possible adaptations, not shipped features.
 
 This documentation describes the checked-in implementation, not the values in a developer's private `.env`. Defaults can be overridden. Availability also depends on provider credentials, subscriptions, ingested content, and infrastructure.
 

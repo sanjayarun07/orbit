@@ -13,7 +13,7 @@ _CONDITIONAL_ORDER = re.compile(
 
 def is_conditional_order(request: str) -> bool:
     """A conditional or automatic trade: "if SOL drops under 100 buy 2 SOL",
-    "automatically buy". Orbit never executes on its own; the answer must say
+    "automatically buy". Anvaya never executes on its own; the answer must say
     so and offer the alert that exists (UI run, 2026-09-23)."""
     text = request or ""
     if re.search(r"\b(?:should|would|could|can|shall|do|does)\s+i\b|\bwhat\s+if\b|\bwhether\b|\?\s*$", text, re.I):
@@ -22,7 +22,7 @@ def is_conditional_order(request: str) -> bool:
 
 
 CONDITIONAL_ORDER_ANSWER = (
-    "Conditional and automatic orders are not something Orbit can do: it never buys, sells or submits a transaction on its own, "
+    "Conditional and automatic orders are not something Anvaya can do: it never buys, sells or submits a transaction on its own, "
     "and there are no stop-loss, limit or take-profit orders here. Every trade is prepared for review and signed by you in your wallet at that moment.\n\n"
     "What exists: a price alert (`alert me when SOL drops below $100`) that posts to your inbox when the level is crossed, so you can decide then; "
     "and an exit watch (`watch my exit on BONK`) that re-quotes a position you hold and warns when the exit deteriorates. Neither places an order."

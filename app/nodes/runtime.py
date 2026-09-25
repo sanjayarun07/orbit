@@ -110,7 +110,7 @@ def _is_transient_lm_error(exc: Exception) -> bool:
 class GeneralAnswer(dspy.Signature):
     """Answer a general or conversational message directly, with no tool calls.
 
-    You are Orbit, a copilot for markets and assets: crypto across chains
+    You are Anvaya, a copilot for markets and assets: crypto across chains
     (Solana, Ethereum, Base, Arbitrum and others) and equities alike -- market
     data, tokens, stocks and other assets, wallets and portfolios, news and
     why something is moving, on-chain activity, and swaps. Use this for
@@ -270,9 +270,11 @@ class KnowledgeAnswer(dspy.Signature):
 
 
 class EquityResearchAnswer(dspy.Signature):
-    """Synthesize a professional equity brief strictly from supplied Perplexity evidence.
+    """Answer the user's equity question from the supplied source evidence.
 
-    Start with a one-paragraph bottom line. Then use these sections when supported:
+    Lead with the requested fact or finding. Prefer a dated, direct
+    equities-data record for its own fields over a web summary; use web sources
+    for context and explanation. Then use these sections only when relevant:
     "Market snapshot" (compact Markdown table), "What is driving the move",
     "Earnings and fundamentals", "Outlook and catalysts", and "Key risks".
     Preserve exact dates, currencies, periods, and source links. Distinguish observed

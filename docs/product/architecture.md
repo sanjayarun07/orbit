@@ -4,7 +4,7 @@
 
 ## System structure
 
-Orbit is a modular Python application with a static browser client. It is not a fleet of independent agent microservices. FastAPI exposes HTTP, serves the UI, mounts an MCP server, and starts background workers. LangGraph composes the agent workflow; DSPy programs call LiteLLM-compatible models.
+Anvaya is a modular Python application with a static browser client. It is not a fleet of independent agent microservices. FastAPI exposes HTTP, serves the UI, mounts an MCP server, and starts background workers. LangGraph composes the agent workflow; DSPy programs call LiteLLM-compatible models.
 
 ```mermaid
 flowchart TD

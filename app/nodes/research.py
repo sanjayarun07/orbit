@@ -611,7 +611,8 @@ def _provider_trajectory(result, request: str, capability: str) -> dict:
 
 
 async def _equity_research(state: dict) -> dict:
-    """Retrieve complementary Perplexity evidence concurrently, then synthesize it."""
+    """Retrieve web context and available structured equity evidence."""
+    from app import equities_data
     request = state["request"]
     finance_request = (
         f"Equity financial-data research for this user request: {request}\n\n"
@@ -628,6 +629,11 @@ async def _equity_research(state: dict) -> dict:
         "stories unless they materially affect the listed equity."
     )
     router = get_provider_router()
+    gateway_selected = equities_data.matching_tools(request)[:2] if equities_data.enabled() else []
+    gateway_future = (asyncio.gather(
+        *(asyncio.to_thread(equities_data.run, name, request) for name in gateway_selected),
+        return_exceptions=True,
+    ) if gateway_selected else None)
 
     async def retrieve(prompt: str, capability: str):
         return await asyncio.to_thread(
@@ -645,6 +651,14 @@ async def _equity_research(state: dict) -> dict:
     )
     trajectory: dict = {}
     evidence: list[str] = []
+    gateway_cards: list[tuple[str, str]] = []
+    if gateway_future is not None:
+        reads = await gateway_future
+        for name, result in zip(gateway_selected, reads):
+            if isinstance(result, Exception):
+                logger.warning("equities-data %s unavailable: %s", name, type(result).__name__)
+        gateway_cards = [(name, result) for name, result in zip(gateway_selected, reads)
+                         if isinstance(result, str) and result.strip()]
     tasks = (
         ("financials, earnings, and market data", finance_request, "finance_data", finance),
         ("recent news and catalysts", news_request, "web_research", news),
@@ -678,7 +692,17 @@ async def _equity_research(state: dict) -> dict:
         trajectory[f"tool_sources_{index}"] = []
         evidence[0] = evidence[0] + "\n\nTradingView (the user's account):\n" + tv_evidence
 
-    if all(isinstance(result, Exception) for result in (finance, news)) and not tv_evidence:
+    for offset, (name, card) in enumerate(gateway_cards):
+        index = len(tasks) + (1 if tv_evidence else 0) + offset
+        trajectory[f"thought_{index}"] = "Read the matching structured equities-data record."
+        trajectory[f"tool_name_{index}"] = name
+        trajectory[f"tool_args_{index}"] = {"query": request}
+        trajectory[f"observation_{index}"] = card
+        trajectory[f"tool_sources_{index}"] = []
+        target = 1 if name in {"equities_market_news", "equities_company_news"} else 0
+        evidence[target] += "\n\nStructured equities-data record:\n" + card
+
+    if all(isinstance(result, Exception) for result in (finance, news)) and not tv_evidence and not gateway_cards:
         return {
             "answer": (
                 "Perplexity could not retrieve the financial or news evidence needed for "
@@ -1846,29 +1870,55 @@ def _remembered_holdings(state: AgentState) -> list[str]:
 async def research_node(state: AgentState) -> dict:
     sink: dict = {}
     request = _effective_request(state)
-    if hedge_prediction.enabled() and prediction_route.candidate(request):
+    if prediction_route.candidate(request):
         decision = await prediction_route.plan(request)
         if decision:
+            if not hedge_prediction.enabled():
+                return {"answer": (f"I can't run a **{decision.symbol}** price prediction because the prediction service "
+                                   "is not configured. No model scenario was produced."),
+                        "trajectory": None, "prediction_contract": decision.model_dump()}
             listed = await asyncio.to_thread(prediction_route.listed_usdt_perpetual, decision.symbol)
-            if listed:
-                try:
-                    tool_request = decision.canonical_request()
-                    result = await asyncio.to_thread(get_provider_router().invoke, "hedge_token_prediction", tool_request)
-                    if result:
-                        payload = json.loads(result.output)
-                        if not isinstance(payload, dict) or not isinstance(payload.get("answer"), str) or not isinstance(payload.get("card"), dict):
-                            raise ValueError("Prediction tool returned an invalid result")
-                        return {"answer": payload["answer"], "prediction_card": payload["card"],
-                                "trajectory": {"thought_0": "Typed futures-scenario contract; Binance instrument verified before the API call.",
-                                "tool_name_0": result.tool, "tool_args_0": {"request": tool_request}, "observation_0": payload["answer"]},
-                                "prediction_contract": decision.model_dump()}
-                except Exception:
-                    logger.warning("Prediction service unavailable; reading the market tape instead", exc_info=True)
-            elif listed is False and re.search(r"\b(?:binance|futures?|perps?|perpetuals?)\b", request, re.I):
-                answer = (f"I couldn't verify an active Binance USDT perpetual for **{decision.symbol}**, so I won't run a leveraged futures scenario for it. "
-                          "If you meant a different venue or token, name it; I can still examine current spot-market data. "
-                          "[Binance futures instrument directory](https://fapi.binance.com/fapi/v1/exchangeInfo)")
-                return {"answer": answer, "trajectory": None, "prediction_contract": decision.model_dump()}
+            if listed is not True:
+                detail = ("No active USDT perpetual was found." if listed is False
+                          else "The Binance futures instrument directory could not be reached.")
+                return {"answer": (f"I couldn't verify an active Binance USDT perpetual for **{decision.symbol}**, "
+                                   f"so I can't run its leveraged price scenario. {detail} "
+                                   "No prediction was produced. "
+                                   "[Binance futures instrument directory](https://fapi.binance.com/fapi/v1/exchangeInfo)"),
+                        "trajectory": None, "prediction_contract": decision.model_dump()}
+            try:
+                tool_request = decision.canonical_request()
+                result = await asyncio.to_thread(get_provider_router().invoke, "hedge_token_prediction", tool_request)
+                if not result:
+                    raise RuntimeError("Prediction provider returned no result")
+                payload = json.loads(result.output)
+                if not isinstance(payload, dict) or not isinstance(payload.get("answer"), str) or not isinstance(payload.get("card"), dict):
+                    raise ValueError("Prediction tool returned an invalid result")
+                return {"answer": payload["answer"], "prediction_card": payload["card"],
+                        "trajectory": {"thought_0": "Typed futures-scenario contract; Binance instrument verified before the API call.",
+                        "tool_name_0": result.tool, "tool_args_0": {"request": tool_request}, "observation_0": payload["answer"]},
+                        "prediction_contract": decision.model_dump()}
+            except Exception:
+                logger.warning("Prediction service unavailable", exc_info=True)
+                return {"answer": (f"I can't run a **{decision.symbol}** price prediction right now: "
+                                   "the prediction service did not return a completed scenario. "
+                                   "No prediction was produced. Please retry later."),
+                        "trajectory": None, "prediction_contract": decision.model_dump()}
+    # Exact macro series asks need the gateway's observed figures. A news or
+    # impact question still follows research discovery and synthesis.
+    from app import equities_data
+    macro_data_ask = re.search(r"\b(?:current|latest|today|now|series|data|value|rates?|reading|snapshot)\b", request, re.I)
+    if (equities_data.enabled() and macro_data_ask
+            and not re.search(r"\b(?:why|impact|affect|effect|mean|outlook|forecast|next release|when|explain|how)\b", request, re.I)):
+        macro = {"equities_interest_rates", "equities_inflation", "equities_yield_curve"}
+        selected = next((name for name in equities_data.matching_tools(request) if name in macro), None)
+        if selected:
+            try:
+                card = await asyncio.to_thread(equities_data.run, selected, request)
+                return {"answer": card, "trajectory": {"thought_0": "Read the observed macro series from equities-data.",
+                                                       "tool_name_0": selected, "tool_args_0": {"request": request}, "observation_0": card}}
+            except Exception:
+                logger.warning("equities-data macro read unavailable", exc_info=True)
     # "@frankdegods wallet analysis" (live, 2026-09-21): a handle is not an
     # address and Orbit cannot resolve one; say so instead of answering for
     # whichever wallet happens to be connected.
@@ -1887,6 +1937,15 @@ async def research_node(state: AgentState) -> dict:
         state = {**state, "request": request, "contextual_request": None,
                  "capabilities": sorted(set(state.get("capabilities") or []) | {"market_data", "derivatives"})}
         streaming.emit("status", text=f"Reading the tape for {asset}")
+    if tequity.enabled() and tequity.quote_matches(request):
+        # A venue pair has its own price. This must precede the cash-equity
+        # path for prompts such as "TSLA price on Hyperliquid".
+        try:
+            card = await asyncio.to_thread(tequity.quote, request)
+            return {"answer": card, "trajectory": {"thought_0": "Read the named venue pair from the live feed.",
+                                                   "tool_name_0": "tequity_quote", "tool_args_0": {"request": request}, "observation_0": card}}
+        except Exception:
+            logger.warning("tequity venue quote unavailable", exc_info=True)
     if tequity.enabled() and (tequity.period_movers_matches(request) or tequity.movers_matches(request) or tequity.volume_leaders_matches(request)):
         # Venue movers come from the company's own feed, whatever the
         # classifier called the ask ("which tokenized stocks are moving on

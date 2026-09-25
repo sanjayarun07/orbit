@@ -310,7 +310,7 @@ def keyboard(response: AgentResponse, *, app_url: str | None = None) -> dict | N
         if len(response.quick_actions) + index >= 8:
             break
         rows.append([{"text": _button_label(suggestion), "callback_data": f"sg:{key}:{index}"}])
-    # No "Open Orbit" on an ordinary answer. It was on every reply, where it
+    # No "Open Anvaya" on an ordinary answer. It was on every reply, where it
     # is noise: a research answer is finished in the chat, and the web is for
     # the few things the chat cannot do -- /app and /account offer it there.
     return {"inline_keyboard": rows} if rows else None

@@ -32,14 +32,14 @@ _HOW_TO_SET = (
 
 
 def policy_summary(state: AgentState) -> str:
-    """The rules Orbit actually enforces for this session, from settings and the
+    """The rules Anvaya actually enforces for this session, from settings and the
     session context -- never narrated by the model, so it cannot drift."""
     context = state.get("session_context") or {}
     charter = context.get("risk_charter")
     wallet = state.get("wallet_address") or ""
     wallet_line = f"`{wallet[:6]}…{wallet[-4:]}`" if len(wallet) > 12 else "none connected"
     lines = [
-        "**Your trading policy in Orbit**",
+        "**Your trading policy in Anvaya**",
         "",
         f"- **Wallet**: {wallet_line}",
         f"- **Risk charter**: {'> ' + charter if charter else 'not set — advisory mode (risk is shown on every trade but never blocks it)'}",
@@ -68,7 +68,7 @@ _POLICY_WORD = re.compile(r"\b(?:polic(?:y|ies)|limits?|caps?|rules|allowed|perm
 
 
 def _about_orbits_policy(request: str) -> bool:
-    """A policy-labelled turn is about Orbit's own policy unless it names
+    """A policy-labelled turn is about Anvaya's own policy unless it names
     something else ("Does that authorize Robinhood Chain?" names an order and
     a chain); "max spend policy?" and "my wallet policy?" name nothing else."""
     from app.routing.subject_probe import has_own_subject
@@ -88,7 +88,7 @@ async def general_node(state: AgentState) -> dict:
         from app import answer_audit
         return {"answer": answer_audit.audit((state.get("session_context") or {}).get("last_answer")), "trajectory": None}
     if (state.get("routing_decision") or {}).get("speech_act") == "policy" and _about_orbits_policy(request):
-        # The policy card answers questions about Orbit's own trading policy;
+        # The policy card answers questions about Anvaya's own trading policy;
         # "Does that automatically authorize Robinhood Chain today?" is about
         # an SEC order and got the card (expanded UI review, 2026-09-24).
         return {"answer": policy_summary(state), "trajectory": None}
@@ -166,18 +166,18 @@ async def general_node(state: AgentState) -> dict:
     if is_execution_explanation(state["request"]):
         return {
             "answer": (
-                "Relay is the routing and execution layer Orbit uses for cross-chain swaps "
-                "and swaps involving non-Solana chains. Orbit first parses your message into "
+                "Relay is the routing and execution layer Anvaya uses for cross-chain swaps "
+                "and swaps involving non-Solana chains. Anvaya first parses your message into "
                 "the source chain, destination chain, amount, input token, output token, and "
                 "slippage. It then resolves exact token contracts against Relay's live chain "
                 "data and requests a fresh quote.\n\n"
                 "You review the amount received, fees, price impact, route, and destination "
                 "address before approving. After you confirm, your connected wallet signs the "
-                "required transaction; Orbit never receives your private key. Relay executes "
+                "required transaction; Anvaya never receives your private key. Relay executes "
                 "the route and reports each bridge or swap step until the destination funds "
                 "arrive. Quotes and Solana blockhashes are short-lived, so an expired approval "
                 "is refreshed instead of reused.\n\n"
-                "Orbit uses Jupiter for same-chain Solana swaps. Relay is used for cross-chain "
+                "Anvaya uses Jupiter for same-chain Solana swaps. Relay is used for cross-chain "
                 "routes and Base, Robinhood Chain, Ethereum, Arbitrum, and other supported "
                 "non-Solana activity. No transaction is created from an explanatory question."
             ),

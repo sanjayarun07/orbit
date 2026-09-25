@@ -81,17 +81,17 @@ async def lead(token: dict | None, window: tuple[datetime, datetime]) -> str:
     recent = await holder_snapshots.history(subject.key, limit=200)
     earliest = holder_snapshots._dt(recent[0]["taken_at"]) if recent else None
     if older is None or holder_snapshots._dt(older["taken_at"]) < start - timedelta(days=2) or newer is None or newer["id"] == older["id"]:
-        have = (f"Orbit's ledger for {label} begins {_fmt(earliest)}" if earliest else f"Orbit has not recorded {label} in its snapshot ledger")
+        have = (f"Anvaya's ledger for {label} begins {_fmt(earliest)}" if earliest else f"Anvaya has not recorded {label} in its snapshot ledger")
         return (f"**No saved snapshot of {label} for {start.strftime('%B %-d, %Y')}.** {have}, so a comparison between {days} cannot be drawn. "
                 "Everything below is current data, not a change over that period.")
     t0, t1 = holder_snapshots._dt(older["taken_at"]), holder_snapshots._dt(newer["taken_at"])
     changes = holder_snapshots.diff(older, newer)
     lines = [f"# Snapshot comparison — {label}",
-             f"**Provider**: Orbit snapshot ledger (Mobula data) · **Earlier**: {_fmt(t0)} · **Later**: {_fmt(t1)} · asked: {days}", ""]
+             f"**Provider**: Anvaya snapshot ledger (Mobula data) · **Earlier**: {_fmt(t0)} · **Later**: {_fmt(t1)} · asked: {days}", ""]
     lines += [f"- {c}" for c in changes] if changes else [f"No material change in concentration, labelled cohorts, LP state, price or liquidity between {_fmt(t0)} and {_fmt(t1)}."]
     missing = sorted({m for row in (older, newer) for m in ((row.get("flags") or {}).get("missing") or [])})
     if missing:
         lines += ["", f"Not covered in one or both rows: {', '.join(missing)}."]
-    lines += ["", "Two rows of Orbit's own periodic snapshots; each is dated above. Labels are Mobula's classifications, evidence not proof. "
+    lines += ["", "Two rows of Anvaya's own periodic snapshots; each is dated above. Labels are Mobula's classifications, evidence not proof. "
                   "The cards below are current data, not part of the comparison."]
     return "\n".join(lines)

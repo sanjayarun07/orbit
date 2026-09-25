@@ -57,6 +57,7 @@ EXPECTED: dict[tuple[str, str], str] = {
     ("GET", "/me/telegram"): "browser",
     ("DELETE", "/me/telegram/{external_id}"): "browser",
     # --- public read-only --------------------------------------------------
+    ("GET", "/"): "public",
     ("GET", "/health"): "public",
     ("GET", "/readyz"): "public",
     ("GET", "/config/public"): "public",

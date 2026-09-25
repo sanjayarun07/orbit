@@ -1,4 +1,4 @@
-"""What Orbit remembers about a user across conversations.
+"""What Anvaya remembers about a user across conversations.
 
 Decision (2026-09-18): built in-house, not mem0. Hosted mem0 would send
 chat content to a third party; self-hosted adds a vector store and an
@@ -12,7 +12,7 @@ agreed shape:
   experience) -- never a secret, never a full address the account does not
   already link -- and each is stored once, deduplicated by embedding;
 - before a turn, the facts nearest the message are recalled into the
-  conversation history as a short "what Orbit knows about you" block, so
+  conversation history as a short "what Anvaya knows about you" block, so
   the general and research paths read them like earlier context;
 - never into trade gating: the risk charter stays the only code-enforced
   source of truth for what a trade may do;
@@ -88,7 +88,7 @@ class DurableFacts(dspy.Signature):
     nothing durable, which is most turns."""
 
     message: str = dspy.InputField(desc="What the user wrote")
-    answer: str = dspy.InputField(desc="What Orbit answered (may be truncated)")
+    answer: str = dspy.InputField(desc="What Anvaya answered (may be truncated)")
     facts_json: str = dspy.OutputField(desc="Strict JSON as specified")
 
 
@@ -254,7 +254,7 @@ async def recall(user_id: str, message: str, k: int = RECALL_K) -> list[dict]:
     return [{key: value for key, value in f.items() if key != "embedding"} for f in picked]
 
 
-_BLOCK_HEAD = "What Orbit knows about this user from earlier conversations"
+_BLOCK_HEAD = "What Anvaya knows about this user from earlier conversations"
 
 
 def conversation_only(history: str) -> str:
@@ -274,7 +274,7 @@ def block(facts: list[dict]) -> str:
     """The recalled facts as a short block for the conversation history."""
     if not facts:
         return ""
-    lines = ["What Orbit knows about this user from earlier conversations (use it for context; never for whether a trade is allowed):"]
+    lines = ["What Anvaya knows about this user from earlier conversations (use it for context; never for whether a trade is allowed):"]
     lines += [f"- {f['fact']}" for f in facts]
     return "\n".join(lines)
 

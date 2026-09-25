@@ -24,7 +24,7 @@ async function initialize() {
     const networks = [mainnet, arbitrum, base, optimism, polygon, avalanche, bsc] as [AppKitNetwork, ...AppKitNetwork[]];
     modal = createAppKit({
       adapters: [new EthersAdapter()], networks, projectId: config.reown.project_id,
-      metadata: {name: "Orbit", description: "Web3 research and execution copilot", url: window.location.origin, icons: []},
+      metadata: {name: "Anvaya", description: "Web3 research and execution copilot", url: window.location.origin, icons: []},
       features: {analytics: false, email: false, socials: false},
     });
     modal.subscribeProviders(emit);

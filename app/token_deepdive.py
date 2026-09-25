@@ -1,7 +1,7 @@
 """Multi-chain token deep-dive -- the "analysis" lens.
 
 A faithful reverse-engineering of Minara's `analysis` skill (its 10-dimension
-crypto-token-analysis framework + snapshot evidence bundle), redesigned for Orbit:
+crypto-token-analysis framework + snapshot evidence bundle), redesigned for Anvaya:
 
 - Evidence is composed DETERMINISTICALLY through our ProviderRouter (one router
   call per dimension, run concurrently), not via an LLM tool-search loop -- so a
@@ -394,7 +394,7 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
         if card:
             dims.append(DimensionEvidence("prediction_markets", "Prediction markets (Polymarket)", "available", card, "polymarket_odds", _now()))
 
-    # How the structure has moved since Orbit first recorded this token (the
+    # How the structure has moved since Anvaya first recorded this token (the
     # snapshot ledger). Only when there is history: a single row is the
     # present, which the dimensions above already show.
     await step("ledger")
@@ -404,7 +404,7 @@ async def build_token_evidence(address: str, chain: str, symbol: str | None = No
         except Exception:
             card = None
         if card:
-            dims.append(DimensionEvidence("history", "Holder history (Orbit ledger)", "available", card, "holder_snapshots", _now()))
+            dims.append(DimensionEvidence("history", "Holder history (Anvaya ledger)", "available", card, "holder_snapshots", _now()))
 
     # Token unlocks -- the most deterministic near-term headwind. Real, free, and
     # verified-by-address via DefiLlama emissions; unavailable when the token isn't

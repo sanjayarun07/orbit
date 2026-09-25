@@ -1,4 +1,4 @@
-/* Orbit service worker: the app shell installs and opens instantly; every
+/* Anvaya service worker: the app shell installs and opens instantly; every
    API call still goes to the network.
 
    - Navigations (/ui/) are network-first so a deploy is picked up on the next
@@ -10,15 +10,15 @@
      a session or a payment changes when the worker is installed.
    Bump VERSION when the shell changes shape; the old cache is dropped on activate. */
 const PREFIX = "orbit-shell-";
-const VERSION = PREFIX + "v15";
-const SHELL = ["/ui/", "/ui/index.html", "/ui/theme.css?v=1", "/ui/chat.css?v=9", "/ui/product.css?v=8", "/ui/mobile.css?v=7", "/ui/manifest.webmanifest",
-               "/ui/icons/icon-192.png", "/ui/icons/icon-512.png"];
+const VERSION = PREFIX + "v17";
+const SHELL = ["/ui/", "/ui/index.html", "/ui/theme.css?v=2", "/ui/chat.css?v=10", "/ui/product.css?v=10", "/ui/mobile.css?v=7", "/ui/manifest.webmanifest",
+               "/ui/icons/anvaya-192.png", "/ui/icons/anvaya-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(VERSION).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
 });
 
-// Only Orbit's own older shells are dropped: another app on the same origin
+// Only this app's own older shells are dropped: another app on the same origin
 // keeps its caches.
 self.addEventListener("activate", (event) => {
   event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k.startsWith(PREFIX) && k !== VERSION).map((k) => caches.delete(k)))).then(() => self.clients.claim()));

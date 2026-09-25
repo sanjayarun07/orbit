@@ -19,6 +19,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand-borde
 .admin-sidebar { width: 232px; position: fixed; inset: 0 auto 0 0; display: flex; flex-direction: column; padding: 20px 12px 12px; background: var(--sidebar); border-right: 1px solid var(--border); }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 10px; height: 36px; color: var(--text-strong); text-decoration: none; font-size: 17px; font-weight: 600; letter-spacing: -.5px; }
 .brand-mark { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; background: var(--text-strong); color: var(--bg); }
+.brand-mark{background:transparent;border-radius:0}
+.brand-mark img{width:28px;height:28px;object-fit:contain}
 .brand-mark svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .nav-label { margin: 34px 12px 10px; color: var(--subtle); font-size: 11px; }
 .admin-nav { display: grid; gap: 4px; }
@@ -45,7 +47,7 @@ main { max-width: 1440px; margin: auto; padding: 36px 32px 64px; display: grid; 
 .auth-field { display: grid; gap: 6px; width: 280px; max-width: 100%; }
 .auth-field label { color: var(--muted); font-size: 11px; }
 #connectionStatus { color: var(--muted); font-size: 12px; align-self: flex-end; padding: 8px 0; }
-.panel { min-width: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow: hidden; scroll-margin-top: 24px; animation: orbit-enter var(--motion-enter) var(--ease-out); }
+.panel { min-width: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow: hidden; scroll-margin-top: 24px; animation: anvaya-enter var(--motion-enter) var(--ease-out); }
 .panel-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--border); }
 .panel-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
 .lab-body { padding: 20px; display: grid; gap: 16px; }

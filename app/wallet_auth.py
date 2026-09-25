@@ -53,7 +53,7 @@ async def create_challenge(address: str, domain: str, uri: str, chain_id: int = 
     normalized = address.lower()
     message = (
         f"{domain} wants you to sign in with your Ethereum account:\n"
-        f"{address}\n\nSign in to Orbit. This request does not initiate a transaction or cost gas.\n\n"
+        f"{address}\n\nSign in to Anvaya. This request does not initiate a transaction or cost gas.\n\n"
         f"URI: {uri}\nVersion: 1\nChain ID: {chain_id}\nNonce: {nonce}\n"
         f"Issued At: {now.isoformat()}\nExpiration Time: {expires.isoformat()}"
     )
@@ -178,7 +178,7 @@ async def create_solana_challenge(address: str, domain: str, uri: str) -> dict:
     expires = now + timedelta(seconds=_SOLANA_CHALLENGE_TTL)
     message = (
         f"{domain} wants you to sign in with your Solana account:\n"
-        f"{address}\n\nSign in to Orbit. This request does not initiate a transaction or cost gas.\n\n"
+        f"{address}\n\nSign in to Anvaya. This request does not initiate a transaction or cost gas.\n\n"
         f"URI: {uri}\nVersion: 1\nNonce: {nonce}\n"
         f"Issued At: {now.isoformat()}\nExpiration Time: {expires.isoformat()}"
     )

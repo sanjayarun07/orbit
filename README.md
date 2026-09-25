@@ -1,10 +1,10 @@
-# Orbit — Web3 Copilot
+# Anvaya — Web3 Copilot
 
 **Detailed documentation:** start with the [product documentation hub](docs/product/README.md)
 for the user guide, current architecture, complete HTTP route inventory,
 deployment instructions, and verified implementation limits.
 
-Orbit is a multi-chain Web3 copilot: it researches tokens, wallets, protocols and
+Anvaya is a multi-chain Web3 copilot: it researches tokens, wallets, protocols and
 markets with live on-chain and market evidence, prepares Solana and cross-chain
 swaps as reviewable quotes, and enforces the user's own risk rules before any
 trade reaches a confirmation card. Responses can include provider evidence and
@@ -23,7 +23,7 @@ images and a one-command production deploy.
 a crypto market overview card, trending pools and new pairs per chain, top
 holders, token security dossiers (Jupiter Shield, GoPlus, Honeypot.is), DeFi
 TVL and yields, listing events, Web3 project/VC/people search, and live web
-research. Symbols resolve chain-agnostically and Orbit asks when a ticker is
+research. Symbols resolve chain-agnostically and Anvaya asks when a ticker is
 ambiguous across chains instead of guessing.
 
 **Wallet intelligence.** Balances, holdings, activity and health diagnostics for
@@ -415,9 +415,9 @@ CI builds and smoke-tests the image on every push and publishes it from `main`.
 Release gates, credential rotation and reconciliation guidance are in
 `docs/production-operations.md`.
 
-## Use Orbit from Telegram
+## Use Anvaya from Telegram
 
-Orbit runs as a Telegram bot with the same agent behind it: the bot is a
+Anvaya runs as a Telegram bot with the same agent behind it: the bot is a
 transport over the same chat turn the web UI and MCP use, so routing, the
 provider router, budgets, validation, credits and the risk charter are shared,
 not reimplemented.
@@ -432,7 +432,7 @@ PUBLIC_BASE_URL=https://your.domain
 The webhook is claimed at startup. Empty token = the bot is off and nothing
 else changes.
 
-A Telegram user's first message creates an ordinary Orbit account keyed on
+A Telegram user's first message creates an ordinary Anvaya account keyed on
 their Telegram id — no sign-in screen, but a real account with the same plan,
 credits and 30-day conversation retention.
 
@@ -455,14 +455,14 @@ gets their own conversation so nobody inherits another's wallet or charter.
 "alert me when SOL drops below 180" reaches you where you asked for it.
 
 **Nothing in Telegram can sign.** A swap renders as a review card and a plain
-link to the Orbit UI, where the user's own wallet confirms it. Links are never
+link to the Anvaya UI, where the user's own wallet confirms it. Links are never
 `web_app` buttons: Telegram's in-app webview has its own cookie jar, so the
 user would arrive signed out, and browser-extension wallets do not exist
 there at all.
 
-## Use Orbit from Claude or ChatGPT (MCP)
+## Use Anvaya from Claude or ChatGPT (MCP)
 
-Orbit is also an MCP server with the same surface as the web UI, so any agent
+Anvaya is also an MCP server with the same surface as the web UI, so any agent
 host can use it as a skill. The server is mounted at `/mcp` (Streamable HTTP)
 and can also run over stdio. Four families of tools:
 
@@ -479,7 +479,7 @@ and can also run over stdio. Four families of tools:
   (discovered dynamically), each running through the router's quotas, circuit breakers,
   cache, budget and outcome accounting with the request→tool matchers
   bypassed because the host chose the tool; plus `orbit_mcp_catalog` /
-  `orbit_mcp_call` for tools Orbit discovers from its own MCP servers
+  `orbit_mcp_call` for tools Anvaya discovers from its own MCP servers
   (execution-risk tools are refused).
 - **Resources and prompts** — `orbit://skill`, `orbit://capabilities`,
   `orbit://health`, `orbit://history/{session_id}`, `orbit://policy/{session_id}`;
@@ -495,7 +495,7 @@ claude mcp add --transport http orbit https://orbit.yourdomain.com/mcp \
   --header "Authorization: Bearer $MCP_API_KEY"
 ```
 
-**Claude Desktop** (`claude_desktop_config.json`, stdio, runs Orbit locally
+**Claude Desktop** (`claude_desktop_config.json`, stdio, runs Anvaya locally
 from this checkout with its `.env`):
 
 ```json
@@ -509,12 +509,12 @@ either leave `MCP_API_KEY` unset on a deployment reserved for that connector or
 put an OAuth-issuing proxy in front of `/mcp`.
 
 **How wallets work from an agent host.** The host has no wallet and must never
-hold keys, so Orbit separates knowing a wallet from signing with it:
+hold keys, so Anvaya separates knowing a wallet from signing with it:
 `orbit_connect_wallet` binds a *public* address to the session for read-only
 analysis; any turn that produces a quote returns a `handoff_url`
 (`PUBLIC_BASE_URL/ui/?session=<id>`) that opens the very same session in the
 web UI, where the user connects Phantom, Coinbase Wallet, MetaMask, Privy or
-WalletConnect, reviews the card and confirms — the wallet signs, Orbit does
+WalletConnect, reviews the card and confirms — the wallet signs, Anvaya does
 not. Quotes expire, so the UI offers a fresh one if the hand-off was slow. The
 conversation can never sign, submit, raise a cap or bypass the risk charter.
 
@@ -538,7 +538,7 @@ their keys exist; keys are never returned by any API or rendered in the UI.
 
 ## Accounts, credits and API keys
 
-Orbit is metered in **credits**. Every finished chat turn is charged by what
+Anvaya is metered in **credits**. Every finished chat turn is charged by what
 it did — a plain answer costs 1, a turn that ran data tools 2, a trade
 preparation 3, a token deep-dive or trading-desk turn 5 (all configurable via
 `CREDIT_COST_*`). The charge is reserved before the turn and settled after
@@ -619,7 +619,7 @@ loop over the `user_tasks` table with atomic occurrence claims, recoverable
 leases, and occurrence-keyed brief charges. There is no separate workflow
 engine; idempotent charging does not guarantee exactly-once notification delivery.
 
-**Payments** go through Stripe-hosted pages only — Orbit never sees a card or
+**Payments** go through Stripe-hosted pages only — Anvaya never sees a card or
 wallet. `POST /billing/checkout` opens Checkout for a plan (subscription mode)
 or a one-time **credit pack** (500 / 2,000 / 10,000 credits; payment mode),
 `POST /billing/portal` opens the Customer Portal (upgrade, cancel, invoices),

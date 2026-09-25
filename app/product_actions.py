@@ -62,7 +62,7 @@ WATCHLIST = ("**Watchlist.** There is no ranked token watchlist yet. What exists
 ALERTS = ("**Alerts.** Exit alerts: `watch my exit on BONK`, then `tell me when the discount on my full-position exit quote exceeds 5%`, "
           "`email me when my BONK exit drops 10%` or `exit alerts to inbox`. Price alerts, reminders and the morning brief live in "
           "Settings › Tasks; low-credit and receipt emails in Settings › Notifications.")
-GENERIC = ("This reads as a request to the app rather than a market look-up. What Orbit can do for you here: conversations are saved "
+GENERIC = ("This reads as a request to the app rather than a market look-up. What Anvaya can do for you here: conversations are saved "
            "automatically under Recents; exit monitors and alerts are set by chat (`watch my exit on BONK`); Settings › Tasks holds price "
            "alerts and reminders; Settings › Data & privacy exports your account. Tell me which of these you meant, or name a token, "
            "wallet or protocol to research.")
@@ -74,12 +74,12 @@ GENERIC = ("This reads as a request to the app rather than a market look-up. Wha
 _WALLET_VIEW = re.compile(r"\b(?:see|view|look\s+at|read|check|analy[sz]e|track)\b.{0,40}\b(?:a|any|someone'?s?|another|an?\s+public)\s+(?:wallet|address|portfolio)\b.{0,60}"
                           r"\b(?:without\s+(?:giving|granting|handing|connecting|signing|control|access|approv\w+)|read[- ]only|just\s+(?:the\s+)?address|public\s+address|no\s+(?:control|signing|access))\b"
                           r"|\b(?:read[- ]only|view[- ]only)\s+(?:wallet|address|portfolio|mode)\b", re.I)
-WALLET_VIEW = ("**Yes: a wallet can be read from its public address alone.** Paste the address (Solana or EVM) and Orbit reads what is public "
+WALLET_VIEW = ("**Yes: a wallet can be read from its public address alone.** Paste the address (Solana or EVM) and Anvaya reads what is public "
                "on-chain: holdings and their value, open positions, recent transfers, health checks and what a position would fetch if sold. "
                "Nothing is connected, nothing is signed, and no access or control is given; the address is read the way a block explorer "
                "reads it.\n\n"
                "**Connecting a wallet is different.** It is only needed to sign a transaction yourself, and only when execution is on; even "
-               "then Orbit never holds a key, and every transaction is shown for review in your own wallet before you sign.\n\n"
+               "then Anvaya never holds a key, and every transaction is shown for review in your own wallet before you sign.\n\n"
                "Try: paste an address followed by `what does it hold`.")
 
 
@@ -173,7 +173,7 @@ def deterioration_answer(request: str) -> str | None:
     pct = float(m.group("pct") or m.group("pct2"))
     usd = float((m.group("usd") or m.group("usd2")).replace(",", ""))
     threshold = usd * (1 - pct / 100)
-    return (f"A {pct:g}% deterioration alert watches the **quoted exit proceeds**, not the token price. Orbit re-takes a full-exit quote for your "
+    return (f"A {pct:g}% deterioration alert watches the **quoted exit proceeds**, not the token price. Anvaya re-takes a full-exit quote for your "
             f"position on a schedule and compares it with the baseline quote taken when the watch started. For a position whose full exit quoted "
             f"${usd:,.2f} at the baseline, the alert fires when a full exit quotes below **${threshold:,.2f}** ({pct:g}% less), whatever moved it: "
             f"price, liquidity or route. A price fall of {pct:g}% does not fire it by itself if the quote holds, and thinning liquidity can fire it "

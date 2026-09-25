@@ -68,7 +68,7 @@ async def create_telegram_link(identity: Identity = Depends(require_browser_sess
     """Mint the one-time `t.me/<bot>?start=<token>` link shown in Profile.
 
     Requires a browser session, not an API key: this hands out a credential
-    that binds a messaging account to this Orbit account, which is a sign-in
+    that binds a messaging account to this Anvaya account, which is a sign-in
     act and belongs to the person in front of the browser.
     """
     if not client.enabled():
@@ -105,7 +105,7 @@ async def claim_telegram_link(body: dict, identity: Identity = Depends(require_b
 
     Three proofs meet here and none is sufficient alone: the token proves the
     holder started this from a particular Telegram account, the browser
-    session proves which Orbit account they just signed into, and the
+    session proves which Anvaya account they just signed into, and the
     confirmation nonce proves this person previewed the connection in this
     session and chose to make it. A link a stranger sent therefore attaches
     nothing on its own (review of 330bc651).
@@ -130,7 +130,7 @@ async def claim_telegram_link(body: dict, identity: Identity = Depends(require_b
     # Tell them in the place they started, so the loop visibly closes.
     await client.send_message(
         payload["id"],
-        "✅ <b>Connected.</b> This chat is now on your Orbit account — same credits, "
+        "✅ <b>Connected.</b> This chat is now on your Anvaya account — same credits, "
         "plan, wallets and risk charter. Alerts and briefs will arrive here.\n\n"
         "Send /account any time to check where you stand.",
     )

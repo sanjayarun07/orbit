@@ -3,13 +3,13 @@
 TradingView's MCP server (https://www.tradingview.com/mcp/docs) answers live
 quotes, technicals, fundamentals, forecasts, news, filings and calendars for
 crypto and equities -- for a signed-in TradingView user, over OAuth 2.1.
-There is no service credential, so Orbit never holds one login for everyone:
-each Orbit user links their own TradingView account here, and the tools in
+There is no service credential, so Anvaya never holds one login for everyone:
+each Anvaya user links their own TradingView account here, and the tools in
 this module act with that user's token for the duration of their turn.
 
 Three layers:
 
-- OAuth client. Orbit registers itself once with TradingView's authorization
+- OAuth client. Anvaya registers itself once with TradingView's authorization
   server (dynamic client registration, RFC 7591), then runs the authorization
   code flow with PKCE and the MCP resource indicator per user, refreshing the
   access token when it is about to expire and revoking it on disconnect.
@@ -163,14 +163,14 @@ async def _save_client(record: dict) -> None:
 
 
 async def client() -> dict:
-    """Orbit's OAuth client at TradingView: registered on first use, and
+    """Anvaya's OAuth client at TradingView: registered on first use, and
     re-registered when the public base URL (so the redirect URI) changed."""
     record = await _load_client()
     if record and record.get("redirect_uri") == redirect_uri():
         return record
     meta = await metadata()
     registered = await _post_json(meta["registration_endpoint"], {
-        "client_name": "Orbit",
+        "client_name": "Anvaya",
         "client_uri": settings.public_base_url,
         "redirect_uris": [redirect_uri()],
         "grant_types": ["authorization_code", "refresh_token"],
@@ -179,7 +179,7 @@ async def client() -> dict:
         "scope": SCOPE,
     })
     if not registered.get("client_id"):
-        raise TradingViewError("TradingView did not return a client id for Orbit")
+        raise TradingViewError("TradingView did not return a client id for Anvaya")
     record = {"client_id": registered["client_id"], "client_secret": registered.get("client_secret"), "redirect_uri": redirect_uri()}
     await _save_client(record)
     return record

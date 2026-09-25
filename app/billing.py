@@ -2,7 +2,7 @@
 Customer Portal, and the webhook that turns Stripe events into ledger rows.
 
 Design rules
-- Orbit never sees card or wallet data: Checkout and the Portal are Stripe-
+- Anvaya never sees card or wallet data: Checkout and the Portal are Stripe-
   hosted pages; we only create sessions and read webhooks.
 - Every webhook is verified with the signing secret and recorded by event id
   before it is acted on, and every credit movement it causes is a ledger row
@@ -384,7 +384,7 @@ async def cancel_subscription_for(user: dict) -> dict:
     """Cancel this account's subscription before its billing link is destroyed.
 
     Deleting the account first would strip the Stripe customer and subscription
-    ids while the subscription kept renewing, leaving a charge nobody at Orbit
+    ids while the subscription kept renewing, leaving a charge nobody at Anvaya
     could map back to a person. Raises rather than swallowing a failure: it is
     recoverable (the operator retries, or cancels in Stripe), and deleting
     anyway is not.
@@ -454,7 +454,7 @@ async def list_invoices(user: dict) -> list[dict]:
 def _invoice_description(invoice: dict) -> str:
     lines = ((invoice.get("lines") or {}).get("data")) or []
     names = [str(line.get("description") or "") for line in lines if line.get("description")]
-    return "; ".join(names)[:160] or "Orbit"
+    return "; ".join(names)[:160] or "Anvaya"
 
 
 async def create_portal(user: dict, base_url: str) -> str:
@@ -532,7 +532,7 @@ async def mark_event_processed(event_id: str) -> None:
 
 
 async def _user_for(obj: dict) -> dict | None:
-    """Resolve the Orbit user an event object belongs to: metadata first, then
+    """Resolve the Anvaya user an event object belongs to: metadata first, then
     the Stripe customer id."""
     metadata = obj.get("metadata") or {}
     user_id = metadata.get("user_id") or obj.get("client_reference_id")

@@ -141,7 +141,7 @@ def test_the_lead_is_the_ledger_comparison_or_the_limitation():
     token = {"address": MINT, "chain": "solana", "symbol": "ANSEM"}
     window = (datetime(2026, 9, 21, tzinfo=timezone.utc), datetime(2026, 9, 22, 23, 59, 59, tzinfo=timezone.utc))
     lead = asyncio.run(snapshot_compare.lead(token, window))
-    assert lead.startswith("**No saved snapshot of ANSEM for September 21, 2026.** Orbit has not recorded ANSEM") and "current data, not a change over that period" in lead
+    assert lead.startswith("**No saved snapshot of ANSEM for September 21, 2026.** Anvaya has not recorded ANSEM") and "current data, not a change over that period" in lead
     key = f"token:solana:{MINT}"
     from app.signals import Subject
     key = Subject(kind="token", id=MINT, chain="solana", symbol="ANSEM").key

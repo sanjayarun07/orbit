@@ -552,7 +552,7 @@ def test_link_says_nothing_to_do_when_already_linked(monkeypatch, sent):
     web = asyncio.run(accounts.get_or_create_user("ravi@example.com"))[0]
     asyncio.run(tg_identity.link_to_account(tg_user, web["id"]))
     asyncio.run(bot.handle_update(_message("/link")))
-    assert "already on your Orbit account" in str([p for m, p in sent if m == "sendMessage"][-1]["text"])
+    assert "already on your Anvaya account" in str([p for m, p in sent if m == "sendMessage"][-1]["text"])
 
 
 def test_running_out_of_credits_also_mentions_linking(monkeypatch, sent):
@@ -650,7 +650,7 @@ def test_account_command_says_whether_the_chat_is_connected(monkeypatch, sent):
     _turns(monkeypatch)
     asyncio.run(bot.handle_update(_message("/account")))
     text = str([p for m, p in sent if m == "sendMessage"][-1]["text"])
-    assert "Your Orbit account" in text and "Credits" in text
+    assert "Your Anvaya account" in text and "Credits" in text
     assert "Not connected to a web account" in text and "/link" in text
 
 

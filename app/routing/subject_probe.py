@@ -407,7 +407,7 @@ def clarify_text(found: dict | None, request: str) -> str:
     reading = reading.split(" Sources:")[0].split(" sources:")[0].strip()
     lead = f"I'm not sure what **{subject}** refers to here." if subject else "I'm not sure what this refers to."
     hint = f" The web reads it as: {reading}" if reading else ""
-    return (f"{lead}{hint}\n\nOrbit covers crypto and markets: if you mean a token, protocol or company, name it "
+    return (f"{lead}{hint}\n\nAnvaya covers crypto and markets: if you mean a token, protocol or company, name it "
             "(a $ticker, the full project name, or a contract address) and say what you want to know -- price, security, "
             "unlocks, holders, news -- and I'll pull the data.")
 

@@ -83,7 +83,7 @@ def test_recall_returns_the_nearest_facts_then_the_most_recent_and_renders_a_blo
     assert all(f["fact"] != "Prefers Base for DeFi yield" for f in asyncio.run(user_memory.recall(USER, "zzz qqq unrelated", k=5))), \
         "nothing near the message means nothing recalled; recent facts no longer fill in (review 2026-09-20)"
     text = user_memory.with_block("user: hi\nassistant: hello", facts)
-    assert text.startswith("What Orbit knows about this user from earlier conversations") and "- Holds BONK and WIF on Solana" in text
+    assert text.startswith("What Anvaya knows about this user from earlier conversations") and "- Holds BONK and WIF on Solana" in text
     assert text.endswith("user: hi\nassistant: hello") and "never for whether a trade is allowed" in text
     assert user_memory.with_block("", []) == "" and user_memory.block([]) == ""
 
@@ -176,7 +176,7 @@ def test_a_turn_reads_the_block_and_schedules_extraction(monkeypatch):
     asyncio.run(user_memory.remember(user_id, [{"fact": "Holds BONK and WIF on Solana", "kind": "holding", "confidence": 0.9}], "s0"))
     response = client.post("/chat", json={"message": "how are my BONK and WIF on Solana doing"}, headers={"X-Orbit-Device": "memory-turn"})
     assert response.status_code == 200, response.text
-    assert seen["history"].startswith("What Orbit knows about this user") and "- Holds BONK and WIF on Solana" in seen["history"]
+    assert seen["history"].startswith("What Anvaya knows about this user") and "- Holds BONK and WIF on Solana" in seen["history"]
     assert extracted == [("how are my BONK and WIF on Solana doing", "research")]
 
 
@@ -247,10 +247,10 @@ def test_a_user_can_switch_memory_off_for_their_account(monkeypatch):
     assert client.put("/me/memory", json={"enabled": False}).json() == {"enabled": False}
     assert client.get("/me/memory").json()["enabled"] is False, "the switch shows in Settings"
     client.post("/chat", json={"message": "how are my BONK and WIF on Solana doing"}, headers={"X-Orbit-Device": "optout"})
-    assert not seen["history"].startswith("What Orbit knows about this user") and extracted == [], "off means no recall and no collection"
+    assert not seen["history"].startswith("What Anvaya knows about this user") and extracted == [], "off means no recall and no collection"
     client.put("/me/memory", json={"enabled": True})
     client.post("/chat", json={"message": "how are my BONK and WIF on Solana doing"}, headers={"X-Orbit-Device": "optout"})
-    assert seen["history"].startswith("What Orbit knows about this user") and len(extracted) == 1
+    assert seen["history"].startswith("What Anvaya knows about this user") and len(extracted) == 1
 
 
 def test_background_work_is_tracked_and_drained():

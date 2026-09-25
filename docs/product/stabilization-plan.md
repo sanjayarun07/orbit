@@ -1,4 +1,4 @@
-# Orbit stabilization backlog
+# Anvaya stabilization backlog
 
 Prepared 16 September 2026 against HEAD `0c07de7d` and the visible staged changes. This is an action plan, not a claim that its checks have passed. Changes are being made concurrently; record a fixed commit before running release acceptance.
 
