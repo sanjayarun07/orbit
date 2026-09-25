@@ -68,10 +68,14 @@ class Settings(BaseSettings):
     # docs/engineering/claude-code-evidence-loop.md): plan the evidence on the
     # research tier over the capability catalog, retrieve, review the gaps,
     # call again or stop, then check every named example against its source.
-    # Enabled for open research: source-page passages must substantiate claims.
-    # Off selects the fixed search-first sequence; a planning failure also
-    # falls back to that sequence for availability.
-    research_loop_enabled: bool = True
+    # Off by default: the loop's verified-passage gate withholds ordinary
+    # research answers (the SEC order question, a Home headline tap) and its
+    # turns ran 100-680 s live on 2026-09-25; the fixed search-first sequence
+    # answers those in under a minute. Turn it on per environment once the
+    # gate is scoped to comparison questions and re-measured at pass^5
+    # (docs/engineering/claude-code-evidence-loop.md). A planning failure
+    # falls back to the fixed sequence either way.
+    research_loop_enabled: bool = False
     # Bounded, typed multi-query discovery for complex open research. Keep
     # independently switchable so the existing loop is a measurable baseline.
     research_query_expansion_enabled: bool = False
@@ -284,6 +288,10 @@ class Settings(BaseSettings):
     tool_selector_cache_entries: int = 512
     tool_selector_cost_usd: float = 0.0
     perplexity_api_key: str | None = None
+    hedge_api_key: str | None = None
+    hedge_base_url: str = "https://hedge.openledger.dev/api"
+    hedge_wait_seconds: int = 90
+    hedge_timeout_seconds: float = 120.0
     perplexity_agent_url: str = "https://api.perplexity.ai/v1/agent"
     perplexity_model: str = "perplexity/sonar"
     perplexity_timeout_seconds: float = 45.0

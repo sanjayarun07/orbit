@@ -93,6 +93,32 @@ def test_why_moving_card_for_a_token_and_a_stock(monkeypatch):
     assert trajectory == {"tool_name_0": "perplexity_finance_search", "observation_0": "NVDA rose 5% after earnings beat. Source: reuters.com"}
 
 
+def test_why_moving_news_keeps_sources_but_hides_search_metadata(monkeypatch):
+    monkeypatch.setattr(why_moving.perplexity_tools, "perplexity_available", lambda: True)
+    monkeypatch.setattr(why_moving.perplexity_tools, "perplexity_search_with_sources", lambda *args, **kwargs: {
+        "text": "A report describes the move [1].", "sources": [
+            {"n": 1, "title": "Dated report", "url": "https://example.com/report", "date": "2026-09-25"}]})
+    news = asyncio.run(why_moving._news("why is Solana (SOL) moving today crypto news"))
+    assert "A report describes the move [1]" in news and "[Dated report](https://example.com/report)" in news
+    assert "Provider" not in news and "Perplexity" not in news and "**Query**" not in news
+
+
+def test_why_moving_separates_x_posts_from_market_and_news(monkeypatch):
+    async def identity(sym):
+        return {"name": "Solana", "symbol": "SOL", "price": 100, "change_24h": 2}
+    async def social(*args, **kwargs):
+        return {"posts": [{"author": "trader", "id": "123", "created_at": "2026-09-25T12:00:00+00:00",
+                           "text": "Rumour about SOL", "url": "https://x.com/trader/status/123"}]}
+    monkeypatch.setattr(why_moving, "_crypto_identity", identity)
+    monkeypatch.setattr(why_moving, "_crypto_market_detail", lambda _: asyncio.sleep(0, result=None))
+    monkeypatch.setattr(why_moving, "_news", lambda _: asyncio.sleep(0, result="A dated news report"))
+    monkeypatch.setattr(why_moving.x_news, "enabled", lambda: True)
+    monkeypatch.setattr(why_moving.x_news, "search", social)
+    answer, trajectory = asyncio.run(why_moving.compose("SOL", "up"))
+    assert "X posts (unverified)" in answer and "Rumour about SOL" in answer
+    assert trajectory["tool_name_2"] == "x_news_search"
+
+
 def test_research_node_intercepts_why_moving(monkeypatch):
     seen = []
 
@@ -146,6 +172,9 @@ def test_a_compound_ask_gets_the_overview_and_the_asset_card(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
     from app import composition
+    monkeypatch.setattr(research_mod.market_today, "compose", AsyncMock(return_value=(
+        "# Crypto market overview\noverview", {"tool_name_0": "crypto_market_overview", "observation_0": "overview"},
+    )))
     monkeypatch.setattr(composition.runtime, "_call_synthesis_lm", AsyncMock(return_value=SimpleNamespace(summary="Market flat; ZEC up on its own news.")))
     out = asyncio.run(research_mod.research_node({"request": "today market trend on crypto. why zec is pumping",
                                                   "capabilities": ["web_research"], "chains": [], "history": "", "session_context": {}}))
@@ -154,10 +183,15 @@ def test_a_compound_ask_gets_the_overview_and_the_asset_card(monkeypatch):
     assert out["answer"].startswith("**Taken together**") and "# Crypto market overview" in out["answer"] and "# Why is ZEC up?" in out["answer"]
     assert out["answer"].index("overview") < out["answer"].index("Why is ZEC")
     assert out["trajectory"]["tool_name_0"] == "crypto_market_overview" and out["trajectory"]["tool_name_1"] == "market_data"
-    # A plain overview ask is still just the overview.
+    # A plain overview ask now reads the snapshot and dated reporting together.
+    monkeypatch.setattr(research_mod.market_today, "compose", AsyncMock(return_value=(
+        "# Crypto market today\n\n## Dated reporting\nsource\n\n# Crypto market overview\noverview",
+        {"tool_name_0": "crypto_market_overview", "tool_name_1": "perplexity_web_search"},
+    )))
     only = asyncio.run(research_mod.research_node({"request": "how's the crypto market today",
                                                    "capabilities": ["web_research"], "chains": [], "history": "", "session_context": {}}))
-    assert only["answer"].startswith("# Crypto market overview") and "Why is" not in only["answer"]
+    assert only["answer"].startswith("# Crypto market today") and "Dated reporting" in only["answer"]
+    assert only["trajectory"]["tool_name_1"] == "perplexity_web_search"
 
 
 def test_a_coin_on_another_chain_is_identified_through_coingecko_not_treated_as_a_stock(monkeypatch):

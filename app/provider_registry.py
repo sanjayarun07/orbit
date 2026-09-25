@@ -14,7 +14,7 @@ def _utc() -> str:
 
 from app.additional_providers import ADDITIONAL_PROVIDERS
 from app.routing import lexicon
-from app import token_unlocks, url_reader
+from app import hedge_prediction, token_unlocks, url_reader
 from app.integrations import tradingview
 from app.tool_catalog import TOOL_SPECS
 from app.market_providers import MARKET_PROVIDERS
@@ -258,6 +258,13 @@ def _solana_token_security(request: str) -> str:
 @lru_cache(maxsize=1)
 def get_provider_router() -> ProviderRouter:
     router = ProviderRouter()
+    router.register(ProviderTool(
+        "hedge_token_prediction", "openledger_hedge", ("market_data", "derivatives"), hedge_prediction.predict_tool,
+        enabled=hedge_prediction.enabled, matches=hedge_prediction.matches,
+        keywords=("predict", "prediction", "forecast", "outlook", "futures"),
+        cache_ttl_seconds=30, quota_per_minute=10, priority=12,
+        description="Read-only Binance USDT futures scenario with signal, assumptions, confidence and factor scores",
+    ))
     for provider_type in (MobulaWalletProvider, MobulaSecurityProvider, MobulaMemeProvider, ExchangeListingsProvider, ListedAssetProvider, RedditCrowdProvider, PolymarketProvider, TequityProvider):
         provider_type().register(router)
     for provider_type in MARKET_PROVIDERS:

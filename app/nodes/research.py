@@ -15,10 +15,10 @@ from app.jupiter import WRAPPED_SOL_MINT
 from app.capability_router import extract_chains
 from app.market_brief import crypto_market_brief
 from app.market_overview import crypto_market_overview
-from app import composition, streaming
+from app import composition, market_today, streaming
 from app.integrations import tradingview
 from app.routing import lexicon, subject_probe
-from app import answer_gate, event_calendar, mobula_wallet, symbol_registry, token_pages, token_unlocks, why_moving
+from app import answer_gate, event_calendar, hedge_prediction, prediction_route, mobula_wallet, symbol_registry, token_pages, token_unlocks, why_moving
 from app.clarify import is_clarification
 from app.settings import settings
 from app.market_providers import TRENDING_TOKENS
@@ -873,9 +873,11 @@ _NAMED_TOKEN = re.compile(
 )
 _NAMED_STOP = {"THE", "A", "AN", "MY", "THIS", "THAT", "IT", "SOME", "TOP", "NEW", "MINT", "SPL", "USD", "TOKEN", "COIN", "AUDIT", "REPORT", "SOLANA", "SPL20", "ERC20",
                "ANY", "YOUR", "MEME", "NATIVE", "UTILITY", "GOVERNANCE", "WRAPPED", "BASE", "ETHEREUM", "BSC", "BEST", "WHICH", "WHAT", "EACH", "EVERY", "OTHER", "SAME",
-               "OWN", "REAL", "FAKE", "ONE", "FIRST", "LATEST", "CURRENT", "GIVE", "SHOW", "GET", "FULL", "MORE", "ABOUT", "FOR", "WITH", "AND", "OF", "TO", "IN", "ON"}
+               "OWN", "REAL", "FAKE", "ONE", "FIRST", "LATEST", "CURRENT", "GIVE", "SHOW", "GET", "FULL", "MORE", "ABOUT", "FOR", "WITH", "AND", "OF", "TO", "IN", "ON",
+               "UTC", "GMT", "EST", "EDT", "CST", "CDT", "MST", "MDT", "PST", "PDT"}
 _SYMBOL_LIKE = re.compile(r"(?<![A-Za-z0-9$])\$?[A-Z][A-Z0-9]{1,9}(?![A-Za-z0-9])")
 _SYMBOL_STOP = {"I", "A", "OK", "ETF", "ETFS", "USD", "USDT", "USDC", "AI", "DEFI", "NFT", "NFTS", "DEX", "CEX", "TVL", "APY", "APR", "ATH", "ATL", "OI", "RSI", "MACD", "EMA", "SMA", "US", "UK", "EU", "SEC", "FED", "CPI", "L1", "L2",
+                "UTC", "GMT", "EST", "EDT", "CST", "CDT", "MST", "MDT", "PST", "PDT",
                 "CLMM", "DLMM", "AMM", "PDA", "PDAS", "LP", "LPS", "DAO", "KYC", "ICO", "IDO", "FDV", "MCAP", "OTC", "PNL", "ROI", "RWA", "EVM", "SPL", "ERC", "KOL", "KOLS", "MEV", "TWAP", "VWAP", "LTV", "API", "MCP"}
 
 
@@ -1408,6 +1410,9 @@ def tape_for(request: str) -> tuple[str, str, str] | None:
     four sentence-split asks (price and 24h change; funding and open interest
     on Hyperliquid; liquidations; key levels), one per tool. Used by the
     research node and the desk alike."""
+    # Resolution notes may quote an earlier forecast or use the words
+    # "price target". Only the current user utterance can trigger tape mode.
+    request = composition.split_notes(request)[0] or request
     if not _FORECAST_ASK.search(request or ""):
         return None
     named = _named_tickers(request) or _bare_symbols(request)
@@ -1841,6 +1846,29 @@ def _remembered_holdings(state: AgentState) -> list[str]:
 async def research_node(state: AgentState) -> dict:
     sink: dict = {}
     request = _effective_request(state)
+    if hedge_prediction.enabled() and prediction_route.candidate(request):
+        decision = await prediction_route.plan(request)
+        if decision:
+            listed = await asyncio.to_thread(prediction_route.listed_usdt_perpetual, decision.symbol)
+            if listed:
+                try:
+                    tool_request = decision.canonical_request()
+                    result = await asyncio.to_thread(get_provider_router().invoke, "hedge_token_prediction", tool_request)
+                    if result:
+                        payload = json.loads(result.output)
+                        if not isinstance(payload, dict) or not isinstance(payload.get("answer"), str) or not isinstance(payload.get("card"), dict):
+                            raise ValueError("Prediction tool returned an invalid result")
+                        return {"answer": payload["answer"], "prediction_card": payload["card"],
+                                "trajectory": {"thought_0": "Typed futures-scenario contract; Binance instrument verified before the API call.",
+                                "tool_name_0": result.tool, "tool_args_0": {"request": tool_request}, "observation_0": payload["answer"]},
+                                "prediction_contract": decision.model_dump()}
+                except Exception:
+                    logger.warning("Prediction service unavailable; reading the market tape instead", exc_info=True)
+            elif listed is False and re.search(r"\b(?:binance|futures?|perps?|perpetuals?)\b", request, re.I):
+                answer = (f"I couldn't verify an active Binance USDT perpetual for **{decision.symbol}**, so I won't run a leveraged futures scenario for it. "
+                          "If you meant a different venue or token, name it; I can still examine current spot-market data. "
+                          "[Binance futures instrument directory](https://fapi.binance.com/fapi/v1/exchangeInfo)")
+                return {"answer": answer, "trajectory": None, "prediction_contract": decision.model_dump()}
     # "@frankdegods wallet analysis" (live, 2026-09-21): a handle is not an
     # address and Orbit cannot resolve one; say so instead of answering for
     # whichever wallet happens to be connected.
@@ -2140,17 +2168,8 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
             }
         return {"answer": answer, "trajectory": trajectory}
     if broad_market:
-        streaming.emit("status", text="Composing the market overview")
-        observation = await asyncio.to_thread(crypto_market_overview, request)
-        return {
-            "answer": observation,
-            "trajectory": {
-                "thought_0": "A broad market-status request maps to the composed market-overview card.",
-                "tool_name_0": "crypto_market_overview",
-                "tool_args_0": {"query": request},
-                "observation_0": observation,
-            },
-        }
+        answer, trajectory = await market_today.compose(request)
+        return {"answer": answer, "trajectory": trajectory}
     # "what about the unlock next month?" with no token named: the token in
     # the conversation's focus, or a question -- never the market calendar's
     # first unlock (live 2026-09-18: it answered with SUI nobody asked about).
@@ -2170,9 +2189,20 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         days = 14 if re.search(r"\b(?:next|two)\s+weeks?|fortnight|month\b", request, re.I) else 7
         streaming.emit("status", text="Fetching the events calendar")
         data = await asyncio.to_thread(event_calendar.get_calendar, days)
+        events = data.get("events") or []
+        sources = []
+        for event in events:
+            url = event.get("source_url")
+            if url and not any(row["url"] == url for row in sources):
+                sources.append({"name": event.get("source") or url, "url": url,
+                                "provenance": "reader" if event.get("verification") == "indexed" else "page",
+                                "verdict": "date_verified"})
         return {"answer": event_calendar.render(data), "trajectory": {
             "thought_0": "A market-events ask maps to the dated calendar card.", "tool_name_0": "market_event_calendar",
-            "tool_args_0": {"days": days}, "observation_0": json.dumps(data.get("events", [])[:20]),
+            "tool_args_0": {"days": days}, "observation_0": json.dumps(events[:20]),
+            "research_progress": {"status": "complete", "kind": "calendar",
+                                  "checked_pages": sum(row["provenance"] == "page" for row in sources),
+                                  "sources": sources},
         }}
     # A structured token due-diligence ask ("deep dive on X", "analyze X",
     # "thoughts on X") -> the multi-dimension analysis lens. Gated on a resolvable
@@ -2240,6 +2270,14 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
         # An exact-state ask in question form ("what percent do the top 10
         # hold?") is not planned here: it needs its ticker resolved first
         # (expanded run 2026-09-25: BONK holders ran without the mint, "nothing usable").
+        piped = await evidence_pipeline.answer(state, request, tuple(state.get("chains") or ()))
+        if piped is not None:
+            return piped
+    if (settings.contract_pipeline_enabled and contracts.plan_by_rules(_ask(request)).kind == "recent_events"
+            and not _TOKEN_ADDRESS.search(_ask(request))):
+        # News, expiries and other dated events start with dated reporting.
+        # Resolving the last all-caps word to a token first can turn a time
+        # zone or market term into a mint, or detour into a price-tape answer.
         piped = await evidence_pipeline.answer(state, request, tuple(state.get("chains") or ()))
         if piped is not None:
             return piped

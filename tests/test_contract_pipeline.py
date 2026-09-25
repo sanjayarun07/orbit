@@ -77,6 +77,8 @@ def test_the_rules_planner_reads_scope_window_and_filters():
     assert plan_by_rules("Hyperliquid gainers excluding stocks").filters == {"crypto_only": True}
     assert plan_by_rules("top pools on Solana by volume with at least $1,000,000 liquidity").filters.get("min_liquidity_usd") == 1_000_000
     assert plan_by_rules("What did the Lido community vote on recently?").kind == "recent_events"
+    assert plan_by_rules("When exactly is the Solana Alpenglow upgrade scheduled to launch?").kind == "open_research"
+    assert plan_by_rules("What is the activation date for the next network upgrade?").kind == "open_research"
     assert plan_by_rules("price of BONK").kind == "other"
 
 
@@ -93,6 +95,99 @@ def test_planner_null_optional_fields_keep_the_valid_contract():
     assert contract.scope == "any"
     assert contract.filters == {}
     assert contract.required_facts == ["original protocol documentation"]
+
+
+def test_freeform_planner_requirements_do_not_disable_schedule_research(monkeypatch):
+    """A semantic schedule metric must not become an unsupported catalog key."""
+    planned = QuestionContract(
+        kind="recent_events", subject=Subject(kind="chain", symbol="SOL", name="Solana", chain="Solana"),
+        scope="global", metric="scheduled_launch_time", window_hours=720,
+        freshness_seconds=3 * 86400, evidence_order="discovery_first",
+        required_facts=["officially scheduled activation date", "whether confirmed or a target"],
+        planner="model",
+    )
+    normalized = contracts.normalize_model_contract(planned)
+    assert normalized.metric == "events"
+    assert normalized.required_facts == ["event"]
+    assert normalized.answer_requirements == ["officially scheduled activation date", "whether confirmed or a target"]
+    assert normalized.subject.chain == "solana"
+    assert tool_catalog.eligible("perplexity_web_search", normalized)[0]
+
+    async def model_plan(*args, **kwargs):
+        return normalized
+    monkeypatch.setattr(evidence_pipeline.contracts, "plan", model_plan)
+    web = f"Anza announced on {STAMP[:10]} that Alpenglow entered public testnet. The mainnet date remains a target.\nSources: [Anza](https://www.anza.xyz/)"
+    out, router = _run({"perplexity_web_search": web}, "When exactly is the Solana Alpenglow upgrade scheduled to launch?")
+    assert router.calls and router.calls[0] == "perplexity_web_search"
+    assert out["contract"]["answer_requirements"] == normalized.answer_requirements
+    assert "No source I have covers this exactly" not in out["answer"]
+
+
+def test_modelled_schedule_uses_source_research_not_recent_event_window(monkeypatch):
+    from app.nodes import runtime
+    monkeypatch.setattr(runtime, "planner_available", lambda: True)
+    raw = ('{"kind":"recent_events","subject":{"kind":"chain","symbol":"SOL","chain":"Solana"},'
+           '"scope":"global","metric":"scheduled_launch_time","window_hours":720,'
+           '"required_facts":["official date","whether confirmed or target"]}')
+    async def model_call(*args, **kwargs):
+        return SimpleNamespace(contract=raw)
+    monkeypatch.setattr(runtime, "_call_planner_lm", model_call)
+    contract = asyncio.run(contracts.plan("When exactly is the Solana Alpenglow upgrade scheduled to launch?"))
+    assert contract.kind == "open_research"
+    assert contract.window_hours is None
+    assert contract.metric == "events" and contract.required_facts == ["source"]
+    assert "official date" in contract.answer_requirements
+    assert "whether confirmed or target" in contract.answer_requirements
+    assert tool_catalog.eligible("perplexity_web_search", contract)[0]
+
+
+def test_schedule_lookup_skips_candidate_loop_and_background_index(monkeypatch):
+    async def unexpected_loop(*args, **kwargs):
+        raise AssertionError("candidate matching is not a factual schedule lookup")
+    monkeypatch.setattr(evidence_pipeline.research_loop, "enabled", lambda: True)
+    monkeypatch.setattr(evidence_pipeline.research_loop, "run", unexpected_loop)
+    out, router = _run({"perplexity_web_search": LIDO_WEB, "knowledge_base_search": "unrelated"},
+                       "When exactly is the Solana Alpenglow upgrade scheduled to launch?")
+    assert out["pipeline"] == "contract"
+    assert router.calls == ["perplexity_web_search"]
+    assert evidence_pipeline.research_query("When exactly is the Solana Alpenglow upgrade scheduled to launch?") == "When exactly is the Solana Alpenglow upgrade scheduled to launch?"
+
+
+def test_narrow_concept_explanation_skips_candidate_loop_and_ticker_expansion(monkeypatch):
+    question = "What does max pain around $75k–$76k mean?"
+    assert plan_by_rules(question).research_depth == "direct"
+    assert plan_by_rules("What is max pain in BTC options?").research_depth == "direct"
+    assert plan_by_rules("Which projects use two transferable tokens?").research_depth == "deep"
+    assert evidence_pipeline.research_query(question) == question
+    async def unexpected_loop(*args, **kwargs):
+        raise AssertionError("a one-term explanation should not enter candidate research")
+    monkeypatch.setattr(evidence_pipeline.research_loop, "enabled", lambda: True)
+    monkeypatch.setattr(evidence_pipeline.research_loop, "run", unexpected_loop)
+    out, router = _run({"perplexity_web_search": LIDO_WEB}, question)
+    assert out["pipeline"] == "contract"
+    assert router.calls == ["perplexity_web_search"]
+
+
+def test_passed_today_expiry_is_not_presented_as_upcoming():
+    from datetime import datetime, timezone
+    question = "How much worth of BTC options are expiring today?"
+    cards = "September 25, 2026: $15.9B in BTC options were scheduled for 08:00 UTC."
+    now = datetime(2026, 9, 25, 14, 10, tzinfo=timezone.utc)
+    note = evidence_pipeline.scheduled_time_notice(question, cards, now=now)
+    assert "was earlier today" in note and "final settled amount" in note
+    assert "was earlier today" in evidence_pipeline.scheduled_time_notice(
+        question + " The deadline was 08:00 UTC.",
+        cards + " The settlement price uses the 07:30–08:00 UTC window.", now=now)
+    assert not evidence_pipeline.scheduled_time_notice(question, cards, now=datetime(2026, 9, 25, 7, tzinfo=timezone.utc))
+    assert not evidence_pipeline.scheduled_time_notice(question, "September 24, 2026: expired at 08:00 UTC", now=now)
+
+
+def test_expiry_question_does_not_become_a_price_forecast_from_context_notes():
+    from app.nodes.research import tape_for
+    question = "How much BTC options notional was scheduled to expire today at 08:00 UTC? Has that time already passed?"
+    assert plan_by_rules(question).kind == "recent_events"
+    assert not contracts.is_schedule_request(question)
+    assert tape_for(question + "\nResolved from conversation context: Earlier price target for BTC was $90k.") is None
 
 
 def test_conceptual_wallet_transfer_is_research_but_account_state_is_not():
@@ -202,6 +297,7 @@ def test_a_structured_search_keeps_claim_to_source_links():
     from app import perplexity_tools
     card = perplexity_tools.render_search_card("q", found)
     assert "[1] [research.lido.fi](https://research.lido.fi/t/x) · 2026-09-21" in card and "opened on 2026-09-21 [1]" in card
+    assert "Perplexity" not in card and "**Query**" not in card
 
 
 def test_undated_open_research_searches_historical_sources(monkeypatch):

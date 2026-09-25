@@ -45,6 +45,7 @@ def test_events_arrive_in_order_and_done_carries_the_full_response(monkeypatch):
         # What the research path does while it works: a status line, a card as
         # soon as a tool returns, the synthesis token by token.
         streaming.emit("status", text="Running jupiter shield")
+        streaming.research_progress("sources", "Reading token security evidence")
         await asyncio.to_thread(streaming.emit, "card", markdown="# Shield\n| ok |", tool="solana_token_security")   # from a worker thread
         for token in ("Safe ", "by the ", "dossier."):
             streaming.emit("delta", text=token)
@@ -57,8 +58,9 @@ def test_events_arrive_in_order_and_done_carries_the_full_response(monkeypatch):
         assert response.status_code == 200 and response.headers["content-type"].startswith("text/event-stream")
         events = _events(response)
     kinds = [e["event"] for e in events]
-    assert kinds == ["status", "card", "delta", "delta", "delta", "done"], kinds
-    assert events[1]["markdown"].startswith("# Shield") and events[1]["tool"] == "solana_token_security"
+    assert kinds == ["status", "research_progress", "card", "delta", "delta", "delta", "done"], kinds
+    assert events[1] == {"event": "research_progress", "phase": "sources", "detail": "Reading token security evidence"}
+    assert events[2]["markdown"].startswith("# Shield") and events[2]["tool"] == "solana_token_security"
     done = events[-1]["data"]
     assert done["answer"].startswith("**Taken together**") and done["intent"] == "research" and done["session_id"]
     assert done["credits"]["charged"] >= 1, "a streamed turn is charged like a JSON one"
@@ -149,7 +151,7 @@ def test_research_work_shows_progress_and_checked_sources():
     result = run_case("research_work_shows_progress_and_verified_source_status")
     assert result["started"]["visible"] is True
     assert "active" in result["started"]["plan"]
-    assert result["sourceCount"] == "1 source link found · page checks follow"
+    assert result["sourceCount"] == "1 source link found"
     assert "active" in result["review"]
     assert result["reviewStatus"] == "Checking sources…"
     assert result["final"] == "1 page checked"
@@ -159,10 +161,26 @@ def test_research_work_shows_progress_and_checked_sources():
                                    "status": "No answer evidence was gathered"}
 
 
+def test_typed_research_progress_shows_observed_work_and_counts():
+    from tests.test_ui_swap_flow import run_case
+    result = run_case("typed_research_progress_shows_actual_activity_and_counts")
+    assert result["visible"] and "active" in result["review"]
+    assert result["counts"] == "4 results received · 1 page checked"
+    assert "Searching for the original event" in result["activity"]
+    assert "Checked 1 original page" in result["activity"]
+    assert result["status"] == "Reviewing evidence…"
+
+
 def test_research_work_counts_pages_and_does_not_mark_abstention_complete():
     from tests.test_ui_swap_flow import run_case
     result = run_case("research_work_counts_every_fetched_page_and_marks_abstention")
     assert result == {"heading": "Research inconclusive", "status": "2 pages checked"}
+
+
+def test_calendar_work_status_reports_direct_and_indexed_date_checks():
+    from tests.test_ui_swap_flow import run_case
+    result = run_case("calendar_work_shows_checked_schedule_sources")
+    assert result == {"status": "1 page checked · 1 reader view", "count": "2 schedule sources checked"}
 
 
 def test_the_client_falls_back_to_the_json_route_without_a_stream():

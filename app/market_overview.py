@@ -85,6 +85,8 @@ def _core_quotes(simple: dict, global_data: dict) -> list[str]:
     if total is not None:
         any_row = True
         rows.append(f"| Total market cap | {_money(total)} | {_pct(mcap_change)} |")
+    if any_row:
+        rows.append(f"Data: [CoinGecko prices]({_SIMPLE_URL}) · [CoinGecko global]({_GLOBAL_URL})")
     return rows if any_row else []
 
 
@@ -103,7 +105,18 @@ def _market_pulse(global_data: dict, fng: dict, tvl_chains: list, dex_total: dic
         top = sorted((c for c in tvl_chains if isinstance(c, dict) and c.get("tvl")), key=lambda c: c["tvl"], reverse=True)[:4]
         if top:
             lines.append("- **Top chains by DeFi TVL**: " + ", ".join(f"{c.get('name')} {_money(c.get('tvl'))}" for c in top))
-    return (["## Market pulse", *lines] if lines else [])
+    if not lines:
+        return []
+    sources = []
+    if fng:
+        sources.append(f"[Alternative.me sentiment]({_FNG_URL})")
+    if global_data:
+        sources.append(f"[CoinGecko dominance]({_GLOBAL_URL})")
+    if dex_total:
+        sources.append(f"[DeFiLlama DEX volume]({_DEX_TOTAL_URL})")
+    if tvl_chains:
+        sources.append(f"[DeFiLlama TVL]({_CHAINS_TVL_URL})")
+    return ["## Market pulse", *lines, "Data: " + " · ".join(sources)]
 
 
 def _top_movers(markets: list) -> list[str]:
@@ -123,6 +136,7 @@ def _top_movers(markets: list) -> list[str]:
         "## Top movers (24h, among top-250 by market cap)",
         f"- **Gainers**: {fmt(gainers)}",
         f"- **Losers**: {fmt(losers)}",
+        f"Data: [CoinGecko top-250 markets]({_MARKETS_URL})",
     ]
 
 
@@ -134,7 +148,8 @@ def _trending(trending: dict) -> list[str]:
         symbol = item.get("symbol")
         if symbol:
             names.append(symbol.upper())
-    return ["## Trending (CoinGecko search)", "- " + ", ".join(names)] if names else []
+    return ["## Trending (CoinGecko search)", "- " + ", ".join(names),
+            f"Data: [CoinGecko trending search]({_TRENDING_URL})"] if names else []
 
 
 def _build(query: str) -> str:
@@ -153,7 +168,7 @@ def _build(query: str) -> str:
 
     lines = [
         "# Crypto Market Overview",
-        f"**As of** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"**Retrieved** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · Provider measurement times may differ.",
     ]
     for section in (
         _core_quotes(results.get("simple") or {}, results.get("global") or {}),
@@ -170,8 +185,7 @@ def _build(query: str) -> str:
         )
     lines.extend([
         "",
-        "Sources: CoinGecko · DeFiLlama · Alternative.me. Data is a market snapshot, not advice; "
-        "verify before trading.",
+        "Data is a market snapshot, not advice; verify before trading.",
     ])
     return compact_tool_result("\n".join(lines))
 

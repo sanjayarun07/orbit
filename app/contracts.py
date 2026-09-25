@@ -71,7 +71,9 @@ class QuestionContract(BaseModel):
     filters: dict = Field(default_factory=dict)     # stocks_only, crypto_only, single_asset, min_liquidity_usd, symbol
     freshness_seconds: int | None = None
     evidence_order: Literal["state_first", "discovery_first"] = "state_first"
+    research_depth: Literal["direct", "deep"] = "deep"  # one-source explanation versus multi-round investigation
     required_facts: list[str] = Field(default_factory=list)   # fact kinds the answer must rest on
+    answer_requirements: list[str] = Field(default_factory=list)  # semantic questions to resolve from those facts
     ambiguity: str | None = None               # the precise question to ask instead of answering
     confidence: float = 0.5
     planner: str = "rules"
@@ -117,7 +119,9 @@ class QuestionPlan(dspy.Signature):
     Read the user's exact words. Decide the kind: market_ranking (gainers,
     losers, most traded, trending tokens by a metric), holders (who holds a
     token, concentration), recent_events (news, votes, launches, what happened
-    recently), yields (APY, where to earn), or other. Name the subject (a
+    recently), yields (APY, where to earn), or other. Use open_research for
+    upcoming schedules, roadmap targets and launch status: a future target
+    is not a recently completed event. Name the subject (a
     token with its chain when stated, a protocol, a chain, a venue, or a topic).
     Use open_research for explanations, historical designs, comparisons, or
     investigations that need source-page evidence, even when the question
@@ -133,15 +137,23 @@ class QuestionPlan(dspy.Signature):
     liquidity), and the freshness in seconds an answer must have (3600 for
     live rankings, 86400*3 for "recently"). evidence_order is discovery_first
     for events, explanations and diligence, state_first for anything the user
-    would act on (prices, rankings, holders, yields, positions). Never invent
-    a subject; when the ask cannot be pinned (a bare symbol on several chains,
+    would act on (prices, rankings, holders, yields, positions).
+    For open_research, set research_depth to direct for a narrow definition or
+    explanation of one term or quoted figure, and deep for comparisons,
+    candidate finding, multi-condition investigations, and broad research.
+    Never invent a subject; when the ask cannot be pinned (a bare symbol on several chains,
     a venue we do not know), set `ambiguity` to the one question that settles
-    it and leave the rest empty. Output strict JSON for the contract fields.
+    it and leave the rest empty. `metric` is a tool capability, not a freeform
+    description: use events for recent_events and open_research, holders for
+    holders, apy for yields. `required_facts` contains only typed fact kinds
+    (event, source, holder_row, yield_row, ranking_row); put the specific
+    questions the answer must resolve in `answer_requirements`. Output strict
+    JSON for the contract fields.
     """
 
     request: str = dspy.InputField()
     conversation_context: str = dspy.InputField(desc="The resolved subject or focus from earlier turns, if any; empty otherwise")
-    contract: str = dspy.OutputField(desc='JSON: {"kind","subject":{"kind","id","symbol","name","chain"},"venue","scope","metric","unit","window_hours","direction","limit","filters","freshness_seconds","evidence_order","required_facts","ambiguity","confidence","notes"}')
+    contract: str = dspy.OutputField(desc='JSON: {"kind","subject":{"kind","id","symbol","name","chain"},"venue","scope","metric","unit","window_hours","direction","limit","filters","freshness_seconds","evidence_order","research_depth","required_facts","answer_requirements","ambiguity","confidence","notes"}')
 
 
 question_planner = dspy.Predict(QuestionPlan)
@@ -156,6 +168,30 @@ _RANKING = re.compile(r"\b(?:gainers?|losers?|movers?|winners?|laggards?|most\s+
 _HOLDERS = re.compile(r"\b(?:holders?|holding|concentration|who\s+(?:holds|owns)|top\s+wallets?|whales?|top\s+\d+\s+(?:hold|own|control)|(?:hold|own|control)s?\s+(?:the\s+)?(?:most|majority|largest\s+share))\b", re.I)
 _YIELDS = re.compile(r"\b(?:yields?|apy|apr|earn|lending\s+rates?|staking\s+rates?|farm\w*)\b", re.I)
 _EVENTS = re.compile(r"\b(?:news|headlines?|vote[ds]?|voting|proposal|governance|recently|latest|what\s+happened|announce\w*|launch(?:ed|es)?|hack(?:ed|s)?|exploit\w*|incidents?|this\s+week|today)\b", re.I)
+_SCHEDULE_ASK = re.compile(
+    r"\b(?:launch\s+date|activation\s+date|rollout\s+date|target\s+date|go\s+live|"
+    r"(?:schedul\w*|target\w*)\s+(?:\w+\s+){0,5}(?:launch|activat\w*|rollout|upgrade|mainnet))\b",
+    re.I,
+)
+
+
+def is_schedule_request(request: str) -> bool:
+    """A factual rollout-date/status lookup, rather than a candidate search."""
+    return bool(_SCHEDULE_ASK.search(request or ""))
+
+
+def is_direct_explanation(request: str) -> bool:
+    """A single concept/figure explanation, not a discovery or comparison ask."""
+    from app.composition import split_notes
+    body, _ = split_notes(request)
+    body = (body or "").strip()
+    if re.search(r"\b(?:compare|find|list|examples?|projects?|investigate|research|deep dive|which (?:other|ones))\b", body, re.I):
+        return False
+    if re.match(r"what\s+(?:is|are)\b", body, re.I) and not re.search(r"\b(?:driving|behind|moving|happening|latest|current|today|this week)\b", body, re.I):
+        return len(body.split()) <= 20
+    return bool(re.match(r"(?:what\s+(?:does|do|is|are)\b.+\bmean\b|explain\b|define\b)", body, re.I))
+
+
 _LOSERS = re.compile(r"\b(?:losers?|dumping|down\s+the\s+most|worst|laggards?)\b", re.I)
 # A token's pools or pairs, listed: "BONK pools with at least $1M liquidity",
 # "pairs for PEPE", "where does WIF trade" -- state read from the DEX
@@ -506,6 +542,14 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
     if _YIELDS.search(text) and not _EVENTS.search(text):
         return QuestionContract(kind="yields", subject=Subject(kind="token", symbol=symbol, chain=chain), scope="global", metric="apy", unit="pct",
                                 filters=filters, freshness_seconds=3600, evidence_order="state_first", required_facts=["yield_row"], confidence=0.6, planner="rules")
+    if is_schedule_request(text):
+        # A target or activation schedule needs current source discovery. It is
+        # not a past event inside a rolling news window; a future date must
+        # be checked as a target, a confirmed date, or an unspecified date.
+        return QuestionContract(kind="open_research", subject=Subject(kind="topic", symbol=symbol, chain=chain), scope="any", metric="events",
+                                freshness_seconds=3 * 86400, evidence_order="discovery_first", required_facts=["source"],
+                                answer_requirements=["whether an exact date and time are officially confirmed", "the latest target window, if any", "which rollout stage each date describes"],
+                                confidence=0.6, planner="rules")
     # "Does that automatically authorize Robinhood Chain today?" asks about the
     # previous answer; "today" is not a window and the ask is not a list of
     # events (expanded journeys, 2026-09-24: gated as "no event in the last
@@ -518,6 +562,7 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
         from app.routing.subject_probe import subject_of
         return QuestionContract(kind="open_research", subject=Subject(kind="topic", id=address.group(1) if address else None, symbol=symbol, name=None if symbol else subject_of(text), chain=chain), scope="any", metric="events",
                                 window_hours=None if referent else window, filters=filters, freshness_seconds=7 * 86400, evidence_order="discovery_first",
+                                research_depth="direct" if is_direct_explanation(text) else "deep",
                                 required_facts=["source"], confidence=0.5, planner="rules")
     return QuestionContract(kind="other", planner="rules", confidence=0.3)
 
@@ -558,6 +603,37 @@ def _parse_model_contract(raw: str) -> QuestionContract | None:
         return None
 
 
+_FACT_KIND_FOR_CONTRACT = {
+    "market_ranking": "ranking_row", "holders": "holder_row", "recent_events": "event",
+    "yields": "yield_row", "open_research": "source", "portfolio": "holding_row",
+    "transaction_intent": "quote_row",
+}
+_CAPABILITY_METRIC_FOR_CONTRACT = {
+    "holders": "holders", "recent_events": "events", "yields": "apy", "open_research": "events",
+}
+
+
+def normalize_model_contract(contract: QuestionContract) -> QuestionContract:
+    """Keep the model's semantic brief without treating prose as catalog keys.
+
+    Catalog metrics and fact kinds are a closed vocabulary. The planner may
+    describe a valid user need as e.g. ``scheduled_launch_time`` and
+    ``officially scheduled activation date``; using those strings as keys
+    silently disables every source and makes the fact gate impossible to pass.
+    """
+    canonical_metric = _CAPABILITY_METRIC_FOR_CONTRACT.get(contract.kind)
+    if canonical_metric:
+        contract.metric = canonical_metric
+    fact_kind = _FACT_KIND_FOR_CONTRACT.get(contract.kind)
+    if fact_kind:
+        semantic = [item for item in contract.required_facts if item != fact_kind]
+        contract.answer_requirements = list(dict.fromkeys(contract.answer_requirements + semantic))
+        contract.required_facts = [fact_kind]
+    if contract.subject.chain:
+        contract.subject.chain = contract.subject.chain.lower()
+    return contract
+
+
 async def plan(request: str, context: str = "") -> QuestionContract:
     """The contract for a request: the planner model's when available and
     valid, with the rules planner's venue, window and filter readings kept
@@ -594,5 +670,13 @@ async def plan(request: str, context: str = "") -> QuestionContract:
     if modelled.kind == "other" and rules.kind != "other" and modelled.confidence < 0.7:
         modelled.kind = rules.kind
         modelled.required_facts = modelled.required_facts or rules.required_facts
+    if rules.kind == "open_research" and is_schedule_request(body or "") and modelled.kind == "recent_events":
+        modelled.kind = "open_research"
+        modelled.window_hours = None
+    if rules.kind == "open_research" and is_schedule_request(body or ""):
+        modelled.answer_requirements = list(dict.fromkeys(modelled.answer_requirements + rules.answer_requirements))
+    if modelled.kind == "open_research" and rules.research_depth == "direct":
+        modelled.research_depth = "direct"
+    normalize_model_contract(modelled)
     modelled.planner = "model"
     return modelled

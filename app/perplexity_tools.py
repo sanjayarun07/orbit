@@ -7,7 +7,7 @@ intentionally absent from both this module and the capability catalog.
 from __future__ import annotations
 
 from collections import OrderedDict
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
 import re
@@ -234,11 +234,13 @@ def perplexity_search_with_sources(query: str, *, recency_days: int | None = Non
     if not charge_and_check(effective_cost):
         increment("perplexity_budget_skips")
         raise RuntimeError("Per-turn data budget reached")
-    today = datetime.now().astimezone().date().isoformat()
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     with httpx.Client(timeout=settings.perplexity_timeout_seconds) as client:
         response = client.post(settings.perplexity_agent_url, headers={"Authorization": f"Bearer {settings.perplexity_api_key}", "Content-Type": "application/json"},
                                json={"model": settings.perplexity_model, "input": query, "tools": [{"type": "web_search"}],
-                                     "instructions": f"Today is {today}. You must use the supplied web_search tool. {instructions}", "max_output_tokens": 2200})
+                                     "instructions": f"Current time is {now_utc}. You must use the supplied web_search tool. "
+                                                     "Treat an event earlier today as already occurred, and distinguish pre-event forecasts from post-event results. "
+                                                     f"{instructions}", "max_output_tokens": 2200})
         response.raise_for_status()
         payload = response.json()
     text = _extract_text(payload)
@@ -252,7 +254,9 @@ def perplexity_search_with_sources(query: str, *, recency_days: int | None = Non
 
 def render_search_card(query: str, found: dict, title: str = "From the web (dated, with sources)") -> str:
     text = found["text"].strip()
-    lines = [f"# {title}", f"**Provider**: Perplexity web search · **Query**: {query[:120]}", "", text, ""]
+    # The provider and search string belong in the tool trajectory, not in
+    # the answer a user reads. Keep numbered source links for verification.
+    lines = [f"# {title}", "", text, ""]
     if found.get("sources"):
         # Every source the text cites is listed, whatever its number, plus the
         # first ten: an answer cited [11] and [13] under a list cut at ten (UI

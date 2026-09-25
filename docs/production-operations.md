@@ -1751,6 +1751,16 @@ sync router tool reaches the app loop through `sentiment_analyst.set_loop`
 **Keys.** `TWITTERAPI_IO_KEY` and `TYPESAFE_API_KEY`. Without either the
 analyst is off and every surface behaves as before.
 
+**News discovery.** When `TWITTERAPI_IO_KEY` has read access, broad crypto
+market briefs, asset-move cards and recent-news research read one latest X
+search page in parallel with their usual sources. At most three recent posts
+from distinct authors appear under **X posts (unverified)** with their post
+time and direct link. This lane records what accounts said; it never supplies
+measured prices or proves the post's claim or causal market impact. A 401,
+402 or 403 response pauses X discovery for 30 minutes in that process; web
+research and market-data answers continue. Monitor the `twitterapi_requests`
+counter and provider payment status before treating X coverage as live.
+
 **Verified live (2026-09-21, after the key went in).** BONK: 19 tweets over
 5.4 hours from two pages, 16 distinct authors, Jev judged in under a second
 (about 3,200 input tokens): bullish 100%, mood euphoric, no catalyst,

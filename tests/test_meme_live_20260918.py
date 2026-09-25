@@ -182,6 +182,7 @@ def test_a_bare_symbol_before_a_data_word_is_the_token():
     assert research._bare_symbols("ANSEM top holders on solana") == ["ANSEM"]
     assert research._bare_symbols("what are the largest smart money wallets holding ANSEM") == ["ANSEM"]
     assert research._bare_symbols("USDC price") == [], "market jargon is not a subject"
+    assert research._bare_symbols("BTC options at 08:00 UTC") == ["BTC"], "a time zone is not the last-mentioned token"
     assert research._DATA_ASK.search("ANSEM top holders on solana") and not research._DATA_ASK.search("thoughts on ANSEM")
 
 

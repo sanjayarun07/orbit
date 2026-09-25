@@ -266,7 +266,7 @@ def _from_perplexity(symbol: str) -> str | None:
     posts = data.get("posts") or []
     lines = [
         f"# X / KOL sentiment — {symbol}",
-        f"**Provider**: Perplexity web search over X posts (last 24–48h) · **As of**: {_utc()}",
+        f"**X posts**: last 24–48h · **As of**: {_utc()}",
         "",
         f"**Read**: **{data.get('sentiment', 'neutral')}** (score {float(data.get('score') or 0):+.2f}) — {data.get('summary') or 'no summary'}",
     ]
@@ -401,7 +401,7 @@ def _trending_from_perplexity(memes: bool = False) -> str | None:
         return None
     lines = [
         "# Trending on crypto Twitter",
-        f"**Provider**: Perplexity web search over X posts (last 24h) · **As of**: {_utc()}",
+        f"**X posts**: last 24h · **As of**: {_utc()}",
         "",
         "| # | Token | Chain | Why it is trending | Accounts | Stance |",
         "|---:|---|---|---|---|---|",

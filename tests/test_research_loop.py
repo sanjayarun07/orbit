@@ -20,6 +20,39 @@ WEB2 = ("# From the web (dated, with sources)\n**Query**: q2\n\nSynthetix locks 
         "Sources:\n[1] [Synthetix docs](https://docs.synthetix.io) · 2026-09-09\n[2] [Aave docs](https://docs.aave.com) · 2026-09-01")
 
 
+def test_attributed_question_uses_bounded_author_source_path(monkeypatch):
+    from app import perplexity_tools
+    question = "What is the nature of GROK's tokenized SpaceX exposure mentioned by @stitchdegen?"
+    source_url = "https://site.twstalker.com/stitchdegen"
+    monkeypatch.setattr(perplexity_tools, "perplexity_search_with_sources", lambda query: {
+        "text": "A search lead", "sources": [{"title": "Stitch @stitchdegen", "url": source_url}]})
+    monkeypatch.setattr(research_loop, "read_page", lambda url: {"url": url, "provenance": "page",
+        "text": "Stitch @stitchdegen says GROK is paired with SPCXx, a tokenized SpaceX asset. "
+                "The paired asset creates a narrative, while a transfer tax may fund SPCXx rewards."})
+    async def synthesize(request, cards, trajectory, research=False):
+        assert "paired with SPCXx" in cards and research
+        return "**Taken together**\n\nStitch describes a trading pair and possible rewards, not direct stock ownership.\n\n---\n\n" + cards
+    monkeypatch.setattr(research_loop.composition, "synthesize", synthesize)
+    async def wrong(*args, **kwargs):
+        raise AssertionError("Attributed claim should not enter the multi-round candidate loop")
+    monkeypatch.setattr(research_loop, "_run", wrong)
+    result = asyncio.run(research_loop.run({}, question, plan_by_rules(question), None, ()))
+    assert result["pipeline"] == "attributed_research"
+    assert "not direct stock ownership" in result["answer"]
+    assert result["trajectory"]["research_progress"]["sources"][0]["url"] == source_url
+
+
+def test_attributed_question_abstains_if_author_page_does_not_support_topic(monkeypatch):
+    from app import perplexity_tools
+    question = "What is the nature of GROK's tokenized SpaceX exposure mentioned by @stitchdegen?"
+    monkeypatch.setattr(perplexity_tools, "perplexity_search_with_sources", lambda query: {
+        "text": "Unverified lead", "sources": [{"title": "Stitch @stitchdegen", "url": "https://example.org/stitchdegen"}]})
+    monkeypatch.setattr(research_loop, "read_page", lambda url: {"url": url, "provenance": "page", "text": "Stitch writes about SOL."})
+    result = asyncio.run(research_loop.run({}, question, plan_by_rules(question), None, ()))
+    assert "could not verify" in result["answer"]
+    assert "ticker" in result["answer"]
+
+
 def test_no_candidate_names_still_inspects_only_cited_pages():
     card = ("# Web\nClaim from the first page [1].\n\nSources:\n"
             "[1] [Primary report](https://example.com/report) · 2026-09-25\n"

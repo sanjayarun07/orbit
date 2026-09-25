@@ -173,6 +173,20 @@ const SOLANA = { id: 792703809, name: "Solana", nativeSymbol: "SOL", vmType: "sv
 const BASE = { id: 8453, name: "Base", nativeSymbol: "ETH", vmType: "evm" };
 
 const CASES = {
+  async prediction_card_uses_structured_data() {
+    const { sandbox } = load();
+    const card = sandbox.renderPredictionCard({
+      kind: "futures_scenario_v1", symbol: "SOLUSDT", exchange: "binance",
+      generated_at: "2026-09-25T14:00:00Z",
+      input: { side: "long", notional_usd: 1000, leverage: 5, horizons: ["24h"], defaults: ["leverage"] },
+      verdict: { signal: "buy", confidence: 62, summary: "<script>alert(1)</script>",
+        factors: [{ label: "Momentum", impact: "bullish", detail: "Higher highs" }], risks: ["Liquidation risk"] },
+      forecast: { horizons: [{ label: "24h", p10: 80, p50: 100, p90: 120, upProbPct: 61, expectedMovePct: 3.2 }] },
+      plan: { expected_pnl_usd: 30, expected_roi_pct: 3 },
+      market_snapshot: { price: 100 },
+    });
+    return { className: card.className, html: card.innerHTML, missing: sandbox.renderPredictionCard(null) };
+  },
   async history_preserves_message_times() {
     const { sandbox, setScriptVar } = load();
     setScriptVar("sessionId", "timestamp-test");
@@ -759,6 +773,23 @@ const CASES = {
       uncovered: { heading: uncovered?.querySelector(".research-work-heading strong").textContent,
         status: uncovered?.querySelector(".research-work-source-status").textContent } };
   },
+  async typed_research_progress_shows_actual_activity_and_counts() {
+    const { dom, sandbox } = load();
+    const view = sandbox.streamView(dom.query("#typing"));
+    view.researchProgress({ phase: "plan", detail: "Identifying the question and evidence needed" });
+    view.researchProgress({ phase: "sources", detail: "Searching for the original event", found: 2 });
+    view.status("Running perplexity web search");
+    view.researchProgress({ phase: "review", detail: "Checked 1 original page against the question", found: 2, checked: 1 });
+    view.researchProgress({ phase: "sources", detail: "Collected another search result", found: 4 });
+    const base = "#typing >> .message-body >> .work-progress";
+    return {
+      visible: !dom.query(base).hidden,
+      review: dom.query(base + " >> .work-stage-review").className,
+      counts: dom.query(base + " >> .work-progress-sources").textContent,
+      activity: dom.query(base + " >> .work-progress-activity").innerHTML,
+      status: dom.query("#typing >> .message-body >> .stream-status").textContent,
+    };
+  },
   async research_work_counts_every_fetched_page_and_marks_abstention() {
     const { sandbox } = load();
     const panel = sandbox.renderResearchWork({ research_progress: {
@@ -767,6 +798,18 @@ const CASES = {
     } }, "**I withheld the written summary: transferability was not established.", "research");
     return { heading: panel.querySelector(".research-work-heading strong").textContent,
       status: panel.querySelector(".research-work-source-status").textContent };
+  },
+  async calendar_work_shows_checked_schedule_sources() {
+    const { sandbox } = load();
+    const panel = sandbox.renderResearchWork({ research_progress: {
+      kind: "calendar", checked_pages: 1,
+      sources: [
+        { name: "BEA", url: "https://www.bea.gov/news/schedule", verdict: "date_verified", provenance: "page" },
+        { name: "BLS", url: "https://www.bls.gov/cps/publications/release-calendar.htm", verdict: "date_verified", provenance: "reader" },
+      ],
+    } }, "# Market events", "research");
+    return { status: panel.querySelector(".research-work-source-status").textContent,
+      count: panel.querySelector(".research-work-count").textContent };
   },
   // A stream that breaks mid-turn is reported as interrupted, not as an error,
   // and recoverTurn finds the finished answer in the conversation's history.

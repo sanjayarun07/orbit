@@ -47,6 +47,10 @@ _GENERIC = {"crypto", "token", "tokens", "market", "markets", "price", "prices",
             "buy", "sell", "risk", "risks", "chain", "chains", "the", "and", "for", "with", "about", "what", "how", "does",
             "next", "current", "latest", "now", "today", "coin", "coins", "project", "protocol", "supply", "unlock", "unlocks",
             "vesting", "schedule", "you", "your", "this", "that", "are", "is", "of", "in", "on", "to", "a", "an", "it", "its"}
+_MONTHS = {name: i for i, name in enumerate(("january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"), 1)}
+_MONTH = "|".join([name + "|" + name[:3] for name in _MONTHS])
+_MONTH_DAY = re.compile(rf"\b({_MONTH})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?\b|\b(\d{{1,2}})\s+({_MONTH})\.?\b", re.I)
+_ISO_DAY = re.compile(r"\b\d{4}-(\d{2})-(\d{2})\b")
 
 
 class RelatedQuestions(dspy.Signature):
@@ -59,7 +63,10 @@ class RelatedQuestions(dspy.Signature):
     research (a price, a holder count, an unlock date, a supply figure, an
     audit, a news event): never predictions ("what impact could"), never
     advice ("should I"), never questions to the user ("do you want"). Do not
-    repeat the user's question. Output nothing else."""
+    combine a reporting period with a different event's day: if the answer
+    says the September jobs report is released October 2, copy October 2
+    when asking about the release date. Do not infer a year, date or time.
+    Do not repeat the user's question. Output nothing else."""
 
     question: str = dspy.InputField(desc="What the user asked")
     answer: str = dspy.InputField(desc="The answer they just read (may be truncated)")
@@ -87,6 +94,18 @@ def _anchors(followup: str) -> list[str]:
     return out
 
 
+def _explicit_dates(text: str) -> set[tuple[int, int]]:
+    """Month and day pairs; a reporting month alone is not a release date."""
+    dates = {(int(m.group(1)), int(m.group(2))) for m in _ISO_DAY.finditer(text or "")}
+    for match in _MONTH_DAY.finditer(text or ""):
+        month = (match.group(1) or match.group(4)).lower()[:3]
+        day = int(match.group(2) or match.group(3))
+        month_number = next((num for name, num in _MONTHS.items() if name[:3] == month), None)
+        if month_number and 1 <= day <= 31:
+            dates.add((month_number, day))
+    return dates
+
+
 def grounded(followup: str, question: str, answer: str) -> bool:
     """A follow-up is grounded when at least one of its anchors appears in the
     answer or the question, and it does not lean on a pronoun for its subject."""
@@ -97,13 +116,22 @@ def grounded(followup: str, question: str, answer: str) -> bool:
         return False
     if _NO_HISTORY.search(text) and _POSITION_WORDS.search(text):
         return False
+    dates = _explicit_dates(text)
+    if dates and not dates <= _explicit_dates(answer):
+        return False
     if _PRONOUN_START.search(text) and not any(a in _terms(answer) | _terms(question) for a in _anchors(text)):
         return False
     haystack = _terms(answer) | _terms(question) | {n.lower() for n in _NUMBER.findall(answer)}
     anchors = _anchors(text)
-    if not anchors:
-        return False
-    return any(a in haystack for a in anchors)
+    if any(a in haystack for a in anchors):
+        return True
+    if dates:
+        # The answer may print "02 Oct" while the model writes "October 2".
+        # A matching date plus a substantive shared event word is grounded.
+        shared = set(re.findall(r"[A-Za-z]{5,}", text.lower())) & set(re.findall(r"[A-Za-z]{5,}", answer.lower()))
+        shared -= _GENERIC | set(_MONTHS) | {name[:3] for name in _MONTHS} | {"release", "report", "expectations", "expected"}
+        return any(len(word) >= 5 for word in shared)
+    return False
 
 
 def _normalise(line: str) -> str:
@@ -141,7 +169,17 @@ def eligible(intent: str | None, answer: str | None, trade_plan) -> bool:
     text = (answer or "").strip()
     if len(text) < MIN_ANSWER_CHARS or is_clarification(text):
         return False
+    if text.startswith("# Market events ·"):
+        # The calendar is future-facing. The free-form writer repeatedly
+        # asks for published results before the scheduled releases occur;
+        # offer no chips until they can be generated from event state.
+        return False
     lowered = text.lower()
+    # This market brief deliberately does not establish why prices moved.
+    # Model-written questions repeatedly reintroduced unsupported causal
+    # claims through new wording, so omit the section for this answer shape.
+    if "market snapshot alone does not establish that they caused the price moves" in lowered:
+        return False
     return not any(marker in lowered for marker in ("could not", "couldn't reach", "try again", "is not configured", "i don't want to guess"))
 
 

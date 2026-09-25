@@ -325,6 +325,7 @@ class ChartCard(BaseModel):
 
 class AgentResponse(BaseModel):
     answer: str
+    prediction_card: dict | None = None
     # What this turn cost the caller's credit balance (absent for service callers).
     credits: dict | None = None
     trade_plan: TradePlan | None = None

@@ -50,6 +50,22 @@ def test_the_gate_dedupes_normalises_and_needs_at_least_two_survivors():
     assert followups.filter_followups("What is OpenLedger's total supply?\nWhat's trending?\n", QUESTION, ANSWER) == [], "one relevant line is not a section"
 
 
+def test_market_snapshot_without_causal_evidence_has_no_related_questions():
+    answer = ("SOL rose 5.56% today. These are reported developments; the market snapshot alone does not "
+              "establish that they caused the price moves. " * 3)
+    assert not followups.eligible("research", answer, None)
+
+
+def test_calendar_followup_cannot_move_release_day_into_reporting_month():
+    answer = ("# Market events · 2026-09-25 → 2026-10-02\n"
+              "## Fri 02 Oct\n- **September Employment Situation** · 08:30 ET · HIGH\n"
+              "Consensus calls for 162,000 nonfarm-payroll additions and 4.1% unemployment. ") * 2
+    question = "What events could move the market this week?"
+    assert not followups.grounded("What are the expectations for the September 2 nonfarm payroll release?", question, answer)
+    assert followups.grounded("What are the expectations for the October 2 nonfarm payroll release?", question, answer)
+    assert not followups.eligible("research", answer, None), "future calendar events should not offer model-written result questions"
+
+
 def test_which_turns_get_related_questions():
     assert followups.eligible("research", ANSWER, None)
     assert followups.eligible("general", ANSWER, None)

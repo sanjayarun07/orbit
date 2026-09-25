@@ -20,6 +20,7 @@ class AgentState(TypedDict, total=False):
     routing_decision: dict
     clarification: str
     answer: str
+    prediction_card: dict | None
     trajectory: dict | None
     proposal: SwapProposal | None
     trade_plan: TradePlan | None

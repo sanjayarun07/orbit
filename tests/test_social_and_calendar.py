@@ -97,20 +97,23 @@ def test_calendar_parses_dates_inside_the_window_only(monkeypatch):
     today = datetime.now(timezone.utc).date()
     monkeypatch.setattr(event_calendar, "perplexity_available", lambda: True)
     payload = {"events": [
-        {"date": (today + timedelta(days=1)).isoformat(), "time": "14:00 ET", "category": "macro", "title": "FOMC rate decision", "detail": "Markets price a 25 bp hike.", "impact": "high", "source": "federalreserve.gov"},
-        {"date": (today + timedelta(days=2)).isoformat(), "category": "earnings", "title": "NVDA earnings", "detail": "Consensus $46B.", "impact": "high", "source": "nvidia.com"},
-        {"date": (today + timedelta(days=3)).isoformat(), "category": "unlock", "title": "ARB unlock 92M tokens", "impact": "medium", "source": "defillama.com"},
+        {"date": (today + timedelta(days=1)).isoformat(), "time": "14:00 ET", "category": "macro", "title": "FOMC rate decision", "detail": "Markets price a 25 bp hike.", "impact": "high", "source_url": "https://www.federalreserve.gov/calendar.htm"},
+        {"date": (today + timedelta(days=2)).isoformat(), "category": "earnings", "title": "NVDA earnings", "detail": "Consensus $46B.", "impact": "high", "source_url": "https://nvidia.com/earnings"},
+        {"date": (today + timedelta(days=3)).isoformat(), "category": "unlock", "title": "ARB unlock 92M tokens", "impact": "medium", "source_url": "https://defillama.com/unlocks"},
         {"date": (today + timedelta(days=40)).isoformat(), "category": "crypto", "title": "Too far out", "impact": "low"},
         {"date": "not a date", "category": "crypto", "title": "No date", "impact": "low"},
-        {"date": today.isoformat(), "category": "weird", "title": "Today thing", "impact": "silly"},
+        {"date": today.isoformat(), "time": "23:59 ET", "category": "weird", "title": "Today thing", "impact": "silly", "source_url": "https://example.com/today"},
     ]}
     monkeypatch.setattr(event_calendar, "perplexity_invoke", lambda *a: json.dumps(payload))
+    page_by_url = {row["source_url"]: f"{row['date']} {row['title']} is scheduled." for row in payload["events"] if row.get("source_url")}
+    monkeypatch.setattr(event_calendar.url_reader, "fetch", lambda url: ("Schedule", page_by_url[url]) if url in page_by_url else None)
+    monkeypatch.setattr(event_calendar, "perplexity_fetch_url", lambda url: "")
     data = event_calendar.get_calendar(7)
     titles = [e["title"] for e in data["events"]]
     assert titles == ["Today thing", "FOMC rate decision", "NVDA earnings", "ARB unlock 92M tokens"]
     assert data["events"][0]["category"] == "crypto" and data["events"][0]["impact"] == "medium"  # sanitised
     card = event_calendar.render(data)
-    assert "🏛 **FOMC rate decision** · 14:00 ET · **HIGH** · federalreserve.gov" in card and "🔓 **ARB unlock 92M tokens**" in card
+    assert "🏛 **FOMC rate decision** · 14:00 ET · **HIGH** · [www.federalreserve.gov](https://www.federalreserve.gov/calendar.htm)" in card and "🔓 **ARB unlock 92M tokens**" in card
     assert event_calendar.today_events(data)[0]["title"] == "Today thing"
     # Cached: a second read within the window doesn't hit the source again.
     monkeypatch.setattr(event_calendar, "perplexity_invoke", lambda *a: (_ for _ in ()).throw(AssertionError("no second call")))
@@ -123,9 +126,13 @@ def test_calendar_reaches_research_endpoint_chips_and_brief(monkeypatch):
     today = datetime.now(timezone.utc).date()
     monkeypatch.setattr(event_calendar, "perplexity_available", lambda: True)
     monkeypatch.setattr(event_calendar, "perplexity_invoke", lambda *a: json.dumps({"events": [
-        {"date": (today + timedelta(days=1)).isoformat(), "category": "macro", "title": "CPI print", "impact": "high", "source": "bls.gov"}]}))
+        {"date": (today + timedelta(days=1)).isoformat(), "category": "macro", "title": "CPI print", "impact": "high", "source_url": "https://www.bls.gov/schedule/news_release/cpi.htm"}]}))
+    monkeypatch.setattr(event_calendar.url_reader, "fetch", lambda url: ("Schedule", f"{(today + timedelta(days=1)).isoformat()} CPI print is scheduled."))
+    monkeypatch.setattr(event_calendar, "perplexity_fetch_url", lambda url: "")
     out = asyncio.run(research_mod.research_node({"request": "what events could move the market this week?", "capabilities": ["web_research"], "chains": [], "history": "", "session_context": {}}))
     assert out["answer"].startswith("# Market events") and "CPI print" in out["answer"] and out["trajectory"]["tool_name_0"] == "market_event_calendar"
+    assert out["trajectory"]["research_progress"]["checked_pages"] == 1
+    assert out["trajectory"]["research_progress"]["sources"][0]["verdict"] == "date_verified"
     assert event_calendar.TRIGGER.search("when is the next FOMC meeting?")
     assert not event_calendar.TRIGGER.search("what is a liquidity pool?")
     client = TestClient(main.app)
@@ -134,6 +141,63 @@ def test_calendar_reaches_research_endpoint_chips_and_brief(monkeypatch):
     monkeypatch.setattr(home_highlights.market_overview, "_get_json", lambda url: (_ for _ in ()).throw(RuntimeError("offline")))
     week = next(c for c in client.get("/home/suggestions").json()["categories"] if c["id"] == "week")
     assert week["rows"][0].startswith("What does CPI print on ")
+
+
+def test_calendar_rejects_unverified_dates_and_unofficial_macro_sources(monkeypatch):
+    from datetime import date
+    start, end = date(2026, 9, 25), date(2026, 10, 2)
+    raw = json.dumps({"events": [
+        {"date": "2026-09-25", "time": "08:30 ET", "category": "macro", "title": "Q2 GDP third estimate", "source_url": "https://www.bea.gov/news/schedule/full"},
+        {"date": "2026-09-30", "time": "08:30 ET", "category": "macro", "title": "Q2 GDP third estimate", "source_url": "https://www.bea.gov/news/schedule/full"},
+        {"date": "2026-10-02", "time": "08:30 ET", "category": "macro", "title": "September Employment Situation", "source_url": "https://www.bls.gov/cps/publications/release-calendar.htm"},
+        {"date": "2026-09-30", "category": "macro", "title": "Personal Income and Outlays", "source_url": "https://smartcalendars.ai/events/gdp"},
+        {"date": "2026-09-30", "category": "macro", "title": "Personal Income and Outlays", "source": "bea.gov"},
+    ]})
+    pages = {
+        "https://www.bea.gov/news/schedule/full": ("BEA", "September 30, 2026 — GDP Third Estimate, Industries and Corporate Profits"),
+        "https://www.bls.gov/cps/publications/release-calendar.htm": ("BLS", "October 2, 2026 — September Employment Situation"),
+    }
+    monkeypatch.setattr(event_calendar.url_reader, "fetch", lambda url: pages[url])
+    events = event_calendar._verify_events(event_calendar._parse(raw, start, end), datetime(2026, 9, 25, 13, 35, tzinfo=timezone.utc))
+    assert [(e["date"], e["title"]) for e in events] == [
+        ("2026-09-30", "Q2 GDP third estimate"), ("2026-10-02", "September Employment Situation")]
+
+
+def test_calendar_can_check_an_indexed_official_page_when_direct_read_is_blocked(monkeypatch):
+    from datetime import date
+    url = "https://www.bls.gov/cps/publications/release-calendar.htm"
+    raw = json.dumps({"events": [{"date": "2026-10-02", "category": "macro", "title": "September Employment Situation", "source_url": url}]})
+    monkeypatch.setattr(event_calendar.url_reader, "fetch", lambda u: None)
+    calls = []
+    monkeypatch.setattr(event_calendar, "perplexity_fetch_url", lambda u: (calls.append(u) or "Employment Situation — Oct. 2, 2026"))
+    events = event_calendar._verify_events(event_calendar._parse(raw, date(2026, 9, 25), date(2026, 10, 2)),
+                                           datetime(2026, 9, 25, tzinfo=timezone.utc))
+    assert len(events) == 1 and events[0]["verification"] == "indexed" and calls == [url]
+
+
+def test_calendar_merges_two_names_for_one_release_but_keeps_distinct_bea_reports():
+    base = {"date": "2026-09-30", "category": "macro", "impact": "high", "time": "08:30 ET", "source_url": "https://www.bea.gov/news/schedule", "source": "www.bea.gov"}
+    events = event_calendar._dedupe_events([
+        {**base, "title": "U.S. GDP third estimate, Q2 2026", "detail": "GDP third estimate."},
+        {**base, "title": "GDP (Third Estimate), Industries, Corporate Profits, State GDP and State Personal Income"},
+        {**base, "title": "GDP third estimate and corporate profits"},
+        {**base, "title": "BEA GDP third estimate and Personal Income & Outlays", "detail": "August personal income and PCE inflation are scheduled."},
+        {**base, "title": "Personal Income and Outlays, August 2026"},
+    ])
+    assert len(events) == 2
+    assert any("Outlays" in e["title"] for e in events)
+    assert "PCE inflation" in events[0]["detail"]
+
+
+def test_first_friday_jobs_anchor_is_only_shown_when_bls_confirms_it(monkeypatch):
+    from datetime import date
+    candidates = event_calendar._employment_calendar_candidates(date(2026, 9, 25), date(2026, 10, 2))
+    assert [(e["date"], e["title"]) for e in candidates] == [("2026-10-02", "Employment Situation")]
+    monkeypatch.setattr(event_calendar.url_reader, "fetch", lambda url: None)
+    monkeypatch.setattr(event_calendar, "perplexity_fetch_url", lambda url: "Employment Situation release: Oct. 2, 2026")
+    assert len(event_calendar._verify_events(candidates, datetime(2026, 9, 25, tzinfo=timezone.utc))) == 1
+    monkeypatch.setattr(event_calendar, "perplexity_fetch_url", lambda url: "Employment Situation release: Oct. 3, 2026")
+    assert event_calendar._verify_events(candidates, datetime(2026, 9, 25, tzinfo=timezone.utc)) == []
 
 
 def test_lunarcrush_path_is_preferred_and_renders_measured_metrics(monkeypatch):

@@ -464,6 +464,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             # Off the turn's critical path: the answer is already written.
             background(user_memory.extract(memory_user, session_id, body.message, answer, run.intent))
         assistant_metadata = {
+            "prediction_card": getattr(run, "prediction_card", None),
             "chart": chart,
             "routing_decision": getattr(run, "routing_decision", None),
             "trajectory": client_trajectory,
@@ -515,6 +516,7 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
             except Exception:
                 logger.warning("chat session ownership update failed", exc_info=True)
         return AgentResponse(
+            prediction_card=getattr(run, "prediction_card", None),
             envelopes=[e.public() for e in turn_evidence],
             job_id=getattr(run, "job_id", None) if not getattr(run, "job_attached", False) else None,
             answer=answer,
@@ -581,4 +583,3 @@ async def solana_execution_status(signature: str):
         "slot": value.get("slot"),
         "error": error,
     }
-

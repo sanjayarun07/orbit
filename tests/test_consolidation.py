@@ -54,6 +54,17 @@ def test_public_research_progress_counts_distinct_direct_page_reads():
     assert public_activity(public) == public
 
 
+def test_public_progress_preserves_checked_calendar_and_author_sources():
+    from app.public_activity import public_activity
+    for kind, verdict in (("calendar", "date_verified"), ("attributed_source", "attributed")):
+        raw = {"research_progress": {"kind": kind, "checked_pages": 1,
+            "sources": [{"name": "Source", "url": "https://example.org/post?token=secret", "verdict": verdict, "provenance": "page"}]}}
+        public = public_activity(raw)
+        assert public["research_progress"]["kind"] == kind
+        assert public["research_progress"]["sources"][0]["verdict"] == verdict
+        assert public_activity(public) == public
+
+
 def test_wallet_leverage_action_keeps_wallet_capability(monkeypatch):
     action = structured_quick_actions([f"Review leverage risk for {WALLET}"], 1)[0]
     assert action.capabilities == ["wallet_intelligence"]

@@ -39,6 +39,7 @@ from app.routing.lexicon import SECURITY_WORDS
 from dataclasses import dataclass, field
 
 DIMENSION_PATTERNS: dict[str, re.Pattern] = {
+    "forecast": re.compile(r"\b(?:predict(?:ion)?|forecast|outlook|price\s+target|where\s+(?:will|could)\s+\w+\s+(?:go|be)|will\s+\w+\s+(?:go|move)\s+(?:up|down))\b", re.I),
     "volume": re.compile(r"\bvolumes?\b|\bmost\s+traded\b|\bturnover\b", re.I),
     "price_change": re.compile(r"\bgainers?\b|\blosers?\b|\bmovers?\b|\bwinners?\b|\bperformers?\b|%\s*change|\bup\s+the\s+most\b|\bdown\s+the\s+most\b|\bpump(?:ing|ed)?\b|\bdump(?:ing|ed)?\b|\bbiggest\s+(?:moves?|drops?|jumps?)\b", re.I),
     "portfolio": re.compile(r"\bportfolios?\b|\bnet\s*worth\b|\ballocations?\b|\bpnl\b|\bp&l\b|\bprofit(?:able|s)?\b|\bwin\s*rate\b|\btrack\s+record\b", re.I),
@@ -110,6 +111,12 @@ def _spec(name, api, endpoints, requires, returns, dimensions, *, not_for=(), co
 _EVM = "ethereum, base, arbitrum, optimism, bsc, polygon, avalanche"
 
 TOOL_SPECS: dict[str, ToolSpec] = {spec.name: spec for spec in [
+    _spec("hedge_token_prediction", "OpenLedger Hedge prediction", ["POST /v1/predict", "GET /v1/predict/{id}"],
+          ["Binance futures symbol"], ["scenario verdict", "confidence", "scores", "plan", "horizons", "defaults applied"],
+          {"forecast", "perps"}, not_for={"holders", "security", "balances", "transactions", "news"},
+          coverage="Binance USDT futures only; no on-chain token or wallet prediction", freshness="on request",
+          answers=["Predict SOL on Binance futures", "BTC futures outlook"],
+          summary="Read-only leveraged futures scenario, with explicit assumptions and uncertainty"),
     # ---------------------------------------------------------------- market data / discovery
     _spec("coingecko_top_volume", "CoinGecko markets", [
               "GET /coins/markets?vs_currency=usd&order=volume_desc&per_page=<=250&page=&price_change_percentage=24h[&category=<chain>-ecosystem]",

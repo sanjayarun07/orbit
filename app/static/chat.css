@@ -221,6 +221,55 @@
   .data-card-title { font-size: 12px; font-weight: 650; }
   .data-card-badge { color: var(--brand-text); background: var(--brand-soft); padding: 4px 7px; border-radius: 6px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
   .data-card-body { padding: 15px 16px; }
+  .prediction-card { margin-top: 10px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); overflow: hidden; color: var(--text-strong); }
+  .prediction-head { display: flex; justify-content: space-between; gap: 20px; padding: 18px 20px 14px; border-bottom: 1px solid var(--border); }
+  .prediction-eyebrow { color: var(--subtle); font-size: 10px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
+  .prediction-head h3 { margin: 4px 0 1px; font-size: 22px; line-height: 1.2; letter-spacing: -.03em; }
+  .prediction-time { color: var(--subtle); font-size: 10px; }
+  .prediction-verdict { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; text-align: right; }
+  .prediction-verdict strong { font-size: 12px; text-transform: capitalize; }
+  .prediction-verdict.bullish strong { color: var(--green); }
+  .prediction-verdict.bearish strong { color: var(--red); }
+  .prediction-verdict span { color: var(--subtle); font-size: 10px; }
+  .prediction-summary { margin: 0; padding: 16px 20px; font-size: 12px; line-height: 1.6; }
+  .prediction-highlight { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); border-block: 1px solid var(--border); }
+  .prediction-highlight>div { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 13px 20px; }
+  .prediction-highlight>div+div { border-left: 1px solid var(--border); }
+  .prediction-highlight span,.prediction-detail-grid span { color: var(--subtle); font-size: 10px; }
+  .prediction-highlight strong { font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .prediction-section { padding: 15px 20px 0; }
+  .prediction-section h4 { margin: 0 0 10px; font-size: 11px; font-weight: 650; }
+  .prediction-factors { display: grid; gap: 10px; }
+  .prediction-factor { display: flex; gap: 10px; font-size: 11px; line-height: 1.45; }
+  .prediction-factor strong { font-weight: 600; }
+  .prediction-factor p { margin: 2px 0 0; color: var(--text-2); }
+  .prediction-impact { flex: 0 0 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: var(--subtle); }
+  .prediction-impact.bullish { background: var(--green); }
+  .prediction-impact.bearish { background: var(--red); }
+  .prediction-risks ul { margin: 0; padding-left: 17px; color: var(--text-2); font-size: 11px; line-height: 1.55; }
+  .prediction-risks li+li { margin-top: 5px; }
+  .prediction-details { margin: 16px 20px 0; border-top: 1px solid var(--border); }
+  .prediction-details summary { padding: 13px 0; cursor: pointer; color: var(--text-strong); font-size: 11px; font-weight: 600; }
+  .prediction-details summary:hover { color: var(--brand-text); }
+  .prediction-table-wrap { max-width: 100%; overflow-x: auto; }
+  .prediction-table-wrap table { min-width: 510px; }
+  .prediction-table-wrap th,.prediction-table-wrap td { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .prediction-detail-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; padding: 12px 0; }
+  .prediction-detail-grid>div { display: flex; flex-direction: column; gap: 3px; }
+  .prediction-detail-grid strong { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .prediction-scoreline { margin: 0 0 14px; color: var(--subtle); font-size: 10px; line-height: 1.5; }
+  .prediction-assumptions { display: flex; flex-wrap: wrap; gap: 3px 9px; padding: 13px 20px; border-top: 1px solid var(--border); color: var(--subtle); font-size: 10px; line-height: 1.5; }
+  .prediction-assumptions strong { color: var(--text-strong); font-weight: 600; }
+  .prediction-assumptions small { flex-basis: 100%; font-size: 10px; }
+  @media(max-width:600px) {
+    .prediction-head { padding: 16px; }
+    .prediction-summary,.prediction-section { padding-left: 16px; padding-right: 16px; }
+    .prediction-highlight { grid-template-columns: 1fr 1fr; }
+    .prediction-highlight>div { padding: 12px 16px; }
+    .prediction-highlight>div:last-child { grid-column: 1 / -1; border-top: 1px solid var(--border); border-left: 0; }
+    .prediction-details { margin-left: 16px; margin-right: 16px; }
+    .prediction-assumptions { padding: 12px 16px; }
+  }
   .inline-swap-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
   .inline-swap-grid .wide { grid-column: 1 / -1; }
   .inline-swap-card .field input, .inline-swap-card .field select { background: var(--card-2); }
@@ -535,6 +584,10 @@
   .work-progress-steps .active { color: var(--brand-text); font-weight: 650; }
   .work-progress-steps .active::before { content: "● "; }
   .work-progress-sources { margin-top: 6px; color: var(--muted); }
+  .work-progress-activity { display: grid; gap: 4px; margin-top: 8px; color: var(--text-2); }
+  .work-progress-activity div { padding-left: 12px; position: relative; line-height: 1.4; }
+  .work-progress-activity div::before { content: ""; position: absolute; left: 1px; top: .52em; width: 4px; height: 4px; border-radius: 50%; background: var(--subtle); }
+  .work-progress-activity div:last-child::before { background: var(--brand); }
   .answer.streaming .stream-summary { line-height: 1.55; margin-bottom: 12px; }
   .answer.streaming .stream-summary::after { content: '▍'; color: var(--brand); animation: orbit-blink 1s steps(2) infinite; }
   .answer.streaming .stream-sep { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }

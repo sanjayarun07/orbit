@@ -14,7 +14,7 @@ import logging
 import re
 from datetime import datetime, timezone
 
-from app import market_overview, perplexity_tools
+from app import market_overview, perplexity_tools, x_news
 from app.jupiter import jupiter
 from app.provider_registry import get_provider_router
 
@@ -245,7 +245,9 @@ async def compose(sym: str, direction: str, prefer_stock: bool = False) -> tuple
         news_query = f"why is {name} ({sym}) {direction if direction not in ('moving', 'red', 'green') else 'moving'} today crypto news"
         detail_task = asyncio.create_task(_crypto_market_detail(identity))
         news_task = asyncio.create_task(_news(news_query))
+        x_task = asyncio.create_task(x_news.search(f'("{name}" OR ${sym})', hours=48)) if x_news.enabled() else None
         detail, news = await asyncio.gather(detail_task, news_task)
+        x_result = await x_task if x_task else {}
         lines = [f"# Why is {name} ({sym}) {direction}?", f"**As of** {now} · crypto", ""]
         market = _market_section(identity)
         if market or detail:
@@ -261,10 +263,16 @@ async def compose(sym: str, direction: str, prefer_stock: bool = False) -> tuple
         if news:
             lines.append(_trim(news))
             trajectory[f"tool_name_{index}"] = "perplexity_web_search"
+            trajectory[f"tool_args_{index}"] = {"query": news_query}
             trajectory[f"observation_{index}"] = news
             index += 1
         else:
             lines.append("No news source is configured, so this card only shows the market data above.")
+        x_card = x_news.render(x_result)
+        if x_card:
+            lines.extend(["", x_card])
+            trajectory[f"tool_name_{index}"] = "x_news_search"
+            trajectory[f"observation_{index}"] = x_card
         lines += ["", "*Market data and reported news, not advice. Moves in crypto are often flow-driven; treat single-cause explanations with care.*"]
         return "\n".join(lines), trajectory
 
@@ -273,6 +281,7 @@ async def compose(sym: str, direction: str, prefer_stock: bool = False) -> tuple
         return (f"I couldn't identify **{sym}** as a verified crypto token, and no news source is configured to check it as a stock. "
                 f"Try the token's mint or contract address, or ask *deep dive on {sym}*."), trajectory
     question = f"Why is {sym} stock {direction if direction not in ('moving', 'red', 'green') else 'moving'} today? Give the price, the day's move in percent, and the reported reasons with sources."
+    x_task = asyncio.create_task(x_news.search(f'${sym} stock', hours=48)) if x_news.enabled() else None
     answer, tool = None, "perplexity_finance_search"
     try:
         answer = await asyncio.to_thread(perplexity_tools.perplexity_finance_search, question)
@@ -286,4 +295,9 @@ async def compose(sym: str, direction: str, prefer_stock: bool = False) -> tuple
             return f"I couldn't check {sym} right now ({exc}).", trajectory
     trajectory["tool_name_0"] = tool
     trajectory["observation_0"] = answer
-    return f"# Why is {sym} {direction}?\n**As of** {now} · stock (web sources)\n\n{_trim(answer, 2600)}\n\n*Reported news, not advice.*", trajectory
+    x_card = x_news.render(await x_task) if x_task else ""
+    if x_card:
+        trajectory["tool_name_1"] = "x_news_search"
+        trajectory["observation_1"] = x_card
+    return (f"# Why is {sym} {direction}?\n**As of** {now} · stock (web sources)\n\n{_trim(answer, 2600)}"
+            + ("\n\n" + x_card if x_card else "") + "\n\n*Reported news, not advice.*"), trajectory

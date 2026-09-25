@@ -53,7 +53,8 @@ def test_card_composes_all_sections(monkeypatch):
     assert "Losers**: STONK -13.72%" in out
     # Trending + sources
     assert "LSK, FIL, PENGU" in out
-    assert "Sources: CoinGecko · DeFiLlama · Alternative.me" in out
+    assert "[CoinGecko prices](" in out and "[DeFiLlama DEX volume](" in out
+    assert "[Alternative.me sentiment](" in out and "**Retrieved**" in out
 
 
 def test_card_degrades_when_all_sources_fail(monkeypatch):

@@ -68,3 +68,21 @@ def emit(event: str, **data: Any) -> None:
         queue.put_nowait(item)
     else:
         loop.call_soon_threadsafe(queue.put_nowait, item)
+
+
+def research_progress(phase: str, detail: str, *, found: int | None = None,
+                      checked: int | None = None) -> None:
+    """Stream observable research work, never private model reasoning.
+
+    Counts are emitted only after the underlying search/read has returned.
+    The browser uses this typed event instead of guessing phases from status
+    strings or inventing progress while a slow provider is pending.
+    """
+    if phase not in {"plan", "sources", "review", "answer"}:
+        raise ValueError("unknown research phase")
+    data: dict[str, Any] = {"phase": phase, "detail": detail[:180]}
+    if found is not None:
+        data["found"] = max(0, int(found))
+    if checked is not None:
+        data["checked"] = max(0, int(checked))
+    emit("research_progress", **data)

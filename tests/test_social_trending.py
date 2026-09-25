@@ -42,7 +42,8 @@ def test_the_web_path_renders_the_posts_as_a_ranked_table_with_accounts(monkeypa
             {"symbol": "PEPE", "chain": "ethereum", "why": "Pepe creator post", "accounts": ["@matt"], "url": "https://evil.example/phish", "stance": "mixed"}],
         "themes": ["hats", "frogs"]}))
     card = social_sentiment.social_trending("Trending meme on twitter socials")
-    assert card.startswith("# Trending on crypto Twitter") and "Perplexity web search over X posts" in card
+    assert card.startswith("# Trending on crypto Twitter") and "**X posts**: last 24h" in card
+    assert "Perplexity" not in card
     assert "[WIF](https://x.com/ansem/status/1)" in card and "@ansem, @blknoiz06" in card
     assert "PEPE |" in card and "evil.example" not in card, "only x.com links are rendered as links"
     assert "**Themes**: hats · frogs" in card and "Reported, not measured" in card

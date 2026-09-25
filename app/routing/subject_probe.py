@@ -354,7 +354,7 @@ def context_card(request: str, context: str) -> str:
     the tools' cards."""
     subject = subject_of(request)
     title = f"# Web context — {subject}" if subject else "# Web context"
-    return f"{title}\n**Provider**: Perplexity search (the question as asked)\n\n{context.strip()}"
+    return f"{title}\n\n{context.strip()}"
 
 
 def route_from(found: dict, request: str) -> dict | None:

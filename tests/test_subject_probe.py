@@ -103,7 +103,7 @@ def test_the_context_search_picks_finance_for_a_market_question_and_caches(monke
     assert subject_probe.context_search("OPEN token unlock schedule") == "Ansem is a crypto trader on X."
     assert calls == [("finance", "what is OPEN trading at"), ("web", "who is ansem"), ("web", "OPEN token unlock schedule")], \
         "one search per message; finance only for a price or figure (it rejects answers without a live quote)"
-    assert subject_probe.context_card("OPEN token unlock schedule", "text").startswith("# Web context — OPEN\n**Provider**: Perplexity search")
+    assert subject_probe.context_card("OPEN token unlock schedule", "text") == "# Web context — OPEN\n\ntext"
 
 
 def test_an_uncertain_turn_carries_the_webs_answer_alongside_the_probed_route(monkeypatch):

@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import re
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from app import composition, contracts, evidence, fact_gate, facts as facts_mod, perplexity_tools, research_loop, streaming, tool_catalog
@@ -41,6 +41,8 @@ def _contract_note(contract: contracts.QuestionContract, gate: fact_gate.GateRes
                  "brief, any contract, window or fact count."]
         if gate.missing:
             lines.append("Say first that the sources leave open: " + "; ".join(gate.missing))
+        if contract.answer_requirements:
+            lines.append("Resolve these points from cited sources, or say which remain unverified: " + "; ".join(contract.answer_requirements))
         return "\n".join(lines)
     hours = contract.window_hours
     window = "-" if not hours else (f"{hours / 24:g} days" if hours >= 48 else f"{hours:g} hours")     # "24 days" was written up as "the last 24 hours" (2026-09-24)
@@ -52,6 +54,8 @@ def _contract_note(contract: contracts.QuestionContract, gate: fact_gate.GateRes
              "what is missing in the first sentence, and never fill it from memory."]
     if scope_note:
         lines.append(f"Scope: {scope_note}")
+    if contract.answer_requirements:
+        lines.append("Resolve these points from cited sources, or say which remain unverified: " + "; ".join(contract.answer_requirements))
     if gate.missing:
         lines.append("Gaps to state first: " + "; ".join(gate.missing))
     if gate.stale:
@@ -90,8 +94,45 @@ def research_query(request: str) -> str:
         # review of c03378b1); only the notes fold into the context.
         question = " ".join(line.strip() for line in (body or request).splitlines() if line.strip())
         return f"{question} (Context: this continues research on {objective.group(1).strip()}; answer for that context, not the general case.{as_of})"
+    if contracts.is_schedule_request(body or request):
+        return " ".join(line.strip() for line in (body or request).splitlines() if line.strip()) + as_of
+    if (contracts.is_direct_explanation(body or request)
+            and not re.search(r"\b\$?[A-Z][A-Z0-9]{1,9}\b", body or request)):
+        # A term in ordinary prose is not an asset ticker. Preserve the
+        # question and its conversation context; market_scoped() would turn
+        # "max pain" into a search for a token named MAX.
+        return request
     # "PUMP revenue" came back as ProPetro (NYSE: PUMP): the ticker reads as a crypto asset first.
     return market_scoped(request) + as_of
+
+
+def scheduled_time_notice(request: str, cards: str, *, now: datetime | None = None) -> str:
+    """Prevent a dated search snapshot from presenting a passed deadline as upcoming."""
+    if not re.search(r"\b(?:today|this morning|this afternoon)\b", request, re.I):
+        return ""
+    if not re.search(r"\b(?:expir(?:e|es|ed|ing|y)|settle[ds]?|release[ds]?|launch(?:es|ed)?|scheduled)\b", request, re.I):
+        return ""
+    times = set(re.findall(r"\b([01]?\d|2[0-3]):([0-5]\d)\s*UTC\b", cards, re.I))
+    asked_times = set(re.findall(r"\b([01]?\d|2[0-3]):([0-5]\d)\s*UTC\b", request, re.I))
+    selected = asked_times & times if asked_times else times
+    if len(selected) != 1:
+        return ""
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    local_today = now.astimezone().date()
+    if (local_today.isoformat() not in cards
+            and local_today.strftime("%B %d, %Y").replace(" 0", " ") not in cards):
+        return ""
+    today_candidates = [now.astimezone(timezone.utc).date() + timedelta(days=shift) for shift in (-1, 0, 1)]
+    hour, minute = map(int, next(iter(selected)))
+    matched = [datetime.combine(day, datetime.min.time(), timezone.utc).replace(hour=hour, minute=minute)
+               for day in today_candidates if datetime.combine(day, datetime.min.time(), timezone.utc).replace(hour=hour, minute=minute).astimezone().date() == local_today]
+    if len(matched) != 1 or now <= matched[0]:
+        return ""
+    at = matched[0].strftime("%H:%M UTC")
+    return (f"**Timing:** The cited {at} scheduled time was earlier today. A pre-event notional or forecast is historical context; "
+            "these sources do not establish the final settled amount or make the event an upcoming volatility catalyst.")
 
 
 def unsourced_examples(summary: str, cards: str) -> list[str]:
@@ -255,8 +296,10 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         return None
     if contract.ambiguity:
         return {"answer": contract.ambiguity, "trajectory": None, "contract": contract.model_dump(), "pipeline": "contract"}
+    streaming.research_progress("plan", "Matching the question to evidence that covers its scope")
     router = get_provider_router()
-    if contract.kind == contracts.OPEN_RESEARCH_KIND and research_loop.enabled():
+    if (contract.kind == contracts.OPEN_RESEARCH_KIND and contract.research_depth == "deep"
+            and research_loop.enabled() and not contracts.is_schedule_request(request)):
         # The bounded evidence loop (docs/engineering/claude-code-evidence-loop.md);
         # None when its plan fails, and the fixed sequence below answers.
         looped = await research_loop.run(state, request, contract, router, chains)
@@ -281,25 +324,31 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         return (spec.fit(request) if spec else 0.0) + float(getattr(tool, "priority", 0.0)) / 100.0 + (1.0 if tool.matches(request) else 0.0)
     state_tools.sort(key=rank, reverse=True)
     if contract.kind == contracts.OPEN_RESEARCH_KIND:
-        # Web first, then up to two targeted tools the router would plan for
-        # this ask (holders, security, market data), then the check.
-        planned = []
-        try:
-            planned = [t.name for t in await asyncio.to_thread(router.plan_across, request, ("market_data", "token_security", "token_discovery", "defi_data", "knowledge"), chains, 2)]
-        except Exception:
-            logger.info("open research: router plan failed", exc_info=True)
-        # A concept question that names no token, protocol or topic ("how
-        # else can we tie a dual token to the main token") gets the web and
-        # the knowledge base only: a token tool would read a word in it as a
-        # ticker (a DEX pair table for "DUAL", live 2026-09-24).
-        # Open research is discovery: the web and the knowledge base. A token
-        # tool joins only when the ask names a contract address -- "research
-        # projects with two tokens like Venice VVV and DIEM" had led with
-        # DIEM's trading pools (the four-turn comparison, 2026-09-24), and
-        # irrelevant evidence cannot be repaired after retrieval.
-        chosen = discovery_tools[:1] + [n for n in planned if n not in discovery_tools and (contract.subject.id or n == "knowledge_base_search")][:2]
+        if contracts.is_schedule_request(request) or (contract.window_hours is not None and contract.window_hours <= 168):
+            # A factual schedule or time-bounded market event needs current
+            # reporting, not an unrelated protocol knowledge-base passage.
+            chosen = discovery_tools[:1]
+        else:
+            # Web first, then up to two targeted tools the router would plan for
+            # this ask (holders, security, market data), then the check.
+            planned = []
+            try:
+                planned = [t.name for t in await asyncio.to_thread(router.plan_across, request, ("market_data", "token_security", "token_discovery", "defi_data", "knowledge"), chains, 2)]
+            except Exception:
+                logger.info("open research: router plan failed", exc_info=True)
+            # Open research is discovery: the web and the knowledge base. A token
+            # tool joins only when the ask names a contract address -- "research
+            # projects with two tokens like Venice VVV and DIEM" had led with
+            # DIEM's trading pools, and irrelevant evidence cannot be repaired.
+            chosen = discovery_tools[:1] + [n for n in planned if n not in discovery_tools and (contract.subject.id or n == "knowledge_base_search")][:2]
     elif contract.evidence_order == "discovery_first":
-        chosen = discovery_tools[:1] + state_tools[:1] + background_tools[:1]
+        if contract.kind == "recent_events" and not contract.subject.id:
+            # A dated report about a named asset is not an on-chain event for
+            # a resolved contract. Search current reporting without adding
+            # unrelated token-state or protocol-index passages.
+            chosen = discovery_tools[:1]
+        else:
+            chosen = discovery_tools[:1] + state_tools[:1] + background_tools[:1]
     else:
         # One state source, plus a second only when it covers different ground
         # (another scope), never two readings of the same feed.
@@ -343,6 +392,9 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         scope_note = (f"the ask needs {contract.scope.replace('_', ' ')}; the only source available is {chosen[0]} whose scope is {cov_scope.replace('_', ' ')} "
                       f"-- shown as the nearest verifiable ranking, not as the ask itself")
     calls = [(name, request) for name in chosen]
+    source_action = ("Searching current reporting" if discovery_tools and any(name in discovery_tools for name, _ in calls)
+                     else "Reading live market and on-chain data")
+    streaming.research_progress("sources", f"{source_action} for this question")
     streaming.emit("status", text=f"Contract: {contract.label()} · tools: {', '.join(n for n, _ in calls)}")
     results = await asyncio.gather(*(_invoke(router, name, text, chains, contract) for name, text in calls))
     chosen = [name for name, _ in calls]
@@ -353,6 +405,7 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         streaming.emit("card", markdown=result.output, tool=result.tool)
         parts.append((result.output, {"tool_name_0": result.tool, "tool_args_0": {"request": request}, "observation_0": result.output}))
         fact_rows.extend(_facts_of(result, contract.kind))
+    streaming.research_progress("sources", f"Received {len(parts)} evidence card{'s' if len(parts) != 1 else ''}", found=len(parts))
     if not parts:
         # The chosen source returned nothing usable: the next eligible source
         # answers instead (Mobula had no ANSEM holders three times over while
@@ -365,6 +418,7 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
                 parts.append((result.output, {"tool_name_0": result.tool, "tool_args_0": {"request": request}, "observation_0": result.output}))
                 fact_rows.extend(_facts_of(result, contract.kind))
                 break
+    streaming.research_progress("review", "Checking source coverage and the required facts", found=len(parts))
     gate = fact_gate.check(contract, fact_rows, scope_satisfied=scope_satisfied)
     if not gate.ok and gate.missing and discovery_tools and not any(n in chosen for n in discovery_tools):
         # One repair: a discovery tool for the gap the state tools left.
@@ -397,9 +451,15 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         gate.notes.append(f"spans {covered:.1f} hours for the {asked} asked (nearest stored ticks)")
         scope_note = (scope_note + "; " if scope_note else "") + f"the cards span {covered:.1f} hours for the {asked} asked, say the span and never call the change a {asked} change"
     note = _contract_note(contract, gate, fact_rows, scope_note)
+    timing = scheduled_time_notice(request, cards)
+    if timing:
+        note += "\n" + timing + " Use past tense for the scheduled time and do not describe it as upcoming."
+    if contract.kind == contracts.OPEN_RESEARCH_KIND and contract.research_depth == "direct":
+        note += "\nGive a short, plain-language answer to the one concept asked. Do not expand into unrelated figures or a broader market report."
     research = contract.kind == contracts.OPEN_RESEARCH_KIND
+    streaming.research_progress("answer", "Writing from the evidence collected", found=len(parts))
     synthesized = await composition.synthesize(f"{request}\n{note}", cards, trajectory, research=research)
-    if research:
+    if research and contract.research_depth == "deep":
         unsourced = unsourced_examples(synthesized, cards)
         if unsourced:
             # A named example the cards do not carry is general knowledge, said as such (never silently dropped, never passed as sourced).
@@ -444,6 +504,8 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
                        ". The cards below are the evidence as fetched; ask for one figure and I will read it from a card.**\n\n---\n\n" + cards)
     if lead:
         answer_text = f"**{lead}**\n\n{answer_text}"
+    if timing and not answer_text.startswith(timing):
+        answer_text = timing + "\n\n" + answer_text
     evidence.keep(evidence.Evidence(tool="contract_pipeline", status="complete" if final.ok else "partial",
                                     subject={"kind": contract.subject.kind, "id": contract.subject.id, "chain": contract.subject.chain, "symbol": contract.subject.symbol},
                                     data={"contract": contract.model_dump(), "facts": len(fact_rows), "tools": chosen, "scope_satisfied": scope_satisfied},

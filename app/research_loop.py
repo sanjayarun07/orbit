@@ -38,7 +38,7 @@ from urllib.parse import urlsplit
 
 import dspy
 
-from app import composition, contracts, fact_gate, research_ledger, streaming, tool_catalog
+from app import composition, contracts, fact_gate, research_ledger, streaming, tool_catalog, x_news
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -500,6 +500,78 @@ def _news_headline(contract: contracts.QuestionContract, request: str) -> str:
     return note.group(1).strip() if note else ""
 
 
+def _attributed_author(request: str) -> str:
+    """An explanation explicitly scoped to what a named social author said."""
+    body, _ = composition.split_notes(request)
+    if not re.search(r"\b(?:according to|mentioned by|said by|posted by|wrote|what did|what does)\b", body, re.I):
+        return ""
+    match = re.search(r"(?<!\w)@([A-Za-z0-9_]{1,15})\b", body)
+    return match.group(1) if match else ""
+
+
+def _attributed_passage(page_text: str, request: str, author: str) -> str:
+    """Keep the closest topical passage from a long profile/feed page."""
+    words = {w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9]{3,}", request)
+             if w.lower() not in {"what", "does", "nature", "mentioned", "according", "posted", "exposure", author.lower()}}
+    text = re.sub(r"\s+", " ", page_text or "").strip()
+    if not text or not words:
+        return ""
+    best, score = "", 0
+    for word in words:
+        for match in list(re.finditer(rf"\b{re.escape(word)}\b", text, re.I))[:15]:
+            start = max(0, match.start() - 700)
+            excerpt = text[start:match.end() + 1800]
+            hits = sum(bool(re.search(rf"\b{re.escape(term)}\b", excerpt, re.I)) for term in words)
+            if hits > score:
+                best, score = excerpt, hits
+    return best if score >= min(2, len(words)) else ""
+
+
+async def _run_attributed(request: str, author: str) -> dict:
+    """A bounded source read for a named author's claim, not a candidate audit."""
+    from app import perplexity_tools
+
+    unavailable = (f"I could not verify what @{author} said from a readable source right now. "
+                   "Please share the post link or retry; I won't infer the claim from the ticker.")
+    streaming.emit("status", text=f"Finding @{author}'s original claim")
+    try:
+        found = await asyncio.wait_for(asyncio.to_thread(
+            perplexity_tools.perplexity_search_with_sources,
+            f"{request} Find the original post by @{author}; preserve the exact relationship and any caveats."), timeout=45)
+    except Exception:
+        logger.info("attributed research: source discovery failed", exc_info=True)
+        return {"answer": unavailable, "trajectory": None, "pipeline": "attributed_research"}
+    sources = [s for s in found.get("sources", []) if author.lower() in
+               (str(s.get("title") or "") + " " + str(s.get("url") or "")).lower()]
+    for source in sources[:2]:
+        url = source.get("url") or ""
+        try:
+            page = await asyncio.wait_for(asyncio.to_thread(read_page, url), timeout=45)
+        except Exception:
+            continue
+        passage = _attributed_passage(page.get("text") or "", request, author)
+        if not passage:
+            continue
+        label = "original or mirrored author page" if page.get("provenance") == "page" else "indexed author page"
+        card = f"# What @{author} wrote\n\n{passage}\n\nSource: [{label}]({url})"
+        streaming.emit("status", text="Checking the author's words")
+        try:
+            composed = await asyncio.wait_for(composition.synthesize(
+                request + "\nAnswer in 2-4 sentences from this author's passage only. Distinguish the author's claim from an independently verified fact, and distinguish an asset's trading pair or possible rewards from ownership of the paired asset.",
+                card, {"tool_name_0": "attributed_source_read", "tool_args_0": {"url": url}, "observation_0": passage}, research=True), timeout=45)
+            summary = composed.split("\n\n---\n\n", 1)[0].removeprefix("**Taken together**").strip()
+        except Exception:
+            summary = ""
+        answer = (summary + f"\n\nSource: [@{author}'s post or author page]({url})" if summary
+                  else f"I found the author's passage but could not safely summarize it right now. [Read it here]({url}).")
+        return {"answer": answer, "trajectory": {"research_progress": {
+            "status": "complete", "kind": "attributed_source",
+            "checked_pages": 1 if page.get("provenance") == "page" else 0,
+            "sources": [{"name": f"@{author}", "url": url, "provenance": page.get("provenance"), "verdict": "attributed"}]}},
+            "pipeline": "attributed_research"}
+    return {"answer": unavailable, "trajectory": None, "pipeline": "attributed_research"}
+
+
 def tool_for(capability: str, contract: contracts.QuestionContract, enabled_tools: set[str]) -> tuple[str | None, str]:
     """The one tool that may run for a capability under the deterministic
     boundary: (tool name, reason). A discovery group takes a query; a group
@@ -636,6 +708,7 @@ async def _run_headline(request: str, contract: contracts.QuestionContract, rout
     calls = _opening_calls(plan, contract, request)
     made: list[str] = []
     t0 = time.monotonic()
+    streaming.research_progress("plan", "Checking the original event separately from the market reaction")
 
     async def search(capability: str, query: str):
         tool, _ = tool_for(capability, contract, {t.name for t in router.tools() if (router._enabled(t) if hasattr(router, "_enabled") else True)})
@@ -643,6 +716,7 @@ async def _run_headline(request: str, contract: contracts.QuestionContract, rout
             return None
         return await budget.call("provider", evidence_pipeline._invoke(router, tool, query, chains, contract), 45, reserve=40)
 
+    streaming.research_progress("sources", "Searching for the original event and a dated market response")
     streaming.emit("status", text="Searching the original event and market response")
     results = await asyncio.gather(*(search(cap, query) for cap, query in calls), return_exceptions=True)
     leads: list[dict] = []
@@ -661,6 +735,7 @@ async def _run_headline(request: str, contract: contracts.QuestionContract, rout
             if (axis, url) not in {(lead["axis"], lead["url"]) for lead in leads}:
                 leads.append({"axis": axis, "url": url, "title": str(row.get("title") or url), "date": str(row.get("date") or "")})
     timings["discovery"] = round(time.monotonic() - t0, 1)
+    streaming.research_progress("sources", f"Found {len(leads)} dated source leads", found=len(leads))
     gate = fact_gate.check(contract, [], scope_satisfied=True)
     if not leads:
         gate.ok = False
@@ -711,6 +786,7 @@ async def _run_headline(request: str, contract: contracts.QuestionContract, rout
             page = {"url": url, "text": "", "provenance": "unreadable", "fetched_at": ""}
         return url, page
 
+    streaming.research_progress("review", "Opening the selected event and market source pages", found=len(leads))
     page_cache.update(await asyncio.gather(*(fetch(url) for url in dict.fromkeys(url for url in selected.values() if url))))
     made.extend(f"page_read: {url}" for url in page_cache)
 
@@ -753,6 +829,9 @@ async def _run_headline(request: str, contract: contracts.QuestionContract, rout
             if not budget.can_run(45):
                 break
     timings["inspection"] = round(time.monotonic() - t_read, 1)
+    checked_pages = sum(page.get("provenance") == "page" for page in page_cache.values())
+    streaming.research_progress("review", f"Checked {checked_pages} source page{'s' if checked_pages != 1 else ''} against the event and market claims",
+                                found=len(leads), checked=checked_pages)
     accepted = event_rows + market_rows
     coverage = {"event": bool(event_rows), "market": bool(market_rows), "selected": selected,
                 "source_leads": leads[:30], "passages": accepted}
@@ -770,6 +849,7 @@ async def _run_headline(request: str, contract: contracts.QuestionContract, rout
             "Separate possible transmission mechanisms from observed reactions; timing alone does not prove this event caused a price move. "
             "Do not offer a trade recommendation or use unverified search snippets as evidence.")
     t_synth = time.monotonic()
+    streaming.research_progress("answer", "Writing from the checked passages")
     try:
         with streaming.muted("delta"):
             answer = await budget.call("synthesis", composition.synthesize(f"{request}\n{note}", card, trajectory, research=True), 55, reserve=12)
@@ -782,6 +862,7 @@ async def _run_headline(request: str, contract: contracts.QuestionContract, rout
         return {"answer": answer, "trajectory": trajectory, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "research_loop"}
     timings["synthesis"] = round(time.monotonic() - t_synth, 1)
     unsupported = fact_gate.unsupported_figures(answer.split("\n\n---\n\n", 1)[0], [], evidence_text=card)
+    streaming.research_progress("answer", "Checking the draft's claims against the passages")
     claims = await _unsupported_claims(headline, answer, card, runtime) if budget.can_run(14) else None
     if (unsupported or claims) and budget.can_run(25):
         repair_note = (f"{request}\n{note}\nRemove or qualify these claims that the checked passages do not establish: "
@@ -813,6 +894,31 @@ async def _run_headline(request: str, contract: contracts.QuestionContract, rout
 
 
 async def run(state: dict, request: str, contract: contracts.QuestionContract, router, chains: tuple[str, ...]) -> dict:
+    """Run checked research, with a separate optional X discovery lane for news."""
+    author = _attributed_author(request)
+    if author and contract.kind == contracts.OPEN_RESEARCH_KIND:
+        return await _run_attributed(request, author)
+    headline = _news_headline(contract, request)
+    if not (headline or contract.kind == "recent_events") or not x_news.enabled():
+        return await _run(state, request, contract, router, chains)
+    subject = getattr(contract, "subject", None)
+    resolved = getattr(subject, "symbol", None) or getattr(subject, "name", None)
+    topic = x_news.topic_from_headline(headline) if headline else (str(resolved).strip() if resolved else x_news.topic_from_headline(composition.split_notes(request)[0]))
+    if not topic:
+        return await _run(state, request, contract, router, chains)
+    x_task = asyncio.create_task(x_news.search(topic, hours=min(168, int(contract.window_hours or 48))))
+    result = await _run(state, request, contract, router, chains)
+    x_result = await x_task
+    x_card = x_news.render(x_result)
+    if not result or not x_card:
+        return result
+    trajectory = dict(result.get("trajectory") or {})
+    trajectory["x_discovery"] = {"query": x_result.get("query"), "posts": x_result["posts"],
+                                  "status": "unverified social posts"}
+    return {**result, "answer": result["answer"] + "\n\n---\n\n" + x_card, "trajectory": trajectory}
+
+
+async def _run(state: dict, request: str, contract: contracts.QuestionContract, router, chains: tuple[str, ...]) -> dict:
     """The loop, returning the pipeline's answer shape."""
     from app import evidence_pipeline
     from app.nodes import runtime
@@ -829,6 +935,7 @@ async def run(state: dict, request: str, contract: contracts.QuestionContract, r
         # skipping that call also prevents a planner failure from falling
         # back to unchecked search prose.
         return await _run_headline(request, contract, router, chains, SimpleNamespace(), runtime, turn_budget, {})
+    streaming.research_progress("plan", "Identifying the question and evidence needed")
     streaming.emit("status", text="Planning the evidence")
     timings: dict[str, float] = {}
     t_plan = time.monotonic()
@@ -843,6 +950,7 @@ async def run(state: dict, request: str, contract: contracts.QuestionContract, r
     required = (getattr(plan, "required_facts", "") or "").strip()
     calls: list[DiscoveryCall | tuple[str, str]] = _expanded_calls(plan, contract, request)
     initial_queries = {call.query for call in calls if isinstance(call, DiscoveryCall)}
+    streaming.research_progress("sources", f"Searching {len(calls)} evidence angle{'s' if len(calls) != 1 else ''}")
     if _news_headline(contract, request):
         required = "\n".join(filter(None, [required,
             "Original event or primary data source, with event time and proposed versus final status",
@@ -862,6 +970,7 @@ async def run(state: dict, request: str, contract: contracts.QuestionContract, r
 
     async def one(job: DiscoveryCall, tool: str):
         text = f"{job.query}\n{notes}" if notes else job.query
+        streaming.research_progress("sources", f"Searching: {job.query[:120]}")
         streaming.emit("status", text=f"Reading {job.capability}: {job.facet or job.query[:80]}")
         options = {"recency_days": job.days, "domains": job.domains} if job.days or job.domains else None
         return await turn_budget.call("provider", evidence_pipeline._invoke(router, tool, text, chains, contract,
@@ -892,6 +1001,8 @@ async def run(state: dict, request: str, contract: contracts.QuestionContract, r
                                                                                           "topic": job.topic, "days": job.days, "domains": job.domains},
                                           "observation_0": result.output}))
             fact_rows.extend(evidence_pipeline._facts_of(result, contract.kind))
+        streaming.research_progress("sources", f"Collected {len(parts)} search result{'s' if len(parts) != 1 else ''}; checking cited pages",
+                                    found=len(parts))
         if parts:
             # Read the sources before deciding what to search next. The old
             # order asked the gap model to judge search snippets, so a fluent
@@ -911,6 +1022,9 @@ async def run(state: dict, request: str, contract: contracts.QuestionContract, r
                 verdicts = None
             inspect_seconds += time.monotonic() - t_inspect
             made.extend(inspect_calls)
+            checked_pages = sum(page.get("provenance") == "page" for page in page_cache.values())
+            streaming.research_progress("review", f"Checked {checked_pages} original page{'s' if checked_pages != 1 else ''} against the question",
+                                        found=len(parts), checked=checked_pages)
         if (not parts or verdicts is None or retrieval_count >= MAX_CALLS
                 or round_no == MAX_ROUNDS - 1 or not turn_budget.can_run(30)
                 or time.monotonic() - started > retrieval_budget):
@@ -1046,6 +1160,7 @@ async def run(state: dict, request: str, contract: contracts.QuestionContract, r
                                        "coverage": ledger.as_dict(), "budget": turn_budget.record(), "timings": timings}
         return {"answer": answer, "trajectory": trajectory, "contract": contract.model_dump(), "gate": final.model_dump(), "pipeline": "research_loop"}
     t_synth = time.monotonic()
+    streaming.research_progress("answer", "Writing the answer from reviewed passages")
     try:
         with streaming.muted("delta"):
             synthesized = await turn_budget.call("synthesis", composition.synthesize(f"{request}\n{note}", verified_cards, trajectory, research=True), 65, reserve=12)
@@ -1058,6 +1173,7 @@ async def run(state: dict, request: str, contract: contracts.QuestionContract, r
         return {"answer": _with_trail(_verified_partial(ledger, verdicts), made, skipped, verdicts, timings),
                 "trajectory": trajectory, "contract": contract.model_dump(), "gate": final.model_dump(), "pipeline": "research_loop"}
     timings["synthesis"] = round(time.monotonic() - t_synth, 1)
+    streaming.research_progress("answer", "Checking the answer's figures and claims against the passages")
     final = fact_gate.check(contract, fact_rows, synthesized, scope_satisfied=True, evidence_text=verified_cards)
     # Source snippets and their parsed facts are not evidence for a figure in
     # the written answer. Only the inspected passage may support that figure.
@@ -1430,6 +1546,7 @@ async def _inspect_candidates(question: str, constraints: str, cards: str, runti
     limit = int(getattr(settings, "research_loop_inspect_pages", 4) or 0)
     if limit <= 0 or not cards.strip():
         return [], calls
+    streaming.research_progress("review", "Identifying cited pages that can answer the question")
     conditions = constraints if constraints and constraints.lower() != "none" else question
     try:
         listed = await asyncio.wait_for(runtime._call_research_loop_lm(_candidates_program, question=question, evidence=_compact(cards)), timeout=45)
@@ -1488,6 +1605,7 @@ async def _inspect_candidates(question: str, constraints: str, cards: str, runti
         logger.info("research loop: no candidates listed from the cards")
         return uninspected, calls
     streaming.emit("status", text=f"Reading {len(candidates)} cited page{'s' if len(candidates) != 1 else ''} to check the candidates")
+    streaming.research_progress("review", f"Reading {len(candidates)} cited page{'s' if len(candidates) != 1 else ''} against the requested conditions")
 
     async def check(name: str, url: str, prior: dict | None = None) -> dict:
         cache_key = (name, url, tuple(p.get("url") for p in (prior.get("_pages", []) if prior else [])))
@@ -1499,6 +1617,7 @@ async def _inspect_candidates(question: str, constraints: str, cards: str, runti
             page = page_cache[url]
         else:
             try:
+                streaming.research_progress("review", f"Opening the cited page at {_source_domain(url)}")
                 page = await (budget.call("page", asyncio.to_thread(read_page, url), 40, reserve=20)
                               if budget else asyncio.wait_for(asyncio.to_thread(read_page, url), timeout=40))
             except Exception as exc:
@@ -1606,6 +1725,7 @@ async def _inspect_candidates(question: str, constraints: str, cards: str, runti
                                                        -sum(p.get("provenance") == "page" for p in v.get("_pages", []))))[:1]
         if not unresolved:
             break
+        streaming.research_progress("review", f"Looking for original documentation on {', '.join(v['name'] for v in unresolved)}")
         streaming.emit("status", text=f"Looking for first-party documentation of {', '.join(v['name'] for v in unresolved)}")
 
         async def follow_up(v: dict) -> tuple[dict, bool]:

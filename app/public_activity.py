@@ -20,7 +20,7 @@ def _research_progress(trajectory: dict) -> dict | None:
             continue
         verdict = item.get("verdict")
         provenance = item.get("provenance")
-        if verdict not in {"qualifies", "related_but_different", "not_established"} or provenance not in {"page", "reader", "unreadable", "uninspected"}:
+        if verdict not in {"qualifies", "related_but_different", "not_established", "date_verified", "attributed"} or provenance not in {"page", "reader", "unreadable", "uninspected"}:
             continue
         name = item.get("name")
         url = item.get("url")
@@ -43,8 +43,12 @@ def _research_progress(trajectory: dict) -> dict | None:
                           if isinstance(call, str) and call.startswith("page_read (url_reader): ")})
                      if isinstance(calls, list) else raw.get("checked_pages", 0))
     bounded = lambda value: min(max(value, 0), 20) if type(value) is int else 0
-    return {"status": "complete", "provider_calls": bounded(completed_calls),
+    kind = raw.get("kind") if raw.get("kind") in {"calendar", "attributed_source"} else None
+    result = {"status": "complete", "provider_calls": bounded(completed_calls),
             "checked_pages": bounded(checked_pages), "sources": verdicts}
+    if kind:
+        result["kind"] = kind
+    return result
 
 
 def public_activity(trajectory: dict | None) -> dict | None:
