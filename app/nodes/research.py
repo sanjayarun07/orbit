@@ -1964,6 +1964,7 @@ async def research_node(state: AgentState) -> dict:
                 if part.get(key) and key not in extras:
                     extras[key] = part[key]
         cards, trajectory = composition.combine(parts)
+        extras.update(composition.pipeline_of(results))     # all clauses from the contract pipeline: the combined answer is one too, never web-gated
         if snapshot_compare.dated_ask(state["request"]):
             # The dated comparison itself comes from the snapshot ledger (the
             # lead written below); the cards are current data and the summary

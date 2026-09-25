@@ -94,7 +94,12 @@ _FORMAT_CLAUSE = re.compile(
     r"explain\s+(?:in|with|using)|keep|use|do\s+not|don'?t|never|avoid|if\s+.*?(?:say\s+so|say\s+unknown|say\s+that))\b[^.?!]*"
     r"\b(?:claims?|assumptions?|sources?|evidence|links?|timestamps?|coverage|gaps?|units?|as\s+unknown|say\s+so|unknown|plain\s+language|"
     r"do\s+not\s+(?:invent|prepare|execute|trade)|not\s+(?:invent|prepare|execute)|no\s+trade|without\s+predicting|database-only|primary\s+source)\b"
-    r"|^\s*(?:do\s+not|don'?t|never)\s+[^.?!]*$|^\s*if\s+[^.?!]*\bsay\s+so\b[^.?!]*$)", re.I | re.S)
+    r"|^\s*(?:do\s+not|don'?t|never)\s+[^.?!]*$|^\s*if\s+[^.?!]*\bsay\s+so\b[^.?!]*$"
+    # "If several contracts share the ticker, tell me which contract you selected": a
+    # condition on how to answer, not an ask of its own (live replay 2026-09-25: it was
+    # dispatched as a second holders ask, and the combined answer lost the pipeline's
+    # coverage statement to the web gate). "Tell me when…" stays an alert, not this.
+    r"|^\s*if\s+[^.?!]*\b(?:tell\s+me|say|state|name|report)\s+(?:which|what|that|so|it|whether)\b[^.?!]*$)", re.I | re.S)
 
 
 _CONSTRAINT = re.compile(r"\b(?:without|only|excluding|except|at\s+least|at\s+most|under|over|below|above|between|single[- ]asset|"
@@ -250,6 +255,18 @@ def _shift(trajectory: dict, by: int) -> dict:
         m = re.fullmatch(r"(.+?)_(\d+)", key)
         out[f"{m.group(1)}_{int(m.group(2)) + by}" if m else key] = value
     return out
+
+
+def pipeline_of(results: list[dict]) -> dict:
+    """The pipeline fields a combined answer keeps: when every clause that
+    answered came from the contract pipeline, the combined answer is a
+    contract answer too (its coverage is proved or stated, and the topical
+    gate must not send it to the web), carrying the first clause's contract."""
+    answered = [r for r in results if r.get("answer")]
+    if not answered or any(r.get("pipeline") != "contract" for r in answered):
+        return {}
+    first = next((r["contract"] for r in answered if r.get("contract")), None)
+    return {"pipeline": "contract", **({"contract": first} if first else {})}
 
 
 def combine(parts: list[tuple[str, dict]]) -> tuple[str, dict]:

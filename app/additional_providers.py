@@ -191,6 +191,9 @@ class CoinGeckoProvider:
             chain = _chain(request)
         except ValueError:
             chain = None    # market-wide: the top 250 by market cap, no category
+        from app.contracts import excluded_names
+        if chain and chain in excluded_names(request):
+            chain = None    # "Binance-listed spot tokens, not BNB Chain": never the ruled-out chain's category (live UI test 2026-09-25)
         category = _GAINERS_CATEGORY.get(chain) if chain else None
         if chain and not category:
             raise ValueError(f"CoinGecko gainers/losers has no curated ecosystem category for {chain}")

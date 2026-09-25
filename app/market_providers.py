@@ -209,6 +209,10 @@ class BirdeyeProvider:
         return bool(settings.birdeye_api_key)
 
     def token_overview(self, request: str) -> str:
+        from app import address_roles
+        refusal = address_roles.not_a_token(_address(request))
+        if refusal:
+            raise ValueError(refusal)
         chain = _chain(request)
         with httpx.Client(timeout=settings.provider_request_timeout_seconds) as client:
             response = client.get(

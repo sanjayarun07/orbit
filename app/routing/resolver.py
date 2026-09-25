@@ -36,7 +36,7 @@ from .intent_router import route_capabilities, plan_execution_route, default_cap
 from .instruments import equity_instruments
 from .model import speech_classifier
 from .semantic import SpeechUnderstanding, embedding_router
-from app import deployment, listed_asset, product_actions, snapshot_compare
+from app import answer_audit, deployment, listed_asset, product_actions, snapshot_compare
 from .speech import CONDITIONAL_ORDER_ANSWER, has_competing_speech, is_conditional_order, is_parameter_fragment
 from .trade_parser import extract_cross_chain_draft
 from app.clarify import is_clarification, is_market_text
@@ -298,6 +298,12 @@ async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> d
         # web described marketplaces (funded UI run, 2026-09-23).
         return {"intent": "general", "capabilities": [], "chains": [], "route_source": "rules",
                 "routing_decision": {"method": "rules", "reason": "product_question", "speech_act": "app"}}
+    if not controlled and answer_audit.is_provenance_ask(request):
+        # "Which fact was observed live and which part was an inference?" is
+        # about this conversation's previous answer, read from the session,
+        # never a web search for it (live UI test 2026-09-25).
+        return {"intent": "general", "capabilities": [], "chains": [], "route_source": "rules",
+                "routing_decision": {"method": "rules", "reason": "answer_audit", "speech_act": "app"}}
     if not controlled and _bare_referent(request, state):
         # "What did it do today?" in a fresh chat: "it" points at nothing this
         # conversation holds, so the answer is a question, never a web read

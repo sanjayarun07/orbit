@@ -21,6 +21,36 @@ _TOKEN_WORD = re.compile(r"\b(?:token|coin|contract|mint|memecoin|meme coin|erc-
 _SUBJECT_CORRECTION = re.compile(r"^\s*(?:no,?\s+|sorry,?\s+|actually,?\s+)?i\s+mean(?:t)?\s+(?P<new>\$?[A-Za-z][A-Za-z0-9._-]{1,15})\b\s*(?P<rest>.*)$", re.IGNORECASE | re.DOTALL)
 
 
+_ITEM_LINE = re.compile(r"^\s*(?:\d{1,2}[.)]|[-*•])\s+(.+?)\s*$")
+
+
+def answer_items(answer: str, limit: int = 8) -> list[str]:
+    """The listed items of an answer (numbered or bulleted lines, the
+    written summary only), for the next turn's "which of those" (live UI
+    test 2026-09-25: "which of those events happened in the last 24 hours"
+    brought a different set of events)."""
+    prose = (answer or "").split("\n---\n", 1)[0]
+    items = []
+    for line in prose.splitlines():
+        m = _ITEM_LINE.match(line)
+        if m:
+            text = re.sub(r"\*\*|`|\[(\d+)\]", "", m.group(1)).strip()
+            if len(text) >= 12 and not text.lower().startswith(("time:", "web_discovery", "knowledge", "finance_discovery")):
+                items.append(text[:160])
+    return items[:limit]
+
+
+_THOSE = re.compile(r"\b(?:which|what|how many)\s+of\s+(?:those|these|them)\b|\b(?:those|these)\s+(?:events?|items?|projects?|candidates?|sources?|headlines?|tokens?|ones)\b|\b(?:for|of|about)\s+each\s+(?:candidate|item|one|of\s+(?:those|these|them))\b", re.I)
+
+
+def items_note(request: str, session_context: dict | None) -> str | None:
+    items = (session_context or {}).get("last_items") or []
+    if not items or not _THOSE.search(request or ""):
+        return None
+    listed = "; ".join(f"({i + 1}) {t}" for i, t in enumerate(items))
+    return f"Resolved from conversation context: \"those\" are the items the previous answer listed -- {listed} -- answer about exactly these, in this order; never substitute a different set."
+
+
 def _last_user_request(history: str, current: str, session_context: dict | None = None) -> str | None:
     """The previous user turn: from the session context first (the bounded
     history text drops the user line after a long answer, live 2026-09-24),
@@ -63,12 +93,39 @@ def themed_followup(request: str, conversation_history: str, session_context: di
             f"(\"{previous.strip()}\"), so this asks how {subject} does that -- answer {subject}'s version of that, not what {subject} is in general.")
 
 
+_METRIC_WORDS = {"liquidity", "holders", "holder", "volume", "price", "prices", "pools", "pairs", "supply", "mcap", "marketcap", "fdv", "tvl", "apy", "yield", "yields",
+                 "trades", "buyers", "sellers", "whales", "concentration", "security", "safety", "unlocks", "vesting", "news", "sentiment", "funding", "liquidations"}
+
+
+def metric_corrected_request(request: str, conversation_history: str, session_context: dict | None = None) -> str | None:
+    """'Actually, I meant liquidity, not holders' after '$BONK holders?': the
+    subject stays BONK and the metric changes -- a metric word is never the
+    new subject (live UI test 2026-09-25: it looked up a token called LIQUIDITY)."""
+    from app.routing.subject_probe import subject_of
+    m = _SUBJECT_CORRECTION.match(request or "")
+    if not m or m.group("new").lstrip("$").lower() not in _METRIC_WORDS:
+        return None
+    metric = m.group("new").lstrip("$").lower()
+    focus = (session_context or {}).get("focus") or {}
+    previous = _last_user_request(conversation_history, request, session_context) or ""
+    subject = (focus.get("label") if focus.get("label") and focus.get("label") != "TOKEN" else None) or subject_of(previous)
+    if not subject:
+        return None
+    rest = re.sub(r"^\s*,?\s*not\s+\w+[.,;!]?\s*", "", m.group("rest").strip(" .,;!"), flags=re.I).strip()
+    mint = f" {focus['address']}" if focus.get("kind") == "token" and focus.get("address") else ""
+    chain = f" on {focus['chain']}" if focus.get("chain") else ""
+    return (f"{metric} of {subject}{mint}{chain}" + (f". {rest}" if rest else "") +
+            f"\nResolved from conversation context: the user corrected the metric of the previous request (\"{previous}\") to {metric}; the subject stays {subject}.")
+
+
 def corrected_request(request: str, conversation_history: str, session_context: dict | None = None) -> str | None:
     """The previous request re-targeted at the corrected subject, or None."""
     from app.routing.subject_probe import subject_of
     m = _SUBJECT_CORRECTION.match(request or "")
     if not m:
         return None
+    if m.group("new").lstrip("$").lower() in _METRIC_WORDS:
+        return None                      # a metric correction, not a subject correction (metric_corrected_request)
     previous = _last_user_request(conversation_history, request, session_context)
     if not previous:
         return None
@@ -376,22 +433,34 @@ def resolve_contextual_request(
 
     last = (session_context or {}).get("last_contract") or {}
     from app.tequity import fuzzy_venue
-    names_last_venue = bool(last.get("venue")) and any(fuzzy_venue(w) == last["venue"] for w in re.findall(r"[A-Za-z]{4,}", request))
+    names_last_venue = bool(last.get("venue")) and any(w.lower() == last["venue"] or fuzzy_venue(w) == last["venue"] for w in re.findall(r"[A-Za-z]{4,}", request))
     corrects_last_venue = names_last_venue and re.match(r"\s*(?:i\s+mean|i\s+meant|no,?\s|not\b|only\b|just\b|actually\b)", request, re.I) is not None
-    if last.get("venue") and not focus.get("address") and (continues_subject(request) or corrects_last_venue):
-        # A correction to the previous venue ask ("I meant the past hour",
-        # "then show 24h separately") keeps the venue and the kind; the words
-        # of this turn change only what they say (expanded UI review, 2026-09-24).
-        what = {"market_ranking": "movers", "holders": "holders", "yields": "yields"}.get(last.get("kind"), last.get("kind") or "data")
-        return (f"{request}\nResolved from canonical session context: the previous ask was {what} on {last['venue']}"
-                + (" (tokenized stocks only)" if (last.get("filters") or {}).get("stocks_only") else " (crypto only)" if (last.get("filters") or {}).get("crypto_only") else "")
-                + f"; this continues it on {last['venue']} with the change stated here.")
+    place = last.get("venue") or ((last.get("subject") or {}).get("chain") if last.get("kind") == "market_ranking" else None)
+    if place and not focus.get("address") and (continues_subject(request) or corrects_last_venue):
+        # A correction to the previous ranking ask ("I meant the past hour",
+        # "now make it seven days, same Base DEX scope") keeps the place, the
+        # kind and the metric; the words of this turn change only what they
+        # say. The carried ask leads the request, because the planner reads
+        # the ask and never the note (live UI test 2026-09-25: a seven-day
+        # follow-up on Base gainers became Base DEX volume).
+        direction = last.get("direction")
+        what = {"market_ranking": {"gainers": "gainers", "losers": "losers"}.get(direction, "top movers") if last.get("metric") != "volume" else "most traded pairs",
+                "holders": "holders", "yields": "yields"}.get(last.get("kind"), last.get("kind") or "data")
+        scope = " (tokenized stocks only)" if (last.get("filters") or {}).get("stocks_only") else " (crypto only)" if (last.get("filters") or {}).get("crypto_only") else ""
+        return (f"{what} on {place}{scope}: {request.strip()}"
+                f"\nResolved from canonical session context: the previous ask was {what} on {place}{scope}; this continues it there with only the change stated here.")
+    metric_fix = metric_corrected_request(request, conversation_history, session_context)
+    if metric_fix:
+        return metric_fix
     corrected = corrected_request(request, conversation_history, session_context)
     if corrected:
         return corrected
     themed = themed_followup(request, conversation_history, session_context)
     if themed:
         return themed
+    those = items_note(request, session_context)
+    if those:
+        return f"{request}\n{those}"
     if focus.get("label") and continues_subject(request):
         if focus.get("kind") == "token" and focus.get("address"):
             chain = f" on {focus['chain']}" if focus.get("chain") else ""

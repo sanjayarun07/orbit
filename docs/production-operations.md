@@ -3338,3 +3338,56 @@ are recorded calls, so the public provider-call count is complete.
 
 Review of f603a871 (2026-09-25): a candidate the page budget leaves unread is `not_established` with provenance
 `uninspected`, so the gate covers it; the label check works per clause, not per sentence.
+
+## Live mobile UI edge-case run (2026-09-25): subject-and-scope corrections
+
+`reports/ui-edge-2026-09-25/report.md` (28 turns, signed in, 365 px). Mechanisms from it, with regressions in
+`tests/test_ui_edge_20260925.py`:
+
+- A metric correction keeps the subject: "Actually, I meant liquidity, not holders" after "$BONK holders?" becomes
+  "liquidity of BONK <mint> on solana" (`context_entities.metric_corrected_request`; a metric word is never a new
+  subject -- it had looked up a token called LIQUIDITY).
+- A ranking correction rewrites the ask, not a note: "Now make it seven days, keeping the same Base DEX scope" becomes
+  "gainers on base: …", so the planner keeps the chain, the kind and the metric and reads the new window (the note
+  path had lost the carry once the planner started reading the ask only; number words are windows now).
+- "Which of those…" points at the previous answer's listed items (`context_entities.answer_items` into
+  `last_items`, `items_note`); "What do you actually know?" continues the subject.
+- For an exact-state kind, figures come from state cards only: a discovery card is context (ten web-derived holder
+  percentages had been written under "no holder source was queried"; `evidence_pipeline` passes state cards to the
+  final figure check).
+- An address the request's own words type as a wallet is a wallet for the turn (`address_roles.roles_in_request`,
+  `not_a_token`; Birdeye's overview refuses it -- a token card had been rendered for a wallet).
+- "Is there already an ANSEM exit watch?" reads the user's own watches (`exit_controls._EXISTS`); "what would a 20
+  percent deterioration alert mean for a $2 position" is explained on quoted exit proceeds, with the threshold
+  computed, never on price (`product_actions.deterioration_answer`).
+- The simulation card carries minimum out at the slippage, the route legs and the quote time; "keep it to five rows"
+  is a limit of five, for holders too; a bare "Binance" ranking asks (spot listings, BNB Chain, or Aster perps); the
+  Explore card asks for the global Base-ecosystem category it describes.
+
+The live replay of the eight affected journeys (`reports/ui-edge-2026-09-25/rerun-698e75e6-fixed/`) confirmed the
+liquidity correction, the read-only task answers, the wallet typing and the honest seven-day Base answer, and found
+four more, fixed in the same file's second block of tests:
+
+- A prompt that lists Binance's meanings to ask which is meant has chosen none of them: `contracts.binance_choice`
+  counts the meanings the ask names (spot listings, BNB Chain, perps) minus the ones it rules out, and the ranking
+  asks unless exactly one is left ("BNB Chain tokens" in the list had planned the BNB Chain table). The reply "I mean
+  Binance-listed spot tokens, not BNB Chain" carries the ranking (the venue carry now matches the venue's own word,
+  not only the feed's fuzzy names), rules out BSC (`filters.exclude`), and the CoinGecko gainers tool never reads a
+  ruled-out chain's category, so the nearest ranking is the market-wide one, labelled.
+- "Use only trades executed on Base, not global prices of Base-ecosystem tokens" is the venue-trades scope: an
+  ecosystem word after a negation, or beside a venue-only phrase, never means the global category
+  (`contracts._ecosystem_scope`; the global plan had been gated to the web, which "could not determine" it).
+- The instruction sentences of a message ask nothing: "Do not substitute a token on Base or an app-listed Robinhood
+  stock. What do you actually know?" is the referent question alone (`subject_probe.ask_sentences`, `is_referent`),
+  planned on the carried contract's address and chain from the resolution note (the answer had become the identity
+  of "Robinhood" on Base with the finance search leading).
+- "Which fact was observed live and which part was an inference?" is answered from the session's previous answer
+  (`app/answer_audit.py`, `session_context.last_answer`; routed as `answer_audit`, no tool runs): the cards under the
+  rule with their stamps are the observations; each summary sentence is labelled figures-in-a-card, cited source,
+  interpretation, or a figure no card carries. The web had reported that "the previous answer is not visible".
+
+Open from the run: two-subject comparison ("compare its liquidity with the Solana SPX only if both contracts are
+identified") and the chart embed's instrument identity; the dual-token "cite a primary source for each candidate"
+follow-up now points at the listed candidates but is not re-measured; the news referent stability is covered by the
+same `last_items` mechanism and needs its live check; "Now switch to Robinhood Chain memes" is answered by the legacy
+web path as a chatty summary and is not yet a contract.

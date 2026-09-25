@@ -1,0 +1,42 @@
+{
+  "format-and-recovery": [
+    "$BONK holders? Keep the answer to five rows and cite the source time.",
+    "Actually, I meant liquidity, not holders. Show the pool and chain.",
+    "For the previous answer, which fact was observed live and which part was an inference?"
+  ],
+  "scope-and-freshness": [
+    "Top gainers on Base in the last 24h. Use only trades executed on Base, not global prices of Base-ecosystem tokens.",
+    "If you cannot verify Base-venue gainers, show the nearest ranking but label its scope clearly.",
+    "Now make it seven days. Do not reuse the 24-hour table."
+  ],
+  "alerts-and-tasks-readonly": [
+    "Show my active alerts, watches, and scheduled briefs. Include each trigger and frequency.",
+    "Is there already an ANSEM exit watch? If yes, show its threshold and last quote time.",
+    "What would a 20 percent deterioration alert mean for a $2 position? Do not create another watch."
+  ],
+  "wallet-versus-token": [
+    "Who are the ten largest ANSEM holders on Solana? Separate token accounts from people and mark pools or exchange wallets as unknown unless proved.",
+    "Is the largest account the deployer? Show the transaction or say it is not established.",
+    "What does public wallet 3aHLqHsvw3gPxnq1fVEYG6P3pCcxkGo3ETSkQGE4KZkS hold now? Treat it as a wallet, not the ANSEM mint."
+  ],
+  "trader-quote-boundary": [
+    "Price-check selling 0.05 SOL into USDC at 50 bps on Solana. Show quoted proceeds, minimum out, route, and quote time; do not place a trade.",
+    "Can I execute that exact quote without connecting a wallet?",
+    "If the route changes before I approve, will the old quote still be guaranteed?"
+  ],
+  "provider-and-ambiguity": [
+    "Meme tokens on Binance are moving. Do you mean Binance-listed spot tokens, BNB Chain tokens, or Aster perps? Ask before ranking if the venue is unclear.",
+    "I mean Binance-listed spot tokens, not BNB Chain. What can you verify now?",
+    "Now switch to Robinhood Chain memes. Do not reuse the Binance scope."
+  ],
+  "news-event-time": [
+    "What happened to Solana in the last 24 hours? Give event times, not just article update times.",
+    "Which of those items happened yesterday versus was only published yesterday?",
+    "If the newest source is older than 24 hours, say the window is uncovered."
+  ],
+  "namesake-and-chain": [
+    "Top 10 holders of MUSEBOOK on Robinhood Chain. If several contracts share the ticker, tell me which contract you selected.",
+    "Use 0x91A2DAe9699f0B82540B5886b0d8759C22820bA3 exactly. Are holder positions available for it?",
+    "Do not substitute a token on Base or an app-listed Robinhood stock. What do you actually know?"
+  ]
+}

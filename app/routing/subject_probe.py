@@ -128,7 +128,8 @@ _INDEFINITE = re.compile(r"\b(?:a|an|any|some|every)\s+(?:wallet|address|token|c
 _REFERENT = re.compile(r"^\s*(?:and\s+|so\s+|but\s+|ok,?\s+)?(?:(?:(?:what|which|how|when|where|why)\s+)?(?:does|do|is|was|did|will|would|can|could|has|have|which\s+part\s+of|what\s+part\s+of|how\s+much\s+of)\s+(?:that|this|it|those|these)\b"
                        r"|(?:which|what)\s+(?:parts?|portion|bits?|of\s+those|of\s+these|of\s+them|ones?)\b"
                        r"|(?:what|which|how|who)\b[^?]{0,40}?\b(?:since|after|before|from|about)\s+(?:then|that|this|it)\b"
-                       r"|(?:what|anything)(?:'s|\s+is|\s+has)?\s+(?:changed|new|different|happened|moved)\s*[?.!]?\s*$)", re.I)     # a bare "What changed?" points at the previous subject; with none it is a question (2026-09-24: it explained DeFi yields)     # "What is different since then?" points at the previous answer     # "Which part was in the order and which is your inference?" partitions the previous answer
+                       r"|(?:what|anything)(?:'s|\s+is|\s+has)?\s+(?:changed|new|different|happened|moved)\s*[?.!]?\s*$"
+                       r"|what\s+(?:do|did|can)\s+you\s+(?:actually|really|truly)?\s*(?:know|find|see|verify|observe)\b)", re.I)     # "What do you actually know?" is about the subject at hand     # a bare "What changed?" points at the previous subject; with none it is a question (2026-09-24: it explained DeFi yields)     # "What is different since then?" points at the previous answer     # "Which part was in the order and which is your inference?" partitions the previous answer
 
 
 # "What does this mean for the market: Bitcoin and Ethereum ETFs see $592
@@ -138,10 +139,31 @@ _REFERENT = re.compile(r"^\s*(?:and\s+|so\s+|but\s+|ok,?\s+)?(?:(?:(?:what|which
 _INLINE_REFERENT = re.compile(r"[:\u2014-]\s*\S+(?:\s+\S+){2,}")
 
 
+# "Do not substitute a token on Base or an app-listed Robinhood stock. What do
+# you actually know?": the first sentence instructs, it asks nothing; the
+# names in it are what NOT to read (live UI test 2026-09-25: the answer
+# became the identity of "Robinhood" on Base).
+_INSTRUCTION = re.compile(r"^\s*(?:please\s+)?(?:do\s+not|don'?t|never|avoid|use\s+only|only\s+use|keep|cite|label|mark|flag|treat|exclude|separate|distinguish|"
+                          r"if\s+[^.?!]*\bsay\b)\b", re.I)
+_SENTENCES = re.compile(r"(?<=[.?!])\s+")
+
+
+def ask_sentences(text: str) -> list[str]:
+    """The sentences of a message that ask something: the instruction
+    sentences ("Do not substitute…", "Cite the source time") are dropped."""
+    parts = [s.strip() for s in _SENTENCES.split((text or "").strip()) if s.strip()]
+    return [s for s in parts if not _INSTRUCTION.match(s)]
+
+
 def is_referent(text: str) -> bool:
     """A pronoun question that points at the previous answer, with nothing
-    after a colon or dash that explains the pronoun itself."""
-    return bool(_REFERENT.match(text or "")) and not _INLINE_REFERENT.search(text or "")
+    after a colon or dash that explains the pronoun itself. A message whose
+    only asking sentence is such a question is one too, whatever the
+    instruction sentences around it name."""
+    if bool(_REFERENT.match(text or "")) and not _INLINE_REFERENT.search(text or ""):
+        return True
+    asks = ask_sentences(text)
+    return bool(asks) and len(asks) < len(_SENTENCES.split((text or "").strip())) and all(_REFERENT.match(s) and not _INLINE_REFERENT.search(s) for s in asks)
 
 
 def continues_subject(request: str) -> bool:

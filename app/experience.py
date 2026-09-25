@@ -277,9 +277,22 @@ def advance_session_context(
     workflow_draft: CrossChainSwapDraft | None = None,
     last_contract: dict | None = None,
     research_objective: str | None = "__keep__",
+    answer: str | None = None,
 ) -> dict:
     """Create the next canonical context snapshot after one completed turn."""
     context = dict(previous or {})
+    if answer is not None:
+        # The items the answer listed, for "which of those" next turn.
+        from app.context_entities import answer_items
+        items = answer_items(answer)
+        if items:
+            context["last_items"] = items
+        else:
+            context.pop("last_items", None)
+        # The answer itself, for "which fact was observed live and which was
+        # an inference?" next turn (app/answer_audit.py); the bounded history
+        # text can drop a long answer.
+        context["last_answer"] = answer[:12000]
     if research_objective != "__keep__":
         # The conversation's research objective (app/research_objective.py): set, refined or ended by this turn.
         if research_objective:

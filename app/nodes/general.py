@@ -84,6 +84,9 @@ async def general_node(state: AgentState) -> dict:
     if state.get("clarification"):
         return {"answer": state["clarification"], "trajectory": None}
     request = state["request"]
+    if (state.get("routing_decision") or {}).get("reason") == "answer_audit":
+        from app import answer_audit
+        return {"answer": answer_audit.audit((state.get("session_context") or {}).get("last_answer")), "trajectory": None}
     if (state.get("routing_decision") or {}).get("speech_act") == "policy" and _about_orbits_policy(request):
         # The policy card answers questions about Orbit's own trading policy;
         # "Does that automatically authorize Robinhood Chain today?" is about

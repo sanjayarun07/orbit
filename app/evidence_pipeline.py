@@ -380,7 +380,12 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
             synthesized = synthesized.rstrip() + "\n\n**Not in the sources fetched**: " + ", ".join(unsourced) + " -- named from general knowledge; verify before relying on them."
 
     lead = gate.gap_sentence(contract)
-    final = fact_gate.check(contract, fact_rows, synthesized, scope_satisfied=scope_satisfied, evidence_text=cards)
+    # For an exact-state kind (holders, rankings, yields) a discovery card is
+    # context, never a source of figures: ten web-derived holder percentages
+    # were written under a line saying no holder source was queried (live UI
+    # test 2026-09-25). The figure check reads state cards only.
+    state_cards = "\n\n".join(text for text, traj in parts if not (cov.get(traj.get("tool_name_0")) or {}).get("discovery")) if contract.kind != contracts.OPEN_RESEARCH_KIND else cards
+    final = fact_gate.check(contract, fact_rows, synthesized, scope_satisfied=scope_satisfied, evidence_text=state_cards)
     if final.unsupported or final.contradictions:
         # The claim check found figures no fact carries, or a comparison the
         # numbers deny ("7,719 below a prior 7,706"): one rewrite without them,
@@ -392,7 +397,7 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
             redo += f"These comparisons contradict their own numbers, rewrite them correctly or drop them: {'; '.join(final.contradictions)}."
         rewritten = await composition.synthesize(redo, cards, trajectory)
         if rewritten:
-            again = fact_gate.check(contract, fact_rows, rewritten, scope_satisfied=scope_satisfied, evidence_text=cards)
+            again = fact_gate.check(contract, fact_rows, rewritten, scope_satisfied=scope_satisfied, evidence_text=state_cards)
             if len(again.unsupported) + len(again.contradictions) < len(final.unsupported) + len(final.contradictions):
                 synthesized, final = rewritten, again
     answer_text = synthesized

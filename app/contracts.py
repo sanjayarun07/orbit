@@ -179,7 +179,43 @@ _EXIT_ASK = re.compile(r"\bexit\b.{0,40}\bposition\b|\bexit\s+(?:quotes?|analysi
 _EXPLANATION_ASK = re.compile(r"^\s*(?:how\s+(?:does|do|is|to)|what\s+is|what\s+are|explain|why)\b(?!.{0,60}\b\d+(?:\.\d+)?\s*[A-Z]{2,10}\b)", re.I)
 _TRADES_ON = re.compile(r"\b(?:trades?|trading|traded|volume|pairs?|pools?|dex(?:es)?)\s+on\b|\bon[- ]venue\b|\bvenue\b", re.I)
 _ECOSYSTEM = re.compile(r"\becosystem\b|\bassociated\s+with\b|\bglobal\b", re.I)
-_WINDOW = re.compile(r"\b(?:last|past|previous)\s+(\d+)\s*(h(?:ours?)?|d(?:ays?)?|w(?:eeks?)?|m(?:in(?:utes?)?)?)\b|\b(?:over|in|within)?\s*(\d+)\s*(h|d|w|m)\b|\b(24\s*h(?:ours)?|this\s+week|past\s+week|last\s+week|today|this\s+morning|this\s+month|7d|30d|"
+# "Use only trades executed on Base, not global prices of Base-ecosystem
+# tokens": the ecosystem words after a negation are what the user does NOT
+# want (live UI test 2026-09-25: the ask planned as the global ranking, the
+# gate then sent it to the web, which "could not determine" it).
+_NEGATION_BEFORE = re.compile(r"\b(?:not|no|never|excluding|except|rather\s+than|instead\s+of|without)\b[^.,;:]*$", re.I)
+_VENUE_ONLY = re.compile(r"\bonly\s+(?:trades|swaps)\b|\btrades\s+(?:executed|made|done|filled)\s+on\b|\bexecuted\s+on\b|\b(?:on-chain|dex|venue)\s+trades\b", re.I)
+
+
+def _ecosystem_scope(text: str) -> bool:
+    """Whether the ask means the global (ecosystem-category) ranking: an
+    ecosystem word that is not negated, and no venue-only phrase."""
+    if _VENUE_ONLY.search(text or ""):
+        return False
+    return any(not _NEGATION_BEFORE.search((text or "")[max(0, m.start() - 40):m.start()]) for m in _ECOSYSTEM.finditer(text or ""))
+
+
+# "Binance" is three different asks -- the exchange's spot listings, BNB
+# Chain tokens, Aster perps -- and the ask settles on one only when it names
+# exactly one of them (live UI test 2026-09-25: a prompt that listed all
+# three to ask which was meant got the BNB Chain table).
+_BINANCE_SPOT = re.compile(r"\bbinance[- ]listed\b|\bbinance\s+spot\b|\bspot\s+(?:tokens?|listings?|markets?|pairs?)\b|\blistings?\b|\blisted\b", re.I)
+_BNB_CHAIN = re.compile(r"\bbnb\s+chain\b|\bbsc\b|\bbinance\s+smart\s+chain\b", re.I)
+_PERPS = re.compile(r"\bperps?\b|\bperpetuals?\b|\bfutures\b", re.I)
+
+
+def binance_choice(text: str, chain: str | None, excluded: set[str]) -> str | None:
+    """'spot', 'bsc' or 'perps' when the ask names exactly one meaning of
+    Binance (a ruled-out one does not count); None when none or several."""
+    named: set[str] = set()
+    if _BINANCE_SPOT.search(text or ""):
+        named.add("spot")
+    if chain == "bsc" or (_BNB_CHAIN.search(text or "") and "bsc" not in excluded):
+        named.add("bsc")
+    if _PERPS.search(text or "") or (re.search(r"\baster\b", text or "", re.I) and "aster" not in excluded):
+        named.add("perps")
+    return named.pop() if len(named) == 1 else None
+_WINDOW = re.compile(r"\b(?:last|past|previous)\s+(\d+)\s*(h(?:ours?)?|d(?:ays?)?|w(?:eeks?)?|m(?:in(?:utes?)?)?)\b|\b(?:over|in|within)?\s*(\d+)\s*(h(?:ours?)?|d(?:ays?)?|w(?:eeks?)?|m(?:in(?:utes?)?)?)\b|\b(24\s*h(?:ours)?|this\s+week|past\s+week|last\s+week|today|this\s+morning|this\s+month|7d|30d|"
                      r"(?:past|last|previous)[- ]hour|(?:one|an)\s+hour\s+ago|hourly|60\s*m|since\s+yesterday|yesterday)\b", re.I)
 _STOCKS = re.compile(r"\b(?:tokeni[sz]ed\s+)?(?:stocks?|equit(?:y|ies)|shares)\b", re.I)
 # "Aster perpetual contracts, not Nasdaq shares" contrasts the instrument
@@ -189,11 +225,26 @@ _SHARES_VS_PERPS = re.compile(r"\b(?:perps?|perpetuals?|perpetual\s+contracts?|c
 _NO_STOCKS = re.compile(r"\b(?:excluding|exclude|without|no|not|minus)\s+(?:the\s+)?(?:tokeni[sz]ed\s+|nasdaq\s+|nyse\s+)?(?:stocks?|equit(?:y|ies)|shares)\b|\bcrypto\s+only\b|\bperpetual\s+contracts?\b.{0,30}\bnot\b.{0,20}\bshares\b|\bcrypto\s+(?:\w+\s+){0,2}only\b|\b(?:crypto|coin)\s+(?:perps?|perpetuals?|contracts?|pairs?|tokens?|coins?)\b", re.I)
 _SINGLE = re.compile(r"\b(?:without\s+(?:exposing\s+me\s+to\s+)?(?:another|other|any|a)\s+(?:volatile\s+)?(?:token|asset|coin)s?|single[- ]asset|no\s+(?:il|impermanent\s+loss))\b", re.I)
 _MIN_LIQ = re.compile(r"(?:at\s+least|over|above|minimum(?:\s+of)?|min)\s+\$?\s*([\d,]+(?:\.\d+)?)\s*([kKmM]?)\s*(?:in\s+)?(?:liquidity|tvl)", re.I)
-_LIMIT = re.compile(r"\btop\s+(\d{1,3})\b", re.I)
+_NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "twelve": 12, "fifteen": 15, "twenty": 20}
+_LIMIT = re.compile(r"\btop\s+(\d{1,3})\b|\b(?:top|first|only|limit(?:ed)?\s+to|keep\s+(?:it|the\s+answer)\s+to|at\s+most|max(?:imum)?\s+of)\s+(\d{1,3}|" + "|".join(_NUMBER_WORDS) + r")\s+(?:rows?|holders?|entries|results?|tokens?|pairs?|pools?|items?|names?)\b", re.I)
+
+
+def _limit_of(text: str) -> int:
+    m = _LIMIT.search(text or "")
+    if not m:
+        return 10
+    raw = (m.group(1) or m.group(2) or "").lower()
+    return int(raw) if raw.isdigit() else _NUMBER_WORDS.get(raw, 10)
 _ADDRESS = re.compile(r"(?<![A-Za-z0-9])(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])")
 
 
+_WORD_NUMBERS = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+                 "twelve": "12", "fourteen": "14", "thirty": "30", "sixty": "60", "ninety": "90"}
+
+
 def _window_hours(text: str) -> float | None:
+    # "seven days", "the last three hours": number words are numbers here (live UI test 2026-09-25: "make it seven days" kept 24h)
+    text = re.sub(r"\b(" + "|".join(_WORD_NUMBERS) + r")\s+(?=(?:h(?:ours?)?|d(?:ays?)?|w(?:eeks?)?|m(?:in(?:utes?)?)?)\b)", lambda m: _WORD_NUMBERS[m.group(1).lower()] + " ", text or "", flags=re.I)
     m = _WINDOW.search(text or "")
     if not m:
         return None
@@ -291,6 +342,14 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
     body, notes = split_notes(text)
     headline = re.search(r'Home news headline "([^"]+)"', notes or "")
     text = body or text
+    from app.routing.subject_probe import _REFERENT, ask_sentences, is_referent
+    referent = is_referent(text)
+    if referent and not _REFERENT.match(text):
+        # "Do not substitute a token on Base or an app-listed Robinhood stock.
+        # What do you actually know?": the ask is the referent sentence; the
+        # instruction sentences name what NOT to read (live UI test 2026-09-25:
+        # the answer became the identity of "Robinhood" on Base).
+        text = " ".join(ask_sentences(text))
     chain, venue = _chain_of(text), _venue_of(text)
     if venue in ("hyperliquid",) and chain == "hyperliquid":
         chain = None
@@ -304,6 +363,11 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
         if named and " " not in named and named.isupper():
             symbol = named                 # "holders of musebook": a lowercase token name in a token position (2026-09-24)
     address = _ADDRESS.search(text)
+    if referent and not address and notes:
+        # "What do you actually know?" after a contract was pinned: the carried
+        # token (its address and chain, from the resolution note) is the subject.
+        address = _ADDRESS.search(notes)
+        chain = chain or (_chain_of(notes) if address else None)
     filters: dict = {}
     excluded = excluded_names(text)
     if excluded:
@@ -320,7 +384,8 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
     if liq:
         value = float(liq.group(1).replace(",", "")) * {"k": 1e3, "m": 1e6}.get(liq.group(2).lower(), 1)
         filters["min_liquidity_usd"] = value
-    limit = int(_LIMIT.search(text).group(1)) if _LIMIT.search(text) else 10
+    limit = _limit_of(text)     # "keep the answer to five rows" is a limit of five (live UI test 2026-09-25: fifteen rows)
+    stated_limit = _LIMIT.search(text) is not None
     window = _window_hours(text)
     if headline:
         # A follow-up about a Home headline is research on that story; the
@@ -389,11 +454,28 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
                                 venue=venue, scope="venue_trades", metric="liquidity", unit="usd", window_hours=window or 24.0, direction="top",
                                 limit=limit, filters=filters, freshness_seconds=3600, evidence_order="state_first",
                                 required_facts=["ranking_row"], confidence=0.6, planner="rules")
+    if _RANKING.search(text) and not _HOLDERS.search(text) and not explanation and venue == "binance":
+        # "Meme tokens on Binance are moving": the exchange's spot listings, BNB
+        # Chain tokens, or Aster perps are different asks (live UI test 2026-09-25:
+        # the user asked to be asked and got a BNB Chain table). A prompt that
+        # lists the meanings to ask which is meant has chosen none of them.
+        choice = binance_choice(text, chain, excluded)
+        metric = "volume" if re.search(r"\b(?:most\s+traded|by\s+volume|volume\s+leaders?|top\s+volume)\b", text, re.I) else "price_change"
+        direction = "losers" if _LOSERS.search(text) else "gainers" if metric == "price_change" else "top"
+        if choice is None:
+            return QuestionContract(kind="market_ranking", subject=Subject(kind="venue", name="binance"), venue="binance", scope="venue_trades", metric=metric,
+                                    window_hours=window or 24.0, direction=direction, limit=limit, filters=filters,
+                                    ambiguity="Binance can mean three things here: Binance-listed spot tokens, tokens on BNB Chain, or Aster perpetuals. Which one?",
+                                    planner="rules", confidence=0.5)
+        if choice == "bsc":
+            venue, chain = None, "bsc"                    # the chain's tokens, not the exchange
+        elif choice == "perps":
+            filters["perps"] = True
     if _RANKING.search(text) and not _HOLDERS.search(text) and not explanation:
         metric = "volume" if re.search(r"\b(?:most\s+traded|by\s+volume|volume\s+leaders?|top\s+volume)\b", text, re.I) else "price_change"
         scope: Scope = "any"
         if chain or venue:
-            scope = "global" if _ECOSYSTEM.search(text) else "venue_trades"
+            scope = "global" if _ecosystem_scope(text) else "venue_trades"
         return QuestionContract(kind="market_ranking", subject=Subject(kind="venue" if venue else "chain" if chain else "market", name=venue or chain, chain=chain),
                                 venue=venue, scope=scope, metric=metric, unit="pct" if metric == "price_change" else "usd",
                                 window_hours=window or 24.0, direction="losers" if _LOSERS.search(text) else "gainers" if metric == "price_change" else "top",
@@ -401,7 +483,7 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
                                 required_facts=["ranking_row"], confidence=0.6, planner="rules")
     if _HOLDERS.search(text) and (symbol or address):
         return QuestionContract(kind="holders", subject=Subject(kind="token", id=address.group(1) if address else None, symbol=symbol, chain=chain),
-                                scope="on_chain", metric="holders", unit="pct", limit=max(limit, 10), filters=filters, freshness_seconds=3600,
+                                scope="on_chain", metric="holders", unit="pct", limit=limit if stated_limit else max(limit, 10), filters=filters, freshness_seconds=3600,
                                 evidence_order="state_first", required_facts=["holder_row"], confidence=0.6, planner="rules")
     if _YIELDS.search(text) and not _EVENTS.search(text):
         return QuestionContract(kind="yields", subject=Subject(kind="token", symbol=symbol, chain=chain), scope="global", metric="apy", unit="pct",
@@ -410,15 +492,13 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
     # previous answer; "today" is not a window and the ask is not a list of
     # events (expanded journeys, 2026-09-24: gated as "no event in the last
     # day"). A referent question is open research on the carried subject.
-    from app.routing.subject_probe import is_referent
-    referent = is_referent(text)
     if _EVENTS.search(text) and not _RANKING.search(text) and not referent:
         return QuestionContract(kind="recent_events", subject=Subject(kind="topic", symbol=symbol, name=None, chain=chain), scope="any", metric="events",
                                 window_hours=window or 24 * 30, freshness_seconds=3 * 86400, evidence_order="discovery_first",
                                 required_facts=["event"], confidence=0.5, planner="rules")
     if is_open_research(text) or referent:
         from app.routing.subject_probe import subject_of
-        return QuestionContract(kind="open_research", subject=Subject(kind="topic", symbol=symbol, name=None if symbol else subject_of(text), chain=chain), scope="any", metric="events",
+        return QuestionContract(kind="open_research", subject=Subject(kind="topic", id=address.group(1) if address else None, symbol=symbol, name=None if symbol else subject_of(text), chain=chain), scope="any", metric="events",
                                 window_hours=None if referent else window, filters=filters, freshness_seconds=7 * 86400, evidence_order="discovery_first",
                                 required_facts=["source"], confidence=0.5, planner="rules")
     return QuestionContract(kind="other", planner="rules", confidence=0.3)

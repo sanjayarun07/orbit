@@ -159,6 +159,27 @@ FEED_COVERAGE = ("The Tequity feed covers Aster and Hyperliquid pairs: live snap
                  "(about every 5 minutes) for any window from 30 minutes to 30 days inside its span. Ask `what does your feed cover` for the live span.")
 
 
+_DETERIORATION = re.compile(r"\b(?P<pct>\d{1,2}(?:\.\d+)?)\s*(?:%|percent)\s+(?:deterioration|decline|drop|worse|worsening)\b.{0,60}?\b(?:alert|watch|rule|threshold)\b.{0,80}?\$\s*(?P<usd>\d[\d,]*(?:\.\d+)?)\s*(?:position|stake|bag|holding)?"
+                            r"|\b(?:alert|watch|rule|threshold)\b.{0,60}?\b(?P<pct2>\d{1,2}(?:\.\d+)?)\s*(?:%|percent)\s+(?:deterioration|decline|drop|worse|worsening)\b.{0,80}?\$\s*(?P<usd2>\d[\d,]*(?:\.\d+)?)", re.I | re.S)
+
+
+def deterioration_answer(request: str) -> str | None:
+    """What an N% deterioration alert means for a $X position: the alert is
+    on quoted exit proceeds, never on the token's price (live UI test
+    2026-09-25: a 20% deterioration was explained as a 20% price fall)."""
+    m = _DETERIORATION.search(request or "")
+    if not m:
+        return None
+    pct = float(m.group("pct") or m.group("pct2"))
+    usd = float((m.group("usd") or m.group("usd2")).replace(",", ""))
+    threshold = usd * (1 - pct / 100)
+    return (f"A {pct:g}% deterioration alert watches the **quoted exit proceeds**, not the token price. Orbit re-takes a full-exit quote for your "
+            f"position on a schedule and compares it with the baseline quote taken when the watch started. For a position whose full exit quoted "
+            f"${usd:,.2f} at the baseline, the alert fires when a full exit quotes below **${threshold:,.2f}** ({pct:g}% less), whatever moved it: "
+            f"price, liquidity or route. A price fall of {pct:g}% does not fire it by itself if the quote holds, and thinning liquidity can fire it "
+            f"without the price moving. Nothing was created by this question.")
+
+
 def home_headlines_answer(request: str) -> str:
     from app import home_highlights
     data = home_highlights.get_highlights()
@@ -191,7 +212,7 @@ def is_product_question(request: str) -> bool:
     """A question about what this product does or how to use it, or about one
     of its own concepts (an exit watch, marked value against sale proceeds)."""
     text = request or ""
-    if _FIND_CHAT.search(text) or _EXIT_WATCH_MEANING.search(text) or _MARKED_VS_PROCEEDS.search(text) or _WALLET_VIEW.search(text) or _asks_quote_failure_behaviour(text) or _HOME_HEADLINES.search(text) or _FEED_COVERAGE.search(text):
+    if _FIND_CHAT.search(text) or _EXIT_WATCH_MEANING.search(text) or _MARKED_VS_PROCEEDS.search(text) or _WALLET_VIEW.search(text) or _asks_quote_failure_behaviour(text) or _HOME_HEADLINES.search(text) or _FEED_COVERAGE.search(text) or _DETERIORATION.search(text):
         return True
     return bool(_WHAT_CAN.search(text)) and not re.search(r"\b(?:price|holders?|liquidity|volume|market\s+cap|tvl)\b", text, re.I)
 
@@ -221,6 +242,8 @@ def answer(request: str) -> str:
         return home_headlines_answer(text)
     if _FEED_COVERAGE.search(text):
         return FEED_COVERAGE
+    if _DETERIORATION.search(text):
+        return deterioration_answer(text)
     if _WHAT_CAN.search(text) and not parts:
         return WHAT_CAN
     if not parts:

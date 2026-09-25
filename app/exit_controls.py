@@ -21,6 +21,9 @@ _STOP = re.compile(rf"^\s*(?:stop|cancel|end)\s+(?:watching|monitoring|tracking)
 _ASK = re.compile(rf"^\s*(?:(?:exit\s+analysis|exit\s+check)\s+(?:for|on)\s+{_TOKEN}|can\s+i\s+(?:still\s+)?(?:exit|get\s+out\s+of)\s+(?:my\s+)?{_TOKEN}(?:\s+position)?(?:\s+(?:in|from|with)\s+(?:the|my)\s+connected\s+wallet)?"
                   rf"|how(?:'s|\s+is)\s+my\s+exit\s+(?:on|for|in)\s+{_TOKEN}|what\s+would\s+(?:a\s+)?(?:full|25%|50%|half|100%)?\s*exit\s+(?:of|from)\s+(?:my\s+)?{_TOKEN}\s+(?:return|get\s+me))\s*[?.!]?(?:\s.*)?$", re.I | re.S)
 _LIST = re.compile(r"^\s*(?:show|list|what\s+are)\s+(?:me\s+)?my\s+(?:exits|watched\s+positions|exit\s+monitors)\s*\??\s*$", re.I)
+# "Is there already an ANSEM exit watch?", "do I have an exit watch on BONK?": the user's own watches, never public commentary (live UI test 2026-09-25)
+_NAMED_TOKEN = r"(?!exit\b|watch\b|my\b)" + _TOKEN
+_EXISTS = re.compile(rf"^\s*(?:is\s+there\s+(?:already\s+)?(?:an?\s+)?(?:{_NAMED_TOKEN}\s+)?(?:exit\s+)?watch(?:\s+(?:on|for|in)\s+{_NAMED_TOKEN})?|(?:do|did)\s+i\s+(?:already\s+)?have\s+(?:an?\s+)?(?:{_NAMED_TOKEN}\s+)?(?:exit\s+)?watch(?:\s+(?:on|for|in)\s+{_NAMED_TOKEN})?|am\s+i\s+(?:already\s+)?watching\s+(?:my\s+)?(?:{_NAMED_TOKEN}\s+)?exit(?:\s+(?:on|for|in)\s+{_NAMED_TOKEN})?)\b.*$", re.I | re.S)
 # "tell me when the discount on my full-position exit quote exceeds 5%",
 # "alert me when my BONK exit drops 10%", "email me when my exit on WIF falls 15%"
 _THRESHOLD = re.compile(
@@ -75,7 +78,7 @@ def is_public_control(message: str) -> bool:
 
 
 def is_exit_control(message: str) -> bool:
-    return any(p.match(message or "") for p in (_WATCH, _STOP, _ASK, _LIST, _THRESHOLD, _CHANNEL, _SIZES, _CHANGED, _SIZED_EXIT)) \
+    return any(p.match(message or "") for p in (_WATCH, _STOP, _ASK, _LIST, _THRESHOLD, _CHANNEL, _SIZES, _CHANGED, _SIZED_EXIT, _EXISTS)) \
         or bool(_EXIT_ESTIMATE.search(message or "")) or bool(_READ_ONLY.match(message or ""))
 
 
@@ -251,6 +254,24 @@ async def handle(message: str, user: dict | None, wallet: str | None, focus: dic
         return await _sized_exit(text, m, focus)
     if user is None and not _SIZES.match(text):
         return "Sign in to use exit monitors and alerts; the sizing comparison works without an account."
+    m = _EXISTS.match(text)
+    if m:
+        token = next((g for g in m.groups() if g), None)
+        rows = [p for p in await exit_monitor.list_for(user["id"]) if p["status"] == "active"]
+        if token:
+            key = _clean(token).lower()
+            rows = [p for p in rows if key in {str(p.get("symbol") or "").lower(), str(p.get("mint") or "").lower()}]
+        if not rows:
+            return (f"No, there is no active exit watch{' on ' + _clean(token).lstrip('$') if token else ''} on this account. "
+                    "Say `watch my exit on <token>` with a connected Solana wallet to start one; the Tasks screen lists every watch.")
+        lines = ["Yes -- active exit watch" + ("es" if len(rows) > 1 else "") + ":"]
+        for p in rows:
+            full = exit_monitor.full_exit((p.get("entry") or {}).get("rows") or [])
+            latest = (p.get("history") or [{}])[-1] if p.get("history") else {}
+            lines.append(f"- **{p.get('symbol') or p['mint'][:6]}** in `{p['wallet'][:6]}…{p['wallet'][-4:]}` since {(p['created_at'] or '')[:10]}"
+                         + (f" · full exit quoted {exit_monitor._usd(full['quoted_usdc'])} at entry" if full else "") + _rules_text(p.get("rules") or {})
+                         + (f" · last quote {str(latest.get('at') or latest.get('taken_at') or '')[:16]}" if latest else ""))
+        return "\n".join(lines)
     if _LIST.match(text):
         rows = [p for p in await exit_monitor.list_for(user["id"]) if p["status"] == "active"]
         if not rows:

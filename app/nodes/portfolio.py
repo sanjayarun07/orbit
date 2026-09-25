@@ -3,6 +3,7 @@ from app.nodes import runtime
 from app.tracing import trace
 import asyncio
 import re
+from datetime import datetime, timezone
 from app.context_entities import extract_token_reference
 from app.plans import simulate_swap
 from app.portfolio import build_portfolio_snapshot
@@ -321,11 +322,25 @@ async def _portfolio_node(state: AgentState) -> dict:
                 in_value = f" (${sim['input_value_usd']:,.2f})" if sim["input_value_usd"] is not None else ""
                 out_value = f" (${sim['output_value_usd']:,.2f})" if sim["output_value_usd"] is not None else ""
                 out_amount = f"{sim['output_amount']:,.6g}" if sim["output_amount"] is not None else "an unknown amount of"
+                quote = sim.get("quote") or {}
+                decimals = getattr(sim["output_token"], "decimals", None)
+                try:
+                    min_raw = int(quote.get("otherAmountThreshold") or 0)
+                    min_out = f"{min_raw / (10 ** decimals):,.6g} {sim['output_token'].symbol}" if decimals is not None and min_raw else None
+                except (TypeError, ValueError):
+                    min_out = None
+                legs = [((leg.get("swapInfo") or {}).get("label") or "?") for leg in (quote.get("routePlan") or []) if isinstance(leg, dict)]
+                route = " → ".join(legs) if legs else None
+                slippage = quote.get("slippageBps")
+                quoted_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                 answer = (
                     f"**This is a simulation only -- nothing has been prepared or submitted.**\n\n"
                     f"Selling **{sim['input_amount']:,.6g} {sim['input_token'].symbol}**{in_value} would get you "
                     f"approximately **{out_amount} {sim['output_token'].symbol}**{out_value} at the current Jupiter "
                     f"quote, with an estimated **{sim['price_impact_pct']:.2f}% price impact**.\n\n"
+                    f"- **Minimum out**: {min_out or 'not returned by the quote'}" + (f" at {int(slippage)} bps slippage" if slippage and min_out else "") + "\n"
+                    f"- **Route**: {route or 'not returned by the quote'}\n"
+                    f"- **Quote time**: {quoted_at}\n\n"
                     f"This is a live quote, not a guarantee -- the actual amount at execution time can differ with "
                     f"market movement and slippage."
                 )
