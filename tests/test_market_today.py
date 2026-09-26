@@ -59,9 +59,10 @@ def test_market_today_combines_independent_sources_without_repeating_search_pros
     def search(query, *, recency_days):
         assert recency_days == 2
         axis = "news" if "developments" in query else "flows"
+        today = datetime.now(timezone.utc)                                   # the lead's URL must carry its own publication date: today's, like the stamp
         return {"text": "Unsupported claim: BTC rose because of this.", "sources": [{
-            "title": "Direct " + axis + " report", "url": "https://example.com/2026/09/25/" + axis + "/story",
-            "date": datetime.now(timezone.utc).date().isoformat(),
+            "title": "Direct " + axis + " report", "url": "https://example.com/" + today.strftime("%Y/%m/%d") + "/" + axis + "/story",
+            "date": today.date().isoformat(),
         }]}
     monkeypatch.setattr(market_today.perplexity_tools, "perplexity_search_with_sources", search)
     answer, trajectory = asyncio.run(market_today.compose("How's the crypto market today?"))
