@@ -72,3 +72,51 @@ def test_which_of_those_reads_a_holders_table():
 def test_a_short_token_sentence_without_a_quote_word_is_not_a_quote_ask():
     assert not tequity.quote_matches("OPEN token unlock schedule") and not tequity.quote_matches("USELESS token pairs")
     assert tequity.quote_matches("hyperliquid btc price") and tequity.quote_matches("Are HOOD tokens up?")
+
+
+# --- "which of those" after an answer that listed nothing (live probe 2026-09-27) ---
+
+HOLDERS = ("**Taken together**\n\nText.\n\n---\n\n# Token holders\n**Provider**: Mobula\n\n| # | Wallet | Share | Value |\n|---:|---|---:|---:|\n"
+           "| 1 | `9WzD…AWWM` | 8.83% | $28.92M |\n| 2 | `51yZ…QU5j` | 6.67% | $21.86M |\n")
+DEPLOYER_CARD = ("Not established: Mobula records no deployer for BONK.\n\n---\n\n# Deployer check · BONK\n**Provider**: Mobula\n\n"
+                 "- **Largest position**: `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM` · 8.83% of supply · labels: none\n"
+                 "- **Deployer per Mobula metadata**: not recorded\n- **Same wallet**: cannot be compared\n")
+BONK_CONTRACT = {"kind": "holders", "subject": {"kind": "token", "id": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", "symbol": "BONK", "chain": "solana"}}
+
+
+def test_a_cards_fields_are_not_items_and_a_full_address_never_reaches_the_planner():
+    from app.contracts import plan_by_rules
+    assert context_entities.answer_items(DEPLOYER_CARD) == []
+    note = context_entities.items_note("Which of those are exchanges or pools?", {"last_items": ["Largest position: 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM · 8.83%"]})
+    assert "9WzD…AWWM" in note and "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM" not in note
+    assert plan_by_rules(f"Which of those are exchanges or pools?\n{note}").kind == "open_research"
+
+
+def test_those_after_the_deployer_card_are_still_the_holders():
+    from app import experience
+    ctx = experience.advance_session_context({}, "Who are the top holders of BONK on Solana?", None, "research", [], [], None, last_contract=BONK_CONTRACT, answer=HOLDERS)
+    assert ctx["last_items"] == ["1 · 9WzD…AWWM · 8.83% · $28.92M", "2 · 51yZ…QU5j · 6.67% · $21.86M"]
+    assert ctx["item_lists"][-1]["subject"] == BONK_CONTRACT["subject"]["id"] and ctx["item_lists"][-1]["request"].startswith("Who are the top holders")
+    ctx = experience.advance_session_context(ctx, "Is the largest account the deployer?", None, "research", [], [], None, last_contract=None, answer=DEPLOYER_CARD)
+    assert "last_items" not in ctx and ctx["last_contract"]["subject"]["id"] == BONK_CONTRACT["subject"]["id"]
+    ask = "Which of those are exchanges or pools, and which are unknown?"
+    items, source, question = context_entities.referent_items(ask, ctx)
+    assert items == ["1 · 9WzD…AWWM · 8.83% · $28.92M", "2 · 51yZ…QU5j · 6.67% · $21.86M"] and source.startswith("Who are the top holders") and question is None
+    resolved = context_entities.resolve_contextual_request(ask, "user: x\nassistant: y", ctx)
+    assert 'the answer to "Who are the top holders of BONK on Solana?" listed earlier' in resolved and "(1) 1 · 9WzD…AWWM" in resolved
+    assert context_entities.referent_question(ask, ctx) is None
+
+
+def test_those_after_the_subject_moved_on_is_a_question_not_an_older_list():
+    from app import experience
+    from app.nodes import research as research_mod
+    ctx = experience.advance_session_context({}, "Who are the top holders of BONK on Solana?", None, "research", [], [], None, last_contract=BONK_CONTRACT, answer=HOLDERS)
+    eigen = {"kind": "other"}
+    ctx = experience.advance_session_context(ctx, "What is EigenLayer?", None, "research", [], [], None, last_contract=None, answer="EigenLayer is a restaking protocol on Ethereum.")
+    assert "last_items" not in ctx and ctx.get("last_contract") is None and (ctx.get("focus") or {}).get("label") == "EigenLayer"
+    items, _source, question = context_entities.referent_items("Which of those are exchanges or pools?", ctx)
+    assert items is None and question.startswith("Which items do you mean?") and 'the 2 items answering "Who are the top holders of BONK on Solana?"' in question
+    out = asyncio.run(research_mod.research_node({"request": "Which of those are exchanges or pools?", "session_context": ctx, "chains": []}))
+    assert out["answer"] == question and out["trajectory"] is None
+    assert context_entities.referent_question("Which of those are exchanges or pools?", {}) is None
+    assert context_entities.referent_question("What is BONK?", ctx) is None

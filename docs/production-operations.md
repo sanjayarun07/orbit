@@ -3502,3 +3502,16 @@ Three of those closed on 2026-09-27 (`tests/test_uat_gaps_20260927.py`):
   substitutes a different set.
 
 Still open: two-subject comparisons and the two withheld summaries.
+
+The live check of those fixes found one more, closed the same day: "which of those" asked after the deployer card
+planned a token-pairs contract on a holder's wallet address. Two causes, two rules (`context_entities.answer_items`,
+`referent_items`, `experience.advance_session_context`; tests in the same file):
+
+- A card's fields ("**Largest position**: `9WzD…`") are facts about one subject, never items the user can pick
+  from, so an answer made of them lists nothing; and an address in the referent note is shortened to what the user
+  saw, because the planner reads a full address anywhere in the request as the subject of a new contract.
+- "Those" are the nearest relevant, evidence-backed list: the previous answer's items when it listed any; else the
+  newest earlier list (the session keeps the last four with the ask each answered and the subject it was about),
+  only while the conversation's subject is still that list's subject, so after the deployer card "those" are still
+  the holders. When the subject has moved on, the node asks which list is meant, naming them, and runs no tool: an
+  older unrelated list would be another wrong answer (user rule, 2026-09-27).

@@ -40,6 +40,12 @@ def answer_items(answer: str, limit: int = 8) -> list[str]:
             m = _ITEM_LINE.match(line)
             if not m:
                 continue
+            if re.match(r"\*\*[^*]{1,48}\*\*\s*:", m.group(1)):
+                # A card's field ("**Largest position**: `9WzD…`") is a fact
+                # about one subject, not an item the user can pick from: the
+                # deployer card's three fields had become "those" and its full
+                # address a token to rank (live probe 2026-09-27).
+                continue
             item = re.sub(r"\*\*|`|\[(\d+)\]", "", m.group(1)).strip()
             if len(item) >= 12 and not item.lower().startswith(("time:", "web_discovery", "knowledge", "finance_discovery")):
                 found.append(item[:320])
@@ -75,12 +81,64 @@ def answer_items(answer: str, limit: int = 8) -> list[str]:
 _THOSE = re.compile(r"\b(?:which|what|how many)\s+of\s+(?:those|these|them)\b|\b(?:those|these)\s+(?:events?|items?|projects?|candidates?|sources?|headlines?|tokens?|ones)\b|\b(?:for|of|about)\s+each\s+(?:candidate|item|one|of\s+(?:those|these|them))\b", re.I)
 
 
+_FULL_ADDRESS = re.compile(r"\b(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})\b")
+
+
+def _short_addresses(text: str) -> str:
+    """Addresses in a note shortened to what the user saw: the planner reads
+    a full address anywhere in the request as the subject of a new contract
+    (a holder's wallet became a token to rank, live probe 2026-09-27)."""
+    return _FULL_ADDRESS.sub(lambda m: f"{m.group(0)[:4]}…{m.group(0)[-4:]}", text or "")
+
+
+def conversation_subject(session_context: dict | None) -> str | None:
+    """What the conversation is about now: the carried contract's subject,
+    else the focus's address or label."""
+    ctx = session_context or {}
+    contract_subject = ((ctx.get("last_contract") or {}).get("subject") or {}).get("id")
+    focus = ctx.get("focus") or {}
+    return contract_subject or focus.get("address") or focus.get("label") or None
+
+
+def referent_items(request: str, session_context: dict | None) -> tuple[list[str] | None, str | None, str | None]:
+    """(items, the ask they answered, a question) for a "which of those" ask.
+
+    The nearest relevant, evidence-backed list: the previous answer's items
+    when it listed any; else the newest earlier list, only while the
+    conversation's subject is still the one that list was about (after the
+    deployer card, "those" are still the holders). An older list about
+    something else is a question, never a guess (user rule, 2026-09-27).
+    """
+    ctx = session_context or {}
+    if not _THOSE.search(request or ""):
+        return None, None, None
+    items = ctx.get("last_items") or []
+    if items:
+        return list(items), None, None
+    lists = [entry for entry in (ctx.get("item_lists") or []) if isinstance(entry, dict) and entry.get("items")]
+    if not lists:
+        return None, None, None
+    newest = lists[-1]
+    subject_now = conversation_subject(ctx)
+    if newest.get("subject") and subject_now and newest["subject"] == subject_now:
+        return list(newest["items"]), newest.get("request") or None, None
+    options = "; ".join(f"the {len(e['items'])} items answering \"{(e.get('request') or 'an earlier question')[:80]}\"" for e in reversed(lists[-3:]))
+    return None, None, (f"Which items do you mean? The last answer listed none, and the lists earlier in this conversation were about something else: {options}. "
+                        "Name the list, or ask the question with the items in it.")
+
+
 def items_note(request: str, session_context: dict | None) -> str | None:
-    items = (session_context or {}).get("last_items") or []
-    if not items or not _THOSE.search(request or ""):
+    items, source, _question = referent_items(request, session_context)
+    if not items:
         return None
-    listed = "; ".join(f"({i + 1}) {t}" for i, t in enumerate(items))
-    return f"Resolved from conversation context: \"those\" are the items the previous answer listed -- {listed} -- answer about exactly these, in this order; never substitute a different set."
+    listed = "; ".join(f"({i + 1}) {_short_addresses(t)}" for i, t in enumerate(items))
+    where = f"the answer to \"{source[:80]}\" listed earlier in this conversation" if source else "the previous answer listed"
+    return f"Resolved from conversation context: \"those\" are the items {where} -- {listed} -- answer about exactly these, in this order; never substitute a different set."
+
+
+def referent_question(request: str, session_context: dict | None) -> str | None:
+    """The clarifying question when "those" has no clear list; None otherwise."""
+    return referent_items(request, session_context)[2]
 
 
 def _last_user_request(history: str, current: str, session_context: dict | None = None) -> str | None:

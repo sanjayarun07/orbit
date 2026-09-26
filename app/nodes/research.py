@@ -21,7 +21,7 @@ from app.routing import lexicon, subject_probe
 from app import answer_gate, event_calendar, hedge_prediction, prediction_route, mobula_wallet, symbol_registry, token_pages, token_unlocks, why_moving
 from app.clarify import is_clarification
 from app.settings import settings
-from app import deployer_check
+from app import context_entities, deployer_check
 from app.market_providers import TRENDING_TOKENS
 from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available, perplexity_web_search
 from app.provider_registry import get_provider_router
@@ -1871,6 +1871,12 @@ def _remembered_holdings(state: AgentState) -> list[str]:
 async def research_node(state: AgentState) -> dict:
     sink: dict = {}
     request = _effective_request(state)
+    referent_question = context_entities.referent_question(_ask(request), state.get("session_context"))
+    if referent_question:
+        # "Which of those…" when the last answer listed nothing and the earlier
+        # lists were about something else: ask, never pick an older list (user
+        # rule 2026-09-27; the deployer card's fields had become "those").
+        return {"answer": referent_question, "trajectory": None}
     if prediction_route.candidate(request):
         decision = await prediction_route.plan(request)
         if decision:

@@ -438,4 +438,14 @@ def advance_session_context(
         active = context.get("active_workflow") or {}
         if not (active.get("status") == "pending_approval" and (is_wallet_connected_ack(request) or is_parameter_fragment(request))):
             context["active_workflow"] = None
+    if answer is not None:
+        # The lists this conversation has shown, newest last, each with the
+        # ask it answered and the subject it was about, for a "which of those"
+        # after an answer that listed nothing (context_entities.referent_items).
+        from app.context_entities import conversation_subject
+        items = context.get("last_items") or []
+        if items:
+            history = [entry for entry in (context.get("item_lists") or []) if isinstance(entry, dict)]
+            history.append({"items": list(items), "request": (request or "")[:160], "subject": conversation_subject(context), "revision": context["revision"]})
+            context["item_lists"] = history[-4:]
     return context
