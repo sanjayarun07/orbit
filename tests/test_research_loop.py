@@ -197,11 +197,16 @@ def test_headline_loop_converges_on_two_directly_read_source_pages(loop):
                                                           "provenance": "unreadable" if url == pdf_url else "page", "fetched_at": "replay"})
     router = Rotating({})
     loop.setattr(evidence_pipeline, "get_provider_router", lambda: router)
+    from app import market_overview
+    pulse = "# Crypto market pulse\n**Retrieved** 2026-09-25 10:00 UTC\n\n## Core quotes\n| Asset | Price | 24h |\n|---|---:|---:|\n| BTC | $84,000.00 | -1.20% |"
+    loop.setattr(market_overview, "market_pulse_card", lambda: pulse)
     out = asyncio.run(evidence_pipeline.answer({}, request, ()))
     assert out["pipeline"] == "research_loop"
-    assert router.calls == ["perplexity_web_search", "perplexity_web_search"]
+    # the two searches, then the policy headline's social read (the market state joins the checked passages, 2026-09-27)
+    assert router.calls[:2] == ["perplexity_web_search", "perplexity_web_search"] and router.calls[2:] == ["x_social_trending"]
     trace = out["trajectory"]["research_loop"]
     assert "original announcement" in trace["calls"][0] and "market reaction" in trace["calls"][1]
+    assert "# Crypto market pulse" in out["answer"] and trace["market_state"] == ["market_pulse"]
     assert trace["coverage"]["event"] and trace["coverage"]["market"]
     assert trace["coverage"]["selected"]["event"] == event_url
     assert f"page_read: {pdf_url}" in trace["calls"] and f"page_read: {event_url}" in trace["calls"]
@@ -1213,7 +1218,8 @@ def test_a_failed_support_check_withholds_the_summary(loop):
     async def fake(program, **kw):
         fields = set(kw)
         if "catalog" in fields and "request" in fields:
-            return SimpleNamespace(subject="Venice", question="q", constraints="none", required_facts="named projects", capabilities="web_discovery", queries="web_discovery: q1")
+            # a comparison with a stated condition: the candidate lane, whose example gate this test covers (the gate was scoped 2026-09-27)
+            return SimpleNamespace(subject="Venice", question="q", constraints="own token locked as collateral", required_facts="named projects", capabilities="web_discovery", queries="web_discovery: q1")
         if "calls_made" in fields:
             return SimpleNamespace(missing="none", next_call="stop", reason="test")
         if "answer" in fields:
@@ -1306,7 +1312,8 @@ def test_a_failed_candidate_listing_withholds_the_summary(loop):
     async def fake(program, **kw):
         fields = set(kw)
         if "catalog" in fields and "request" in fields:
-            return SimpleNamespace(subject="Venice", question="q", constraints="none", required_facts="named projects", capabilities="web_discovery", queries="web_discovery: q1")
+            # the candidate lane (a stated condition): a failed listing withholds there; the fact lane writes from the cards (tests/test_research_loop_scope.py)
+            return SimpleNamespace(subject="Venice", question="q", constraints="own token locked as collateral", required_facts="named projects", capabilities="web_discovery", queries="web_discovery: q1")
         if "calls_made" in fields:
             return SimpleNamespace(missing="none", next_call="stop", reason="test")
         if "evidence" in fields and "answer" not in fields:

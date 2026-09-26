@@ -608,6 +608,81 @@
     ],
     "pipeline": "research_loop"
    }
+  },
+  {
+   "id": "open-sec-tokenized-order",
+   "prompt": "What does the SEC's September 17 tokenized-stock order actually authorize?",
+   "kind": "open_research",
+   "live_only": true,
+   "goal": {
+    "must_contain_any": [
+     [
+      "[1]",
+      "Sources",
+      "Source"
+     ]
+    ],
+    "must_not_contain": [
+     "I withheld the written summary",
+     "Which token should I check"
+    ]
+   }
+  },
+  {
+   "id": "tap-fed-stablecoin",
+   "prompt": "What does this mean for the market: Fed proposes new stablecoin rules as crypto market rallies",
+   "kind": "open_research",
+   "live_only": true,
+   "goal": {
+    "must_contain_any": [
+     [
+      "Crypto market pulse",
+      "market pulse"
+     ]
+    ],
+    "must_contain_any_2": [
+     [
+      "[1]",
+      "Sources",
+      "Source",
+      "source"
+     ]
+    ],
+    "must_not_contain": [
+     "I withheld the written summary",
+     "could not verify the original event",
+     "could not retrieve source pages",
+     "**Checked facts**"
+    ]
+   }
+  },
+  {
+   "id": "tap-cme-futures",
+   "prompt": "What does this mean for the market: CME plans Bitcoin Cash and Uniswap futures",
+   "kind": "open_research",
+   "live_only": true,
+   "goal": {
+    "must_contain_any": [
+     [
+      "Crypto market pulse",
+      "market pulse"
+     ]
+    ],
+    "must_contain_any_2": [
+     [
+      "[1]",
+      "Sources",
+      "Source",
+      "source"
+     ]
+    ],
+    "must_not_contain": [
+     "I withheld the written summary",
+     "could not verify the original event",
+     "could not retrieve source pages",
+     "**Checked facts**"
+    ]
+   }
   }
  ]
 }

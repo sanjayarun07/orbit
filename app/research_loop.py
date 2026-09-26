@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 
 MAX_ROUNDS = 2          # the plan's round, then one gap review and its call (a third round put turns past 170 s live, 2026-09-24)
 MAX_CALLS = 5           # provider calls per turn, whatever the model asks for
+FACT_LANE_PAGES = 4     # cited pages read for an ordinary question (the fact lane): provenance for its claims, not a candidate hunt
 MAX_INITIAL = 4         # distinct evidence questions from the plan, run concurrently
 MAX_MODEL_CALLS = 18    # includes inspection, audits, synthesis support and one repair
 
@@ -738,10 +739,11 @@ async def _run_headline(request: str, contract: contracts.QuestionContract, rout
     streaming.research_progress("sources", f"Found {len(leads)} dated source leads", found=len(leads))
     gate = fact_gate.check(contract, [], scope_satisfied=True)
     if not leads:
-        gate.ok = False
-        return {"answer": "I could not retrieve source pages for this headline, so its details and market effect remain unverified.",
-                "trajectory": {"research_loop": {"question": headline, "calls": made, "budget": budget.record(), "timings": timings}},
-                "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "research_loop"}
+        # No dated lead to read: the fixed sequence answers from its dated web
+        # card and the market pulse card rather than refusing the tap (the
+        # loop had withheld headline taps after 100-160 s, review 2026-09-26).
+        logger.info("research loop: headline lane found no dated lead; the fixed sequence answers")
+        return None
 
     source_lines = "\n".join(f"{'original-event search' if row['axis'] == 0 else 'market-response search'} | {row['url']} | {row['title']} | {row['date'] or 'date unknown'}" for row in leads[:30])
     try:
@@ -838,9 +840,10 @@ async def _run_headline(request: str, contract: contracts.QuestionContract, rout
     trajectory = {"research_loop": {"question": headline, "calls": made, "coverage": coverage,
                                     "budget": budget.record(), "timings": timings}}
     if not event_rows:
-        gate.ok = False
-        return {"answer": "I found coverage of this headline but could not verify the original event from a directly read page. Its market impact is not established.",
-                "trajectory": trajectory, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "research_loop"}
+        # The event page could not be read or yielded no passage: the fixed
+        # sequence answers from the dated web card, labelled as such.
+        logger.info("research loop: headline lane verified no event passage; the fixed sequence answers")
+        return None
     card = "# Checked source passages\n\n" + "\n".join(
         f"- **{row['facet']}** · [source]({row['url']}) · fetched {row['fetched_at'] or 'time unknown'}: “{row['quote']}”" for row in accepted)
     note = ("Answer the Home news question directly and briefly. State what the original source confirms, including whether an action is proposed or final. "
@@ -848,6 +851,22 @@ async def _run_headline(request: str, contract: contracts.QuestionContract, rout
             "If no market passage was verified, state that the market response was not verified. "
             "Separate possible transmission mechanisms from observed reactions; timing alone does not prove this event caused a price move. "
             "Do not offer a trade recommendation or use unverified search snippets as evidence.")
+    # The market's state now joins the checked passages (the tap fix of
+    # 2026-09-26: majors, total cap, fear and greed; the social read for a
+    # policy headline), so the read is grounded in state on this lane too.
+    state_parts: list = []
+    if composition.is_headline_tap(request):
+        try:
+            state_parts, tap_note = await evidence_pipeline._attach_market_state(router, request, chains, contract, [], {})
+        except Exception:
+            logger.info("research loop: market state unavailable for the tap", exc_info=True)
+            state_parts, tap_note = [], ""
+        if tap_note:
+            note += "\n" + tap_note
+    state_cards = "\n\n---\n\n".join(text for text, _ in state_parts)
+    if state_cards:
+        card = card + "\n\n---\n\n" + state_cards
+        trajectory["research_loop"]["market_state"] = [meta.get("tool_name_0") for _, meta in state_parts]
     t_synth = time.monotonic()
     streaming.research_progress("answer", "Writing from the checked passages")
     try:
@@ -884,6 +903,8 @@ async def _run_headline(request: str, contract: contracts.QuestionContract, rout
         answer = "**Checked facts**\n\n" + "\n".join(f"- [Source]({row['url']}): “{row['quote']}”" for row in accepted)
         if not market_rows:
             answer += "\n\nThe market response could not be verified from the pages read."
+        if state_cards:
+            answer += "\n\n---\n\n" + state_cards
         gate.ok = False
     else:
         gate.ok = True
@@ -948,6 +969,19 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
     timings["plan"] = round(time.monotonic() - t_plan, 1)
     question = (getattr(plan, "question", "") or body.splitlines()[0] if body else request).strip()
     required = (getattr(plan, "required_facts", "") or "").strip()
+    constraints = (getattr(plan, "constraints", "") or "").strip()
+    # The lane. A comparison with stated conditions ("which other projects
+    # lock their own token to mint a second one") is the candidate lane: a
+    # name stands only on a page passage that meets every condition, else the
+    # summary is withheld. An ordinary question (what an order authorizes, why
+    # a token moved, who backs a protocol) states no conditions: it is the
+    # fact lane, written from the dated search cards and whatever page
+    # passages were read, audited against both, withheld only when a claim
+    # still fails after one repair. The verified-passage-or-withhold rule had
+    # covered both and withheld ordinary answers after 100-160 s (review of
+    # the loop, 2026-09-26); the brief scopes it to comparison questions.
+    candidate_lane = bool(constraints) and constraints.lower() != "none"
+    lane = "candidate" if candidate_lane else "fact"
     calls: list[DiscoveryCall | tuple[str, str]] = _expanded_calls(plan, contract, request)
     initial_queries = {call.query for call in calls if isinstance(call, DiscoveryCall)}
     streaming.research_progress("sources", f"Searching {len(calls)} evidence angle{'s' if len(calls) != 1 else ''}")
@@ -1010,10 +1044,11 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
             cards_so_far, _ = composition.combine(parts)
             t_inspect = time.monotonic()
             inspected, inspect_calls = await _inspect_candidates(
-                question, (getattr(plan, "constraints", "") or "").strip(),
+                question, constraints,
                 cards_so_far, runtime, router, page_cache=page_cache,
-                followup_reads=0 if round_no < MAX_ROUNDS - 1 else 4,
-                budget=turn_budget, check_cache=check_cache)
+                followup_reads=(0 if round_no < MAX_ROUNDS - 1 else 4) if candidate_lane else 0,
+                budget=turn_budget, check_cache=check_cache,
+                **({} if candidate_lane else {"page_limit": FACT_LANE_PAGES}))
             # A later inspection can exhaust the budget after earlier pages
             # were checked. Keep the last accepted evidence state.
             if inspected is not None:
@@ -1042,7 +1077,11 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
         # paraphrase of a search card. When no condition has an accepted
         # passage, search broadly for the mechanism; when some conditions are
         # proved, seek the missing condition across first-party publications.
-        if calls and "site:" not in request.lower():
+        # The condition-driven second axis (a missing condition across
+        # first-party pages, a broad mechanism search when no candidate
+        # qualifies) belongs to the candidate lane; the fact lane runs the
+        # review's next call as asked.
+        if calls and candidate_lane and "site:" not in request.lower():
             coverage = research_ledger.CoverageLedger.from_verdicts((getattr(plan, "constraints", "") or question), required, verdicts)
             supported = [row for row in coverage.records if row.status == "supported"]
             if supported and "site:" in calls[0][1].lower():
@@ -1062,7 +1101,7 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
                 prior = initial_queries | {q for _, q in _parse_calls(getattr(plan, "queries", ""))}
                 if broad not in prior and broad not in {q for _, q in calls}:
                     calls = [("web_discovery", broad)] + calls
-        elif not calls and round_no == 0 and verdicts and "site:" not in request.lower():
+        elif not calls and round_no == 0 and candidate_lane and verdicts and "site:" not in request.lower():
             coverage = research_ledger.CoverageLedger.from_verdicts((getattr(plan, "constraints", "") or question), required, verdicts)
             if not any(v.get("verdict") == "qualifies" for v in verdicts) and _tools_of("web_discovery"):
                 alternate = _condition_discovery_query((getattr(plan, "constraints", "") or question))
@@ -1073,11 +1112,11 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
             # candidate when one cited or first-party page may close the
             # specific gap. Spend a small final read allowance, then answer
             # from that verdict; do not return to a broad search.
-            if (verdicts and not any(v.get("verdict") == "qualifies" for v in verdicts)
+            if (candidate_lane and verdicts and not any(v.get("verdict") == "qualifies" for v in verdicts)
                     and turn_budget.can_run(30)):
                 t_inspect = time.monotonic()
                 inspected, inspect_calls = await _inspect_candidates(
-                    question, (getattr(plan, "constraints", "") or "").strip(),
+                    question, constraints,
                     cards_so_far, runtime, router, page_cache=page_cache,
                     followup_reads=4, budget=turn_budget, check_cache=check_cache)
                 if inspected is not None:
@@ -1096,8 +1135,9 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
     cards, trajectory = composition.combine(parts)
     gate = fact_gate.check(contract, fact_rows, scope_satisfied=True)
     note = evidence_pipeline._contract_note(contract, gate, fact_rows, None)
-    constraints = (getattr(plan, "constraints", "") or "").strip()
-    ledger = research_ledger.CoverageLedger.from_verdicts(constraints if constraints.lower() != "none" else question, required, verdicts)
+    if verdicts is None and not candidate_lane:
+        verdicts = []          # the fact lane names no candidates; a failed listing leaves the cards as the evidence
+    ledger = research_ledger.CoverageLedger.from_verdicts(constraints if candidate_lane else question, required, verdicts)
     if _news_headline(contract, request):
         note += ("\nFor this news question, first explain the original event and its status from an inspected source page. "
                  "Then describe any observed market response with its timestamp and source. "
@@ -1112,7 +1152,7 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
         timings["total"] = round(time.monotonic() - started, 1)
         withheld = _with_trail(_withheld("the candidate check could not run, so no named example is verified", cards), made, skipped, [], timings)
         trajectory = dict(trajectory or {})
-        trajectory["research_loop"] = {"subject": getattr(plan, "subject", ""), "question": question, "constraints": constraints, "required_facts": required,
+        trajectory["research_loop"] = {"subject": getattr(plan, "subject", ""), "question": question, "constraints": constraints, "required_facts": required, "lane": lane,
                                        "calls": made, "skipped": skipped, "verdicts": [], "timings": timings, "withheld": "candidate check failed"}
         gate.ok = False
         return {"answer": withheld, "trajectory": trajectory, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "research_loop"}
@@ -1123,7 +1163,11 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
     verified = [v for v in verdicts if v["verdict"] in ("qualifies", "related_but_different")
                 and v.get("provenance") == "page" and v.get("quote") not in (None, "", "none")
                 and (v["verdict"] != "qualifies" or ledger.complete(v["name"]))]
-    if not verified:
+    if not candidate_lane:
+        # Every literal passage read is evidence here, whatever verdict the
+        # condition check gave it: the conditions were the question itself.
+        verified = [v for v in verdicts if v.get("provenance") == "page" and v.get("quote") not in (None, "", "none")]
+    if not verified and candidate_lane:
         # Search prose is a discovery lead. Without one directly inspected
         # passage the research tier cannot turn it into an asserted answer.
         timings["total"] = round(time.monotonic() - started, 1)
@@ -1137,7 +1181,7 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
         preface = "**No fully verified match yet.** The inspected pages support only these narrower observations:\n\n" + "\n".join(partial) + "\n\n" if partial else ""
         withheld = _with_trail(preface + _withheld(reason, cards), made, skipped, verdicts, timings)
         trajectory = dict(trajectory or {})
-        trajectory["research_loop"] = {"subject": getattr(plan, "subject", ""), "question": question, "constraints": constraints, "required_facts": required,
+        trajectory["research_loop"] = {"subject": getattr(plan, "subject", ""), "question": question, "constraints": constraints, "required_facts": required, "lane": lane,
                                        "calls": made, "skipped": skipped, "verdicts": verdicts, "coverage": ledger.as_dict(),
                                        "budget": turn_budget.record(), "timings": timings, "withheld": "no verified page passage"}
         gate.ok = False
@@ -1148,8 +1192,15 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
         for passage in passages:
             verified_lines.append(f"- **{v['name']}** — {v['verdict']} · [page]({passage['url']}) · "
                                   f"fetched {passage.get('fetched_at') or 'time unknown'}: “{passage['quote']}”")
-    verified_cards = "# Reviewed source-page passages\n\n" + "\n".join(verified_lines)
-    note += "\nWrite factual claims from the reviewed page passages below, not from the unverified search snippets. An unverified candidate may be mentioned only as not established."
+    verified_cards = ("# Reviewed source-page passages\n\n" + "\n".join(verified_lines)) if verified_lines else ""
+    if candidate_lane:
+        note += "\nWrite factual claims from the reviewed page passages below, not from the unverified search snippets. An unverified candidate may be mentioned only as not established."
+    else:
+        # The fact lane's evidence: the dated, sourced search cards and the
+        # passages read from their pages; a passage outranks a snippet.
+        verified_cards = (verified_cards + "\n\n---\n\n" if verified_cards else "") + cards
+        note += ("\nWrite from the dated search cards and the reviewed page passages below, nothing beyond them; cite each claim with its source, "
+                 "and prefer a reviewed page passage over a search snippet where both speak. Say what the sources do not establish.")
     if not turn_budget.can_run(35):
         turn_budget.exhausted = turn_budget.exhausted or "insufficient time for audited synthesis"
         final = fact_gate.check(contract, fact_rows, scope_satisfied=True)
@@ -1204,7 +1255,8 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
             synthesized = _verified_partial(ledger, verdicts)
             final.ok = False
         else:
-            synthesized = await _verify_examples(question, synthesized, verified_cards, request, note, trajectory, runtime, verdicts)
+            if candidate_lane:
+                synthesized = await _verify_examples(question, synthesized, verified_cards, request, note, trajectory, runtime, verdicts)
             if not turn_budget.can_run(12):
                 synthesized = _verified_partial(ledger, verdicts)
                 final.ok = False
@@ -1231,7 +1283,7 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
     timings["total"] = round(time.monotonic() - started, 1)
     synthesized = _with_trail(synthesized, made, skipped, verdicts, timings)
     trajectory = dict(trajectory or {})
-    trajectory["research_loop"] = {"subject": getattr(plan, "subject", ""), "question": question, "constraints": constraints, "required_facts": required,
+    trajectory["research_loop"] = {"subject": getattr(plan, "subject", ""), "question": question, "constraints": constraints, "required_facts": required, "lane": lane,
                                    "calls": made, "skipped": skipped, "verdicts": verdicts, "coverage": ledger.as_dict(),
                                    "budget": turn_budget.record(), "timings": timings}
     logger.info("research loop record: %s", trajectory["research_loop"])
@@ -1534,7 +1586,8 @@ async def _inspect_candidates(question: str, constraints: str, cards: str, runti
                               page_cache: dict[str, dict] | None = None,
                               followup_reads: int | None = None,
                               budget: TurnBudget | None = None,
-                              check_cache: dict[tuple, dict] | None = None) -> tuple[list[dict] | None, list[str]]:
+                              check_cache: dict[tuple, dict] | None = None,
+                              page_limit: int | None = None) -> tuple[list[dict] | None, list[str]]:
     """Read the cited page of each candidate the cards name and check it
     against the conditions; bounded by `research_loop_inspect_pages`.
     (verdicts, the calls made): verdicts is None when the candidate listing
@@ -1544,6 +1597,8 @@ async def _inspect_candidates(question: str, constraints: str, cards: str, runti
     page_cache = page_cache if page_cache is not None else {}
     check_cache = check_cache if check_cache is not None else {}
     limit = int(getattr(settings, "research_loop_inspect_pages", 4) or 0)
+    if page_limit:
+        limit = min(limit, page_limit)
     if limit <= 0 or not cards.strip():
         return [], calls
     streaming.research_progress("review", "Identifying cited pages that can answer the question")
