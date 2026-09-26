@@ -65,6 +65,32 @@ def test_an_ordinary_question_is_written_from_the_cards_when_no_page_could_be_re
     assert len(audits) == 1 and "SEC release" in audits[0]        # the claim audit ran, against the cards
 
 
+def test_the_fact_lanes_audit_reads_the_whole_evidence_and_a_qualified_answer_keeps_the_cards(loop):
+    seen: list = []
+
+    async def lm(program, **kw):
+        if "summary" in kw and "evidence" in kw:
+            seen.append((getattr(program.signature, "__name__", ""), kw["evidence"]))
+            return SimpleNamespace(unsupported_claims="retail investors may trade tokenized stocks on DEXs")
+        return await _fact_lane_lm([])(program, **kw)
+    long_card = SEC_CARD + "\n\n" + ("filler " * 3000)          # 21k chars: past the candidate lane's 14k audit cut
+
+    async def synth(prompt, cards, trajectory, advice=False, research=False):
+        return f"**Taken together**\n\nThe order also lets retail investors trade tokenized stocks on DEXs [1].\n\n---\n\n{cards}"
+    from app.nodes import runtime
+    loop.setattr(runtime, "_call_research_lm", lm)
+    loop.setattr(runtime, "_call_research_loop_lm", lm)
+    loop.setattr(research_loop, "read_page", lambda url: {"url": url, "title": "", "text": "", "provenance": "unreadable", "fetched_at": "replay"})
+    loop.setattr(research_loop.composition, "synthesize", synth)
+    router = FakeRouter({"perplexity_web_search": long_card})
+    router.plan_across = lambda request, caps, chains, n: []
+    loop.setattr(evidence_pipeline, "get_provider_router", lambda: router)
+    out = asyncio.run(evidence_pipeline.answer({}, "What does the SEC's September 17 tokenized-stock order actually authorize?", ()))
+    assert seen and all(name == "FactClaimSupport" for name, _ in seen) and all(len(evidence) > 20000 for _, evidence in seen)
+    assert out["answer"].startswith("**Taken together**") and "**Not established by the sources read:**" in out["answer"]   # qualified, not withheld
+    assert "[SEC release]" in out["answer"] and out["gate"]["ok"] is False                                                  # the dated card stays for the reader
+
+
 def test_a_claim_the_cards_do_not_carry_is_repaired_once_then_withheld(loop):
     audits: list = []
 
@@ -76,7 +102,7 @@ def test_a_claim_the_cards_do_not_carry_is_repaired_once_then_withheld(loop):
     assert "I withheld" not in out["answer"] and "retail investors" in out["answer"]       # the repair passed the second audit
 
 
-def test_a_claim_that_still_fails_after_the_repair_is_withheld(loop):
+def test_a_claim_that_still_fails_after_the_repair_is_qualified_on_the_fact_lane(loop):
     audits: list = []
 
     async def lm(program, **kw):
@@ -88,8 +114,9 @@ def test_a_claim_that_still_fails_after_the_repair_is_withheld(loop):
     async def synth(prompt, cards, trajectory, advice=False, research=False):
         return f"**Taken together**\n\nThe order also lets retail investors trade tokenized stocks on DEXs [1].\n\n---\n\n{cards}"
     out, _ = _run_fact(loop, lm, synth=synth)
-    assert out["answer"].startswith("**I withheld the written summary: the summary still asserted claims its reviewed passages do not establish")
-    assert out["gate"]["ok"] is False
+    # the fact lane qualifies what one repair could not settle: the sourced summary stands, the open claim is named under it
+    assert out["answer"].startswith("**Taken together**") and "**Not established by the sources read:**\n- retail investors may trade tokenized stocks on DEXs" in out["answer"]
+    assert "[SEC release]" in out["answer"] and out["gate"]["ok"] is False and out["trajectory"]["research_loop"]["audit"]["after_repair"]
 
 
 def test_a_comparison_with_conditions_keeps_the_candidate_lane(loop):
@@ -166,3 +193,48 @@ def test_a_failed_candidate_listing_leaves_the_cards_as_the_fact_lanes_evidence(
     out, _ = _run_fact(loop, lm, synth=synth)
     assert out["trajectory"]["research_loop"]["lane"] == "fact" and "I withheld" not in out["answer"] and "broker-dealers" in out["answer"]
     assert len(audits) == 1
+
+
+def test_a_question_about_one_subject_is_the_fact_lane_whatever_conditions_the_planner_wrote(loop):
+    """"Who are the investors backing EigenLayer?": the planner wrote qualifying
+    conditions ("include only direct investors; exclude…") and the example gate
+    withheld the list of investors after 115 s (live, 2026-09-27)."""
+    audits: list = []
+
+    async def lm(program, **kw):
+        if "catalog" in kw and "request" in kw:
+            return SimpleNamespace(subject="EigenLayer", question="who invested in EigenLayer or Eigen Labs", answer_shape="one_subject",
+                                   constraints="include only investors publicly identified as direct investors in EigenLayer or Eigen Labs; exclude ecosystem-only investors",
+                                   required_facts="funding rounds\ninvestors", capabilities="web_discovery", queries="web_discovery: EigenLayer investors funding rounds")
+        return await _fact_lane_lm(audits)(program, **kw)
+
+    async def synth(prompt, cards, trajectory, advice=False, research=False):
+        return f"**Taken together**\n\nEigen Labs raised from a16z crypto and Blockchain Capital [1].\n\n---\n\n{cards}"
+    out, _ = _run_fact(loop, lm, request="Who are the investors backing EigenLayer?", synth=synth)
+    trace = out["trajectory"]["research_loop"]
+    assert trace["lane"] == "fact" and trace["constraints"].startswith("include only")
+    assert "I withheld" not in out["answer"] and "a16z" in out["answer"]
+    plan = SimpleNamespace(answer_shape="matching_examples")
+    assert research_loop._candidate_lane(plan, "own token as collateral") and not research_loop._candidate_lane(plan, "none")
+    assert research_loop._candidate_lane(SimpleNamespace(), "own token as collateral")        # a replay fixture without the field keeps the conditions rule
+    assert not research_loop._candidate_lane(SimpleNamespace(answer_shape="one subject"), "some condition")
+
+
+def test_a_repair_that_runs_out_of_time_withholds_instead_of_crashing_the_turn(loop):
+    audits: list = []
+
+    async def lm(program, **kw):
+        if "summary" in kw and "evidence" in kw:
+            audits.append(1)
+            return SimpleNamespace(unsupported_claims="retail investors may trade tokenized stocks on DEXs")
+        return await _fact_lane_lm(audits)(program, **kw)
+    calls: list = []
+
+    async def synth(prompt, cards, trajectory, advice=False, research=False):
+        calls.append(prompt)
+        if len(calls) > 1:
+            raise asyncio.TimeoutError()               # the repair times out under the turn budget
+        return f"**Taken together**\n\nThe order also lets retail investors trade tokenized stocks on DEXs [1].\n\n---\n\n{cards}"
+    out, _ = _run_fact(loop, lm, synth=synth)
+    assert out["answer"].startswith("**I withheld the written summary") and out["gate"]["ok"] is False
+    assert out["trajectory"]["research_loop"]["budget"]["exhausted"] == "insufficient time for the repair"

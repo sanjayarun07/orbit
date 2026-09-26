@@ -3392,6 +3392,39 @@ linked reviewed passages before the research trail. This is safer and more usefu
 answer, but live recall and long-turn latency remain an open UAT acceptance check; these runs do not prove that the
 loop will always find an existing authoritative page.
 
+### The withhold gate scoped to comparison questions (2026-09-27, b34e96b3)
+
+The review of the loop on 2026-09-26 found the verified-passage-or-withhold rule covering every open-research
+question: an SEC-order question and two Home headline taps came back as withheld summaries after 100 to 160 s. The
+brief scopes that rule to comparison questions, so the loop now runs two lanes, chosen by the plan
+(`research_loop._run`, `_candidate_lane`; tests in `tests/test_research_loop_scope.py`). The plan says what shape
+the answer takes (`answer_shape`: facts about one named subject, or examples that must satisfy conditions); the
+conditions alone do not decide it, because the planner wrote "include only direct investors; exclude…" for "who
+backs EigenLayer" and the example gate withheld the list of investors after 115 s (live 2026-09-27). A replay fixture
+without the field keeps the conditions rule.
+
+- **Candidate lane** (matching examples with stated conditions: "which other projects lock their own token to mint a
+  second one"): unchanged. A name stands only on a page passage that meets every condition, the example gate and the
+  condition-driven second axis run, and the summary is withheld otherwise.
+- **Fact lane** (one subject: what an order authorizes, why a token moved, who backs a protocol, even when the answer
+  is a list of names): up to three cited pages are read for provenance with no follow-up hunts; the evidence is the
+  dated search cards plus the passages read, a passage outranking a snippet, and the candidate vocabulary (the
+  conditions, per-candidate verdicts) stays out of the synthesis note; the figure gate runs against both; the claim
+  audit is the lane's own (`FactClaimSupport`: a card with its source counts, an inference or a figure no card carries
+  does not) over the whole evidence, not the candidate lane's 14k cut. One repair; a claim that still fails is
+  qualified, not withheld: the repaired summary stands with "Not established by the sources read" under it and the
+  gate marked not ok (the audit had withheld a whole list of investors over one hedging sentence about the cards
+  disagreeing). A failed candidate listing leaves the cards as the evidence; a withheld fact-lane answer keeps its
+  dated cards. A repair that runs out of time is a withhold, not a crash (the timeout had escaped the loop). The
+  trajectory records `lane` and `audit`.
+- **Headline lane**: no dated lead, or no event passage from a directly read page, returns None and the fixed
+  sequence answers (the dated web card, the market pulse card, the tap note) instead of refusing. A tap the loop does
+  verify carries the market state on this lane too (`evidence_pipeline._attach_market_state`), in the audit's evidence
+  and in the answer.
+
+Measured: `reports/loop-scope-2026-09-27/report.md`, the deliberate off-versus-on comparison at k=5 over the
+open-research live episodes (five ordinary questions, the SEC order, two headline taps, the dual-token sequence).
+
 ## Live mobile UI edge-case run (2026-09-25): subject-and-scope corrections
 
 `reports/ui-edge-2026-09-25/report.md` (28 turns, signed in, 365 px). Mechanisms from it, with regressions in

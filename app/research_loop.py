@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 MAX_ROUNDS = 2          # the plan's round, then one gap review and its call (a third round put turns past 170 s live, 2026-09-24)
 MAX_CALLS = 5           # provider calls per turn, whatever the model asks for
-FACT_LANE_PAGES = 4     # cited pages read for an ordinary question (the fact lane): provenance for its claims, not a candidate hunt
+FACT_LANE_PAGES = 3     # cited pages read for an ordinary question (the fact lane): provenance for its claims, not a candidate hunt
 MAX_INITIAL = 4         # distinct evidence questions from the plan, run concurrently
 MAX_MODEL_CALLS = 18    # includes inspection, audits, synthesis support and one repair
 
@@ -168,12 +168,17 @@ class EvidencePlan(dspy.Signature):
     what a dated market observation shows. Neither a contemporaneous price move
     nor a plausible mechanism alone proves the event caused the move. A follow-up changes the facts to
     verify while keeping its resolved referents. If a state read needs an
-    unresolved contract address, put that gap in constraints; do not guess."""
+    unresolved contract address, put that gap in constraints; do not guess.
+    Say what shape the answer takes: facts about one named subject, or
+    examples that must satisfy conditions. A question about one subject is
+    "one_subject" even when its answer is a list of names (the investors
+    backing a protocol are facts about it, not candidates to qualify)."""
 
     request: str = dspy.InputField()
     catalog: str = dspy.InputField()
     subject: str = dspy.OutputField()
     question: str = dspy.OutputField()
+    answer_shape: str = dspy.OutputField(desc='"one_subject" when the question asks for facts about a named subject (what an order authorizes, who backs a protocol, why a token moved, how a mechanism works, what happened this week), even when the answer is a list; "matching_examples" only when it asks for other projects, designs, tokens or cases that satisfy stated conditions (which other projects lock their own token to mint a second one)')
     constraints: str = dspy.OutputField(desc="only the necessary qualifying conditions for a proposed answer; semicolon-separated, or 'none'; exclude evidence tasks and unrequested dates")
     required_facts: str = dspy.OutputField(desc="one per line")
     capabilities: str = dspy.OutputField(desc="comma-separated capability names from the catalog")
@@ -199,12 +204,15 @@ class ExpandedEvidencePlan(dspy.Signature):
     For news, separate the original event from dated market observations; a
     price move alone does not prove causation. A follow-up keeps resolved
     referents while changing the facts to verify. Never guess an unresolved
-    contract address."""
+    contract address. Say what shape the answer takes: facts about one named
+    subject, or examples that must satisfy conditions; a question about one
+    subject is "one_subject" even when its answer is a list of names."""
 
     request: str = dspy.InputField()
     catalog: str = dspy.InputField()
     subject: str = dspy.OutputField()
     question: str = dspy.OutputField()
+    answer_shape: str = dspy.OutputField(desc='"one_subject" when the question asks for facts about a named subject (what an order authorizes, who backs a protocol, why a token moved, how a mechanism works, what happened this week), even when the answer is a list; "matching_examples" only when it asks for other projects, designs, tokens or cases that satisfy stated conditions (which other projects lock their own token to mint a second one)')
     constraints: str = dspy.OutputField(desc="only necessary qualifying conditions; semicolon-separated or 'none'; exclude evidence tasks and unrequested dates")
     required_facts: str = dspy.OutputField(desc="one per line")
     capabilities: str = dspy.OutputField(desc="comma-separated capability names from the catalog")
@@ -266,6 +274,23 @@ class ClaimSupport(dspy.Signature):
     summary: str = dspy.InputField()
     evidence: str = dspy.InputField()
     unsupported_claims: str = dspy.OutputField(desc="one unsupported summary claim per line, or none")
+
+
+class FactClaimSupport(dspy.Signature):
+    """Audit every material factual statement in the written summary against
+    the evidence: dated search cards, each with its numbered sources, and
+    any verbatim source-page passages. A statement is supported when a card
+    or a passage states it (a snippet with its source counts here; the
+    question asks for facts about one subject, not for candidates that
+    must qualify). A plausible inference, a figure no card carries, or a
+    citation marker alone is not enough. List each unsupported or
+    overstated claim on its own line, copied from the summary. An
+    explicitly labelled unknown is not an assertion."""
+
+    question: str = dspy.InputField()
+    summary: str = dspy.InputField()
+    evidence: str = dspy.InputField()
+    unsupported_claims: str = dspy.OutputField(desc="one per line, or 'none'")
 
 
 class CandidateCheck(dspy.Signature):
@@ -401,6 +426,7 @@ _followup_program = dspy.Predict(FollowupSource)
 _review_program = dspy.Predict(GapReview)
 _support_program = dspy.Predict(ExampleSupport)
 _claim_support_program = dspy.Predict(ClaimSupport)
+_fact_claim_program = dspy.Predict(FactClaimSupport)
 
 
 def _parse_calls(text: str) -> list[tuple[str, str]]:
@@ -487,6 +513,17 @@ def _opening_calls(plan, contract: contracts.QuestionContract, request: str) -> 
         ("web_discovery", f"{headline} original announcement official release or primary data exact event date and terms"),
         ("web_discovery", f"{headline} dated market reaction observed prices volumes affected assets and alternative drivers"),
     ]
+
+
+def _candidate_lane(plan, constraints: str) -> bool:
+    """Whether the plan describes a matching-examples question: conditions
+    are stated, and the answer's shape is examples to qualify rather than
+    facts about one subject (the shape decides when the plan gives one)."""
+    conditioned = bool(constraints) and constraints.lower() != "none"
+    shape = (getattr(plan, "answer_shape", "") or "").strip().lower().replace(" ", "_")
+    if not shape:
+        return conditioned
+    return conditioned and shape.startswith("matching")
 
 
 def _news_headline(contract: contracts.QuestionContract, request: str) -> str:
@@ -980,7 +1017,12 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
     # still fails after one repair. The verified-passage-or-withhold rule had
     # covered both and withheld ordinary answers after 100-160 s (review of
     # the loop, 2026-09-26); the brief scopes it to comparison questions.
-    candidate_lane = bool(constraints) and constraints.lower() != "none"
+    # The plan says which shape the answer takes; conditions alone do not
+    # decide it (the planner wrote "include only direct investors; exclude…"
+    # for "who backs EigenLayer", and the example gate withheld the list of
+    # investors, live 2026-09-27). A replay fixture without the field keeps
+    # the conditions rule.
+    candidate_lane = _candidate_lane(plan, constraints)
     lane = "candidate" if candidate_lane else "fact"
     calls: list[DiscoveryCall | tuple[str, str]] = _expanded_calls(plan, contract, request)
     initial_queries = {call.query for call in calls if isinstance(call, DiscoveryCall)}
@@ -1143,7 +1185,10 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
                  "Then describe any observed market response with its timestamp and source. "
                  "A market move around an event does not establish causation; label proposed mechanisms and implications as interpretation. "
                  "If the market response was not verified, say so rather than presenting an impact or trading conclusion as fact.")
-    if constraints and constraints.lower() != "none":
+    if candidate_lane:
+        # The conditions and the per-candidate verdicts are the candidate
+        # lane's vocabulary; written into a fact-lane answer they turned a list
+        # of investors into "not_established candidates" (live 2026-09-27).
         note += f"\nConstraints the user stated, to apply strictly: {constraints}"
     # Inspection already happened at the end of each retrieval round; use
     # that same evidence state for synthesis and the user-visible trail.
@@ -1156,7 +1201,7 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
                                        "calls": made, "skipped": skipped, "verdicts": [], "timings": timings, "withheld": "candidate check failed"}
         gate.ok = False
         return {"answer": withheld, "trajectory": trajectory, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "research_loop"}
-    if verdicts:
+    if verdicts and candidate_lane:
         note += "\nCandidates checked against the conditions from their cited pages (state these verdicts, never upgrade one): " + "; ".join(
             f"{v['name']}: {v['verdict']}" + (f" ({v['conditions_failed']})" if v["verdict"] == "related_but_different" and v.get("conditions_failed") not in (None, "", "none") else "")
             for v in verdicts)
@@ -1190,7 +1235,8 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
     for v in verified:
         passages = v.get("passages") or [{"url": v["url"], "quote": _clean_quote(v["quote"]), "fetched_at": v.get("fetched_at", "")}]
         for passage in passages:
-            verified_lines.append(f"- **{v['name']}** — {v['verdict']} · [page]({passage['url']}) · "
+            label = f"**{v['name']}** — {v['verdict']} · " if candidate_lane else f"**{v['name']}** · "
+            verified_lines.append(f"- {label}[page]({passage['url']}) · "
                                   f"fetched {passage.get('fetched_at') or 'time unknown'}: “{passage['quote']}”")
     verified_cards = ("# Reviewed source-page passages\n\n" + "\n".join(verified_lines)) if verified_lines else ""
     if candidate_lane:
@@ -1211,6 +1257,7 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
                                        "coverage": ledger.as_dict(), "budget": turn_budget.record(), "timings": timings}
         return {"answer": answer, "trajectory": trajectory, "contract": contract.model_dump(), "gate": final.model_dump(), "pipeline": "research_loop"}
     t_synth = time.monotonic()
+    audit: dict = {}
     streaming.research_progress("answer", "Writing the answer from reviewed passages")
     try:
         with streaming.muted("delta"):
@@ -1237,8 +1284,7 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
             redo += f"Do not state these figures, no fact card carries them: {', '.join(final.unsupported)}. State only figures that appear in the cards, or describe without the number. "
         if final.contradictions:
             redo += f"These comparisons contradict their own numbers, rewrite them correctly or drop them: {'; '.join(final.contradictions)}."
-        with streaming.muted("delta"):
-            rewritten = await turn_budget.call("synthesis", composition.synthesize(redo, verified_cards, trajectory, research=True), 45) if turn_budget.can_run(12) else ""
+        rewritten = await _repair(turn_budget, redo, verified_cards, trajectory)
         if rewritten:
             again = fact_gate.check(contract, fact_rows, rewritten, scope_satisfied=True, evidence_text=verified_cards)
             again.unsupported = fact_gate.unsupported_figures(rewritten.split("\n\n---\n\n", 1)[0], [], evidence_text=verified_cards)
@@ -1261,18 +1307,32 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
                 synthesized = _verified_partial(ledger, verdicts)
                 final.ok = False
         if not synthesized.startswith(("**I withheld", "**Checked source passages so far")):
-            unsupported = await _unsupported_claims(question, synthesized, verified_cards, runtime)
+            unsupported = await _unsupported_claims(question, synthesized, verified_cards, runtime, fact_lane=not candidate_lane)
+            audit = {"unsupported": unsupported, "repaired": False, "after_repair": None}
             if unsupported is None:
                 synthesized = _withheld("the claim-to-passage check could not run", verified_cards)
             elif unsupported:
                 redo = (f"{request}\n{note}\nThe following claims are not established by the reviewed page passages: "
                         + "; ".join(unsupported[:8])
                         + ". Remove them or explicitly say they are not established. Write only what the quoted passages prove.")
-                with streaming.muted("delta"):
-                    rewritten = await turn_budget.call("synthesis", composition.synthesize(redo, verified_cards, trajectory, research=True), 45) if turn_budget.can_run(12) else ""
-                again = await _unsupported_claims(question, rewritten, verified_cards, runtime) if rewritten else None
+                rewritten = await _repair(turn_budget, redo, verified_cards, trajectory)
+                again = await _unsupported_claims(question, rewritten, verified_cards, runtime, fact_lane=not candidate_lane) if rewritten else None
                 figures = fact_gate.unsupported_figures(rewritten.split("\n\n---\n\n", 1)[0], [], evidence_text=verified_cards) if rewritten else []
-                synthesized = rewritten if again == [] and not figures else _withheld("the summary still asserted claims its reviewed passages do not establish", verified_cards)
+                audit.update(repaired=bool(rewritten), after_repair=again, figures_after_repair=figures)
+                if again == [] and not figures:
+                    synthesized = rewritten
+                elif candidate_lane or not rewritten or again is None or figures:
+                    synthesized = _withheld("the summary still asserted claims its reviewed passages do not establish", verified_cards)
+                else:
+                    # The fact lane qualifies what one repair could not settle
+                    # (the brief: repair once, else withhold or qualify): the
+                    # repaired summary stands, and the claims the sources do
+                    # not establish are named under it, so the reader sees the
+                    # sourced facts and exactly what remains open. The audit
+                    # had withheld a whole list of investors over one hedging
+                    # sentence about the cards disagreeing (live 2026-09-27).
+                    synthesized = _qualified(rewritten, again)
+                    final.ok = False
         timings["support"] = round(time.monotonic() - t_support, 1)
     # Discovery cards are retained in the trajectory for review, but their
     # provider-written prose must not appear below a page-checked answer or
@@ -1280,12 +1340,16 @@ async def _run(state: dict, request: str, contract: contracts.QuestionContract, 
     # authoritative answer in the chat UI.
     if synthesized.startswith("**I withheld"):
         final.ok = False
+        if not candidate_lane:
+            # The fact lane's evidence is the dated cards themselves: a
+            # withheld summary leaves them for the reader, labelled as they are.
+            synthesized += "\n\n---\n\n" + cards
     timings["total"] = round(time.monotonic() - started, 1)
     synthesized = _with_trail(synthesized, made, skipped, verdicts, timings)
     trajectory = dict(trajectory or {})
     trajectory["research_loop"] = {"subject": getattr(plan, "subject", ""), "question": question, "constraints": constraints, "required_facts": required, "lane": lane,
                                    "calls": made, "skipped": skipped, "verdicts": verdicts, "coverage": ledger.as_dict(),
-                                   "budget": turn_budget.record(), "timings": timings}
+                                   "budget": turn_budget.record(), "timings": timings, "audit": audit}
     logger.info("research loop record: %s", trajectory["research_loop"])
     return {"answer": synthesized, "trajectory": trajectory, "contract": contract.model_dump(), "gate": final.model_dump(), "pipeline": "research_loop"}
 
@@ -1367,21 +1431,51 @@ async def _verify_examples(question: str, synthesized: str, cards: str, request:
     return _withheld("it presented as examples names the cited sources do not establish (" + ", ".join(gated) + ")", cards)
 
 
+async def _repair(turn_budget: TurnBudget, redo: str, cards: str, trajectory: dict) -> str:
+    """One rewrite under the turn's budget; "" when there is no time left or
+    the rewrite times out (the timeout had escaped the loop and crashed the
+    turn after the claim audit, live 2026-09-27)."""
+    if not turn_budget.can_run(12):
+        return ""
+    try:
+        with streaming.muted("delta"):
+            return await turn_budget.call("synthesis", composition.synthesize(redo, cards, trajectory, research=True), 45) or ""
+    except (TimeoutError, asyncio.TimeoutError):
+        turn_budget.exhausted = turn_budget.exhausted or "insufficient time for the repair"
+        return ""
+    except Exception:
+        logger.info("research loop: repair synthesis failed", exc_info=True)
+        return ""
+
+
+def _qualified(answer: str, unsupported: list[str]) -> str:
+    """The written summary with the claims the sources read do not establish
+    named under it; the cards follow as they were."""
+    summary, sep, rest = answer.partition("\n\n---\n\n")
+    listed = "\n".join(f"- {claim.strip()}" for claim in unsupported[:6] if claim.strip())
+    return f"{summary.rstrip()}\n\n**Not established by the sources read:**\n{listed}" + (sep + rest if sep else "")
+
+
 def _withheld(reason: str, cards: str) -> str:
     reviewed = []
     if cards.startswith("# Reviewed source-page passages"):
-        reviewed = [line for line in cards.splitlines() if line.startswith("- **")][:4]
+        reviewed = [line for line in cards.split("\n\n---\n\n", 1)[0].splitlines() if line.startswith("- **")][:4]
     observed = ("\n\n**Directly checked passages:**\n\n" + "\n".join(reviewed)
                 + "\n\nThese passages establish only what they say; the full requested conclusion remains unverified.") if reviewed else ""
     return (f"**I withheld the written summary: {reason}. The research trail shows what was checked "
             f"and how each candidate fared.**{observed}")
 
 
-async def _unsupported_claims(question: str, answer: str, cards: str, runtime) -> list[str] | None:
+async def _unsupported_claims(question: str, answer: str, cards: str, runtime, *, fact_lane: bool = False) -> list[str] | None:
+    """The claims the evidence does not establish; None when the audit could
+    not run. The candidate lane audits against page passages only; the fact
+    lane against the dated search cards and the passages read, all of them
+    (a 14k cut had hidden the cards behind the passages, live 2026-09-27)."""
     summary = answer.split("\n\n---\n\n", 1)[0]
+    program, evidence = (_fact_claim_program, _compact(cards, 48000)) if fact_lane else (_claim_support_program, _compact(cards, 14000))
     try:
         result = await asyncio.wait_for(runtime._call_research_loop_lm(
-            _claim_support_program, question=question, summary=summary[:6500], evidence=_compact(cards, 14000)), timeout=45)
+            program, question=question, summary=summary[:6500], evidence=evidence), timeout=45)
     except Exception:
         logger.info("research loop: claim support check failed", exc_info=True)
         return None
