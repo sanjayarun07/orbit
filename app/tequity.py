@@ -221,10 +221,25 @@ def fuzzy_venue(word: str) -> str | None:
     return hit[0] if hit else None
 
 
+def _venue_span(request: str) -> tuple[int, int] | None:
+    """Where the sentence names its venue. Aster is a venue and a token listed
+    on Hyperliquid: with two venue words, the one after "on" is the venue and
+    the other is the asset ("how is ASTER trading on Hyperliquid",
+    regression run 2026-09-25)."""
+    hits = list(_DEX.finditer(request or ""))
+    if not hits:
+        return None
+    if len(hits) > 1:
+        on = re.search(r"\bon\s+(aster|hyperliquid|hl)\b", request, re.I)
+        if on:
+            return on.span(1)
+    return hits[0].span(1)
+
+
 def _dex_of(request: str) -> str | None:
-    m = _DEX.search(request or "")
-    if m:
-        word = m.group(1).lower()
+    span = _venue_span(request)
+    if span:
+        word = (request or "")[span[0]:span[1]].lower()
         return "hyperliquid" if word in ("hyperliquid", "hl") else "aster"
     for word in re.findall(r"[A-Za-z]{5,}", request or ""):
         venue = fuzzy_venue(word)
@@ -334,7 +349,10 @@ def base_in(request: str, allow_lowercase: bool = False) -> str | None:
     """The base asset a request names ($tsla, TSLA, 'AAPL on hyperliquid'), or None.
     A lowercase ticker counts only where the caller knows the sentence is a
     quote ask ("hyperliquid btc price")."""
-    text = _DEX.sub(" ", request or "")
+    text = request or ""
+    span = _venue_span(text)
+    if span:
+        text = text[:span[0]] + " " + text[span[1]:]
     m = re.search(r"\$([A-Za-z][A-Za-z0-9]{1,9})\b", text)
     if m:
         return m.group(1).upper()
@@ -673,21 +691,35 @@ def volume_leaders(request: str) -> str:
     return compact_tool_result("\n\n".join(cards))
 
 
-_QUOTE_WORDS = re.compile(r"\b(?:price|quote|trading\s+at|how\s+much|last\s+price|worth|rate|what\s+is|what'?s|full\s+name|description|which\s+company|labell?ed|listed\s+as)\b", re.I)     # "what is the stock labeled NBIS on Hyperliquid": the feed's own record answers first (2026-09-24)
+_QUOTE_WORDS = re.compile(r"\b(?:price|quote|trading(?:\s+at)?|how\s+much|last\s+price|worth|rate|what\s+is|what'?s|full\s+name|description|which\s+company|labell?ed|listed\s+as|"
+                          r"doing|performing|up|down|moving)\b", re.I)     # "how is ASTER trading on Hyperliquid", "are HOOD tokens up": the feed's pair, not the web (regression run 2026-09-25)     # "what is the stock labeled NBIS on Hyperliquid": the feed's own record answers first (2026-09-24)
 
 
 def quote_matches(request: str) -> bool:
     text = request or ""
-    return bool(_dex_of(text) and base_in(text, allow_lowercase=True) and (_QUOTE_WORDS.search(text) or len(text.split()) <= 4)
+    venue = _dex_of(text)
+    # "Are HOOD tokens up?": a ticker called a token with no venue named is
+    # the tokenized stock on the feed's default venue; the quote itself
+    # says when the feed does not list it, and the ordinary path answers.
+    tokenised = bool(re.search(r"\btokens?\b", text, re.I)) and base_in(text) is not None
+    # the short-sentence form ("hyperliquid btc price") needs the venue: "OPEN
+    # token unlock schedule" and "USELESS token pairs" are not quote asks
+    asks_quote = bool(_QUOTE_WORDS.search(text)) or (bool(venue) and len(text.split()) <= 4)
+    return bool((venue or tokenised) and base_in(text, allow_lowercase=bool(venue)) and asks_quote
                 and not re.search(r"\b(?:positions?|balances?|margin|my|movers?|gainers?|losers?|trending|volume\s+leaders?|funding|open\s+interest|oi|liquidations?|order\s*book|depth)\b", text, re.I))
+
+
+def pair_of(request: str) -> tuple[str, str | None]:
+    """(venue, base) a quote ask names; the venue defaults to Hyperliquid."""
+    venue = _dex_of(request) or "hyperliquid"
+    return venue, base_in(request, allow_lowercase=True)
 
 
 def quote(request: str) -> str:
     """One pair on one venue from the latest snapshot: last price, 24h change
     and quote volume, with the snapshot time ("hyperliquid btc price" had no
     tool and wandered, live 2026-09-23)."""
-    venue = _dex_of(request) or "hyperliquid"
-    base = base_in(request, allow_lowercase=True)
+    venue, base = pair_of(request)
     if not base:
         raise ValueError("Name the asset, e.g. 'hyperliquid BTC price'")
     snap = _sync(snapshot(MOVERS[venue]))

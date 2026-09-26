@@ -21,6 +21,7 @@ from app.routing import lexicon, subject_probe
 from app import answer_gate, event_calendar, hedge_prediction, prediction_route, mobula_wallet, symbol_registry, token_pages, token_unlocks, why_moving
 from app.clarify import is_clarification
 from app.settings import settings
+from app import deployer_check
 from app.market_providers import TRENDING_TOKENS
 from app.perplexity_tools import PERPLEXITY_FUNCTIONS, perplexity_available, perplexity_web_search
 from app.provider_registry import get_provider_router
@@ -1937,6 +1938,24 @@ async def research_node(state: AgentState) -> dict:
         state = {**state, "request": request, "contextual_request": None,
                  "capabilities": sorted(set(state.get("capabilities") or []) | {"market_data", "derivatives"})}
         streaming.emit("status", text=f"Reading the tape for {asset}")
+    if deployer_check.is_deployer_question(_ask(request)):
+        # "Is the largest account the deployer?": the largest position and the
+        # deployer compared by address from Mobula's records, never a web page
+        # (one of three regression runs asserted a deployer from an article,
+        # 2026-09-25). The token is the one named or the conversation's focus.
+        named = _TOKEN_ADDRESS.search(_ask(request))
+        focus = _focus_token(state) or {}
+        mint = named.group(1) if named else focus.get("address")
+        chain = (focus.get("chain") if focus.get("address") == mint else None) or ("solana" if mint and not mint.startswith("0x") else None)
+        if mint and chain:
+            try:
+                text, trajectory = await deployer_check.answer(mint, chain, focus.get("symbol") if focus.get("address") == mint else None)
+                return {"answer": text, "trajectory": trajectory}
+            except Exception:
+                logger.warning("deployer check unavailable for %s", mint[:8], exc_info=True)
+                return {"answer": "I cannot compare the largest holder with the deployer right now: Mobula returned no holder positions for this token. "
+                                  "Nothing from the web is substituted for that; ask again in a minute.", "trajectory": None}
+        return {"answer": "Which token? Name it or paste its contract, and I will compare its largest holder with the deployer Mobula records.", "trajectory": None}
     if tequity.enabled() and tequity.quote_matches(request):
         # A venue pair has its own price. This must precede the cash-equity
         # path for prompts such as "TSLA price on Hyperliquid".

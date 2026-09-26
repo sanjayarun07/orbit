@@ -3485,3 +3485,20 @@ Still open after the run: "which of those" over a holders table (list items only
 ASTER trading on Hyperliquid?" and "Are HOOD tokens up?" going to the web instead of the feed, the deployer question
 answered from the web rather than the security card's creator field, and two withheld summaries over figures the
 cards did not carry.
+
+Three of those closed on 2026-09-27 (`tests/test_uat_gaps_20260927.py`):
+
+- The deployer question ("Is the largest account the deployer? Show the transaction or say it is not established")
+  is answered from state, never from the web (`app/deployer_check.py`, hooked at the top of the research node's
+  security branch): Mobula's holder positions give the largest position with its full address, Mobula's token
+  metadata gives the deployer, and the two are compared by address. What the sources do not carry, a transfer between
+  them or who funded whom, is said to be not established; with no token in focus the node asks which token.
+- A venue pair in a sentence reaches the feed's quote: Aster is a venue and a token listed on Hyperliquid, so with two
+  venue words the one after "on" is the venue and the other the asset (`tequity._venue_span`); "Are HOOD tokens up?"
+  is the tokenised stock on the default venue when the sentence has a quote word (up, down, trading, doing…), and the
+  four-word shortcut ("hyperliquid btc price") needs the venue, so "OPEN token unlock schedule" is not a quote ask.
+- "Which of those are exchanges or pools?" over a holders table: `context_entities.answer_items` reads markdown table
+  rows when the answer has no list, so the referent note carries the numbered wallets and the follow-up never
+  substitutes a different set.
+
+Still open: two-subject comparisons and the two withheld summaries.

@@ -45,13 +45,27 @@ def answer_items(answer: str, limit: int = 8) -> list[str]:
                 found.append(item[:320])
         return found[:limit]
 
+    def tabled(text: str) -> list[str]:
+        """The rows of the card's first table ("which of those are exchanges"
+        after a holders table: the rows are the items, expanded run 2026-09-25)."""
+        found = []
+        for line in text.splitlines():
+            cells = [c.strip() for c in line.strip().strip("|").split("|")] if line.strip().startswith("|") else []
+            if len(cells) < 2 or all(re.fullmatch(r":?-+:?", c) for c in cells if c) or cells[0].lstrip("#").strip().lower() in ("", "#", "rank"):
+                if not (cells and re.fullmatch(r"\d+", cells[0])):
+                    continue
+            row = " · ".join(re.sub(r"\*\*|`", "", c) for c in cells[:4] if c and c != "—")
+            if len(row) >= 6:
+                found.append(row[:320])
+        return found[:limit]
+
     items = listed(written)
     if not evidence:
         return items
     first_card = re.split(r"(?m)^#{1,6}\s+", evidence, maxsplit=2)
     body = first_card[1] if len(first_card) > 1 else evidence
     body = re.split(r"(?im)^\s*(?:sources?|references?)\s*:\s*$", body, maxsplit=1)[0]
-    card_items = listed(body)
+    card_items = listed(body) or tabled(body)
     # Some generated summaries put "1. ... 2. ... 3. ..." on one line.
     # The numbered evidence card then represents the actual visible set more
     # faithfully than a single truncated summary-line match.
