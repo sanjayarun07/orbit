@@ -633,9 +633,14 @@ async def monitor(job: dict, ctx: "jobs.JobContext") -> dict:
     rows = await quote_exit(row["mint"], current["quantity_raw"])
     await record(position_id, current["quantity_raw"], rows)
     await _update(position_id, quantity_raw=current["quantity_raw"], decimals=current["decimals"])
+    # The row the alert and the armed rule read carries the quantity these
+    # quotes were taken for, never the quantity loaded at the start of the
+    # tick (review 2026-09-27: a 30% armed exit sized itself on a stale balance).
+    row = {**row, "quantity_raw": current["quantity_raw"], "decimals": current["decimals"]}
     await ctx.finish_step("1")
     await ctx.step("2")
     row = await _rebaseline_if_needed(row, current, rows)
+    row = await _retry_pending_arm(row, rows)
     alert = await _maybe_alert(row, rows)
     await ctx.finish_step("2")
     return {"answer": "recorded", "quotes": rows, "alerted": bool(alert), "next_run_at": next_at}
@@ -732,16 +737,44 @@ async def _maybe_alert(row: dict, rows: list[dict]) -> dict | None:
         _item, new = await tasks.notify(row["user_id"], title, body, kind="exit_alert", task_id=row["id"], occurrence=occurrence)
         if new and rules.get("channel") == "email":
             alert.update({"title": title, "body": body, "email_pending": not await _email(row["user_id"], title, body)})
+    armed = bool(rules.get("arm_fraction")) and alert.get("kind") in ("deterioration", "discount")
+    if armed:
+        # The alert is stored with the arm still pending: a quoting, storage
+        # or delivery failure is retried on the next tick against fresh
+        # quotes, instead of becoming the new baseline with the armed action
+        # silently lost (review 2026-09-27).
+        alert["arm_pending"] = True
     await _update(row["id"], last_alert=alert)
-    if rules.get("arm_fraction") and alert.get("kind") in ("deterioration", "discount"):
-        # The armed rule (app/agent_rules.py): the sized exit is quoted now,
-        # checked, receipted and handed to the user to confirm. An arming
-        # failure never loses the alert itself.
-        try:
-            await agent_rules.arm_exit(row, alert, rows)
-        except Exception:
-            logger.warning("exit_monitor: arming failed for %s", row["id"], exc_info=True)
+    if armed and await _arm(row, alert, rows):
+        alert["arm_pending"] = False
+        await _update(row["id"], last_alert=alert)
     return alert
+
+
+async def _arm(row: dict, alert: dict, rows: list[dict]) -> bool:
+    """The armed rule (app/agent_rules.py): the sized exit is quoted now,
+    checked, receipted and handed to the user to confirm. True when the
+    receipt and its delivery are in place; an arming failure never loses
+    the alert itself."""
+    try:
+        return (await agent_rules.arm_exit(row, alert, rows)) is not None
+    except Exception:
+        logger.warning("exit_monitor: arming failed for %s", row["id"], exc_info=True)
+        return False
+
+
+async def _retry_pending_arm(row: dict, rows: list[dict]) -> dict:
+    """An alert whose armed action did not complete last tick is armed again
+    now, from these fresh quotes, before any new alert is considered."""
+    last = row.get("last_alert") or {}
+    rules = row.get("rules") or {}
+    if not last.get("arm_pending") or not rules.get("arm_fraction"):
+        return row
+    if await _arm(row, last, rows):
+        last = {**last, "arm_pending": False}
+        await _update(row["id"], last_alert=last)
+        row = {**row, "last_alert": last}
+    return row
 
 
 async def _email(user_id: str, title: str, body: str) -> bool:

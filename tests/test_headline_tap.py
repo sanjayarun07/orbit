@@ -8,7 +8,7 @@ import asyncio
 from app import composition, evidence_pipeline, market_overview
 from tests.test_contract_pipeline import FakeRouter
 
-PULSE = "# Market pulse\n**Retrieved** 2026-09-26 09:00 UTC\n\n- **BTC** $84,700 (−0.8% 24h)\n- **ETH** $2,711 (+0.3% 24h)\n\n- Fear & Greed: 73 (Greed)\n- Total market cap: $3.1T"
+PULSE = "# Crypto market pulse\n**Retrieved** 2026-09-26 09:00 UTC\n\n- **BTC** $84,700 (−0.8% 24h)\n- **ETH** $2,711 (+0.3% 24h)\n\n- Fear & Greed: 73 (Greed)\n- Total market cap: $3.1T"
 WEB = "# From the web (dated, with sources)\n**Query**: q\n\nThe Federal Reserve requested comment on two stablecoin proposals on September 24, 2026. [1]\n\nSources:\n[1] [Fed](https://federalreserve.gov/x) · 2026-09-24"
 SOCIAL = "# X social trending\n- Posts about stablecoin rules: mostly relieved, some accounts call it a crackdown."
 
@@ -46,7 +46,7 @@ def test_a_policy_headline_gets_the_pulse_and_the_social_read(monkeypatch):
                              {"perplexity_web_search": WEB, "x_social_trending": SOCIAL})
     assert out is not None and out["contract"]["kind"] == "open_research"
     answer = out["answer"]
-    assert "# Market pulse" in answer and "Fear & Greed: 73" in answer and "# X social trending" in answer
+    assert "# Crypto market pulse" in answer and "Fear & Greed: 73" in answer and "# X social trending" in answer
     assert "x_social_trending" in router.calls
     assert "grounded in the market pulse card and the social read" in seen["request"] and "never its publication date" in seen["request"]
     assert "No prediction, no target, no advice." in seen["request"]
@@ -55,20 +55,20 @@ def test_a_policy_headline_gets_the_pulse_and_the_social_read(monkeypatch):
 def test_a_market_headline_gets_the_pulse_but_not_the_social_read(monkeypatch):
     out, router, seen = _run(monkeypatch, "What does this mean for memecoins: Solana gainers lead as BONK rallies",
                              {"perplexity_web_search": WEB, "x_social_trending": SOCIAL})
-    assert "# Market pulse" in out["answer"] and "# X social trending" not in out["answer"]
+    assert "# Crypto market pulse" in out["answer"] and "# X social trending" not in out["answer"]
     assert "x_social_trending" not in router.calls
     assert "grounded in the market pulse card:" in seen["request"]
 
 
 def test_an_unavailable_pulse_leaves_the_tap_on_the_story(monkeypatch):
     out, router, seen = _run(monkeypatch, "What does this mean for memecoins: Solana gainers lead as BONK rallies", {"perplexity_web_search": WEB}, pulse="")
-    assert "# Market pulse" not in out["answer"] and "Home headline tap" not in seen["request"]
+    assert "# Crypto market pulse" not in out["answer"] and "Home headline tap" not in seen["request"]
     assert "September 24, 2026" in out["answer"]
 
 
 def test_an_ordinary_research_question_never_gets_the_pulse(monkeypatch):
     out, router, seen = _run(monkeypatch, "How does Akash AKT and ACT compare? Is ACT actually transferable?", {"perplexity_web_search": WEB})
-    assert "# Market pulse" not in out["answer"] and "x_social_trending" not in router.calls
+    assert "# Crypto market pulse" not in out["answer"] and "x_social_trending" not in router.calls
 
 
 def test_the_pulse_card_is_two_sections_or_nothing(monkeypatch):
@@ -86,7 +86,7 @@ def test_the_pulse_card_is_two_sections_or_nothing(monkeypatch):
     monkeypatch.setattr(market_overview, "_get_json", fake_get)
     market_overview._cache.clear()
     card = market_overview.market_pulse_card()
-    assert card.startswith("# Market pulse") and "| BTC |" in card and "Fear & Greed**: 73" in card and "Top movers" not in card and "Trending" not in card
+    assert card.startswith("# Crypto market pulse") and "| BTC |" in card and "Fear & Greed**: 73" in card and "Top movers" not in card and "Trending" not in card
     assert "not a reading of the headline" in card
     monkeypatch.setattr(market_overview, "_get_json", lambda url: (_ for _ in ()).throw(RuntimeError("down")))
     market_overview._cache.clear()
@@ -101,3 +101,16 @@ def test_an_off_topic_social_read_is_dropped_not_shown(monkeypatch):
     assert "grounded in the market pulse card:" in seen["request"] and "social read" not in seen["request"]
     assert evidence_pipeline._about_headline("Fed proposes tougher stablecoin rules", "posts about stablecoin issuers")
     assert not evidence_pipeline._about_headline("Fed proposes tougher stablecoin rules", "posts about PAID and XPL unlocks")
+
+
+def test_a_stocks_or_bonds_headline_gets_the_crypto_pulse_as_context_never_as_the_market(monkeypatch):
+    out, router, seen = _run(monkeypatch, "What does this mean for the market: Bond yields hit highest level since 2007, pressuring stocks",
+                             {"perplexity_web_search": WEB, "x_social_trending": SOCIAL})
+    assert "# Crypto market pulse" in out["answer"]
+    note = seen["request"]
+    assert "about traditional markets" in note and "CRYPTO market's state now, not the market the headline describes" in note
+    assert "Never describe stock or bond levels from the pulse card" in note and "consistent with the headline" not in note
+    crypto = _run(monkeypatch, "What does this mean for the market: Bitcoin ETF inflows hit a record as stocks fall", {"perplexity_web_search": WEB})[2]["request"]
+    assert "about traditional markets" not in crypto and "consistent with the headline" in crypto
+    assert evidence_pipeline._TRADFI_HEADLINE.search("S&P 500 falls 0.75% as yields hit multi-decade highs")
+    assert not evidence_pipeline._CRYPTO_HEADLINE.search("S&P 500 falls 0.75% as yields hit multi-decade highs")

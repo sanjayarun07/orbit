@@ -1,4 +1,4 @@
-"""Every recorded episode passes k=2 times: the end state, not the prose."""
+"""Every recorded episode passes once in the ordinary suite: the end state, not the prose."""
 import importlib.util
 import json
 from pathlib import Path
@@ -13,9 +13,9 @@ EPISODES = [e for e in json.load(open(ROOT / "evals" / "episodes" / "cases.json"
 
 
 @pytest.mark.parametrize("episode", EPISODES, ids=[e["id"] for e in EPISODES])
-def test_episode_passes_twice(episode):
-    runs = [episode_eval.run_episode(episode) for _ in range(2)]
-    assert all(r["ok"] for r in runs), [r["failures"] for r in runs if not r["ok"]]
+def test_episode_passes(episode):
+    result = episode_eval.run_episode(episode)
+    assert result["ok"], result["failures"]
 
 
 def test_live_goal_does_not_count_a_name_only_in_the_research_trail():

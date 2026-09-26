@@ -185,6 +185,10 @@ def _about_headline(headline: str, card: str) -> bool:
     return any(w in text for w in words)
 
 
+_TRADFI_HEADLINE = re.compile(r"\b(?:stocks?|equit(?:y|ies)|shares|S&P|Nasdaq|Dow|bonds?|yields?|Treasur(?:y|ies)|FOMC|rate\s+(?:hike|cut)s?|inflation|CPI|jobs\s+report|payrolls|GDP|oil|crude|gold|dollar|earnings)\b", re.I)
+_CRYPTO_HEADLINE = re.compile(r"\b(?:crypto|bitcoin|BTC|ether(?:eum)?|ETH|solana|SOL|stablecoins?|tokens?|DeFi|memecoins?|altcoins?|blockchain|on-?chain|exchange\s+hack|ETF\s+(?:inflows?|outflows?))\b", re.I)
+
+
 async def _attach_market_state(router, request: str, chains: tuple[str, ...], contract, parts: list, enabled: dict) -> tuple[list, str]:
     """A Home headline tap asks what a story means for the market: the
     market's state now is a card of its own (majors, total cap, fear and
@@ -215,6 +219,15 @@ async def _attach_market_state(router, request: str, chains: tuple[str, ...], co
             attached.append("the social read")
     if not attached:
         return parts, ""
+    if _TRADFI_HEADLINE.search(headline) and not _CRYPTO_HEADLINE.search(headline):
+        # A stocks, bonds or macro headline: the pulse is the crypto market's
+        # state, which is the market this product reads; it is never
+        # presented as the market the headline describes (review 2026-09-27).
+        note = ("This is a Home headline tap about traditional markets (stocks, bonds or macro). Say what the story is and when it happened (the event "
+                "date from the web card, never its publication date). The market pulse card is the CRYPTO market's state now, not the market the headline "
+                "describes: say so in those words, then how crypto is positioned alongside the story, stating the majors' moves, total crypto market cap "
+                "and fear and greed exactly as the card states them. Never describe stock or bond levels from the pulse card. No prediction, no target, no advice.")
+        return parts, note
     note = ("This is a Home headline tap. Say what the story is and when it happened (the event date from the web card, never its publication date), "
             "then what it means for the market grounded in " + " and ".join(attached) + ": state the majors' moves, total market cap and fear and greed "
             "exactly as the card states them and say whether they are consistent with the headline. Posts show what accounts said, never a fact. "

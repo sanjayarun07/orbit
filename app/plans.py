@@ -1,4 +1,5 @@
 import json
+import logging
 import secrets
 from contextvars import ContextVar
 import re
@@ -10,6 +11,8 @@ from app.jupiter import jupiter, normalize_mint
 from app.models import SwapProposal, TokenInfo, TradePlan
 from app.settings import settings
 from app.solana_rpc import simulate_transaction
+
+logger = logging.getLogger(__name__)
 
 
 # Who this turn's plans belong to. A contextvar for the same reason the call
@@ -244,6 +247,15 @@ def _flatten_warnings(payload: dict) -> list[str]:
     return warnings
 
 
+async def _receipt_hook(plan_id: str, status: str) -> None:
+    """An agent receipt that produced this plan follows its outcome (Phase 0 of docs/agentic-wallets-plan.md)."""
+    try:
+        from app import agent_rules
+        await agent_rules.on_plan_status(plan_id, status)
+    except Exception:  # noqa: BLE001 - the receipt never breaks the plan store
+        logger.warning("plans: receipt hook failed for %s", plan_id, exc_info=True)
+
+
 async def get_plan(plan_id: str) -> TradePlan:
     plan = await _load_plan(plan_id)
     if not plan:
@@ -262,6 +274,8 @@ async def get_plan(plan_id: str) -> TradePlan:
                     plan_id,
                 )
             plan = await _load_plan(plan_id)
+        if plan is not None and plan.status == "expired":
+            await _receipt_hook(plan_id, "expired")
     return plan
 
 
@@ -284,6 +298,7 @@ async def claim_plan_submission(plan: TradePlan, signature: str | None = None) -
             plan.status = "submitting"
             plan.submission_signature = signature
             plan.submitted_at = current.submitted_at
+        await _receipt_hook(plan.plan_id, "submitting")
         return
     submitting = plan.model_copy(update={"status": "submitting", "submission_signature": signature, "submitted_at": datetime.now(timezone.utc)})
     async with pool.acquire() as conn:
@@ -300,6 +315,7 @@ async def claim_plan_submission(plan: TradePlan, signature: str | None = None) -
     plan.status = "submitting"
     plan.submission_signature = signature
     plan.submitted_at = submitting.submitted_at
+    await _receipt_hook(plan.plan_id, "submitting")
 
 
 async def unsettled_plans(limit: int = 100) -> list[TradePlan]:
@@ -327,6 +343,7 @@ async def update_submission(plan: TradePlan, status: str) -> None:
             if current and current.status in {"submitting", "submitted", "submission_unknown"}:
                 current.status = status
                 current.reconciled_at = now
+        await _receipt_hook(plan.plan_id, status)
         return
     updated = plan.model_copy(update={"status": status, "reconciled_at": now})
     async with pool.acquire() as conn:
@@ -339,6 +356,7 @@ async def update_submission(plan: TradePlan, status: str) -> None:
     if result == "UPDATE 1":
         plan.status = status
         plan.reconciled_at = now
+        await _receipt_hook(plan.plan_id, status)
 
 
 async def mark_plan_superseded(plan_id: str) -> None:
@@ -348,6 +366,7 @@ async def mark_plan_superseded(plan_id: str) -> None:
             plan = _plans.get(plan_id)
             if plan and plan.status == "pending_confirmation":
                 plan.status = "superseded"
+        await _receipt_hook(plan_id, "superseded")
         return
     async with pool.acquire() as conn:
         await conn.execute(
@@ -355,3 +374,4 @@ async def mark_plan_superseded(plan_id: str) -> None:
             "payload = jsonb_set(payload::jsonb, '{status}', '\"superseded\"'::jsonb) "
             "WHERE plan_id = $1 AND status = 'pending_confirmation'", plan_id,
         )
+    await _receipt_hook(plan_id, "superseded")

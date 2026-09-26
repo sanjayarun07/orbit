@@ -991,6 +991,19 @@ const CASES = {
   },
   // Related questions (2026-09-18): rendered under the answer as a list, a
   // tap sends the question as a new message; fewer than two means no section.
+  async inbox_action_sends_the_prepared_sell_line_and_closes_the_panel() {
+    const { sandbox } = load();
+    const sent = [], closed = [];
+    sandbox.sendMessage = async (text) => { sent.push(text); };
+    sandbox.closeDialog = (id) => { closed.push(id); };
+    const prompt = "sell 500000 DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 for USDC on solana with 50 bps slippage";
+    const armed = sandbox.renderInboxItem({ title: "BONK: 50% exit ready to confirm", body: "Ready to confirm.", kind: "exit_armed", created_at: "2026-09-27T09:00:00Z",
+      data: { receipt_id: "r1", action: { label: "Prepare the sale", prompt } } });
+    const plain = sandbox.renderInboxItem({ title: "Exit for BONK deteriorated 33%", body: "Alert.", kind: "exit_alert", created_at: "2026-09-27T09:00:00Z" });
+    const button = armed.children[armed.children.length - 1];
+    button.dispatch("click");
+    return { label: button.textContent, sent, closed, plainButtons: plain.children.length };
+  },
   async related_questions_render_under_the_answer_and_send_on_tap() {
     const { sandbox } = load();
     const sent = [];

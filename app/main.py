@@ -1816,6 +1816,13 @@ async def my_inbox(identity: Identity = Depends(require_browser_session)):
     return {"items": await tasks.inbox(identity.user["id"]), "unread": await tasks.unread_count(identity.user["id"])}
 
 
+@app.get("/me/agent-receipts")
+async def my_agent_receipts(identity: Identity = Depends(require_browser_session)):
+    """What the armed rules did on this account: each firing's receipt, the
+    plan it produced and how that ended (docs/agentic-wallets-plan.md)."""
+    return {"items": [agent_rules.public(r) for r in await agent_rules.list_for(identity.user["id"])]}
+
+
 @app.post("/me/inbox/read")
 async def read_my_inbox(body: InboxRead, identity: Identity = Depends(require_browser_session)):
     return {"marked": await tasks.mark_read(identity.user["id"], body.ids), "unread": await tasks.unread_count(identity.user["id"])}

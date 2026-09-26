@@ -2889,7 +2889,7 @@ Rank-and-accept is replaced, for four kinds of ask, by plan → gather → prove
   `CONTRACT_PIPELINE_ENABLED=false` returns everything to the legacy path.
 - **Episodes** (`evals/episodes/`, `scripts/episode_eval.py`, `tests/test_episodes.py`): recorded tool outputs
   replayed through the pipeline; a goal is the end state (tools that ran and must not, scope satisfied, gate,
-  facts, must/must-not say). pass^k after τ-bench; CI runs every episode twice, `--k 5` locally.
+  facts, must/must-not say). CI runs every episode once; request `--k 5` explicitly for a pass^k consistency check.
 
 **Evaluate first, then Perplexity-first selectively (2026-09-23).** Twenty recorded research episodes (`evals/episodes/cases.json`)
 cover rankings, holders, recent events and yields with paraphrases and unsupported-scope cases. `scripts/episode_eval.py

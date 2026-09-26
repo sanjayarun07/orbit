@@ -18,7 +18,7 @@ import json
 import logging
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.db import apply_schema, get_pg_pool, memory_is_the_store
 from app.settings import settings
@@ -140,6 +140,19 @@ async def count_today(source_id: str) -> int:
                    and datetime.fromisoformat(r["created_at"]) >= start)
 
 
+async def find_by_trigger(source_id: str, at: str | None) -> dict | None:
+    """The receipt already written for one firing of a rule (its trigger time)."""
+    if not at:
+        return None
+    pool = await _pool()
+    if pool is not None:
+        r = await pool.fetchrow("SELECT * FROM agent_receipts WHERE source_id = $1 AND trigger->>'at' = $2 ORDER BY created_at DESC LIMIT 1", source_id, at)
+        return _from_db(r) if r else None
+    with _lock:
+        rows = [r for r in _receipts.values() if r.get("source_id") == source_id and (r.get("trigger") or {}).get("at") == at]
+    return json.loads(json.dumps(rows[-1])) if rows else None
+
+
 async def set_outcome(receipt_id: str, status: str, plan_id: str | None = None, outcome: dict | None = None) -> None:
     pool = await _pool()
     if pool is not None:
@@ -162,6 +175,56 @@ async def scrub_user(user_id: str) -> int:
         for k in gone:
             del _receipts[k]
     return len(gone)
+
+
+async def _latest_armed(user_id: str, mint: str, amount_raw: int) -> dict | None:
+    """The newest armed receipt this plan matches by content: same user, same
+    mint, the same size the receipt proposed, within a day. Content, not an
+    id threaded through the UI: the line works pasted from email or Telegram too."""
+    since = _now() - timedelta(hours=24)
+    for r in await list_for(user_id, limit=100):
+        proposal = r.get("proposal") or {}
+        if (r.get("status") == "armed" and proposal.get("mint") == mint and int(proposal.get("amount_raw") or 0) == int(amount_raw)
+                and datetime.fromisoformat(r["created_at"]) >= since):
+            return r
+    return None
+
+
+async def link_plan(user_id: str, plan) -> dict | None:
+    """Called by the chat path when a trade plan is created: the armed
+    receipt whose sell line produced it is marked prepared and carries the
+    plan id, so the plan's outcome reaches the receipt."""
+    proposal = getattr(plan, "proposal", None)
+    if proposal is None or getattr(plan, "status", None) != "pending_confirmation":
+        return None
+    receipt = await _latest_armed(user_id, proposal.input_mint, proposal.amount_atomic)
+    if receipt is None:
+        return None
+    await set_outcome(receipt["id"], "prepared", plan_id=plan.plan_id, outcome={"plan_status": "pending_confirmation", "at": _now().isoformat()})
+    return await get(receipt_id=receipt["id"])
+
+
+_PLAN_OUTCOMES = {"submitting": "submitting", "submitted": "submitted", "submission_unknown": "submitted", "executed": "executed",
+                  "failed": "failed", "expired": "expired", "superseded": "superseded", "rejected": "rejected"}
+
+
+async def on_plan_status(plan_id: str, status: str) -> None:
+    """The plan's status change, written to the receipt that produced it.
+    Never raises into the plan store."""
+    mapped = _PLAN_OUTCOMES.get(status)
+    if not mapped or not plan_id:
+        return
+    try:
+        pool = await _pool()
+        if pool is not None:
+            rows = [_from_db(r) for r in await pool.fetch("SELECT * FROM agent_receipts WHERE plan_id = $1", plan_id)]
+        else:
+            with _lock:
+                rows = [json.loads(json.dumps(r)) for r in _receipts.values() if r.get("plan_id") == plan_id]
+        for r in rows:
+            await set_outcome(r["id"], mapped, plan_id=plan_id, outcome={**(r.get("outcome") or {}), "plan_status": status, "at": _now().isoformat()})
+    except Exception:
+        logger.warning("agent_rules: plan status %s for %s not recorded", status, plan_id, exc_info=True)
 
 
 def public(receipt: dict) -> dict:
@@ -255,10 +318,20 @@ async def arm_exit(row: dict, alert: dict, rows: list[dict]) -> dict | None:
     max_per_day = int(rules.get("arm_max_per_day") or DEFAULT_MAX_PER_DAY)
     slippage_bps = int(rules.get("arm_slippage_bps") or DEFAULT_SLIPPAGE_BPS)
     symbol = row.get("symbol") or row["mint"][:6]
+    existing = await find_by_trigger(row["id"], alert.get("at"))
+    if existing is not None:
+        # This firing was already receipted (a delivery failed after the
+        # receipt was written): deliver again, never a second receipt.
+        await _deliver(row, alert, existing, rules)
+        return existing
+    # The size is a fraction of the quantity these quotes were taken for (the
+    # full-exit row carries it), never the position row's stored quantity,
+    # which can be a tick stale (review 2026-09-27).
+    quoted_raw = next((int(r["amount_raw"]) for r in rows if r.get("fraction") == 1.0 and r.get("amount_raw")), int(row["quantity_raw"]))
     quote = next((r for r in rows if r.get("fraction") == fraction), None)
     if quote is None:
         try:
-            quote = (await exit_monitor.quote_exit(row["mint"], int(row["quantity_raw"]), fractions=(fraction,)))[0]
+            quote = (await exit_monitor.quote_exit(row["mint"], quoted_raw, fractions=(fraction,)))[0]
         except Exception:
             logger.info("agent_rules: sized quote failed for %s", row["id"], exc_info=True)
             quote = None
@@ -271,7 +344,7 @@ async def arm_exit(row: dict, alert: dict, rows: list[dict]) -> dict | None:
     elif quote is None or not quote.get("ok"):
         receipt.update(status="refused", reason=f"no quote for a {fraction:.0%} exit: {(quote or {}).get('error') or 'quote unavailable'}")
     else:
-        proposal = proposal_for(row, fraction, quote, slippage_bps)
+        proposal = proposal_for({**row, "quantity_raw": quoted_raw}, fraction, quote, slippage_bps)
         checks = charter_precheck(await _charter_fields(user_id), quote.get("quoted_usdc"), slippage_bps, quote.get("price_impact_pct"))
         receipt.update(proposal=proposal, checks=checks)
         if checks["violations"] or checks["unresolved"]:
@@ -279,14 +352,28 @@ async def arm_exit(row: dict, alert: dict, rows: list[dict]) -> dict | None:
         else:
             receipt["status"] = "paper" if paper else "armed"
     await _insert(receipt)                                          # the record exists before anyone is told
-    title, body = _notification(symbol, row, alert, receipt, today, max_per_day)
+    await _deliver(row, alert, receipt, rules)
+    return receipt
+
+
+async def _deliver(row: dict, alert: dict, receipt: dict, rules: dict) -> None:
+    """The inbox item (once per firing: the occurrence key de-duplicates a
+    retry), email or Telegram per the position's channel. An armed receipt
+    carries the one-tap action: the exact sell line to send."""
+    from app import exit_monitor, tasks
+    user_id = row["user_id"]
+    symbol = row.get("symbol") or row["mint"][:6]
+    today = await count_today(row["id"])
+    max_per_day = int(rules.get("arm_max_per_day") or DEFAULT_MAX_PER_DAY)
+    title, body = _notification(symbol, row, alert, receipt, max(today - 1, 0), max_per_day)
+    data = ({"receipt_id": receipt["id"], "action": {"label": "Prepare the sale", "prompt": receipt["proposal"]["prompt"]}}
+            if receipt.get("status") == "armed" and receipt.get("proposal") else {"receipt_id": receipt["id"]})
     occurrence = f"{row['id']}:{alert.get('at')}:armed"
-    _item, new = await tasks.notify(user_id, title, body, kind="exit_armed", task_id=row["id"], occurrence=occurrence)
+    _item, new = await tasks.notify(user_id, title, body, kind="exit_armed", task_id=row["id"], occurrence=occurrence, data=data)
     if new and rules.get("channel") == "email":
         await exit_monitor._email(user_id, title, body)
     if new and rules.get("channel") == "telegram":
         await _telegram(user_id, title, body)
-    return receipt
 
 
 async def _telegram(user_id: str, title: str, body: str) -> None:

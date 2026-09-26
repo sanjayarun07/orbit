@@ -413,7 +413,7 @@ async def due_tasks(now: datetime | None = None, limit: int = 50) -> list[dict]:
 # ----------------------------------------------------------------------------
 
 async def notify(user_id: str, title: str, body: str, kind: str = "task", task_id: str | None = None,
-                 occurrence: str | None = None) -> tuple[dict, bool]:
+                 occurrence: str | None = None, data: dict | None = None) -> tuple[dict, bool]:
     """Deliver to the inbox. Returns (item, new).
 
     Keyed by the task occurrence when there is one: the inbox row IS the
@@ -421,13 +421,13 @@ async def notify(user_id: str, title: str, body: str, kind: str = "task", task_i
     delivered finds its row and does nothing, and email -- which cannot be
     de-duplicated after the fact -- is sent only when the row was new."""
     item = {"id": str(uuid4()), "user_id": user_id, "title": title[:200], "body": body[:4000], "kind": kind,
-            "task_id": task_id, "occurrence": occurrence, "created_at": _iso(_now()), "read_at": None}
+            "task_id": task_id, "occurrence": occurrence, "created_at": _iso(_now()), "read_at": None, "data": data or None}
     pool = await get_pg_pool()
     if pool is not None:
         status = await pool.execute(
-            "INSERT INTO user_inbox (id, user_id, title, body, kind, task_id, occurrence) VALUES ($1, $2, $3, $4, $5, $6, $7) "
+            "INSERT INTO user_inbox (id, user_id, title, body, kind, task_id, occurrence, data) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb) "
             "ON CONFLICT DO NOTHING",
-            item["id"], user_id, item["title"], item["body"], kind, task_id, occurrence,
+            item["id"], user_id, item["title"], item["body"], kind, task_id, occurrence, json.dumps(data) if data else None,
         )
         return item, status.endswith("1")
     if occurrence and any(i.get("task_id") == task_id and i.get("occurrence") == occurrence for i in _inbox.get(user_id, [])):
@@ -455,7 +455,8 @@ async def inbox(user_id: str, limit: int = 50) -> list[dict]:
     if pool is not None:
         rows = await pool.fetch("SELECT * FROM user_inbox WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2", user_id, limit)
         return [{"id": str(r["id"]), "title": r["title"], "body": r["body"], "kind": r["kind"], "task_id": str(r["task_id"]) if r["task_id"] else None,
-                 "created_at": _iso(r["created_at"]), "read_at": _iso(r["read_at"])} for r in rows]
+                 "created_at": _iso(r["created_at"]), "read_at": _iso(r["read_at"]),
+                 "data": (json.loads(r["data"]) if isinstance(r["data"], str) else r["data"]) if "data" in r.keys() and r["data"] else None} for r in rows]
     items = list(reversed(_inbox.get(user_id, [])))[:limit]
     return [{k: v for k, v in item.items() if k != "user_id"} for item in items]
 

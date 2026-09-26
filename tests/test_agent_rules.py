@@ -157,3 +157,111 @@ def test_the_precheck_is_deterministic_and_never_guesses():
     assert not bad["ok"] and "$40.00 is over your max per trade of $25.00" in bad["violations"] and "50 bps is over your max slippage of 30 bps" in bad["violations"]
     unknown = agent_rules.charter_precheck(fields, None, 30, None)
     assert not unknown["ok"] and unknown["unresolved"] and not unknown["violations"]
+
+
+# --- the review of 2026-09-27: size from the quoted quantity, arming retried, one receipt per firing ---
+
+def test_a_custom_fraction_is_sized_on_the_quantity_the_quotes_were_taken_for(chain, monkeypatch):
+    from tests.test_exit_monitor import _accounts
+    p = _watched(monkeypatch)
+    asyncio.run(exit_controls.handle("arm my BONK exit: sell 30% if it drops 20%", USER, WALLET))
+    smaller = 400_000_00000                                                            # the wallet sold some since the watch started
+
+    async def accounts(wallet):
+        return _accounts(smaller)
+    monkeypatch.setattr(exit_monitor, "get_token_accounts", accounts)
+    _fire(monkeypatch, p, price=0.00002, impact=1.5)                                     # the holding changed: this tick re-baselines, no alert
+    assert asyncio.run(agent_rules.list_for("u1")) == []
+    _fire(monkeypatch, p)                                                                # the next tick's deterioration fires against the new baseline
+    r = asyncio.run(agent_rules.list_for("u1"))[0]
+    assert r["status"] == "armed" and r["proposal"]["fraction"] == 0.3
+    assert r["proposal"]["amount_raw"] == int(smaller * 0.3) and r["proposal"]["amount"] == "120000"
+    assert r["quote"]["amount_raw"] == int(smaller * 0.3)
+
+
+def test_an_arming_failure_is_retried_next_tick_and_receipted_once(chain, monkeypatch):
+    p = _watched(monkeypatch)
+    asyncio.run(exit_controls.handle("arm my BONK exit: sell half if it drops 20%", USER, WALLET))
+    real = agent_rules.arm_exit
+    attempts = {"n": 0}
+
+    async def flaky(row, alert, rows):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise RuntimeError("quote provider down")
+        return await real(row, alert, rows)
+    monkeypatch.setattr(agent_rules, "arm_exit", flaky)
+    _fire(monkeypatch, p)
+    row = asyncio.run(exit_monitor.get(p["id"]))
+    assert row["last_alert"]["arm_pending"] is True and asyncio.run(agent_rules.list_for("u1")) == []
+    _fire(monkeypatch, p)                                                                # inside the cooldown: no new alert, the pending arm is retried
+    row = asyncio.run(exit_monitor.get(p["id"]))
+    receipts = asyncio.run(agent_rules.list_for("u1"))
+    assert row["last_alert"]["arm_pending"] is False and len(receipts) == 1 and receipts[0]["status"] == "armed"
+    assert receipts[0]["trigger"]["at"] == row["last_alert"]["at"]
+    assert [i["kind"] for i in asyncio.run(tasks.inbox("u1"))].count("exit_armed") == 1
+    _fire(monkeypatch, p)                                                                # a third tick arms nothing new
+    assert len(asyncio.run(agent_rules.list_for("u1"))) == 1
+
+
+def test_a_delivery_failure_after_the_receipt_never_writes_a_second_receipt(chain, monkeypatch):
+    p = _watched(monkeypatch)
+    asyncio.run(exit_controls.handle("arm my BONK exit: sell half if it drops 20%", USER, WALLET))
+    real_deliver = agent_rules._deliver
+    calls = {"n": 0}
+
+    async def flaky_deliver(row, alert, receipt, rules):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("inbox down")
+        return await real_deliver(row, alert, receipt, rules)
+    monkeypatch.setattr(agent_rules, "_deliver", flaky_deliver)
+    _fire(monkeypatch, p)
+    assert len(asyncio.run(agent_rules.list_for("u1"))) == 1 and asyncio.run(exit_monitor.get(p["id"]))["last_alert"]["arm_pending"] is True
+    _fire(monkeypatch, p)
+    receipts = asyncio.run(agent_rules.list_for("u1"))
+    inbox = asyncio.run(tasks.inbox("u1"))
+    assert len(receipts) == 1 and [i["kind"] for i in inbox].count("exit_armed") == 1
+    armed = next(i for i in inbox if i["kind"] == "exit_armed")
+    assert armed["data"]["receipt_id"] == receipts[0]["id"] and armed["data"]["action"]["label"] == "Prepare the sale"
+    assert armed["data"]["action"]["prompt"] == receipts[0]["proposal"]["prompt"]
+
+
+# --- slice 2: the one-tap action and the receipt's link to the plan it produced ---
+
+def test_the_inbox_action_sends_the_exact_sell_line_into_the_chat():
+    from tests.test_ui_swap_flow import run_case
+    r = run_case("inbox_action_sends_the_prepared_sell_line_and_closes_the_panel")
+    assert r["label"] == "Prepare the sale" and r["closed"] == ["profileDialog"] and r["plainButtons"] == 0
+    assert r["sent"] == ["sell 500000 DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 for USDC on solana with 50 bps slippage"]
+
+
+def test_a_plan_made_from_the_sell_line_links_to_its_receipt_and_follows_its_outcome(chain, monkeypatch):
+    from types import SimpleNamespace
+    from app import plans
+    p = _watched(monkeypatch)
+    asyncio.run(exit_controls.handle("arm my BONK exit: sell half if it drops 20%", USER, WALLET))
+    _fire(monkeypatch, p)
+    receipt = asyncio.run(agent_rules.list_for("u1"))[0]
+    plan = SimpleNamespace(plan_id="plan-1", status="pending_confirmation", proposal=SimpleNamespace(input_mint=MINT, amount_atomic=receipt["proposal"]["amount_raw"]))
+    linked = asyncio.run(agent_rules.link_plan("u1", plan))
+    assert linked["status"] == "prepared" and linked["plan_id"] == "plan-1"
+    other = SimpleNamespace(plan_id="plan-2", status="pending_confirmation", proposal=SimpleNamespace(input_mint=MINT, amount_atomic=12345))
+    assert asyncio.run(agent_rules.link_plan("u1", other)) is None                     # a different size is not the armed sale
+    asyncio.run(agent_rules.on_plan_status("plan-1", "submitting"))
+    asyncio.run(agent_rules.on_plan_status("plan-1", "executed"))
+    done = asyncio.run(agent_rules.get(receipt["id"]))
+    assert done["status"] == "executed" and done["outcome"]["plan_status"] == "executed" and done["plan_id"] == "plan-1"
+    asyncio.run(agent_rules.on_plan_status("plan-1", "made-up"))                          # an unknown status changes nothing
+    assert asyncio.run(agent_rules.get(receipt["id"]))["status"] == "executed"
+
+
+def test_the_plan_store_reports_expiry_and_supersession_to_the_receipt(chain, monkeypatch):
+    from app import plans
+    seen = []
+
+    async def hook(plan_id, status):
+        seen.append((plan_id, status))
+    monkeypatch.setattr(agent_rules, "on_plan_status", hook)
+    asyncio.run(plans.mark_plan_superseded("nope"))
+    assert seen == [("nope", "superseded")]

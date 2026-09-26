@@ -68,8 +68,30 @@ The armed exit rule (`app/agent_rules.py`, `tests/test_agent_rules.py`):
 - Bounds: at most `arm_max_per_day` (default 3) prepared per position per
   day; refusals are receipted too; an arming failure never loses the alert.
 
-Not yet: the one-tap button in the inbox and the receipt's link to the plan
-it produced (slice 2), entry rules and DCA (slice 3), the receipts screen.
+Review of 2026-09-27 (three gaps, fixed the same day): a custom-sized exit is
+sized on the quantity the tick's quotes were taken for, never the position
+row's stored quantity; an alert whose armed action failed (quote, storage or
+delivery) is stored with `arm_pending` and re-armed on the next tick from
+fresh quotes, with one receipt per firing (a retry re-delivers, never
+re-receipts); a stocks, bonds or macro headline gets the crypto pulse as
+context, named as such, never as the market the headline describes.
+
+## Shipped: Phase 0, slice 2 (2026-09-27)
+
+- The inbox item of an armed receipt carries the one-tap action (`data.action`
+  with the exact sell line); the Tasks inbox renders "Prepare the sale", which
+  sends that line into the chat and closes the panel. The ordinary trade path
+  quotes it fresh and shows the CONFIRM card; the tap prepares and signs
+  nothing.
+- The receipt follows the plan: when the chat path creates a `TradePlan`, the
+  newest armed receipt for the same mint and size (within a day) is marked
+  `prepared` with the plan id (`agent_rules.link_plan`, matched by content so
+  the line works pasted from email or Telegram too); the plan store reports
+  `submitting`, `submitted`, `executed`, `failed`, `expired` and `superseded`
+  into the receipt (`plans._receipt_hook`).
+- `GET /me/agent-receipts` lists the account's receipts.
+
+Not yet: the receipts screen in the UI, entry rules and DCA (slice 3).
 
 ## Phases
 

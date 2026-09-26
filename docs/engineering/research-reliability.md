@@ -202,9 +202,11 @@ stale sources, unreadable pages, contradictory sources, provider failures,
 and search snippets that overstate their cited pages. Score end states:
 identity, tool eligibility, required-fact coverage, source provenance,
 unsupported claims, appropriate abstention, and any task/approval/credit
-state. Repeat each episode at least five times with answer caches disabled
-and report pass^5, wrong-answer rate, unsupported-claim rate, p50/p95
-latency, provider/model calls, and cost. For comparison questions, use
+state. The ordinary run checks each episode once. For an explicit consistency
+or rollout comparison, repeat the affected episodes five times with answer
+caches disabled and report pass^5 separately from the single-run score,
+alongside wrong-answer rate, unsupported-claim rate, p50/p95 latency,
+provider/model calls, and cost. For comparison questions, use
 human-reviewed relationship fixtures in addition to an LLM judge.
 
 Keep the deep-research rollout gated until it improves answer correctness

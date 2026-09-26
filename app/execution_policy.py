@@ -52,6 +52,7 @@ from app.routing.workflow import WorkflowState, WorkflowEvent, apply_event
 from app.service_errors import ServiceError, safe_detail as _safe_detail
 from app.sessions import CoordinationStoreFull, acquire_session_turn, commit_turn, extend_retention, get_session_snapshot, history_text_from_messages
 from app.settings import settings
+from app import agent_rules
 from app.billing_plans import FREE
 from app.solana_rpc import rpc
 
@@ -409,6 +410,12 @@ async def _execute_chat_turn(body: ChatRequest, identity: Identity, session_id: 
         except Exception:
             logger.warning("research gap recording failed", exc_info=True)
         trade_readiness = build_trade_readiness(plan)
+        if plan is not None and getattr(identity, "signed_in", False) and getattr(identity, "user", None):
+            # An armed exit's sell line produced this plan: its receipt takes the plan id (app/agent_rules.py).
+            try:
+                await agent_rules.link_plan(identity.user["id"], plan)
+            except Exception:
+                logger.warning("agent receipt link failed for %s", plan.plan_id, exc_info=True)
         gas_advisory = build_gas_advisory(run.cross_chain_swap)
         from app import research_objective
         objective = await research_objective.update((session_context or {}).get("research_objective"), body.message, answer,

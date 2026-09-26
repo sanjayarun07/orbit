@@ -204,14 +204,15 @@ def _build_pulse() -> str:
                 results[key] = future.result()
             except Exception:
                 results[key] = None
-    lines = ["# Market pulse", f"**Retrieved** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · CoinGecko, alternative.me, DefiLlama; provider measurement times may differ."]
+    lines = ["# Crypto market pulse", f"**Retrieved** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · CoinGecko, alternative.me, DefiLlama; provider measurement times may differ. "
+             "The crypto market's state now; it measures no stock, bond or macro market."]
     for section in (_core_quotes(results.get("simple") or {}, results.get("global") or {}),
                     _market_pulse(results.get("global") or {}, results.get("fng") or {}, results.get("tvl") or [], results.get("dex") or {})):
         if section:
             lines.extend(["", *section])
     if len(lines) <= 2:
         return ""
-    lines.extend(["", "A snapshot of the market now, not a reading of the headline; verify before trading."])
+    lines.extend(["", "A snapshot of the crypto market now, not a reading of the headline; verify before trading."])
     return compact_tool_result("\n".join(lines))
 
 
