@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from app import exit_monitor
+from app import agent_rules, exit_monitor
 from app.settings import settings
 from app.jupiter import jupiter, normalize_mint
 
@@ -30,6 +30,16 @@ _THRESHOLD = re.compile(
     r"^\s*(?P<verb>tell|alert|notify|email|warn)\s+me\s+(?:when|if)\s+(?:the\s+)?(?P<what>discount\s+(?:on|of)\s+)?my\s+(?:full[- ]position\s+)?"
     rf"(?:(?P<before>{_TOKEN})\s+)?exit(?:\s+quote)?(?:\s+(?:on|for|in)\s+(?P<after>{_TOKEN}))?\s+(?:exceeds|is\s+(?:more|higher|greater)\s+than|goes\s+(?:above|over|past)|widens\s+(?:past|beyond)|drops|falls|declines|deteriorates)(?:\s+by|\s+more\s+than|\s+over)?\s+(?P<pct>\d+(?:\.\d+)?)\s*%\s*[.!?]?(?:\s.*)?$", re.I | re.S)
 _CHANNEL = re.compile(r"^\s*(?:(?:email|send)\s+me\s+my\s+exit\s+alerts(?:\s+by\s+email)?|(?:send\s+)?(?:my\s+)?exit\s+alerts\s+(?:by|via|to)\s+(?P<channel>email|inbox|app))\s*[.!?]?\s*$", re.I)
+# The armed rule (app/agent_rules.py, Phase 0 of docs/agentic-wallets-plan.md):
+# "arm my BONK exit: sell half if it drops 20%", "prepare a 50% exit on BONK
+# when my exit falls 20%", "paper arm my BONK exit: sell all if it drops 15%",
+# "disarm my BONK exit". The size and the threshold are both stated; nothing
+# is inferred. The rule prepares a sell line for the user to send; it never
+# signs.
+_SIZE = r"(?:\d+(?:\.\d+)?\s*%|half|all|full|everything)"
+_ARM_A = re.compile(rf"^\s*(?P<paper>paper\s+)?arm\s+my\s+(?P<token>{_TOKEN})\s+exit\s*[:,]\s*sell\s+(?P<size>{_SIZE})\s+(?:when|if)\s+(?:it|my\s+exit|the\s+exit)\s+(?:drops|falls|deteriorates)(?:\s+by)?\s+(?P<pct>\d+(?:\.\d+)?)\s*%\s*[.!?]?\s*$", re.I)
+_ARM_B = re.compile(rf"^\s*(?P<paper>paper\s+)?prepare\s+(?:a|the)\s+(?P<size>{_SIZE})\s+(?:exit|sale|sell)\s+(?:on|for|of)\s+(?:my\s+)?(?P<token>{_TOKEN})\s+(?:when|if)\s+(?:it|my\s+exit|the\s+exit)\s+(?:drops|falls|deteriorates)(?:\s+by)?\s+(?P<pct>\d+(?:\.\d+)?)\s*%\s*[.!?]?\s*$", re.I)
+_DISARM = re.compile(rf"^\s*(?:disarm|stop\s+arming)\s+my\s+(?:(?P<token>{_TOKEN})\s+exit|exits?)\s*[.!?]?\s*$", re.I)
 # "compare buying $500, $2,000 and $5,000 of BONK", "size check BONK at $1000", "what would $250 of WIF cost to enter and exit"
 # The command may carry the chain and trailing instructions: "compare buying
 # $500, $2,000 and $5,000 of ANSEM on Solana. Show entry quotes and immediate
@@ -78,7 +88,7 @@ def is_public_control(message: str) -> bool:
 
 
 def is_exit_control(message: str) -> bool:
-    return any(p.match(message or "") for p in (_WATCH, _STOP, _ASK, _LIST, _THRESHOLD, _CHANNEL, _SIZES, _CHANGED, _SIZED_EXIT, _EXISTS)) \
+    return any(p.match(message or "") for p in (_WATCH, _STOP, _ASK, _LIST, _THRESHOLD, _CHANNEL, _SIZES, _CHANGED, _SIZED_EXIT, _EXISTS, _ARM_A, _ARM_B, _DISARM)) \
         or bool(_EXIT_ESTIMATE.search(message or "")) or bool(_READ_ONLY.match(message or ""))
 
 
@@ -137,7 +147,7 @@ def _rules_text(rules: dict) -> str:
         parts.append(f"discount {float(rules['discount_pct']):g}%")
     if rules.get("channel") == "email":
         parts.append("email")
-    return f" · alerts: {', '.join(parts)}" if parts else ""
+    return (f" · alerts: {', '.join(parts)}" if parts else "") + agent_rules.describe_rules(rules)
 
 
 def _amounts(text: str) -> list[float]:
@@ -241,6 +251,21 @@ def _token_mention(text: str, focus: dict | None) -> str | None:
     return None
 
 
+def _fraction(size: str) -> float | None:
+    word = (size or "").strip().lower().replace(" ", "")
+    if word == "half":
+        return 0.5
+    if word in ("all", "full", "everything"):
+        return 1.0
+    if word.endswith("%"):
+        try:
+            value = float(word[:-1])
+        except ValueError:
+            return None
+        return value / 100 if 0 < value <= 100 else None
+    return None
+
+
 async def handle(message: str, user: dict | None, wallet: str | None, focus: dict | None = None, last_capabilities: list[str] | None = None) -> str | None:
     """The reply to an exit control, or None when the message is not one."""
     text = (message or "").strip()
@@ -312,6 +337,51 @@ async def handle(message: str, user: dict | None, wallet: str | None, focus: dic
                       if kind == "discount_pct" else "the alert fires when the quoted proceeds are at or below the baseline quote minus your rule")
                    + f", at most once per {settings.exit_alert_cooldown_hours:g} hours, into your inbox. It never sells and never places an order.")
         return f"Set: you will be told when {what}{tail} for {names}" + (", by email as well as here." if rules.get("channel") == "email" else ".") + "\n\n" + trigger
+    m = _ARM_A.match(text) or _ARM_B.match(text)
+    if m:
+        if not user:
+            return "Sign in first: an armed exit rule belongs to your account, and the sell line it prepares is confirmed in your own wallet."
+        fraction = _fraction(m.group("size"))
+        pct = float(m.group("pct"))
+        if fraction is None or pct <= 0:
+            return "Say the size as a percentage, `half` or `all`, and the drop as a percentage: `arm my BONK exit: sell half if it drops 20%`."
+        token = _clean(m.group("token"))
+        mint, symbol, question = await resolve_token(token.lstrip("$"))
+        if question:
+            return question
+        rows = [p for p in await exit_monitor.list_for(user["id"]) if p["status"] == "active" and p["mint"] == mint]
+        if not rows:
+            return f"You are not watching an exit on {symbol or token}. Say `watch my exit on {symbol or token}` first, then arm it."
+        paper = bool(m.group("paper"))
+        for p in rows:
+            await exit_monitor.set_rules(p["id"], arm_fraction=fraction, drop_pct=pct, arm_paper=paper or None)
+        name = symbol or token
+        cap = agent_rules.DEFAULT_MAX_PER_DAY
+        head = (f"Paper-armed: when a full exit of {name} is quoted {pct:g}% lower than the baseline, a {fraction:.0%} exit is quoted and recorded, nothing to confirm."
+                if paper else
+                f"Armed: when a full exit of {name} is quoted {pct:g}% lower than the baseline, a {fraction:.0%} exit is quoted at that moment, checked against the "
+                f"built-in caps and your risk charter, and you get the exact sell line to send.")
+        return (head + f"\n\nWhat happens then: sending that line gets a fresh quote and the CONFIRM card; your wallet signs it. {settings.product_name} never sells on its own "
+                f"and holds no key. At most {cap} prepared sells a day per position; every firing is recorded whether it was prepared or refused. "
+                f"Say `disarm my {name} exit` to remove the rule; the watch itself keeps running.")
+    m = _DISARM.match(text)
+    if m:
+        if not user:
+            return "Sign in first."
+        rows = [p for p in await exit_monitor.list_for(user["id"]) if p["status"] == "active"]
+        token = _clean(m.group("token")) if m.group("token") else None
+        if token:
+            mint, symbol, question = await resolve_token(token.lstrip("$"))
+            if question:
+                return question
+            rows = [p for p in rows if p["mint"] == mint]
+        armed = [p for p in rows if (p.get("rules") or {}).get("arm_fraction")]
+        if not armed:
+            return "No armed exit rule to remove." + (f" You are still watching {len(rows)} position(s)." if rows else "")
+        for p in armed:
+            await exit_monitor.set_rules(p["id"], arm_fraction=None, arm_paper=None)
+        names = ", ".join(p.get("symbol") or p["mint"][:6] for p in armed)
+        return f"Disarmed {names}: alerts continue, nothing is prepared for you to confirm."
     m = _CHANNEL.match(text)
     if m:
         channel = "email" if (m.group("channel") or "email").lower() == "email" else "inapp"

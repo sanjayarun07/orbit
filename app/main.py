@@ -89,7 +89,7 @@ from app.settings import settings
 from app import tequity, tequity_ledger
 from pydantic import BaseModel, Field
 
-from app import decision_records, execution_policy, exit_monitor, holder_snapshots, jobs, polymarket_odds, sentiment_analyst, token_unlocks, turn_log, user_memory
+from app import agent_rules, decision_records, execution_policy, exit_monitor, holder_snapshots, jobs, polymarket_odds, sentiment_analyst, token_unlocks, turn_log, user_memory
 from app.portfolio import build_portfolio_snapshot
 from app.wallet_insights import portfolio_scenario, wallet_health
 from app.wallet_auth import (
@@ -1604,6 +1604,7 @@ async def delete_my_account(body: DeleteAccountRequest, request: Request, respon
         decision_records.forget_user(user["id"])
         await jobs.scrub_user(user["id"])
         await exit_monitor.scrub_user(user["id"])
+        await agent_rules.scrub_user(user["id"])
     except Exception as exc:
         logger.warning("account deletion stopped: the log could not be scrubbed", exc_info=True)
         raise HTTPException(503, "Your records could not be cleared right now, so the account was not deleted. Try again shortly.") from exc

@@ -190,6 +190,44 @@ def _build(query: str) -> str:
     return compact_tool_result("\n".join(lines))
 
 
+def _build_pulse() -> str:
+    """The market's state now, in two sections: the core quotes and the
+    pulse (total cap, dominance, fear and greed, DEX volume, TVL). No movers,
+    no trending: this is the card a headline tap is grounded in, not a
+    market report."""
+    urls = {"global": _GLOBAL_URL, "simple": _SIMPLE_URL, "fng": _FNG_URL, "tvl": _CHAINS_TVL_URL, "dex": _DEX_TOTAL_URL}
+    results: dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=len(urls)) as executor:
+        futures = {executor.submit(_get_json, url): key for key, url in urls.items()}
+        for future, key in list(futures.items()):
+            try:
+                results[key] = future.result()
+            except Exception:
+                results[key] = None
+    lines = ["# Market pulse", f"**Retrieved** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · CoinGecko, alternative.me, DefiLlama; provider measurement times may differ."]
+    for section in (_core_quotes(results.get("simple") or {}, results.get("global") or {}),
+                    _market_pulse(results.get("global") or {}, results.get("fng") or {}, results.get("tvl") or [], results.get("dex") or {})):
+        if section:
+            lines.extend(["", *section])
+    if len(lines) <= 2:
+        return ""
+    lines.extend(["", "A snapshot of the market now, not a reading of the headline; verify before trading."])
+    return compact_tool_result("\n".join(lines))
+
+
+def market_pulse_card() -> str:
+    """The pulse card for a Home headline tap, cached for 60s; empty when
+    every source failed (the tap then answers from the story alone)."""
+    with _cache_lock:
+        cached = _cache.get("pulse")
+        if cached is not None and time.monotonic() - cached[0] < _CACHE_TTL:
+            return cached[1]
+    output = _build_pulse()
+    with _cache_lock:
+        _cache["pulse"] = (time.monotonic(), output)
+    return output
+
+
 def crypto_market_overview(query: str = "") -> str:
     """Compact live crypto market-overview card, cached for 60s across callers."""
     with _cache_lock:

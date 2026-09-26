@@ -3445,6 +3445,19 @@ follow-up now points at the listed candidates but is not re-measured; the news r
 same `last_items` mechanism and needs its live check; "Now switch to Robinhood Chain memes" is answered by the legacy
 web path as a chatty summary and is not yet a contract.
 
+## Home headline tap: grounded in the market's state (2026-09-26)
+
+"What does this mean for the market: <headline>" is open research on the headline (the tap fix of 2026-09-25), and
+now carries the market's state as a card of its own: `market_overview.market_pulse_card` (core quotes, total cap,
+fear and greed, dominance, DEX volume, TVL; two sections, cached 60 s, empty when every source fails) joins the web
+read, and a policy headline (SEC, Fed, rules, bill, court, ETF, sanctions…) also gets the market-wide social read
+(`x_social_trending`, posts as what accounts said, never a fact), attached only when the card is about the headline: the
+first live tap got posts about unrelated tokens and the summary repeated them, so an off-topic read is dropped, not shown. The synthesis is told to give the story with its
+event date, then the read grounded in the pulse card, stating the majors, total cap and fear and greed exactly as
+the card has them, with no prediction (`evidence_pipeline._attach_market_state`, tests in
+`tests/test_headline_tap.py`). This is the one place the Minara comparison of 2026-09-25 showed a visible gap on
+our own Home screen: it read the majors and sentiment before answering; the tap read the story only.
+
 ## Regression run before UAT (2026-09-25, build 2807c358)
 
 `reports/regression-2807c358/report.md`: the frozen trust re-run (96 turns), the expanded journeys three times (231

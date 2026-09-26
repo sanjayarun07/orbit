@@ -166,6 +166,62 @@ def _near_tools(contract: contracts.QuestionContract, ranked: list[tuple[str, st
             and not (contract.venue and (tool_catalog.CONTRACT_COVERAGE.get(name) or {}).get("venues"))]
 
 
+# A headline about policy: the social read joins the market pulse, because
+# the market's reaction to a rule is the thing the tap asks about.
+_POLICY_HEADLINE = re.compile(r"\b(?:SEC|CFTC|Fed|Federal\s+Reserve|FOMC|Treasury|Congress|Senate|House|White\s+House|regulat\w*|rules?|law|bill|act|ban|bans|"
+                              r"sanction\w*|tariff\w*|court|ruling|lawsuit|subpoena|approv\w+|licen[cs]\w*|GENIUS|MiCA|ETF)\b")
+
+
+_HEADLINE_STOP = {"market", "markets", "crypto", "stocks", "today", "level", "since", "highest", "lowest", "tougher", "stays", "volatile",
+                  "proposes", "rules", "after", "amid", "while", "against", "record", "hits", "falls", "rises", "pressuring", "surges", "drops"}
+
+
+def _about_headline(headline: str, card: str) -> bool:
+    """Whether a market-wide social card is about this headline: at least one
+    of the headline's distinctive words (five letters or more, not market
+    filler) appears in the card."""
+    words = {w.lower() for w in re.findall(r"[A-Za-z]{5,}", headline or "")} - _HEADLINE_STOP
+    text = (card or "").lower()
+    return any(w in text for w in words)
+
+
+async def _attach_market_state(router, request: str, chains: tuple[str, ...], contract, parts: list, enabled: dict) -> tuple[list, str]:
+    """A Home headline tap asks what a story means for the market: the
+    market's state now is a card of its own (majors, total cap, fear and
+    greed, DEX volume, TVL), and for a policy headline the market-wide
+    social read joins it, so the written read is grounded in state and not
+    in the story's prose alone (2026-09-25: Minara read the majors and
+    sentiment before answering; the tap read the story only)."""
+    from app import market_overview
+    attached: list[str] = []
+    try:
+        pulse = await asyncio.wait_for(asyncio.to_thread(market_overview.market_pulse_card), timeout=20)
+    except Exception:
+        logger.info("headline tap: market pulse unavailable", exc_info=True)
+        pulse = ""
+    if pulse:
+        streaming.emit("card", markdown=pulse, tool="market_pulse")
+        parts.append((pulse, {"tool_name_0": "market_pulse", "tool_args_0": {"request": request}, "observation_0": pulse}))
+        attached.append("the market pulse card")
+    headline = composition.split_notes(request)[0].split(":", 1)[-1]
+    if _POLICY_HEADLINE.search(headline):
+        # The social tool is a router tool, not a contract-coverage entry; an unknown or disabled tool returns None from _invoke.
+        # Its read is market-wide: it joins only when it is about the headline (live 2026-09-26: the Fed stablecoin tap got
+        # posts about PAID and XPL unlocks, and the summary repeated them). Off-topic posts are dropped, never shown.
+        result = await _invoke(router, "x_social_trending", request, chains, contract)
+        if result is not None and result.output and _about_headline(headline, result.output):
+            streaming.emit("card", markdown=result.output, tool=result.tool)
+            parts.append((result.output, {"tool_name_0": result.tool, "tool_args_0": {"request": request}, "observation_0": result.output}))
+            attached.append("the social read")
+    if not attached:
+        return parts, ""
+    note = ("This is a Home headline tap. Say what the story is and when it happened (the event date from the web card, never its publication date), "
+            "then what it means for the market grounded in " + " and ".join(attached) + ": state the majors' moves, total market cap and fear and greed "
+            "exactly as the card states them and say whether they are consistent with the headline. Posts show what accounts said, never a fact. "
+            "No prediction, no target, no advice.")
+    return parts, note
+
+
 async def _invoke(router, name: str, request: str, chains: tuple[str, ...], contract=None, *, search_options: dict | None = None):
     """One tool. The web discovery tool runs through the structured search so
     claims keep their [n] markers and numbered, dated sources; everything
@@ -434,6 +490,9 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         gate = fact_gate.check(contract, [], scope_satisfied=scope_satisfied)
         text = f"The sources for this ({', '.join(chosen)}) returned nothing usable right now. " + gate.gap_sentence(contract)
         return {"answer": text.strip(), "trajectory": None, "contract": contract.model_dump(), "gate": gate.model_dump(), "pipeline": "contract"}
+    tap_note = ""
+    if composition.is_headline_tap(request):
+        parts, tap_note = await _attach_market_state(router, request, chains, contract, parts, enabled)
     cards, trajectory = composition.combine(parts)
     covered = _covered_hours(cards)
     if covered is not None and contract.window_hours and covered < 0.8 * contract.window_hours:
@@ -451,6 +510,8 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
         gate.notes.append(f"spans {covered:.1f} hours for the {asked} asked (nearest stored ticks)")
         scope_note = (scope_note + "; " if scope_note else "") + f"the cards span {covered:.1f} hours for the {asked} asked, say the span and never call the change a {asked} change"
     note = _contract_note(contract, gate, fact_rows, scope_note)
+    if tap_note:
+        note += "\n" + tap_note
     timing = scheduled_time_notice(request, cards)
     if timing:
         note += "\n" + timing + " Use past tense for the scheduled time and do not describe it as upcoming."

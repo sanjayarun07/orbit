@@ -30,7 +30,7 @@ import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from app import jobs, tasks
+from app import agent_rules, jobs, tasks
 from app.db import apply_schema, get_pg_pool, memory_is_the_store
 from app.jupiter import jupiter, normalize_mint
 from app.plans import simulate_swap
@@ -89,6 +89,7 @@ def reset_for_test() -> None:
         _positions.clear()
         _history.clear()
     _ready = False
+    agent_rules.reset_for_test()
     QUOTE_GAP_S, RATE_LIMIT_PAUSES_S = 0, (0, 0)                     # tests never wait on the quote pacing
 
 
@@ -732,6 +733,14 @@ async def _maybe_alert(row: dict, rows: list[dict]) -> dict | None:
         if new and rules.get("channel") == "email":
             alert.update({"title": title, "body": body, "email_pending": not await _email(row["user_id"], title, body)})
     await _update(row["id"], last_alert=alert)
+    if rules.get("arm_fraction") and alert.get("kind") in ("deterioration", "discount"):
+        # The armed rule (app/agent_rules.py): the sized exit is quoted now,
+        # checked, receipted and handed to the user to confirm. An arming
+        # failure never loses the alert itself.
+        try:
+            await agent_rules.arm_exit(row, alert, rows)
+        except Exception:
+            logger.warning("exit_monitor: arming failed for %s", row["id"], exc_info=True)
     return alert
 
 

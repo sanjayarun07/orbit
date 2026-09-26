@@ -163,6 +163,12 @@ _HEADLINE_TAP = re.compile(r"^\s*What does this mean for (?:the market|memecoins
 HEADLINE_TAP_WORDS = 150
 
 
+def is_headline_tap(request: str) -> bool:
+    """A Home headline tap: "What does this mean for the market: <headline>"
+    (the ask line; the notes under it never make one)."""
+    return bool(_HEADLINE_TAP.match(split_notes(request)[0] or ""))
+
+
 def word_limit(request: str) -> int | None:
     """The word limit a request states ("answer in under 150 words"), or the
     headline tap's own (a news tile wants a short read: 850-word answers under
