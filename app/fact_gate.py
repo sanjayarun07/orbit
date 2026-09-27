@@ -129,9 +129,20 @@ def _cumulative(facts: list[Fact]) -> set[str]:
     return sigs
 
 
+_SHARED_UNIT_RANGE = re.compile(r"(\$?\d[\d,]*(?:\.\d+)?)(\s*(?:[–—-]|to|and)\s*)(\$?\d[\d,]*(?:\.\d+)?)\s*(%|[kKmMbB]\b|(?:thousand|million|billion|mn|bn|trillion)\b)", re.I)
+
+
+def _share_units(text: str) -> str:
+    """"$108.65–$108.86 billion": the unit belongs to both ends of a range;
+    read alone, the first end had been a figure no card carries and a
+    correct earnings summary was withheld (UAT preflight 2026-09-27)."""
+    return _SHARED_UNIT_RANGE.sub(lambda m: f"{m.group(1)} {m.group(4)}{m.group(2)}{m.group(3)} {m.group(4)}", text or "")
+
+
 def unsupported_figures(answer: str, facts: list[Fact], evidence_text: str = "") -> list[str]:
     """Figures in the prose that neither a fact, the evidence cards, nor a
     running total of the facts carries. Dates and clock times are not figures."""
+    answer, evidence_text = _share_units(answer), _share_units(evidence_text)
     known = _numbers_in_facts(facts) | _cumulative(facts)
     values: list[float] = []
     for f in facts:
@@ -290,12 +301,15 @@ def check(contract: QuestionContract, facts: list[Fact], answer: str | None = No
         if contract.kind == "yields" and required == "yield_row" and contract.filters.get("single_asset"):
             rows = [r for r in rows if r.attrs.get("exposure") == "single"]
         if contract.kind == "recent_events" and required == "event":
-            window = timedelta(hours=contract.window_hours or 24 * 30)
+            # No window on the contract ("the latest reported quarter"): the
+            # newest past dated event, whenever it was; a 30-day default had
+            # gated a July quarter in September (UAT preflight 2026-09-27).
+            window = timedelta(hours=contract.window_hours) if contract.window_hours else None
             dated = [r for r in rows if event_date_of(r) is not None]
             # Recent means inside the window and not in the future: an event
             # dated October 1 passed a September 23 "last 24 hours" contract
             # (second review, 2026-09-23). A day ahead is allowed for timezones.
-            recent = [r for r in dated if -_AHEAD_SLACK <= now - event_date_of(r) <= window]
+            recent = [r for r in dated if -_AHEAD_SLACK <= now - event_date_of(r) and (window is None or now - event_date_of(r) <= window)]
             upcoming = [r for r in dated if now - event_date_of(r) < -_AHEAD_SLACK]
             if not dated:
                 result.missing.append("a dated event (the sources gave no event date)")
@@ -304,7 +318,7 @@ def check(contract: QuestionContract, facts: list[Fact], answer: str | None = No
             if not recent:
                 past = [event_date_of(r) for r in dated if now - event_date_of(r) >= -_AHEAD_SLACK]
                 detail = (f"the newest past event is {max(past).date()}" if past else "every dated event is in the future") + (f"; {len(upcoming)} upcoming" if upcoming and past else "")
-                result.missing.append(f"an event inside the last {window.days} days ({detail})")
+                result.missing.append((f"an event inside the last {window.days} days" if window else "a past dated event") + f" ({detail})")
                 result.ok = False
                 continue
             rows = recent

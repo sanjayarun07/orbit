@@ -226,6 +226,37 @@ def _bounded(value: Any, rows: int) -> Any:
     return value
 
 
+_ticker_cache: dict[str, tuple[float, bool | None]] = {}
+_TICKER_TTL = 6 * 3600.0
+
+
+def is_listed_ticker(symbol: str) -> bool | None:
+    """Whether the equities gateway quotes this ticker: True, False, or None
+    when the gateway is off or unreachable. Cached six hours; one snapshot
+    call per new symbol ("BP" the company against Backpack the token, UAT
+    preflight 2026-09-27)."""
+    import time
+    sym = (symbol or "").strip().upper()
+    if not sym or not enabled():
+        return None
+    hit = _ticker_cache.get(sym)
+    if hit and time.monotonic() - hit[0] < _TICKER_TTL:
+        return hit[1]
+    verdict: bool | None = False
+    for name, ask in (("equities_ticker_details", f"{sym} company profile"), ("equities_price_snapshot", f"{sym} price")):
+        try:
+            run(name, ask)
+            verdict = True
+            break
+        except NoData:
+            continue
+        except Exception:
+            logger.info("equities ticker check unavailable for %s (%s)", sym, name, exc_info=True)
+            verdict = None
+    _ticker_cache[sym] = (time.monotonic(), verdict)
+    return verdict
+
+
 def run(name: str, request: str) -> str:
     endpoint = BY_NAME[name]
     params = _params(endpoint, request)

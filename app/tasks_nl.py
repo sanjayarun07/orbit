@@ -33,7 +33,10 @@ _LIST = re.compile(r"^\s*(?:show|list|what\s+are)\s+(?:me\s+)?(?:my\s+)?(?:tasks
 # "Did I set a morning brief?", "Which of those are paused?"): a task word with an
 # asking verb and no creation verb (expanded UI review, 2026-09-24: "Show my tasks."
 # with a full stop asked for a ticker; "anything scheduled for me" asked for a wallet).
-_INVENTORY = re.compile(r"\b(?:tasks?|reminders?|alerts?|watches|scheduled|schedule|morning\s+brief|briefs?)\b", re.I)
+_INVENTORY = re.compile(r"\b(?:tasks?|reminders?|alerts?|watches|morning\s+brief|briefs?|my\s+schedule|(?:what(?:'s|\s+is)|anything|something)\s+scheduled(?:\s+for\s+me)?|(?:do|did)\s+i\s+have\s+(?:anything|something)\s+scheduled)\b", re.I)
+# "scheduled" alone is a word about events too: "which date is the next
+# high-impact event scheduled for?" is about the market calendar, not the
+# user's tasks (UAT preflight 2026-09-27).
 _INVENTORY_ASK = re.compile(r"\b(?:show|list|what|which|any|anything|do\s+i\s+have|did\s+i\s+set|have\s+i\s+set|are\s+there|is\s+there|running|active|paused|pending|already)\b", re.I)
 _CREATES = re.compile(r"^\s*(?:please\s+)?(?:remind\s+me|alert\s+me|notify\s+me|tell\s+me\s+when|send\s+me|set\s+(?:a|an|up)|create|schedule\s+a|watch\s+my)\b", re.I)   # an instruction opens the message; "did I set a brief?" asks
 _STATUS_FILTER = re.compile(r"\b(paused|active|running|done|completed|finished|pending)\b", re.I)

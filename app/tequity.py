@@ -695,8 +695,24 @@ _QUOTE_WORDS = re.compile(r"\b(?:price|quote|trading(?:\s+at)?|how\s+much|last\s
                           r"doing|performing|up|down|moving)\b", re.I)     # "how is ASTER trading on Hyperliquid", "are HOOD tokens up": the feed's pair, not the web (regression run 2026-09-25)     # "what is the stock labeled NBIS on Hyperliquid": the feed's own record answers first (2026-09-24)
 
 
+_NOTE_LINE = re.compile(r"^(?:Resolved from (?:canonical session|conversation) context:|Resolved subject:|Research objective of this conversation:|\(Context: this is a question)", re.I)
+
+
+def ask_of(request: str) -> str:
+    """The user's words without the resolution notes under them: a note
+    saying "not a token symbol to look up" had made an earnings follow-up
+    a quote ask ("token", "up"; UAT preflight 2026-09-27)."""
+    lines = (request or "").splitlines()
+    body = []
+    for line in lines:
+        if _NOTE_LINE.match(line.strip()):
+            break
+        body.append(line)
+    return "\n".join(body).strip() or (request or "")
+
+
 def quote_matches(request: str) -> bool:
-    text = request or ""
+    text = ask_of(request)
     venue = _dex_of(text)
     # "Are HOOD tokens up?": a ticker called a token with no venue named is
     # the tokenized stock on the feed's default venue; the quote itself
@@ -711,8 +727,9 @@ def quote_matches(request: str) -> bool:
 
 def pair_of(request: str) -> tuple[str, str | None]:
     """(venue, base) a quote ask names; the venue defaults to Hyperliquid."""
-    venue = _dex_of(request) or "hyperliquid"
-    return venue, base_in(request, allow_lowercase=True)
+    text = ask_of(request)
+    venue = _dex_of(text) or "hyperliquid"
+    return venue, base_in(text, allow_lowercase=True)
 
 
 def quote(request: str) -> str:

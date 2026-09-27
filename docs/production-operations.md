@@ -3487,6 +3487,37 @@ follow-up now points at the listed candidates but is not re-measured; the news r
 same `last_items` mechanism and needs its live check; "Now switch to Robinhood Chain memes" is answered by the legacy
 web path as a chatty summary and is not yet a contract.
 
+## UAT preflight of aa7fb46d: the fixes (2026-09-28)
+
+The preflight run of the news/stocks/crypto/meme UAT plan (`reports/uat-preflight-aa7fb46d/report.md`) found three
+wrong answers and a recurring follow-up context failure. The fixes, each a deterministic reading rule or a gate
+correction (regressions in `tests/test_uat_preflight_20260928.py`; the fixes report in
+`reports/uat-preflight-fixes-2026-09-28/report.md`):
+
+- **A ticker that is a listed company's and a lesser coin's** ("Why is BP moving today?" answered for Backpack):
+  `why_moving.namesake`. The words settle it (stock/shares or token/coin/crypto) and a top-100 coin owns its ticker;
+  otherwise, when the equities gateway (`equities_data.is_listed_ticker`, profile then price, cached) or the venue
+  feed knows the ticker as a stock it is a question, and when our stock data cannot check it the coin answers under a
+  lead line naming the token and how to ask for the company, so the reading is never a confident wrong asset.
+- **Comparison words and metric qualifiers are never names**: "the live price versus the reported catalyst" had
+  looked up a token called CATALYST (`subject_probe._LOWER_STOP`); "live price" is exact state; "the reported X"
+  points at the previous answer, whose driving section travels in the note (`context_entities.prior_reference_note`).
+- **A wallet named ahead of an exit control** is the wallet to read (`exit_controls.split_wallet`): "For wallet …,
+  can I exit my ANSEM position? Read-only" had gone to the portfolio summary and said "yes" from a marked value.
+- **Follow-up context**: a task inventory ask needs the user's own tasks or a first-person "scheduled"
+  (`tasks_nl._INVENTORY`; "the next high-impact event scheduled" is the calendar); an ordinal-definite reference ("the
+  next high-impact event", "the largest holder") is a referent into the list just shown, and list items keep their
+  section title (the calendar's date); the quote matcher reads the ask, never the notes (`tequity.ask_of`); "only
+  the 24-hour quote-volume field" reruns the previous table for that field (`context_entities.field_only_request`).
+- **Venue perp state now** (funding, open interest, mark/oracle price) is exact state, so the router's own matcher
+  picks the GoldRush Hyperliquid tool instead of a web read.
+- **"Latest reported quarter"** carries no rolling window (`contracts._LATEST`, kept through the planner merge; the
+  gate accepts the newest past event when no window is set), a window the words state wins over the model's, and a
+  range's unit belongs to both ends ("$108.65–$108.86 billion", `fact_gate._share_units`).
+
+Still open from the preflight: the BONK deep-dive's top-10 versus top-50 share contradiction and the event-time gate
+on "what's new today". Browser UAT (Home taps, progress, mobile, watch/action controls) remains to be run.
+
 ## Home headline tap: grounded in the market's state (2026-09-26)
 
 "What does this mean for the market: <headline>" is open research on the headline (the tap fix of 2026-09-25), and

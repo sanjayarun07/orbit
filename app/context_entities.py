@@ -36,7 +36,15 @@ def answer_items(answer: str, limit: int = 8) -> list[str]:
 
     def listed(text: str) -> list[str]:
         found = []
+        section = ""
         for line in text.splitlines():
+            heading = re.match(r"^\s*#{2,6}\s+(.+?)\s*$", line)
+            if heading:
+                # A section's items keep its title: the market calendar lists
+                # events under "## Wed 30 Sep", and "the next high-impact
+                # event" needs its date (UAT preflight 2026-09-27).
+                section = re.sub(r"\*\*|`", "", heading.group(1)).strip()
+                continue
             m = _ITEM_LINE.match(line)
             if not m:
                 continue
@@ -48,7 +56,7 @@ def answer_items(answer: str, limit: int = 8) -> list[str]:
                 continue
             item = re.sub(r"\*\*|`|\[(\d+)\]", "", m.group(1)).strip()
             if len(item) >= 12 and not item.lower().startswith(("time:", "web_discovery", "knowledge", "finance_discovery")):
-                found.append(item[:320])
+                found.append((f"{section} · {item}" if section and len(section) <= 40 else item)[:320])
         return found[:limit]
 
     def tabled(text: str) -> list[str]:
@@ -78,7 +86,9 @@ def answer_items(answer: str, limit: int = 8) -> list[str]:
     return card_items if len(items) < 2 and len(card_items) > len(items) else items
 
 
-_THOSE = re.compile(r"\b(?:which|what|how many)\s+of\s+(?:those|these|them)\b|\b(?:those|these)\s+(?:events?|items?|projects?|candidates?|sources?|headlines?|tokens?|ones)\b|\b(?:for|of|about)\s+each\s+(?:candidate|item|one|of\s+(?:those|these|them))\b", re.I)
+_THOSE = re.compile(r"\b(?:which|what|how many)\s+of\s+(?:those|these|them)\b|\b(?:those|these)\s+(?:events?|items?|projects?|candidates?|sources?|headlines?|tokens?|ones)\b|\b(?:for|of|about)\s+each\s+(?:candidate|item|one|of\s+(?:those|these|them))\b"
+                    # "the next high-impact event", "the largest holder", "the first one": an ordinal-definite reference into the list just shown (UAT preflight 2026-09-27)
+                    r"|\bthe\s+(?:next|first|last|earliest|latest|soonest|biggest|largest|smallest|highest|lowest|top|second|third)\s+(?:[\w-]+\s+){0,2}(?:events?|items?|ones?|entr(?:y|ies)|rows?|headlines?|holders?|wallets?|pools?|tokens?|projects?|candidates?|sources?|releases?|prints?)\b", re.I)
 
 
 _FULL_ADDRESS = re.compile(r"\b(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})\b")
@@ -206,6 +216,42 @@ def metric_corrected_request(request: str, conversation_history: str, session_co
     chain = f" on {focus['chain']}" if focus.get("chain") else ""
     return (f"{metric} of {subject}{mint}{chain}" + (f". {rest}" if rest else "") +
             f"\nResolved from conversation context: the user corrected the metric of the previous request (\"{previous}\") to {metric}; the subject stays {subject}.")
+
+
+_FIELD_ONLY = re.compile(r"^\s*(?:only|just|show\s+(?:me\s+)?(?:only|just)|give\s+me\s+(?:only|just))\s+(?:the\s+)?(?P<field>.+?)\s+(?:field|column|figure|value|number|metric)s?\s*[.!?]?\s*$", re.I)
+_FIELD_METRIC = (("volume", "volume"), ("traded", "volume"), ("liquidity", "liquidity"), ("change", "price_change"), ("move", "price_change"), ("gain", "price_change"),
+                 ("apy", "apy"), ("yield", "apy"), ("holder", "holders"), ("share", "holders"))
+
+
+def field_only_request(request: str, session_context: dict | None) -> str | None:
+    """"Only the 24-hour quote-volume field." after a venue table: the same
+    ranking on the same venue with only that field asked for -- never a new
+    question about what the field means (UAT preflight 2026-09-27: it
+    searched for a definition of quote volume and asked for a pair)."""
+    m = _FIELD_ONLY.match(request or "")
+    last = (session_context or {}).get("last_contract") or {}
+    if not m or last.get("kind") not in ("market_ranking", "yields", "holders"):
+        return None
+    field = m.group("field").strip()
+    metric = next((metric for word, metric in _FIELD_METRIC if word in field.lower()), last.get("metric"))
+    place = last.get("venue") or ((last.get("subject") or {}).get("chain"))
+    if not place and last.get("kind") == "market_ranking":
+        return None
+    filters = last.get("filters") or {}
+    scope = " (tokenized stocks only)" if filters.get("stocks_only") else " (crypto only)" if filters.get("crypto_only") else ""
+    hours = last.get("window_hours")
+    window = f" over the last {int(hours)} hours" if hours and hours < 48 else f" over {hours / 24:g} days" if hours else ""
+    if last.get("kind") == "market_ranking":
+        what = "most traded pairs" if metric == "volume" else {"gainers": "gainers", "losers": "losers"}.get(last.get("direction"), "top movers")
+        ask = f"{what} on {place}{scope}{window}"
+    elif last.get("kind") == "yields":
+        ask = f"yields{(' on ' + place) if place else ''}"
+    else:
+        subject = ((last.get("subject") or {}).get("symbol")) or ((last.get("subject") or {}).get("id")) or ""
+        ask = f"holders of {subject}".strip()
+    return (f"{ask}: {request.strip()}"
+            f"\nResolved from canonical session context: the previous answer was {ask}; this asks for only the {field} of that same table, "
+            f"nothing else changes and no definition is wanted.")
 
 
 def corrected_request(request: str, conversation_history: str, session_context: dict | None = None) -> str | None:
@@ -450,7 +496,44 @@ def extract_wallet_reference(*texts: str) -> WalletReference | None:
     return None
 
 
+_PRIOR_REF = re.compile(r"\bthe\s+(?:reported|mentioned|cited|earlier|previous|above|stated|quoted|listed|named)\s+(?P<what>[a-z][a-z-]{2,24}(?:\s+[a-z][a-z-]{2,24})?)\b", re.I)
+
+
+def prior_reference_note(request: str, session_context: dict | None) -> str | None:
+    """"What is the live price versus the reported catalyst?": "the reported
+    catalyst" is what the previous answer reported. The note says so and
+    carries that answer's driving section, so the follow-up restates it
+    rather than searching for it or saying it was not covered (UAT preflight
+    2026-09-27: a token called CATALYST was quoted, then "not covered")."""
+    m = _PRIOR_REF.search(composition_split(request))
+    last = ((session_context or {}).get("last_answer") or "").strip()
+    if not m or not last:
+        return None
+    body = last.split("\n\n---\n\n", 1)[0]
+    section = re.search(r"(?ims)^##\s+what'?s\s+driving\s+it\s*$(.*?)(?=^##\s|\Z)", body)
+    excerpt = (section.group(1) if section else body).strip()
+    excerpt = re.sub(r"\s+", " ", re.sub(r"\*\*|`|\[(\d+)\]", "", excerpt))[:700]
+    return (f"Resolved from conversation context: \"the {m.group(0).split(' ', 1)[1]}\" is what the previous answer reported; restate it from that answer, "
+            f"never from a new search, and set the live figure against it: «{_short_addresses(excerpt)}»")
+
+
+def composition_split(request: str) -> str:
+    """The ask line(s) of a request, without resolution notes."""
+    from app.composition import split_notes
+    return split_notes(request)[0] or (request or "")
+
+
 def resolve_contextual_request(
+    request: str, conversation_history: str, session_context: dict | None = None
+) -> str:
+    """Attach prior token or wallet identity to an unambiguous follow-up, and
+    point a reference to "the reported X" at the previous answer."""
+    resolved = _resolve_contextual_request(request, conversation_history, session_context)
+    prior = prior_reference_note(request, session_context)
+    return f"{resolved}\n{prior}" if prior and prior not in resolved else resolved
+
+
+def _resolve_contextual_request(
     request: str, conversation_history: str, session_context: dict | None = None
 ) -> str:
     """Attach prior token or wallet identity to an unambiguous follow-up."""
@@ -539,6 +622,9 @@ def resolve_contextual_request(
         scope = " (tokenized stocks only)" if (last.get("filters") or {}).get("stocks_only") else " (crypto only)" if (last.get("filters") or {}).get("crypto_only") else ""
         return (f"{what} on {place}{scope}: {request.strip()}"
                 f"\nResolved from canonical session context: the previous ask was {what} on {place}{scope}; this continues it there with only the change stated here.")
+    field_only = field_only_request(request, session_context)
+    if field_only:
+        return field_only
     metric_fix = metric_corrected_request(request, conversation_history, session_context)
     if metric_fix:
         return metric_fix

@@ -38,7 +38,9 @@ Scope = Literal["venue_trades", "global", "on_chain", "any"]
 CONTRACT_KINDS: tuple[str, ...] = ("market_ranking", "holders", "recent_events", "yields")
 OPEN_RESEARCH_KIND = "open_research"
 # Exact state the web must never answer first: an address, a wallet, a quote, a price now, an exit, a position.
-_EXACT_STATE = re.compile(r"(?<![A-Za-z0-9])(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])|\b(?:my\s+wallet|connected\s+wallet|this\s+wallet|that\s+wallet|wallet\s+(?:address|balance|holdings|activity|transactions?)|balance|balances|portfolio|position|exit|quote|swap|bridge|price\s+of|price\s+now|current\s+price|how\s+much\s+is|holders?|liquidity\s+of|tvl\s+of|apy|yield)\b", re.I)
+_EXACT_STATE = re.compile(r"(?<![A-Za-z0-9])(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])|\b(?:my\s+wallet|connected\s+wallet|this\s+wallet|that\s+wallet|wallet\s+(?:address|balance|holdings|activity|transactions?)|balance|balances|portfolio|position|exit|quote|swap|bridge|price\s+of|price\s+now|current\s+price|live\s+price|how\s+much\s+is|holders?|liquidity\s+of|tvl\s+of|apy|yield"
+                          # venue perp state now ("NEAR funding and open interest on Hyperliquid now"): the venue's live figures, never a web read (UAT preflight 2026-09-27)
+                          r"|(?:funding(?:\s+rates?)?|open\s+interest|mark\s+price|oracle\s+price)\s+(?:on|for|now|right\s+now|currently|at\s+the\s+moment)|current\s+(?:funding|open\s+interest))\b", re.I)
 _OPEN_RESEARCH = re.compile(r"\b(?:why|how|what|who|which|explain|compare|analy[sz]e|diligence|competitors?|investors?|backers?|revenue|risks?|outlook|history|background|roadmap|tokenomics|governance|research|deep\s+dive|overview|"
                             r"mean(?:s|ing)?|guarantee[sd]?|impl(?:y|ies)|does\s+that)\b", re.I)     # "does that mean I cannot get rugged?" asks what a concept means, not for a token check (2026-09-24)
 
@@ -281,6 +283,10 @@ _ADDRESS = re.compile(r"(?<![A-Za-z0-9])(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{
 
 _WORD_NUMBERS = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
                  "twelve": "12", "fourteen": "14", "thirty": "30", "sixty": "60", "ninety": "90"}
+
+
+_LATEST = re.compile(r"\b(?:latest|most\s+recent|last)\s+(?:reported\s+|published\s+|announced\s+)?(?:quarter(?:ly)?|results?|earnings|report|filing|fiscal|annual|q[1-4]\b|guidance|dividend|buyback)"
+                     r"|\b(?:latest|most\s+recent)\s+(?:reported|published|announced|filed)\b", re.I)
 
 
 def _window_hours(text: str) -> float | None:
@@ -555,8 +561,12 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
     # events (expanded journeys, 2026-09-24: gated as "no event in the last
     # day"). A referent question is open research on the carried subject.
     if _EVENTS.search(text) and not _RANKING.search(text) and not referent:
+        # "AAPL's latest reported quarter": the newest such event, whenever it
+        # was; a rolling 30-day window is not asked for and had gated a July
+        # quarter as "not established" (UAT preflight 2026-09-27).
+        latest = bool(_LATEST.search(text)) and not window
         return QuestionContract(kind="recent_events", subject=Subject(kind="topic", symbol=symbol, name=None, chain=chain), scope="any", metric="events",
-                                window_hours=window or 24 * 30, freshness_seconds=3 * 86400, evidence_order="discovery_first",
+                                window_hours=None if latest else (window or 24 * 30), freshness_seconds=3 * 86400, evidence_order="discovery_first",
                                 required_facts=["event"], confidence=0.5, planner="rules")
     if is_open_research(text) or referent:
         from app.routing.subject_probe import subject_of
@@ -663,8 +673,10 @@ async def plan(request: str, context: str = "") -> QuestionContract:
     # a model that dropped them does not get to widen the ask.
     if rules.venue and not modelled.venue:
         modelled.venue = rules.venue
-    if rules.window_hours and not modelled.window_hours:
-        modelled.window_hours = rules.window_hours
+    if rules.window_hours and (not modelled.window_hours or _window_hours(body or "")):
+        modelled.window_hours = rules.window_hours      # a window the words state is read deterministically; the model neither drops nor widens it
+    if rules.kind == "recent_events" and modelled.kind == "recent_events" and rules.window_hours is None and _LATEST.search(body or "") and not _window_hours(body or ""):
+        modelled.window_hours = None          # "latest reported quarter": the newest such event, no rolling window the model may add
     for key, value in rules.filters.items():
         modelled.filters.setdefault(key, value)
     if modelled.kind == "other" and rules.kind != "other" and modelled.confidence < 0.7:

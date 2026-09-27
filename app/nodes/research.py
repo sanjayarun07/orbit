@@ -2239,8 +2239,17 @@ async def _research_node(state: AgentState, sink: dict) -> dict:
     moving = why_moving.match(_ask(request))
     if moving and not _TOKEN_ADDRESS.search(request):
         prefer_stock = why_moving.prefers_stock(request) or "equity_research" in set(state.get("capabilities", []))
+        hedge = None
+        if not prefer_stock:
+            # A ticker that is a listed company's and a lesser coin's is a question, not a guess; a lesser coin our
+            # stock data cannot check answers under a lead line naming it (BP plc vs Backpack, UAT preflight 2026-09-27).
+            namesake, hedge = await why_moving.namesake(moving[0], _ask(request))
+            if namesake:
+                return {"answer": namesake, "trajectory": None}
         streaming.emit("status", text="Reading the market data and the news for the move")
         answer, trajectory = await why_moving.compose(*moving, prefer_stock=prefer_stock)
+        if hedge and answer and "· crypto" in (answer.split("\n", 2)[1] if "\n" in answer else ""):
+            answer = f"{hedge}\n\n{answer}"          # the crypto card's "As of … · crypto" line: the coin answered, under the lead line
         trajectory = {"thought_0": "A 'why is X moving' ask maps to the composed market + news card.", **trajectory} if trajectory else None
         if broad_market:
             overview = await asyncio.to_thread(crypto_market_overview, request)

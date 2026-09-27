@@ -119,6 +119,57 @@ def prefers_stock(request: str) -> bool:
     return bool(_STOCK_WORDS.search(request or ""))
 
 
+_CRYPTO_WORDS = re.compile(r"\b(?:tokens?|coins?|crypto|memes?|memecoins?|on\s+(?:solana|ethereum|base|bsc|bnb))\b", re.I)
+LEADING_RANK = 100      # a top-100 coin owns its ticker outright (SOL, LINK, NEAR); below that a listed company's ticker is a question
+
+
+async def stock_namesake_ask(sym: str, request: str) -> str | None:
+    """The question to ask when a ticker is both a listed company's and a
+    lesser coin's (see `namesake`)."""
+    return (await namesake(sym, request))[0]
+
+
+async def namesake(sym: str, request: str) -> tuple[str | None, str | None]:
+    """(the question to ask, the hedge to lead the crypto answer with).
+
+    "Why is BP moving today?" was answered for Backpack (BP) with crypto
+    market data while BP plc was meant (UAT preflight 2026-09-27). The words
+    settle it (stock / shares, or token / coin / crypto) and a top-100 coin
+    owns its ticker: then neither. Otherwise, when our stock data knows the
+    ticker (the equities gateway, or the venue feed lists it as a stock) it
+    is a question; when it does not, the coin answers under a lead line that
+    names the token and how to ask for the company, so the reading is never
+    a confident wrong asset."""
+    text = request or ""
+    sym = (sym or "").lstrip("$").upper()
+    if not sym or sym in _MAJORS or prefers_stock(text) or _CRYPTO_WORDS.search(text):
+        return None, None
+    from app import equities_data, symbol_registry, tequity
+    try:
+        rows = await asyncio.to_thread(symbol_registry.listed, sym)
+    except Exception:
+        return None, None
+    lead = symbol_registry.leader(rows) if rows else None
+    if not lead or (lead.get("rank") or 10 ** 6) <= LEADING_RANK:
+        return None, None
+    stock = False
+    if equities_data.enabled():
+        stock = bool(await asyncio.to_thread(equities_data.is_listed_ticker, sym))
+    if not stock:
+        try:
+            stock = any(tequity.resolve_pair(venue, sym) for venue in ("hyperliquid", "aster"))
+        except Exception:
+            stock = False
+    rank = lead.get("rank") or "—"
+    if stock:
+        return (f"**{sym}** can mean the listed company (ticker {sym}) or the token **{lead['name']}** (CoinGecko rank {rank}). "
+                f"Which one? Say `why is {sym} stock moving` or `why is {sym} token moving` and I'll answer that."), None
+    if len(sym) > 5:
+        return None, None
+    return None, (f"_{sym} here is the token **{lead['name']}** (CoinGecko rank {rank}), the crypto market's reading of the ticker; "
+                  f"for a listed company with that ticker, say `why is {sym} stock moving`._")
+
+
 async def _crypto_identity(sym: str) -> dict | None:
     """{name, symbol, mint?, coingecko_id?, price, change_24h} or None."""
     if sym in _MAJORS:

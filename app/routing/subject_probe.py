@@ -197,7 +197,11 @@ _LOWER_STOP = {"the", "this", "that", "these", "those", "my", "our", "your", "it
                "most", "much", "many", "such", "like", "just", "only", "still", "again", "back", "over", "under", "about", "after", "before",
                "because", "while", "where", "whether", "should", "would", "could", "will", "shall", "can", "may", "might", "must", "have", "has", "had",
                "does", "did", "done", "doing", "get", "got", "give", "make", "made", "take", "show", "tell", "say", "said", "see", "know", "think",
-               "want", "need", "help", "use", "used", "using", "please", "thanks", "buying", "selling", "trading", "holding", "moving", "going"}
+               "want", "need", "help", "use", "used", "using", "please", "thanks", "buying", "selling", "trading", "holding", "moving", "going",
+               # comparison words after a metric ("price versus the reported catalyst"): never a name (UAT preflight 2026-09-27: CATALYST was looked up)
+               "versus", "vs", "against", "compared", "relative", "between", "per",
+               # qualifiers of a metric ("live price", "spot price", "mark price"): never a name
+               "live", "spot", "mark", "quoted", "fair", "average", "median", "total", "daily", "hourly", "weekly"}
 
 
 def _lower_name(text: str) -> str | None:

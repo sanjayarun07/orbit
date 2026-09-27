@@ -82,12 +82,28 @@ _AMOUNT = re.compile(r"\$?\s*(\d[\d,]*(?:\.\d+)?)")
 _ADDRESS = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
 
+# "For wallet 3aHL…, can I exit my ANSEM position? Read-only.": the wallet
+# named ahead of the control is the wallet to read; the control itself is
+# what follows (UAT preflight 2026-09-27: the sentence went to the portfolio
+# summary and "yes, you can exit" was said from a marked value, no quote).
+_WALLET_PREFIX = re.compile(r"^\s*(?:for|in|from|using|with|on)\s+(?:the\s+|my\s+)?wallet\s+(?P<wallet>[1-9A-HJ-NP-Za-km-z]{32,44})\s*[,:;]?\s*", re.I)
+
+
+def split_wallet(message: str) -> tuple[str | None, str]:
+    """(the wallet named ahead of the control, the control itself)."""
+    m = _WALLET_PREFIX.match(message or "")
+    if not m:
+        return None, (message or "")
+    return m.group("wallet"), (message or "")[m.end():]
+
+
 def is_public_control(message: str) -> bool:
     """A control that needs no account: the sizing diagnostic."""
     return bool(_SIZES.match(message or "") or _SIZED_EXIT.match(message or ""))
 
 
 def is_exit_control(message: str) -> bool:
+    _named, message = split_wallet(message)
     return any(p.match(message or "") for p in (_WATCH, _STOP, _ASK, _LIST, _THRESHOLD, _CHANNEL, _SIZES, _CHANGED, _SIZED_EXIT, _EXISTS, _ARM_A, _ARM_B, _DISARM)) \
         or bool(_EXIT_ESTIMATE.search(message or "")) or bool(_READ_ONLY.match(message or ""))
 
@@ -268,6 +284,9 @@ def _fraction(size: str) -> float | None:
 
 async def handle(message: str, user: dict | None, wallet: str | None, focus: dict | None = None, last_capabilities: list[str] | None = None) -> str | None:
     """The reply to an exit control, or None when the message is not one."""
+    named, message = split_wallet(message)
+    if named:
+        wallet = named                       # the wallet named in the sentence is the one to read
     text = (message or "").strip()
     if _READ_ONLY.match(text):
         if "exit_control" in (last_capabilities or []):
