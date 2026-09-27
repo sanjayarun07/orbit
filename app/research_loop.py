@@ -935,13 +935,20 @@ async def _run_headline(request: str, contract: contracts.QuestionContract, rout
             logger.info("headline answer repair failed; retaining checked facts", exc_info=True)
     coverage["answer_audit"] = {"unsupported_figures": unsupported, "unsupported_claims": claims,
                                 "claim_check_available": claims is not None}
-    if unsupported or claims is None or claims:
-        # A useful verified partial is safer than an unverified causal story.
+    if unsupported or claims is None:
+        # A figure no passage carries, or an audit that could not run: the
+        # verified partial is safer than an unverified causal story.
         answer = "**Checked facts**\n\n" + "\n".join(f"- [Source]({row['url']}): “{row['quote']}”" for row in accepted)
         if not market_rows:
             answer += "\n\nThe market response could not be verified from the pages read."
         if state_cards:
             answer += "\n\n---\n\n" + state_cards
+        gate.ok = False
+    elif claims:
+        # A claim the one repair could not settle is qualified under the
+        # written answer, as on the fact lane (two of five Fed-tap runs had
+        # collapsed to bare quotes over one such claim, k=5 live 2026-09-27).
+        answer = _qualified(answer, claims)
         gate.ok = False
     else:
         gate.ok = True

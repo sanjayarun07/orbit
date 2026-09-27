@@ -3422,8 +3422,17 @@ without the field keeps the conditions rule.
   verify carries the market state on this lane too (`evidence_pipeline._attach_market_state`), in the audit's evidence
   and in the answer.
 
-Measured: `reports/loop-scope-2026-09-27/report.md`, the deliberate off-versus-on comparison at k=5 over the
-open-research live episodes (five ordinary questions, the SEC order, two headline taps, the dual-token sequence).
+The headline lane qualifies too: a claim the one repair cannot settle is named under the written answer instead
+of reducing it to bare "Checked facts" quotes (two of five Fed-tap runs had collapsed that way at k=5); a figure no
+passage carries, or an audit that cannot run, still gives the checked facts.
+
+Measured (`reports/loop-scope-2026-09-27/report.md`, the deliberate off-versus-on comparison at k=5 over twelve
+live open-research episodes): every ordinary question and both taps pass 5/5 on both sides; where the loop runs it
+takes 93 s a turn against 33 s, 9.5 model calls against 1.9, about 2.5 times the web cost; over 45 loop turns the
+only withheld summaries are the two comparison cases where no cited page established a match, and on one of them
+the fixed sequence names the reviewed true match (Synthetix) from a snippet while the loop never surfaces it.
+Decision for UAT: `research_loop_enabled` stays False; the scoped loop is a candidate for an explicit deep-research
+request or for comparison questions only, to be measured again at k=5 when that is built.
 
 ## Live mobile UI edge-case run (2026-09-25): subject-and-scope corrections
 

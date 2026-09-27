@@ -558,15 +558,14 @@
     "tools_any": [
      "perplexity_web_search"
     ],
-    "must_contain": [
+    "replay_must_contain": [
      "I withheld the written summary",
      "Nova Labs"
     ],
-    "replay_must_contain": [
-     "Nova Labs"
-    ],
     "pipeline": "research_loop"
-   }
+   },
+   "replay_only": true,
+   "note": "Replay only: Nova Labs and the misleading snippet exist only in the fixture, so the goal cannot hold live (it failed 0/5 on both sides of the 2026-09-27 comparison)."
   },
   {
    "id": "dual-token-4-second-axis",

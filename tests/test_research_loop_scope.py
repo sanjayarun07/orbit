@@ -238,3 +238,28 @@ def test_a_repair_that_runs_out_of_time_withholds_instead_of_crashing_the_turn(l
     out, _ = _run_fact(loop, lm, synth=synth)
     assert out["answer"].startswith("**I withheld the written summary") and out["gate"]["ok"] is False
     assert out["trajectory"]["research_loop"]["budget"]["exhausted"] == "insufficient time for the repair"
+
+
+def test_a_tap_claim_the_repair_cannot_settle_is_qualified_not_reduced_to_quotes(loop):
+    from app.nodes import runtime
+    passage = "CME Group today announced plans to launch Bitcoin Cash and Uniswap futures on October 13."
+
+    async def lm(program, **kw):
+        if "summary" in kw and "evidence" in kw:
+            return SimpleNamespace(unsupported_claims="the launch will lift UNI liquidity")
+        return await _tap_lm(passage)(program, **kw)
+    loop.setattr(runtime, "_call_research_loop_lm", lm)
+    loop.setattr(research_loop, "read_page", lambda url: {"url": url, "title": "", "text": passage, "provenance": "page", "fetched_at": "replay"})
+    loop.setattr(market_overview, "market_pulse_card", lambda: PULSE)
+
+    async def synth(prompt, cards, trajectory, advice=False, research=False):
+        return f"CME announced the futures on September 26; the launch will lift UNI liquidity.\n\n{cards}"
+    loop.setattr(research_loop.composition, "synthesize", synth)
+    router = FakeRouter({"perplexity_web_search": EVENT_CARD})
+    router.plan_across = lambda request, caps, chains, n: []
+    loop.setattr(evidence_pipeline, "get_provider_router", lambda: router)
+    out = asyncio.run(evidence_pipeline.answer({}, TAP, ()))
+    assert out["pipeline"] == "research_loop" and out["gate"]["ok"] is False
+    assert not out["answer"].startswith("**Checked facts**")
+    assert "CME announced the futures on September 26" in out["answer"] and "**Not established by the sources read:**\n- the launch will lift UNI liquidity" in out["answer"]
+    assert "# Crypto market pulse" in out["answer"]
