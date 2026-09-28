@@ -240,6 +240,37 @@ async def _attach_market_state(router, request: str, chains: tuple[str, ...], co
     return parts, note
 
 
+_DERIVATIVES = re.compile(r"\b(?:liquidations?|heatmaps?|clusters?|open\s+interest|funding\s+rates?|perps?|perpetuals?|leverage)\b", re.I)
+
+
+async def _attach_venue_state(router, request: str, chains: tuple[str, ...], contract, parts: list, state: dict | None) -> tuple[list, str]:
+    """A derivatives ask about a coin ("analyze the liquidation clusters" on
+    BTC): the venue's live state (mark price, funding, open interest) is a
+    card of its own beside the web read, and liquidation levels themselves
+    have no live source here, which the answer says (live 2026-09-28: a
+    five-day-old dashboard figure and a concept lecture were the answer)."""
+    from app.routing.subject_probe import subject_of
+    focus = ((state or {}).get("session_context") or {}).get("focus") or {}
+    coin = (contract.subject.symbol or "").upper()
+    if not coin and focus.get("kind") == "token":
+        coin = str(focus.get("label") or "").upper()
+    if not coin and focus.get("kind") == "topic" and re.fullmatch(r"[A-Z0-9]{2,6}", str(focus.get("label") or "")):
+        coin = str(focus["label"])                       # a ticker-shaped topic ("NEAR" after "NEAR funding and open interest") is the coin
+    if not coin:
+        coin = (subject_of(composition.split_notes(request)[0]) or "").upper()
+    if not coin or not coin.isalpha() or len(coin) > 6:
+        return parts, ""
+    result = await _invoke(router, "goldrush_hyperliquid_market", f"{coin} funding rate and open interest on hyperliquid", chains, contract)
+    if result is None or not result.output or "not listed" in result.output.lower():
+        return parts, (f"Liquidation levels, clusters and heatmaps have no live source in this product; say so first, then read the web card as dated reporting, "
+                       f"never as the current state of {coin}.")
+    streaming.emit("card", markdown=result.output, tool=result.tool)
+    parts.append((result.output, {"tool_name_0": result.tool, "tool_args_0": {"request": request}, "observation_0": result.output}))
+    return parts, (f"Liquidation levels, clusters and heatmaps have no live source in this product: say so first. The venue card is {coin}'s live derivatives "
+                   "state on Hyperliquid (mark price, funding, open interest, checked time): state those figures exactly as the card gives them, "
+                   "then read the web card as dated reporting, never as the current state.")
+
+
 async def _invoke(router, name: str, request: str, chains: tuple[str, ...], contract=None, *, search_options: dict | None = None):
     """One tool. The web discovery tool runs through the structured search so
     claims keep their [n] markers and numbered, dated sources; everything
@@ -511,6 +542,10 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
     tap_note = ""
     if composition.is_headline_tap(request):
         parts, tap_note = await _attach_market_state(router, request, chains, contract, parts, enabled)
+    elif _DERIVATIVES.search(composition.split_notes(request)[0]):
+        from app.routing.subject_probe import is_general_question
+        if not is_general_question(composition.split_notes(request)[0]):        # "what is a liquidation cluster?" is a definition, not a state read
+            parts, tap_note = await _attach_venue_state(router, request, chains, contract, parts, state)
     cards, trajectory = composition.combine(parts)
     covered = _covered_hours(cards)
     if covered is not None and contract.window_hours and covered < 0.8 * contract.window_hours:

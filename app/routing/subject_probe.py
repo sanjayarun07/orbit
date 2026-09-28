@@ -107,6 +107,8 @@ _CONTINUES = re.compile(
     r"report|table|its|checks?|verify|verified|proven|inferred|disputed|unsupported|assumptions?|questions?|"
     # a time or window correction continues the previous ask ("I meant the past hour", "then show 24h separately", 2026-09-24)
     r"hours?|hourly|minutes?|24h|1h|daily|weekly|interval|window|period|separately|labell?ed|feed|support|meant|"
+    # derivatives words continue the asset ("analyze the liquidation clusters" after BTC led the market answer, live 2026-09-28)
+    r"liquidations?|clusters?|heatmaps?|open\s+interest|leverage|longs|shorts|perps?|perpetuals?|"
     # "I only want a read-only estimate", "restate the quote limits", "do not submit anything": the exit ask continues (2026-09-24)
     r"estimate|estimates|read[- ]only|hypothetical|restate|submit|limits|research\s+mode|sell\s+it\s+now|denominator|percent|same)\b", re.I)
 _NEW_TOPIC = re.compile(
@@ -166,15 +168,45 @@ def is_referent(text: str) -> bool:
     return bool(asks) and len(asks) < len(_SENTENCES.split((text or "").strip())) and all(_REFERENT.match(s) and not _INLINE_REFERENT.search(s) for s in asks)
 
 
+# A general or product question is not about the conversation's subject:
+# "what is a liquidation cluster?", "how do funding rates work?", "can I see
+# a wallet without giving you control?", "what does this mean for the
+# market: <headline>" (a Home tap carries its own story).
+_GENERAL_QUESTION = re.compile(
+    r"^\s*(?:what|who|which)\s+(?:is|are|was|were)\s+(?:a|an|the\s+(?:difference|meaning|point|purpose|role)|some|any)\b"
+    r"|^\s*(?:explain|define|describe|tell\s+me)\s+(?:what|how|why|a|an|the\s+(?:difference|concept|idea))\b"
+    r"|\bhow\s+(?:do|does|did|would|should)\s+(?:\w+\s+){1,3}work\b"
+    r"|\b(?:in\s+general|generally|typically|usually|as\s+a\s+rule|in\s+theory)\b"
+    r"|\bdifference\s+between\b"
+    r"|^\s*(?:can|could|do|does|will|would|should|may)\s+i\b"
+    r"|^\s*(?:do|does|can|will)\s+(?:you|anvaya|this\s+app|the\s+app)\s+(?:support|have|offer|allow|handle|cover|track|store|keep|read|see)\b"
+    r"|^\s*(?:how|where)\s+(?:do|can|could|would)\s+i\b"
+    r"|^\s*what\s+does\s+this\s+mean\s+for\s+(?:the\s+market|memecoins)\s*:"
+    r"|^\s*(?:hi|hello|hey|thanks|thank\s+you|ok|okay|cool|great|nice)\b"
+    r"|^\s*(?:what(?:'s|\s+is)?\s+(?:the\s+)?(?:time|date|day)\b|what\s+time\b|who\s+are\s+you\b|what\s+can\s+you\s+do\b|help\b)", re.I)
+
+
+def is_general_question(request: str) -> bool:
+    return bool(_GENERAL_QUESTION.search(request or ""))
+
+
 def continues_subject(request: str) -> bool:
     """Whether a message that names nothing of its own reads as a follow-up
-    on the conversation's subject rather than a new topic or small talk."""
+    on the conversation's subject rather than a new topic or small talk.
+
+    A message with no subject of its own continues the subject unless it is
+    a new-topic ask, an indefinite ask, or a general or product question:
+    the earlier allow-list of follow-up words dropped the context whenever
+    the follow-up used a word outside it ("analyze the liquidation clusters"
+    after BTC led the market answer, live 2026-09-28)."""
     text = request or ""
     if is_referent(text) and not _NEW_TOPIC.search(text):
         return True
     if len(text.split()) < 3 or has_own_subject(text) or _NEW_TOPIC.search(text) or _INDEFINITE.search(text):
         return False
-    return bool(_CONTINUES.search(text))
+    if is_general_question(text):
+        return False                      # "what is a liquidation cluster?" is general whatever words it shares with the subject
+    return True
 
 
 def opens_new_topic(request: str) -> bool:
@@ -201,7 +233,9 @@ _LOWER_STOP = {"the", "this", "that", "these", "those", "my", "our", "your", "it
                # comparison words after a metric ("price versus the reported catalyst"): never a name (UAT preflight 2026-09-27: CATALYST was looked up)
                "versus", "vs", "against", "compared", "relative", "between", "per",
                # qualifiers of a metric ("live price", "spot price", "mark price"): never a name
-               "live", "spot", "mark", "quoted", "fair", "average", "median", "total", "daily", "hourly", "weekly"}
+               "live", "spot", "mark", "quoted", "fair", "average", "median", "total", "daily", "hourly", "weekly",
+               # "open interest", "funding": derivatives phrases, never a lowercase name (OPEN the ticker is uppercase)
+               "open", "interest", "funding", "leverage", "longs", "shorts"}
 
 
 def _lower_name(text: str) -> str | None:

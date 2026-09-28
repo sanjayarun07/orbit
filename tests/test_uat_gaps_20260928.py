@@ -154,3 +154,84 @@ def test_a_missing_part_that_the_previous_answer_reported_is_restated_not_called
     assert "Not covered by the sources this turn" not in out["answer"] and out["answer_gate"]["resolved_by"] == "prior_answer"
     out = asyncio.run(answer_gate.gate("What is the live price versus funding?", {"answer": "# Solana (SOL)\nPrice: $119.39", "trajectory": {"tool_name_0": "x"}}))
     assert "Not covered by the sources this turn" in out["answer"]
+
+
+# --- "Analyze the liquidation clusters" after "why crypto market is down today?" is BTC's (live 2026-09-28) ---
+
+def test_the_answers_declared_subject_becomes_the_focus_and_a_subjectless_follow_up_continues_it():
+    """The general rules: the focus falls back to the subject the answer
+    declares in its own card headings, and a message that names nothing of
+    its own continues the subject unless it is a general or product question
+    (BTC after "why crypto market is down today?", then "Analyze the
+    liquidation clusters", live 2026-09-28)."""
+    from app import experience, context_entities
+    from app.routing import subject_probe
+    market = ("_The market here is the crypto market, led by BTC; say \"stock market\" for equities._\n\n# Crypto Market Overview\n**Retrieved** x\n\n---\n\n"
+              "# Why is Bitcoin (BTC) moving?\n**As of** x · crypto\n")
+    assert context_entities.answer_subject(market)["label"] == "BTC"
+    assert context_entities.answer_subject("# Hyperliquid market data\n**Provider**: GoldRush\n\n## NEAR\n**Mark Price (USD)**: $5")["label"] == "NEAR"
+    assert context_entities.answer_subject("# Exit analysis — ANSEM\n**Wallet**: x")["label"] == "ANSEM"
+    assert context_entities.answer_subject("# Backpack (BP)\n**Provider**: Birdeye · **Contract**: `9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump` · **Chain**: solana") == {
+        "kind": "token", "label": "BP", "symbol": "BP", "address": "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump", "chain": "solana", "confidence": 0.7, "source": "answer"}
+    assert context_entities.answer_subject("# Crypto market today\n**Checked** x\n\n## Dated reporting\n- x") is None
+    ctx = experience.advance_session_context({}, "why crypto market is down today?", None, "research", [], [], None, answer=market)
+    assert ctx["focus"]["label"] == "BTC" and ctx["focus"]["source"] == "answer"
+    for q in ("Analyze the liquidation clusters", "and open interest?", "Can you also check the funding rate?", "Build bull, base and bear cases"):
+        assert subject_probe.continues_subject(q), q
+    for q in ("what is a liquidation cluster?", "how do funding rates work?", "Do you support Base?", "Can I see a wallet without giving you control of it?",
+              "What does this mean for the market: Nasdaq closes at record", "top gainers on base", "thanks"):
+        assert not subject_probe.continues_subject(q), q
+    resolved = context_entities.resolve_contextual_request("Analyze the liquidation clusters", "user: why crypto market is down today?\nassistant: ...", ctx)
+    assert "this continues the discussion about BTC (the coin the previous answer was about; no contract address)" in resolved
+    ctx = experience.advance_session_context(ctx, "Analyze the liquidation clusters", None, "research", [], [], None, answer="**Taken together**\n\nBTC clusters…")
+    assert ctx["focus"]["label"] == "BTC"                       # a continuation keeps the focus
+    ctx = experience.advance_session_context(ctx, "How's the crypto market today?", None, "research", [], [], None, answer="# Crypto market today\n**Checked** x")
+    assert ctx["focus"] is None                                 # a fresh ask whose answer declares no subject clears it
+
+
+def test_a_derivatives_ask_about_a_coin_carries_the_venues_live_state(monkeypatch):
+    from app import evidence_pipeline
+    from tests.test_contract_pipeline import FakeRouter
+    monkeypatch.setattr(evidence_pipeline.settings, "contract_pipeline_enabled", True)
+    from app.nodes import runtime
+    monkeypatch.setattr(runtime, "planner_available", lambda: False)
+    seen = {}
+
+    async def synth(req, cards, trajectory, advice=False, research=False):
+        seen["request"] = req
+        return f"**Taken together**\n\nA read.\n\n---\n\n{cards}"
+    monkeypatch.setattr(evidence_pipeline.composition, "synthesize", synth)
+    web = "# From the web (dated, with sources)\n**Query**: q\n\nCoinGlass shows dense long liquidations below $80K. [1]\n\nSources:\n[1] [CoinGlass](https://www.coinglass.com/x) · 2026-09-23"
+    venue = "# Hyperliquid market data\n**Provider**: GoldRush · **Checked**: 2026-09-28 10:10 UTC\n\n## BTC\n**Mark Price (USD)**: $82,700\n**Funding Rate**: 0.0010% (per hour)\n**Open Interest**: 12,000.00 BTC\n"
+    router = FakeRouter({"perplexity_web_search": web, "goldrush_hyperliquid_market": venue})
+    saved = evidence_pipeline.get_provider_router
+    evidence_pipeline.get_provider_router = lambda: router
+    try:
+        request = "Analyze the liquidation clusters\nResolved from conversation context: this continues the discussion about BTC (the coin the previous answer was about; no contract address)."
+        out = asyncio.run(evidence_pipeline.answer({"session_context": {"focus": {"kind": "token", "label": "BTC", "address": None, "chain": None}}}, request, ()))
+    finally:
+        evidence_pipeline.get_provider_router = saved
+    assert out is not None and "goldrush_hyperliquid_market" in router.calls
+    assert "# Hyperliquid market data" in out["answer"] and "Open Interest" in out["answer"]
+    assert "Liquidation levels, clusters and heatmaps have no live source in this product" in seen["request"] and "BTC's live derivatives" in seen["request"]
+
+
+def test_a_general_derivatives_question_gets_no_venue_card(monkeypatch):
+    from app import evidence_pipeline
+    from tests.test_contract_pipeline import FakeRouter
+    monkeypatch.setattr(evidence_pipeline.settings, "contract_pipeline_enabled", True)
+    from app.nodes import runtime
+    monkeypatch.setattr(runtime, "planner_available", lambda: False)
+
+    async def synth(req, cards, trajectory, advice=False, research=False):
+        return f"**Taken together**\n\nA definition.\n\n---\n\n{cards}"
+    monkeypatch.setattr(evidence_pipeline.composition, "synthesize", synth)
+    web = "# From the web (dated, with sources)\n**Query**: q\n\nA liquidation cluster is a zone. [1]\n\nSources:\n[1] [x](https://x.y) · 2026-09-27"
+    router = FakeRouter({"perplexity_web_search": web, "goldrush_hyperliquid_market": "# Hyperliquid market data\n## SOL\n**Open Interest**: 1"})
+    saved = evidence_pipeline.get_provider_router
+    evidence_pipeline.get_provider_router = lambda: router
+    try:
+        out = asyncio.run(evidence_pipeline.answer({"session_context": {"focus": {"kind": "topic", "label": "SOL"}}}, "what is a liquidation cluster?\nResolved from conversation context: this continues the discussion about SOL.", ()))
+    finally:
+        evidence_pipeline.get_provider_router = saved
+    assert out is not None and "goldrush_hyperliquid_market" not in router.calls

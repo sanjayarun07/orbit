@@ -535,6 +535,39 @@ def prior_reference_note(request: str, session_context: dict | None) -> str | No
             f"never from a new search, and set the live figure against it: «{_short_addresses(excerpt)}»")
 
 
+_ANSWER_SUBJECT = (
+    re.compile(r"^#{1,2}\s+Why is (?P<name>[^(\n]{1,60}?)\s*\((?P<sym>[A-Z0-9]{2,10})\)\s+\w+\??\s*$", re.M),     # "# Why is Bitcoin (BTC) down?", "… moving?"
+    re.compile(r"^#{1,2}\s+(?P<name>[A-Z][^(\n#]{1,60}?)\s*\((?P<sym>[A-Z0-9]{2,10})\)\s*$", re.M),                 # "# Backpack (BP)", "# Wrapped SOL (SOL)"
+    re.compile(r"^#{1,2}\s+(?:Deployer check|Exit analysis|Token check)\s*[·—–-]\s*(?P<sym>[A-Z0-9]{2,10})\b", re.M),
+    re.compile(r"^#{1,2}\s+(?P<sym>[A-Z0-9]{2,10}) on (?:Hyperliquid|Aster)\b", re.M),
+    re.compile(r"^# Hyperliquid market data\n(?:.*\n){0,4}?##\s+(?P<sym>[A-Z0-9]{2,10})\s*$", re.M),
+)
+_ANSWER_CONTRACT = re.compile(r"\*\*Contract\*\*:\s*`([^`\s]{20,64})`")
+_ANSWER_CHAIN = re.compile(r"\*\*Chain\*\*:\s*([A-Za-z]+)")
+
+
+def answer_subject(answer: str) -> dict | None:
+    """The asset an answer declares as its subject, read from its own card
+    headings ("# Why is Bitcoin (BTC) moving?", "# Backpack (BP)", "## NEAR"
+    under the Hyperliquid card, "# Exit analysis — ANSEM"), with the
+    contract and chain when the same card states them. This is what a
+    follow-up that names nothing refers to, whatever the user's words were."""
+    text = answer or ""
+    for pattern in _ANSWER_SUBJECT:
+        m = pattern.search(text)
+        if not m:
+            continue
+        sym = m.group("sym").upper()
+        if sym in ("USD", "USDC", "USDT", "UTC", "ET", "API", "ETF", "DEX", "CEX"):
+            continue
+        section = text[m.end():].split("\n\n---\n\n", 1)[0][:1500]
+        address = _ANSWER_CONTRACT.search(section)
+        chain = _ANSWER_CHAIN.search(section)
+        return {"kind": "token", "label": sym, "symbol": sym, "address": address.group(1) if address else None,
+                "chain": chain.group(1).lower() if chain else None, "confidence": 0.7, "source": "answer"}
+    return None
+
+
 def composition_split(request: str) -> str:
     """The ask line(s) of a request, without resolution notes."""
     from app.composition import split_notes
@@ -671,4 +704,8 @@ def _resolve_contextual_request(
         if focus.get("kind") == "topic":
             return (f"{request}\nResolved from conversation context: this continues the discussion about {focus['label']} "
                     "(the subject of the previous turns: a protocol, company or topic, not a token symbol to look up).")
+        if focus.get("kind") == "token":
+            # a coin with no contract in the conversation (BTC after "why is the market down": the market's leader answered)
+            return (f"{request}\nResolved from conversation context: this continues the discussion about {focus_label} "
+                    "(the coin the previous answer was about; no contract address).")
     return request

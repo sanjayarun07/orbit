@@ -3544,6 +3544,32 @@ question; "What happened, and what does it mean for the market?" with nothing to
 (`context_entities.event_question`); a day span is not a figure. At phone width the tap journey passed end to end and
 no turn scrolled the page sideways.
 
+### The conversation's subject is what the answer was about; a subjectless follow-up continues it (2026-09-28)
+
+Live: "How's the crypto market today?" → "why crypto market is down today?" → "Analyze the liquidation clusters"
+answered the third turn as a concept explanation with no coin. Two general rules were wrong, not one prompt:
+
+- **The focus was set only from the user's words and resolved contracts, never from what the answer was about.**
+  Now, when the request names nothing, the focus falls back to the subject the answer declares in its own card
+  headings (`context_entities.answer_subject`: "# Why is Bitcoin (BTC) down?", "# Backpack (BP)", "## NEAR" under the
+  Hyperliquid card, "# Exit analysis — ANSEM", with the card's contract and chain when stated; `experience.
+  advance_session_context`). A continuation keeps the focus it has; a fresh ask whose answer declares no subject
+  clears it.
+- **A follow-up continued the subject only if it used a word from an allow-list**, so any vocabulary outside it
+  ("clusters") dropped the context. Now a message that names nothing of its own continues the subject unless it is a
+  new-topic ask, an indefinite ask, or a general or product question (`subject_probe.is_general_question`: "what is
+  a liquidation cluster?", "how do funding rates work?", "can I see a wallet…", "do you support Base?", a Home tap,
+  small talk); the resolver notes a coin focus that has no contract address. The allow-list remains as documentation
+  of known follow-up words only.
+
+Alongside: funding rate, open interest and mark price are exact venue state wherever they appear ("and the open
+interest?" had gone to a DEX pair search), except in a general question; a derivatives ask about a coin, liquidation
+levels included, attaches the GoldRush Hyperliquid card beside the web read (`evidence_pipeline._attach_venue_state`)
+with the note that liquidation levels, clusters and heatmaps have no live source in this product, so the answer says
+so first and reads the web card as dated reporting; a ticker-shaped topic focus ("NEAR") counts as the coin. Live,
+three conversations once each: BTC after the market answer, NEAR after its funding card, SOL's follow-ups; the
+definitional "what is a liquidation cluster?" stays general.
+
 ## Home headline tap: grounded in the market's state (2026-09-26)
 
 "What does this mean for the market: <headline>" is open research on the headline (the tap fix of 2026-09-25), and

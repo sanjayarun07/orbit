@@ -39,8 +39,9 @@ CONTRACT_KINDS: tuple[str, ...] = ("market_ranking", "holders", "recent_events",
 OPEN_RESEARCH_KIND = "open_research"
 # Exact state the web must never answer first: an address, a wallet, a quote, a price now, an exit, a position.
 _EXACT_STATE = re.compile(r"(?<![A-Za-z0-9])(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![A-Za-z0-9])|\b(?:my\s+wallet|connected\s+wallet|this\s+wallet|that\s+wallet|wallet\s+(?:address|balance|holdings|activity|transactions?)|balance|balances|portfolio|position|exit|quote|swap|bridge|price\s+of|price\s+now|current\s+price|live\s+price|how\s+much\s+is|holders?|liquidity\s+of|tvl\s+of|apy|yield"
-                          # venue perp state now ("NEAR funding and open interest on Hyperliquid now"): the venue's live figures, never a web read (UAT preflight 2026-09-27)
-                          r"|(?:funding(?:\s+rates?)?|open\s+interest|mark\s+price|oracle\s+price)\s+(?:on|for|now|right\s+now|currently|at\s+the\s+moment)|current\s+(?:funding|open\s+interest))\b", re.I)
+                          # venue perp state ("NEAR funding and open interest on Hyperliquid now", "and the open interest?"): the venue's live figures,
+                          # never a web read or a DEX pair search (UAT preflight 2026-09-27; live 2026-09-28); a general question is exempt below
+                          r"|funding\s+rates?|open\s+interest|mark\s+price|oracle\s+price)\b", re.I)
 _OPEN_RESEARCH = re.compile(r"\b(?:why|how|what|who|which|explain|compare|analy[sz]e|diligence|competitors?|investors?|backers?|revenue|risks?|outlook|history|background|roadmap|tokenomics|governance|research|deep\s+dive|overview|"
                             r"mean(?:s|ing)?|guarantee[sd]?|impl(?:y|ies)|does\s+that)\b", re.I)     # "does that mean I cannot get rugged?" asks what a concept means, not for a token check (2026-09-24)
 
@@ -49,7 +50,9 @@ def is_open_research(request: str) -> bool:
     """Open-ended research the web may lead: a question about a project, a
     move, a narrative or a mechanism, with no exact on-chain state in it."""
     text = request or ""
-    return bool(_OPEN_RESEARCH.search(text)) and not _EXACT_STATE.search(text) and len(text.split()) >= 3
+    from app.routing.subject_probe import is_general_question
+    exact = bool(_EXACT_STATE.search(text)) and not is_general_question(text)      # "how do funding rates work?" is a concept, not a state read
+    return bool(_OPEN_RESEARCH.search(text)) and not exact and len(text.split()) >= 3
 
 
 class Subject(BaseModel):

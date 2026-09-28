@@ -360,10 +360,22 @@ def advance_session_context(
         from app.routing.subject_probe import continues_subject, subject_of
 
         topic = subject_of(request)
-        if topic and not continues_subject(request):
+        continuing = continues_subject(request)
+        if topic and not continuing:
             context["focus"] = {"kind": "topic", "label": topic, "address": None, "chain": None, "confidence": 0.6, "source": "request"}
-        elif not topic and not continues_subject(request):
-            context["focus"] = None
+        elif not topic:
+            # The request named nothing: the subject is what the answer was
+            # about, read from the answer's own card headings ("why is the
+            # market down" answered with BTC as the market's leader; the
+            # next turn's "analyze the liquidation clusters" is BTC's, live
+            # 2026-09-28). A continuation keeps the focus it has; a fresh
+            # ask with no declared subject clears it.
+            from app.context_entities import answer_subject
+            declared = answer_subject(answer) if answer else None
+            if declared and (not continuing or not context.get("focus")):
+                context["focus"] = declared
+            elif not continuing:
+                context["focus"] = None
         # A referent follow-up ("does that authorize Robinhood Chain?") keeps
         # the subject it points at, whatever other name it mentions.
     elif intent == "general":
