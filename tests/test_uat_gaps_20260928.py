@@ -78,3 +78,51 @@ def test_a_rounded_share_or_a_threshold_stands_and_only_the_offending_sentence_g
     audited = token_deepdive.audit_concentration(answer, EVIDENCE)
     assert "top 10 holders control around 31–38% of supply" in audited and "Liquidity is pullable." in audited
     assert "Top 50 hold ~50%+" not in audited and "removed from the written analysis: 1 statement " in audited
+
+
+# --- browser UAT of 260faaf7 (2026-09-28) ---
+
+def test_an_exit_watch_after_a_named_wallet_exit_analysis_reads_that_wallet(monkeypatch):
+    from app import exit_controls
+    seen = {}
+
+    async def resolve_token(token):
+        return "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump", "ANSEM", None
+
+    async def position_of(wallet, mint):
+        seen["wallet"] = wallet
+        return None
+    monkeypatch.setattr(exit_controls, "resolve_token", resolve_token)
+    monkeypatch.setattr(exit_controls.exit_monitor, "position_of", position_of)
+    focus = {"kind": "wallet", "label": "Wallet", "address": "3aHLqHsvw3gPxnq1fVEYG6P3pCcxkGo3ETSkQGE4KZkS", "chain": "solana"}
+    reply = asyncio.run(exit_controls.handle("Watch my exit on ANSEM.", {"id": "u1"}, None, focus=focus))
+    assert seen["wallet"] == focus["address"] and not reply.startswith("Connect a Solana wallet first")
+    reply = asyncio.run(exit_controls.handle("Watch my exit on ANSEM.", {"id": "u1"}, None, focus={"kind": "token", "address": "x"}))
+    assert reply.startswith("Connect a Solana wallet first")
+
+
+def test_the_deployer_answer_names_the_contracts_symbol_not_the_placeholder(monkeypatch):
+    from tests.test_routing_rules_20260918 import _security_state, _stub_downstream
+    from app.nodes import research as research_mod
+    _stub_downstream(monkeypatch, {})
+    seen = {}
+
+    async def fake(mint, chain, symbol=None):
+        seen["symbol"] = symbol
+        return "ok", {"tool_name_0": "mobula_token_holders"}
+    monkeypatch.setattr(research_mod.deployer_check, "answer", fake)
+    mint = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+    ctx = {"focus": {"kind": "token", "label": "TOKEN", "address": mint, "chain": "solana"},
+           "last_contract": {"kind": "holders", "subject": {"kind": "token", "id": mint, "symbol": "BONK", "chain": "solana"}}}
+    asyncio.run(research_mod.research_node(_security_state("Is the largest account the deployer or funded by it?", session_context=ctx)))
+    assert seen["symbol"] == "BONK"
+
+
+def test_quoted_material_in_a_note_is_never_read_by_a_tool_matcher():
+    from app import mobula_wallet, provider_router
+    request = ('What is the live price versus the reported catalyst?\nResolved from canonical session context: token SOL mint So11111111111111111111111111111111111111112 on solana.\n'
+               'Resolved from conversation context: "the reported catalyst" is what the previous answer reported: «SOL moved higher as traders sold the news; wallet activity and '
+               'transactions in this wallet address show whales bought $86.67 million in one session.»')
+    assert mobula_wallet.matches(request)                                   # the excerpt alone would make it a wallet ask
+    assert not mobula_wallet.matches(provider_router._matchable(request))   # the router never lets a matcher read it
+    assert "«" not in provider_router._matchable(request) and "live price" in provider_router._matchable(request)

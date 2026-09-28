@@ -1071,6 +1071,7 @@ function renderResearchWork(trajectory,answer="",intent=""){
   if(!record&&intent==="research"){
     const cited=new Map();for(const match of String(answer||"").matchAll(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g)){if(!cited.has(match[2]))cited.set(match[2],{name:match[1],url:match[2],verdict:"cited",provenance:"citation"});}
     record={status:"complete",provider_calls:parseTrajectory(trajectory).length,sources:[...cited.values()].slice(0,8)};
+    if(!record.provider_calls&&!record.sources.length&&/\?/.test(String(answer||"").split(/\n\s*\n/)[0]))return null;   // a clarifying question ("Which one?") ran no tool and cites nothing: no "No evidence available" panel under it; a statement that could not verify keeps it (browser UAT 2026-09-28)
   }
   if(!record||typeof record!=="object")return null;
   const sources=Array.isArray(record.sources)?record.sources:Array.isArray(record.verdicts)?record.verdicts:[];

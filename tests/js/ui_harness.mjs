@@ -767,11 +767,13 @@ const CASES = {
     const legacy = sandbox.renderResearchWork({ tool_name_0: "perplexity_web_search" }, "See [Akash docs](https://akash.network/docs).", "research");
     const legacyStatus = legacy?.querySelector(".research-work-source-status").textContent;
     const uncovered = sandbox.renderResearchWork(null, "I cannot verify holders for this token on Robinhood Chain.", "research");
+    const clarifying = sandbox.renderResearchWork(null, "**BP** can mean a listed company (ticker BP) or the token **Backpack**. Which one? Say `why is BP stock moving` and I'll answer that.", "research");
     return { started, sourceCount, review, reviewStatus, final: finalStatus,
       calls,
       legacy: legacyStatus,
       uncovered: { heading: uncovered?.querySelector(".research-work-heading strong").textContent,
-        status: uncovered?.querySelector(".research-work-source-status").textContent } };
+        status: uncovered?.querySelector(".research-work-source-status").textContent },
+      clarifying: clarifying === null };
   },
   async typed_research_progress_shows_actual_activity_and_counts() {
     const { dom, sandbox } = load();

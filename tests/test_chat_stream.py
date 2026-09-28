@@ -159,6 +159,7 @@ def test_research_work_shows_progress_and_checked_sources():
     assert result["legacy"] == "1 source cited · page checks not recorded"
     assert result["uncovered"] == {"heading": "No evidence available",
                                    "status": "No answer evidence was gathered"}
+    assert result["clarifying"] is True          # a clarifying question ran no tool: no panel under it (browser UAT 2026-09-28)
 
 
 def test_typed_research_progress_shows_observed_work_and_counts():

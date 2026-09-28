@@ -1958,8 +1958,12 @@ async def research_node(state: AgentState) -> dict:
         mint = named.group(1) if named else focus.get("address")
         chain = (focus.get("chain") if focus.get("address") == mint else None) or ("solana" if mint and not mint.startswith("0x") else None)
         if mint and chain:
+            symbol = (focus.get("symbol") or focus.get("label")) if focus.get("address") == mint else None
+            if not symbol or symbol.strip().lower() in ("token", "wallet"):
+                # the focus carries a placeholder label after a holders contract ("TOKEN", browser UAT 2026-09-28): the contract's symbol names it
+                symbol = ((((state.get("session_context") or {}).get("last_contract") or {}).get("subject") or {}).get("symbol")) or None
             try:
-                text, trajectory = await deployer_check.answer(mint, chain, focus.get("symbol") if focus.get("address") == mint else None)
+                text, trajectory = await deployer_check.answer(mint, chain, symbol)
                 return {"answer": text, "trajectory": trajectory}
             except Exception:
                 logger.warning("deployer check unavailable for %s", mint[:8], exc_info=True)

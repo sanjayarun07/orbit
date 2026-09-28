@@ -10,7 +10,7 @@
      a session or a payment changes when the worker is installed.
    Bump VERSION when the shell changes shape; the old cache is dropped on activate. */
 const PREFIX = "orbit-shell-";
-const VERSION = PREFIX + "v17";
+const VERSION = PREFIX + "v18";
 const SHELL = ["/ui/", "/ui/index.html", "/ui/theme.css?v=2", "/ui/chat.css?v=10", "/ui/product.css?v=10", "/ui/mobile.css?v=7", "/ui/manifest.webmanifest",
                "/ui/icons/anvaya-192.png", "/ui/icons/anvaya-512.png"];
 

@@ -155,6 +155,18 @@ class _CacheEntry:
     words: frozenset[str] = field(default_factory=frozenset)
 
 
+_QUOTED_NOTE = re.compile(r"«[^»]*»")
+
+
+def _matchable(request: str) -> str:
+    """The request as a tool matcher may read it: quoted material inside a
+    resolution note («…», the previous answer's own words) is never an ask.
+    A news excerpt carrying "traders", "sold" and the token's mint had
+    matched the wallet-history tool on a price question (browser UAT
+    2026-09-28)."""
+    return _QUOTED_NOTE.sub(" ", request or "")
+
+
 class ProviderRouter:
     """Rank interchangeable providers, then execute with transparent fallback."""
 
@@ -309,7 +321,7 @@ class ProviderRouter:
         regex_matched: set[str] = set()
         gated: list[ProviderTool] = []
         for tool in eligible:
-            if tool.matches(request):
+            if tool.matches(_matchable(request)):
                 selected.append(tool)
                 regex_matched.add(tool.name)
             elif allow_semantic_fallback and tool.description and (
@@ -387,7 +399,7 @@ class ProviderRouter:
                 continue
             if chains and tool.chains and not (set(chains) & set(tool.chains)):
                 continue
-            if tool.matches(request):
+            if tool.matches(_matchable(request)):
                 matched.update(tool.capabilities)
         return matched
 
@@ -602,7 +614,7 @@ class ProviderRouter:
 
         for tool in ranked:
             if chosen:
-                if tool.matches is _always_match or not tool.matches(request):
+                if tool.matches is _always_match or not tool.matches(_matchable(request)):
                     continue
                 if ground(tool) <= covered:
                     continue

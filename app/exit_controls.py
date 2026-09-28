@@ -287,6 +287,8 @@ async def handle(message: str, user: dict | None, wallet: str | None, focus: dic
     named, message = split_wallet(message)
     if named:
         wallet = named                       # the wallet named in the sentence is the one to read
+    elif not wallet and (focus or {}).get("kind") == "wallet" and (focus or {}).get("address"):
+        wallet = focus["address"]            # "Watch my exit on ANSEM" after an exit analysis that named the wallet (browser UAT 2026-09-28)
     text = (message or "").strip()
     if _READ_ONLY.match(text):
         if "exit_control" in (last_capabilities or []):
