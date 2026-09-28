@@ -186,3 +186,86 @@ def test_a_stated_size_quote_uses_the_contracts_fields_even_with_a_wallet_bound(
     except Exception:
         pass                                        # the quote itself needs the chain; the binding is what this asserts
     assert seen["calls"][0] == "swap 1 ANSEM to USDC"      # the contract's fields, not the model's reading
+
+
+# --- exact-out buys: an output quantity is not a spend amount (user decision, 2026-09-28) ---
+
+def test_an_exact_output_quantity_is_read_as_one_and_never_reversed():
+    """"buy 2 SOL with USDC" asks to RECEIVE 2 SOL. The draft fallback had read
+    the token beside the amount as the token to sell, drafting 2 SOL → USDC:
+    the opposite trade, with no field missing so nothing asked."""
+    for text, amount, token, pay_with in (("buy 2 SOL with USDC", "2", "SOL", "USDC"),
+                                          ("purchase 0.5 ETH using USDC", "0.5", "ETH", "USDC"),
+                                          ("acquire 10 BONK with SOL", "10", "BONK", "SOL"),
+                                          ("buy 2 SOL", "2", "SOL", None)):
+        assert contracts.exact_out_buy(text) == {"amount": amount, "token": token, "pay_with": pay_with}, text
+        plan = contracts.plan_by_rules(text)
+        filters = plan.filters or {}
+        assert plan.kind == "transaction_intent"
+        assert filters.get("input_token") is None and filters.get("output_token") is None      # no draft at all
+        assert filters["exact_out_amount"] == amount and filters["exact_out_token"] == token
+        assert "not supported here" in plan.ambiguity and "opposite trade" in plan.ambiguity
+    assert contracts.exact_out_buy("buy 2 tokens") is None
+    assert contracts.exact_out_buy("sell 1 ANSEM for USDC") is None
+
+
+def test_a_spend_amount_keeps_its_direction_and_is_not_an_output_quantity():
+    """"buy $100 of SOL with USDC": the dollar figure is what is spent, so the
+    swap is USDC → SOL, exact-in, and never the exact-out refusal."""
+    plan = contracts.plan_by_rules("buy $100 of SOL with USDC")
+    filters = plan.filters or {}
+    assert contracts.exact_out_buy("buy $100 of SOL with USDC") is None
+    assert filters["input_token"] == "USDC" and filters["output_token"] == "SOL" and filters["amount_usd"] == 100.0
+    assert "exact_out_amount" not in filters
+    assert plan.ambiguity == "To quote this I need the chain. Nothing is prepared until then."   # a dollar size is a size
+    assert contracts.plan_by_rules("buy $100 of SOL with USDC on solana").ambiguity is None
+
+
+def test_a_sell_request_is_unchanged_by_the_exact_out_rule():
+    plan = contracts.plan_by_rules("sell 1 ANSEM for USDC")
+    filters = plan.filters or {}
+    assert filters["input_token"] == "ANSEM" and filters["output_token"] == "USDC" and filters["amount"] == "1"
+    assert "exact_out_amount" not in filters
+    plan = contracts.plan_by_rules("swap 2 SOL for USDC")
+    assert (plan.filters or {})["input_token"] == "SOL" and (plan.filters or {})["output_token"] == "USDC"
+
+
+def test_the_exact_out_route_never_anchors_as_a_stated_swap_but_still_reaches_the_trade_node():
+    from app.routing import resolver
+    from app.nodes import portfolio as portfolio_node
+    assert not resolver.stated_swap("buy 2 SOL with USDC") and not portfolio_node._stated_swap_fields("buy 2 SOL with USDC")
+    assert resolver.stated_swap("buy $100 of SOL with USDC")          # a dollar size is a size
+    assert resolver.stated_swap("sell 1 ANSEM for USDC")
+
+    async def never(*args, **kwargs):
+        raise AssertionError("the model must not be asked")
+    for text in ("buy 2 SOL with USDC", "buy $100 of SOL with USDC", "sell 1 ANSEM for USDC"):
+        out = asyncio.run(resolver.resolve({"request": text, "session_context": {}, "history": ""}, never))
+        assert out["intent"] == "trade", text
+
+
+@pytest.mark.parametrize("execution_on", [False, True])
+def test_the_exact_out_answer_offers_the_spend_alternative_and_never_the_opposite_trade(monkeypatch, execution_on):
+    from app import deployment
+    from app.nodes import trading
+    from app.settings import settings
+    monkeypatch.setattr(settings, "contract_pipeline_enabled", True)
+    monkeypatch.setattr(deployment, "execution_enabled", lambda: execution_on)
+    out = asyncio.run(trading.trade_planner_node({"request": "buy 2 SOL with USDC", "capabilities": [], "missing_fields": []}))
+    answer = out["answer"]
+    assert "2 SOL to USDC" not in answer and "SOL to USDC" not in answer          # never the opposite trade
+    assert "Buying an exact quantity is not supported here" in answer
+    assert "swap 50 USDC for SOL" in answer and "will vary" in answer             # the exact-input alternative
+    assert out["cross_chain_swap"] is None and out["trajectory"] is None
+    if not execution_on:
+        assert answer.startswith("This deployment is running in research mode") and "buying exactly 2 SOL" in answer
+
+
+def test_research_mode_names_a_spend_amount_rather_than_none(monkeypatch):
+    from app import deployment
+    from app.nodes import trading
+    from app.settings import settings
+    monkeypatch.setattr(settings, "contract_pipeline_enabled", True)
+    monkeypatch.setattr(deployment, "execution_enabled", lambda: False)
+    out = asyncio.run(trading.trade_planner_node({"request": "buy $100 of SOL with USDC", "capabilities": [], "missing_fields": []}))
+    assert "$100 USDC to SOL" in out["answer"] and "None" not in out["answer"]

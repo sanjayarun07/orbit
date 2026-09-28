@@ -61,9 +61,22 @@ async def trade_planner_node(state: AgentState) -> dict:
         # for a chain first reads as though the swap were otherwise available
         # (wallet UAT 2026-09-28).
         return {"answer": contract.ambiguity, "trajectory": None, "cross_chain_swap": None, "contract": contract.model_dump(), "pipeline": "contract"}
+    exact_out = ((contract.filters if contract is not None else {}) or {}).get("exact_out_amount")
+    if exact_out and contract is not None:
+        # "buy 2 SOL with USDC": the amount names the token to receive, and
+        # every swap this system prepares is exact-in. Nothing is drafted and
+        # the opposite trade is never described (wallet UAT 2026-09-28).
+        f = contract.filters or {}
+        what = f"buying exactly {f['exact_out_amount']} {f['exact_out_token']}"
+        answer = (contract.ambiguity if deployment.execution_enabled()
+                  else _research_mode_answer(what)["answer"] + "\n\n" + contract.ambiguity)
+        return {"answer": answer, "trajectory": None, "cross_chain_swap": None,
+                "contract": contract.model_dump(), "pipeline": "contract"}
     if not deployment.execution_enabled():
         f = (contract.filters if contract is not None else {}) or {}
-        what = (f"{f.get('amount')} {f.get('input_token')} to {f.get('output_token')}" + (f" on {f.get('source_chain')}" if f.get("source_chain") else "")) if f.get("input_token") and f.get("output_token") else "this one"
+        size = f.get("amount") or (f"${f['amount_usd']:,.2f}".rstrip("0").rstrip(".") if f.get("amount_usd") else None)
+        what = ((f"{size + ' ' if size else ''}{f.get('input_token')} to {f.get('output_token')}"
+                 + (f" on {f.get('source_chain')}" if f.get("source_chain") else "")) if f.get("input_token") and f.get("output_token") else "this one")
         return {**_research_mode_answer(what), **({"contract": contract.model_dump(), "pipeline": "contract"} if contract is not None else {})}
     if not state.get("wallet_address"):
         return {"answer": _NO_WALLET_ANSWER, "trajectory": None, "pending_wallet_request": state["request"]}

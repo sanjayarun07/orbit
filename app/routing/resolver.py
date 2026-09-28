@@ -296,7 +296,10 @@ def stated_swap(request: str) -> bool:
     if plan.kind != "transaction_intent":
         return False
     filters = plan.filters or {}
-    return all(filters.get(key) for key in ("amount", "input_token", "output_token"))
+    if filters.get("exact_out_amount"):
+        return False              # "buy 2 SOL with USDC": an exact-out request this system cannot quote, never a stated swap
+    return bool(filters.get("input_token") and filters.get("output_token")
+                and (filters.get("amount") or filters.get("amount_usd")))     # a dollar size is a size
 
 
 def _bare_referent(request: str, state: dict) -> bool:

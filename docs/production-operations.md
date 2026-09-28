@@ -3594,6 +3594,16 @@ Three general rules, not three prompt fixes (`tests/test_uat_wallet_action_20260
 In research mode the refusal now leads, rather than asking for a missing chain first and only then saying nothing can
 be prepared.
 
+**An exact-output buy is unsupported, and is never drafted as the opposite trade** (`contracts.exact_out_buy`, fixed
+the same day): "buy 2 SOL with USDC" asks to receive 2 SOL, and the draft fallback read the token beside the amount as
+the token to sell, producing a complete `2 SOL → USDC` draft that nothing questioned. Every swap this system prepares
+is exact-in and no layer carries a swap mode, so flipping the tokens would be a different wrong trade. No draft is
+built; the answer says buying an exact quantity is unsupported, states that it will not become the opposite trade, and
+offers the exact-input alternative (say how much to spend; the amount received varies). Research mode still leads with
+the mode refusal, naming the request correctly ("buying exactly 2 SOL"). A spend amount is the ordinary exact-in swap
+and now parses properly: "buy $100 of SOL with USDC" is USDC → SOL at a $100 size, and a dollar size counts as a size
+wherever one is required. Exact-out support belongs to the execution milestone.
+
 ## Home headline tap: grounded in the market's state (2026-09-26)
 
 "What does this mean for the market: <headline>" is open research on the headline (the tap fix of 2026-09-25), and

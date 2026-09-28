@@ -46,6 +46,53 @@ _OPEN_RESEARCH = re.compile(r"\b(?:why|how|what|who|which|explain|compare|analy[
                             r"mean(?:s|ing)?|guarantee[sd]?|impl(?:y|ies)|does\s+that)\b", re.I)     # "does that mean I cannot get rugged?" asks what a concept means, not for a token check (2026-09-24)
 
 
+_BUY_VERB = r"(?:buy|buying|purchase|purchasing|acquire|acquiring|get\s+me|grab)"
+# "buy 2 SOL with USDC", "purchase 0.5 ETH using USDC": the amount names the
+# token to RECEIVE, which is an exact-out swap. A dollar figure is a spend
+# amount instead ("buy $100 of SOL with USDC"), and that is an ordinary
+# exact-in swap.
+_EXACT_OUT_BUY = re.compile(
+    rf"\b{_BUY_VERB}\s+(?:me\s+)?(?P<amount>\d+(?:\.\d+)?)\s*(?P<token>[A-Za-z][A-Za-z0-9]{{1,9}})\b"
+    rf"(?:\s*(?:with|using|for|from|out\s+of|in\s+exchange\s+for)\s+\$?(?P<pay_with>[A-Za-z][A-Za-z0-9]{{1,9}})\b)?", re.I)
+
+# "buy $100 of SOL with USDC": a spend amount, the ordinary exact-in swap.
+_BUY_WITH_SPEND = re.compile(
+    rf"\b{_BUY_VERB}\s+(?:me\s+)?\$\s*\d[\d,]*(?:\.\d+)?\s*[kKmM]?\s*(?:worth\s+)?(?:of|in)\s+(?P<token>[A-Za-z][A-Za-z0-9]{{1,9}})\b"
+    rf"\s*(?:with|using|from|paying\s+(?:with|in))\s+\$?(?P<pay_with>[A-Za-z][A-Za-z0-9]{{1,9}})\b", re.I)
+
+EXACT_OUT_UNSUPPORTED = (
+    "Buying an exact quantity is not supported here: a swap is quoted from the amount you spend, not from the amount you receive, "
+    "so I cannot quote {amount} {token} as the output and I will not turn it into the opposite trade. "
+    "Say how much {pay_with} to spend instead (`swap 50 {pay_with} for {token}`) and the {token} received will vary with the price."
+)
+
+
+def exact_out_buy(request: str) -> dict | None:
+    """The fields of a request to buy an exact quantity ("buy 2 SOL with
+    USDC"), or None. The amount sits on the token to receive, which this
+    system cannot quote: every swap it prepares is exact-in. Reading it the
+    other way round -- the token beside the amount as the token to sell --
+    is the opposite trade, and was what the draft fallback did (wallet UAT
+    2026-09-28)."""
+    text = composition_split_notes(request)
+    if re.search(r"\$\s*\d", text):
+        return None                               # a dollar figure is a spend amount, not an output quantity
+    m = _EXACT_OUT_BUY.search(text)
+    if not m:
+        return None
+    token = m.group("token").upper()
+    # A chain word can be the asset ("buy 0.5 ETH", "buy 2 SOL"); only a
+    # counting noun ("buy 2 tokens") is not a quantity of a named asset.
+    if token in _AMOUNT_NOUNS or token in {"SOLANA", "ETHEREUM", "ARBITRUM", "AVALANCHE", "OPTIMISM", "POLYGON"}:
+        return None
+    return {"amount": m.group("amount"), "token": token, "pay_with": (m.group("pay_with") or "").upper() or None}
+
+
+def composition_split_notes(request: str) -> str:
+    from app.composition import split_notes
+    return split_notes(request or "")[0] or (request or "")
+
+
 def is_open_research(request: str) -> bool:
     """Open-ended research the web may lead: a question about a project, a
     move, a narrative or a mechanism, with no exact on-chain state in it."""
@@ -213,6 +260,7 @@ _PORTFOLIO_ASK = re.compile(r"\b(?:my|connected)\b.{0,30}\b(?:portfolio|wallet|h
 # guess ("Start a cross-chain swap" got a generic clarification, 2026-09-23).
 _TRANSACTION = re.compile(r"\b(?:swap(?:ped|ping)?|sell(?:ing)?|sold|buy(?:ing)?|bought|bridg(?:e|ed|ing)|convert(?:ed|ing)?|exchang(?:e|ed|ing)"
                           # the nominalisations: "prepare a sale of 1 ANSEM for USDC", "a purchase of 2 SOL" (wallet UAT 2026-09-28)
+                          r"|purchas(?:e|ed|ing)|acquir(?:e|ed|ing)"
                           r"|sale\s+of|purchase\s+of|swap\s+of|conversion\s+of)\b.{0,60}\b(?:\d+(?:\.\d+)?\s*[A-Za-z$][A-Za-z0-9]{1,9}|[A-Z]{2,10}\s+(?:to|into|for)\s+[A-Z]{2,10})"
                           r"|\b(?:start|begin|prepare|quote)\s+(?:a\s+|an\s+|the\s+)?(?:cross[- ]chain\s+)?(?:swap|bridge|trade|quote)\b|\bquote\s+me\b"
                           r"|\bexit\b.{0,40}\bposition\b|\bexit\s+(?:quotes?|analysis)\b"
@@ -470,6 +518,26 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
         if draft.destination_chain is None and draft.source_chain is not None and not re.search(r"\b(?:cross[- ]chain|bridge)\b", text, re.I):
             import dataclasses
             draft = dataclasses.replace(draft, destination_chain=draft.source_chain)          # a same-chain swap names one chain
+        buying_exact = exact_out_buy(text)
+        if buying_exact:
+            # No draft at all: the fallback below would read the token beside
+            # the amount as the token to sell, which is the opposite trade.
+            pay_with = buying_exact["pay_with"] or "the token you are paying with"
+            return QuestionContract(kind="transaction_intent", subject=Subject(kind="token", symbol=buying_exact["token"], chain=chain),
+                                    scope="on_chain", metric="quote", unit="usd",
+                                    filters={"exact_out_amount": buying_exact["amount"], "exact_out_token": buying_exact["token"],
+                                             **({"pay_with": buying_exact["pay_with"]} if buying_exact["pay_with"] else {})},
+                                    freshness_seconds=120, evidence_order="state_first", required_facts=["quote_row"],
+                                    ambiguity=EXACT_OUT_UNSUPPORTED.format(amount=buying_exact["amount"], token=buying_exact["token"], pay_with=pay_with),
+                                    confidence=0.8, planner="rules")
+        spend = _BUY_WITH_SPEND.search(text) if not buying_exact else None
+        if spend and (draft.input_token is None or draft.output_token is None):
+            # "buy $100 of SOL with USDC": the dollar figure is what is spent,
+            # so the token after "with" is sold and the named token is bought.
+            # The direction is stated; only the size is denominated in dollars.
+            import dataclasses
+            draft = dataclasses.replace(draft, input_token=draft.input_token or spend.group("pay_with").upper(),
+                                        output_token=draft.output_token or spend.group("token").upper())
         if draft.amount is None or draft.input_token is None or draft.output_token is None:
             # The draft parser knows swap verbs; "the minimum USDC I'd get for
             # 0.05 SOL" and "a quote for SOL→USDC, 0.05 SOL" name the same swap
@@ -492,7 +560,7 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
                 draft = dataclasses.replace(draft, amount=draft.amount or amount_m.group(1), input_token=draft.input_token or inp, output_token=draft.output_token or out,
                                             source_chain=draft.source_chain or ("solana" if "SOL" in (inp, out) else None),
                                             destination_chain=draft.destination_chain or ("solana" if "SOL" in (inp, out) else None))
-        missing = () if _EXIT_ASK.search(text) else draft.missing()
+        missing = () if _EXIT_ASK.search(text) else tuple(m for m in draft.missing() if not (m == "amount" and usd_amount))
         words = {"amount": "the amount", "input_token": "the token to sell", "output_token": "the token to buy", "source_chain": "the chain", "destination_chain": "the destination chain"}
         ambiguity = None
         if missing:
