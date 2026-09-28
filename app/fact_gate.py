@@ -35,6 +35,7 @@ class GateResult(BaseModel):
     unsupported: list[str] = Field(default_factory=list)      # figures in the prose that no fact carries
     contradictions: list[str] = Field(default_factory=list)   # "7,719 below 7,706": a comparison the numbers deny
     stale: list[str] = Field(default_factory=list)
+    recap: list[str] = Field(default_factory=list)            # prose items whose event date is before the window asked, not labelled as a recap
     notes: list[str] = Field(default_factory=list)
 
     def gap_sentence(self, contract: QuestionContract) -> str:
@@ -238,10 +239,67 @@ def contradictions(answer: str) -> list[str]:
     return out[:5]
 
 
+_MONTHS = {m: i for i, m in enumerate(("january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"), 1)}
+_MONTHS.update({m[:3]: i for m, i in list(_MONTHS.items())})
+_WEEKDAYS = {d: i for i, d in enumerate(("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"))}
+_PROSE_DATE = re.compile(r"\b((?:19|20)\d{2})-(\d{2})-(\d{2})\b"
+                         r"|\b(\d{1,2})\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b"
+                         r"|\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})\b"
+                         r"|\b(?:on|last|this)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.I)
+_RECAP_WORDS = re.compile(r"\b(?:recap|earlier|previously|republished|recirculat\w+|older|last\s+week|earlier\s+this\s+week|before\s+the\s+window|not\s+new|already\s+reported)\b", re.I)
+_SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z*\[])|\n+")
+
+
+def prose_event_dates(sentence: str, now: datetime) -> list[datetime]:
+    """The calendar dates a sentence names: ISO dates, "24 September",
+    "September 25", "on Wednesday" (the most recent such day, today
+    included). A month-day with no year takes the most recent past year."""
+    dates: list[datetime] = []
+    for m in _PROSE_DATE.finditer(sentence or ""):
+        try:
+            if m.group(1):
+                d = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=timezone.utc)
+            elif m.group(4):
+                d = datetime(now.year, _MONTHS[m.group(5).lower()[:3]], int(m.group(4)), tzinfo=timezone.utc)
+            elif m.group(6):
+                d = datetime(now.year, _MONTHS[m.group(6).lower()[:3]], int(m.group(7)), tzinfo=timezone.utc)
+            else:
+                back = (now.weekday() - _WEEKDAYS[m.group(8).lower()]) % 7
+                d = datetime(now.year, now.month, now.day, tzinfo=timezone.utc) - timedelta(days=back)
+            if not m.group(1) and not m.group(8) and d > now + timedelta(days=1):
+                d = d.replace(year=d.year - 1)
+        except ValueError:
+            continue
+        dates.append(d)
+    return dates
+
+
+def recap_sentences(answer: str, window_hours: float, now: datetime) -> list[str]:
+    """Sentences of the written summary that name an event date before the
+    window asked without saying they are a recap ("What's actually new in
+    crypto today?" led with Wednesday's peak and Thursday's hack on a
+    Saturday, UAT preflight 2026-09-27)."""
+    if not answer or not window_hours or window_hours > 24 * 7:
+        return []
+    start = now - timedelta(hours=window_hours) - timedelta(hours=12)      # half a day of slack for time zones and "today" written late
+    out = []
+    summary = answer.split("\n\n---\n\n", 1)[0]                        # the written summary, never the cards or their dated source lists
+    for sentence in _SENTENCE.split(prose_of(summary)):
+        sentence = sentence.strip()
+        if not sentence or _RECAP_WORDS.search(sentence) or re.match(r"^\[\d+\]|^Sources?:|^\*\*Query\*\*|^Publication:", sentence):
+            continue
+        old = [d for d in prose_event_dates(sentence, now) if d < start.replace(hour=0, minute=0, second=0, microsecond=0)]
+        if old:
+            out.append(f"{min(old).date()}: {sentence[:140]}")
+    return out[:8]
+
+
 def check(contract: QuestionContract, facts: list[Fact], answer: str | None = None, *, scope_satisfied: bool = True, now: datetime | None = None,
           evidence_text: str = "") -> GateResult:
     now = now or datetime.now(timezone.utc)
     result = GateResult(ok=True, scope_satisfied=scope_satisfied)
+    if answer and contract.kind == "recent_events" and contract.window_hours:
+        result.recap = recap_sentences(answer, float(contract.window_hours), now)
     # A fact older than the freshness the contract asks for is named and set
     # aside: it satisfies nothing (review 2026-09-23: stale evidence passed
     # the gate as ok). A fact with no stated time under a freshness contract

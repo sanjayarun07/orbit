@@ -28,7 +28,7 @@ from app.provider_registry import get_provider_router
 from app.repeat_guard import guard_tools
 from app.token_resolve import bitquery_evm_lookup, clear_winner, token_candidates
 from app.token_deepdive import (
-    ANALYSIS_RULES, build_token_evidence, bundle_signals, coverage_rows, evidence_skips, extract_market_price, format_evidence_bundle,
+    ANALYSIS_RULES, audit_concentration, build_token_evidence, bundle_signals, coverage_rows, evidence_skips, extract_market_price, format_evidence_bundle,
 )
 from app import contracts, decision_records, evidence_pipeline, handles, holder_snapshots, jobs, listed_asset, role_memory, snapshot_compare, tequity
 from app.signals import Signal, Subject
@@ -1623,6 +1623,10 @@ async def _deep_dive_job(job: dict, ctx: "jobs.JobContext") -> dict:
     try:
         verdict = await ctx.call("synthesis", synthesize, args={"evidence": evidence[:200], "charter": charter, "learned": learned})
         answer = verdict.get("answer") or evidence
+        # A concentration claim the cards cannot support as written is removed and the
+        # sourced figures stated with their bases (BONK: "top 10 hold 38.37%, top 50 hold
+        # 17.47%" merged two Mobula figures, UAT preflight 2026-09-27).
+        answer = audit_concentration(answer, evidence)
         # The lens's typed view. An answer whose stance or confidence did not
         # come back as one word abstains: an unparsed opinion is not a vote.
         analyst = Signal.from_stance("token_deep_dive", subject, as_of, verdict.get("stance", ""), verdict.get("confidence", ""),

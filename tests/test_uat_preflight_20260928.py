@@ -33,7 +33,7 @@ def test_a_ticker_that_is_a_listed_company_and_a_lesser_coin_is_a_question(monke
     monkeypatch.setattr(equities_data, "enabled", lambda: True)
     monkeypatch.setattr(equities_data, "is_listed_ticker", lambda sym: sym == "BP")
     ask = asyncio.run(why_moving.stock_namesake_ask("BP", "Why is BP moving today?"))
-    assert ask.startswith("**BP** can mean the listed company (ticker BP) or the token **Backpack** (CoinGecko rank 412)")
+    assert ask.startswith("**BP** can mean a listed company (ticker BP) or the token **Backpack** (CoinGecko rank 412)")
     assert "`why is BP stock moving`" in ask and "`why is BP token moving`" in ask
     assert asyncio.run(why_moving.stock_namesake_ask("BP", "why is BP stock moving")) is None       # the words settle it
     assert asyncio.run(why_moving.stock_namesake_ask("BP", "why is BP token moving")) is None
@@ -41,7 +41,7 @@ def test_a_ticker_that_is_a_listed_company_and_a_lesser_coin_is_a_question(monke
     assert asyncio.run(why_moving.stock_namesake_ask("SOL", "Why is SOL moving today?")) is None     # a top-100 coin owns its ticker
     monkeypatch.setattr(symbol_registry, "listed", lambda sym: [{"name": "Backpack", "symbol": "BP", "rank": 412}])
     monkeypatch.setattr(equities_data, "is_listed_ticker", lambda sym: False)
-    assert asyncio.run(why_moving.stock_namesake_ask("BP", "Why is BP moving today?")) is None       # no listed company: the coin
+    assert asyncio.run(why_moving.stock_namesake_ask("BP", "Why is BP moving today?"))                # a bare short ticker still asks (user decision 2026-09-28)
     assert why_moving.match("why is BP stock moving") == ("BP", "moving") and why_moving.prefers_stock("why is BP stock moving")
 
 
@@ -133,16 +133,19 @@ def test_venue_perp_state_now_is_exact_state_not_open_research():
 
 def test_a_lesser_coin_our_stock_data_cannot_check_answers_under_a_lead_line(monkeypatch):
     from app import symbol_registry
-    monkeypatch.setattr(symbol_registry, "listed", lambda sym: [{"name": "Backpack", "symbol": "BP", "rank": 135}])
+    monkeypatch.setattr(symbol_registry, "listed", lambda sym: [{"name": "Moodeng", "symbol": "MOODENG", "rank": 210}])
     monkeypatch.setattr(symbol_registry, "leader", lambda rows: rows[0])
     monkeypatch.setattr(equities_data, "enabled", lambda: True)
-    monkeypatch.setattr(equities_data, "is_listed_ticker", lambda sym: False)      # the gateway's allowlist does not carry BP plc
+    monkeypatch.setattr(equities_data, "is_listed_ticker", lambda sym: False)      # no stock signal for a long ticker
     monkeypatch.setattr(tequity, "resolve_pair", lambda venue, sym: None)
-    ask, hedge = asyncio.run(why_moving.namesake("BP", "Why is BP moving today?"))
-    assert ask is None and hedge.startswith("_BP here is the token **Backpack** (CoinGecko rank 135)") and "`why is BP stock moving`" in hedge
-    monkeypatch.setattr(tequity, "resolve_pair", lambda venue, sym: "BPUSDC" if venue == "hyperliquid" else None)
-    ask, hedge = asyncio.run(why_moving.namesake("BP", "Why is BP moving today?"))
-    assert ask and ask.startswith("**BP** can mean the listed company") and hedge is None        # the venue feed lists it as a stock: a question
+    ask, hedge = asyncio.run(why_moving.namesake("MOODENG", "Why is MOODENG moving today?"))
+    assert ask is None and hedge is None                                          # seven letters: no company reading, no lead line
+    monkeypatch.setattr(symbol_registry, "listed", lambda sym: [{"name": "Ansem", "symbol": "ANSEM", "rank": 1400}])
+    ask, hedge = asyncio.run(why_moving.namesake("ANSEM", "Why is ANSEM moving today?"))
+    assert ask is None and hedge.startswith("_ANSEM here is the token **Ansem** (CoinGecko rank 1400)") and "`why is ANSEM stock moving`" in hedge
+    monkeypatch.setattr(tequity, "resolve_pair", lambda venue, sym: "ANSEMUSDC" if venue == "hyperliquid" else None)
+    ask, hedge = asyncio.run(why_moving.namesake("ANSEM", "Why is ANSEM moving today?"))
+    assert ask and ask.startswith("**ANSEM** can mean a listed company") and hedge is None      # the venue feed lists it as a stock: a question
 
 
 def test_the_ticker_check_tries_the_profile_before_the_price_snapshot(monkeypatch):

@@ -62,6 +62,10 @@ ANALYSIS_RULES = (
     "- Holder lists include pools, exchanges, and treasury/program addresses — they "
     "do NOT describe beneficial owners. Top-10 concentration above ~30% is elevated "
     "risk, but read known-entity wallets in that context.\n"
+    "- Concentration figures from different sources use different bases: a holders table counts every "
+    "position (pools and exchanges included), a security profile applies its own exclusions. State each "
+    "top-N figure with its source and basis; never merge figures from two sources into one 'top 10 … top 50' "
+    "statement, and never write a top-50 share smaller than a top-10 share as if they shared a basis.\n"
     "- A null or absent mint/freeze authority is NOT proof of no mint/freeze power; "
     "absent safety signals are UNKNOWN, not 'safe'. Never assert no owner, no tax, "
     "no blacklist, immutable code, or audited safety without evidence in this bundle.\n"
@@ -99,6 +103,106 @@ _DIMENSION_WORDS = {
     "sentiment": re.compile(r"\b(?:sentiment|social|twitter|crypto\s+twitter|\bx\s+says?)\b", re.I),
     "market": re.compile(r"\b(?:price\s+action|volume|market\s+cap|mcap|fdv|momentum)\b", re.I),
 }
+
+
+_TOP_N = re.compile(r"\btop[\s-]?(\d{1,3})\b[^.\n|]{0,60}?(\d{1,3}(?:\.\d+)?)\s*%", re.I)
+_CONC_LINE = re.compile(r"(?im)^.*\btop[\s-]?(?:10|50|100)\b.*(?:%|per\s*cent).*$")
+
+
+def concentration_conflicts(text: str) -> list[str]:
+    """Lines where a larger top-N carries a smaller share than a smaller
+    top-N: impossible on one basis ("Top 10 hold 38.37%, top 50 hold 17.47%"
+    merged a holders table with a security profile, UAT preflight
+    2026-09-27)."""
+    out = []
+    for line in (text or "").splitlines():
+        pairs = [(int(n), float(p)) for n, p in _TOP_N.findall(line)]
+        for n1, p1 in pairs:
+            for n2, p2 in pairs:
+                if n2 > n1 and p2 < p1:
+                    out.append(line.strip()[:200])
+                    break
+            else:
+                continue
+            break
+    return out
+
+
+def sourced_concentration(evidence: str) -> list[str]:
+    """The concentration lines as the evidence cards state them, each with
+    its source card's own words about the basis."""
+    lines = []
+    for line in (evidence or "").splitlines():
+        if _CONC_LINE.match(line) and "|" not in line[:3]:
+            cleaned = re.sub(r"\s+", " ", re.sub(r"\*\*|`", "", line.strip().lstrip("-* "))).strip()
+            if cleaned and cleaned not in lines:
+                lines.append(cleaned[:300])
+    return lines[:4]
+
+
+_THRESHOLD_BEFORE = re.compile(r"(?:>|<|≥|≤|above|over|under|below|at\s+least|at\s+most|more\s+than|less\s+than)\s*$", re.I)
+_APPROX_BEFORE = re.compile(r"(?:around|about|roughly|approx\.?|approximately|~|circa|c\.)\s*$", re.I)
+_PCT_IN_TOPN = re.compile(r"\btop[\s-]?(\d{1,3})\b[^.\n|]{0,60}?(?:(\d{1,3}(?:\.\d+)?)\s*[–-]\s*)?(\d{1,3}(?:\.\d+)?)\s*%", re.I)
+
+
+def _supported_pct(value: float, evidence_pcts: set[float], approximate: bool = False) -> bool:
+    """A written share is the cards' when a card figure rounds to it at the
+    written precision ("31%" for 30.92%, "38%" for 38.37%); an approximation
+    ("~31%", "about 38%") may sit within 2.5 points of a card figure, and
+    "~50%" with no card near it is not the cards' at all."""
+    text = f"{value:g}"
+    decimals = len(text.split(".")[1]) if "." in text else 0
+    if approximate:
+        return any(abs(e - value) <= 2.5 for e in evidence_pcts)
+    return any(round(e, decimals) == round(value, decimals) or abs(e - value) <= 0.5 * 10 ** -decimals for e in evidence_pcts)
+
+
+def _unsupported_shares(sentence: str, evidence_pcts: set[float]) -> list[float]:
+    out = []
+    for m in _PCT_IN_TOPN.finditer(sentence):
+        for value in (m.group(2), m.group(3)):
+            if not value:
+                continue
+            before = sentence[:m.start(3) if value == m.group(3) else m.start(2)]
+            if _THRESHOLD_BEFORE.search(re.sub(r"[~\s]+$", "", before)):
+                continue                                 # "above ~30%", ">30%": a threshold, not a figure
+            if not _supported_pct(float(value), evidence_pcts, approximate=bool(_APPROX_BEFORE.search(before))):
+                out.append(float(value))
+    return out
+
+
+def audit_concentration(answer: str, evidence: str) -> str:
+    """Remove concentration claims the evidence cannot support as written: a
+    sentence or table row that merges bases (a larger top-N with a smaller
+    share), or a top-N share no card carries even rounded; then state the
+    figures as the cards give them, with their bases. A rounded share of a
+    card figure, or a threshold ("above ~30%"), stands."""
+    evidence_pcts = {float(p) for _, p in _TOP_N.findall(evidence or "")}
+    kept_lines, removed = [], []
+    for line in (answer or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("|"):
+            if concentration_conflicts(line) or _unsupported_shares(line, evidence_pcts):
+                removed.append(stripped[:160])
+                continue
+            kept_lines.append(line)
+            continue
+        sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z(*])", line)
+        kept = []
+        for sentence in sentences:
+            if concentration_conflicts(sentence) or _unsupported_shares(sentence, evidence_pcts):
+                removed.append(sentence.strip()[:160])
+                continue
+            kept.append(sentence)
+        if kept or not sentences:
+            kept_lines.append(" ".join(kept) if kept else line)
+    if not removed:
+        return answer
+    sourced = sourced_concentration(evidence)
+    block = ["", "**Holder concentration, as the sources state it** (each figure on its own source's basis; a holders table counts every position, a security profile applies its own exclusions):"]
+    block += [f"- {line}" for line in sourced] if sourced else ["- no concentration figure in the evidence bundle"]
+    block.append(f"- removed from the written analysis: {len(removed)} statement{'s' if len(removed) != 1 else ''} that merged or restated these figures on a basis the sources do not support")
+    return "\n".join(kept_lines).rstrip() + "\n" + "\n".join(block)
 
 
 def names_dimensions(request: str) -> int:

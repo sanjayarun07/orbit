@@ -54,6 +54,11 @@ def _contract_note(contract: contracts.QuestionContract, gate: fact_gate.GateRes
              "what is missing in the first sentence, and never fill it from memory."]
     if scope_note:
         lines.append(f"Scope: {scope_note}")
+    if contract.kind == "recent_events" and hours and hours <= 24 * 7:
+        # "What's actually new today": the event's own date decides, never the article's; an older event a
+        # source republishes today is a recap and says so (UAT preflight 2026-09-27).
+        lines.append(f"Freshness: name each item's event date (the day it happened, never the article's date); an event before the {window} asked is a recap: "
+                     "write 'recap:' before it or leave it out, and lead with what happened inside the window, or say that nothing new inside it is verified.")
     if contract.answer_requirements:
         lines.append("Resolve these points from cited sources, or say which remain unverified: " + "; ".join(contract.answer_requirements))
     if gate.missing:
@@ -552,21 +557,29 @@ async def answer(state: dict, request: str, chains: tuple[str, ...], *, context:
     state_cards = ("\n\n".join(text for text, traj in parts if not (cov.get(traj.get("tool_name_0")) or {}).get("discovery"))
                    if contract.kind in EXACT_STATE_KINDS else cards)
     final = fact_gate.check(contract, fact_rows, synthesized, scope_satisfied=scope_satisfied, evidence_text=state_cards)
-    if final.unsupported or final.contradictions:
-        # The claim check found figures no fact carries, or a comparison the
-        # numbers deny ("7,719 below a prior 7,706"): one rewrite without them,
-        # then the check again; whatever remains withholds the summary.
+    if final.unsupported or final.contradictions or final.recap:
+        # The claim check found figures no fact carries, a comparison the
+        # numbers deny ("7,719 below a prior 7,706"), or an older event told as
+        # new: one rewrite without them, then the check again; figures and
+        # comparisons that remain withhold the summary, a recap that remains
+        # is labelled.
         redo = f"{request}\n{note}\n"
         if final.unsupported:
             redo += f"Do not state these figures, no fact card carries them: {', '.join(final.unsupported)}. State only figures that appear in the cards, or describe without the number. "
         if final.contradictions:
             redo += f"These comparisons contradict their own numbers, rewrite them correctly or drop them: {'; '.join(final.contradictions)}."
+        if final.recap:
+            redo += (" These items happened before the window asked and were told as new; write 'recap:' before each or leave it out, and lead with what happened inside the window: "
+                     + "; ".join(final.recap))
         rewritten = await composition.synthesize(redo, cards, trajectory)
         if rewritten:
             again = fact_gate.check(contract, fact_rows, rewritten, scope_satisfied=scope_satisfied, evidence_text=state_cards)
-            if len(again.unsupported) + len(again.contradictions) < len(final.unsupported) + len(final.contradictions):
+            if len(again.unsupported) + len(again.contradictions) + len(again.recap) < len(final.unsupported) + len(final.contradictions) + len(final.recap):
                 synthesized, final = rewritten, again
     answer_text = synthesized
+    if final.recap and not (final.unsupported or final.contradictions):
+        # Still told as new after the rewrite: the reader is told which items are recaps, by event date, above the summary.
+        answer_text = ("**Recap, not new inside the window asked** (event dates before it): " + "; ".join(final.recap) + "\n\n" + answer_text)
     if final.unsupported or final.contradictions:
         # Still untraceable or self-contradicting after the rewrite: the
         # written summary is withheld, never shown with a warning under it

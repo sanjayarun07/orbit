@@ -161,8 +161,10 @@ async def namesake(sym: str, request: str) -> tuple[str | None, str | None]:
         except Exception:
             stock = False
     rank = lead.get("rank") or "—"
-    if stock:
-        return (f"**{sym}** can mean the listed company (ticker {sym}) or the token **{lead['name']}** (CoinGecko rank {rank}). "
+    if stock or len(sym) <= 4:
+        # A bare short ticker on a lesser coin is a question either way: our stock data's allowlist cannot
+        # say a company does not exist ("BP" is BP plc and Backpack; user decision 2026-09-28).
+        return (f"**{sym}** can mean a listed company (ticker {sym}) or the token **{lead['name']}** (CoinGecko rank {rank}). "
                 f"Which one? Say `why is {sym} stock moving` or `why is {sym} token moving` and I'll answer that."), None
     if len(sym) > 5:
         return None, None
