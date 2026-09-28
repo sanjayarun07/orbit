@@ -1875,7 +1875,8 @@ def _remembered_holdings(state: AgentState) -> list[str]:
 async def research_node(state: AgentState) -> dict:
     sink: dict = {}
     request = _effective_request(state)
-    referent_question = context_entities.referent_question(_ask(request), state.get("session_context"))
+    referent_question = (context_entities.referent_question(_ask(request), state.get("session_context"))
+                         or context_entities.event_question(_ask(request), state.get("session_context")))
     if referent_question:
         # "Which of those…" when the last answer listed nothing and the earlier
         # lists were about something else: ask, never pick an older list (user

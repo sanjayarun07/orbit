@@ -124,6 +124,16 @@ _LACKS = re.compile(r"^\s*(?:the\s+)?(?:answer|data|response|passages?|card)\s+(
 _ADDRESS = re.compile(r"\b(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})\b")
 
 
+_PRIOR_NOTE = re.compile(r'"(the [^"]{3,60})" is what the previous answer reported;[^«]*«([^»]+)»', re.I)
+
+
+def _prior_reference(question: str) -> tuple[str, str] | None:
+    """(what the ask referred to, the previous answer's words) when the
+    resolved request carries a prior-reference note (context_entities)."""
+    m = _PRIOR_NOTE.search(question or "")
+    return (m.group(1).strip(), m.group(2).strip()) if m else None
+
+
 def _missing_phrase(missing: str) -> str:
     """The judge's `missing` as a noun phrase that reads inside a sentence.
     It sometimes answers with a whole sentence ("The answer lacks the date
@@ -206,6 +216,15 @@ async def gate(question: str, result: dict) -> dict:
         # replace real data with a refusal (live: a BTC tape that had price
         # and 24h change lost them because funding was missing, 2026-09-22).
         gap = _missing_phrase(verdict.get("missing") or "")
+        prior = _prior_reference(question)
+        if prior:
+            # The missing part is what the previous answer reported ("the
+            # reported catalyst"): restate it from that answer under the live
+            # figure, never call it uncovered (browser UAT 2026-09-28).
+            what, excerpt = prior
+            return {**result, "answer": f"{answer.strip()}\n\n**{what[0].upper() + what[1:]}, from the previous answer:** {excerpt}\n\n"
+                                        "_The live figure above is set against what was reported before; the sources this turn did not restate it._",
+                    "answer_gate": {**verdict, "resolved_by": "prior_answer"}}
         return {**result, "answer": f"{answer.strip()}\n\n_Not covered by the sources this turn: {gap}._",
                 "answer_gate": {**verdict, "resolved_by": "partial"}}
     return {**result, "answer": _could_not_find(question, verdict), "trajectory": None, "answer_gate": {**verdict, "resolved_by": "ask"}}

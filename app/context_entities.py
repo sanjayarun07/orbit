@@ -151,6 +151,24 @@ def referent_question(request: str, session_context: dict | None) -> str | None:
     return referent_items(request, session_context)[2]
 
 
+_EVENT_REFERENT = re.compile(r"^\s*(?:so\s+)?what\s+(?:just\s+)?happened\b(?:,?\s*and\s+what\s+does\s+(?:it|this|that)\s+mean\b.*)?[?.!]?\s*$"
+                             r"|^\s*what\s+does\s+(?:it|this|that)\s+mean\s+for\s+the\s+market\??\s*$", re.I)
+
+
+def event_question(request: str, session_context: dict | None) -> str | None:
+    """"What happened, and what does it mean for the market?" names no event:
+    it is the question a Home card tap answers. With nothing tapped and no
+    subject or previous answer in the conversation, ask which story is meant
+    rather than research "the past 30 days" (browser UAT 2026-09-28)."""
+    ctx = session_context or {}
+    if not _EVENT_REFERENT.match(composition_split(request)):
+        return None
+    if (ctx.get("focus") or {}).get("label") or ctx.get("last_answer") or ctx.get("last_items"):
+        return None
+    return ("Which event or headline do you mean? Tap a Market updates card on Home, or name the story, and I'll say what happened, when, "
+            "and what it means for the market.")
+
+
 def _last_user_request(history: str, current: str, session_context: dict | None = None) -> str | None:
     """The previous user turn: from the session context first (the bounded
     history text drops the user line after a long answer, live 2026-09-24),

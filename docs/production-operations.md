@@ -3518,6 +3518,32 @@ correction (regressions in `tests/test_uat_preflight_20260928.py`; the fixes rep
 Still open from the preflight: the BONK deep-dive's top-10 versus top-50 share contradiction and the event-time gate
 on "what's new today". Browser UAT (Home taps, progress, mobile, watch/action controls) remains to be run.
 
+## The 5b85ec5a candidate: three answer-quality gaps and the browser UAT (2026-09-28)
+
+Three gaps closed before broad UAT (`tests/test_uat_gaps_20260928.py`; live once each in
+`reports/uat-preflight-fixes-2026-09-28/run5`, `run7`):
+
+- **Concentration figures keep their source and basis** in the deep dive: `token_deepdive.audit_concentration` runs
+  after synthesis; a sentence or table row that merges bases (a larger top-N with a smaller share) or states a top-N
+  share no card carries even rounded is removed, and the figures are stated as the cards give them with their bases;
+  a rounded share or a threshold ("above ~30%") stands. `ANALYSIS_RULES` says so.
+- **"New today" is judged by event date**: for a recent-events ask with a window of a week or less, the written
+  summary's own dates (ISO, "24 September", "on Wednesday") decide; a sentence dated before the window without a recap
+  word is one repair, then a "Recap, not new inside the window asked" line above the summary
+  (`fact_gate.recap_sentences`); the contract note asks for each item's event date and a recap label.
+- **A bare short ticker on a lesser coin asks** which asset is meant (`why_moving.namesake`: four letters or fewer,
+  outside the top 100), whatever the equities gateway's allowlist says; longer tickers keep the lead line.
+
+The browser UAT of the 13 journeys (`scripts/ui/uat_journeys.mjs`, `reports/uat-browser-2026-09-28/report.md`;
+desktop and iPhone widths, signed in, Home taps, streamed progress, Related chips, screenshots per turn) found and
+closed: «…» material in a resolution note is never read by a tool matcher (`provider_router._matchable`; a wallet
+history card had been produced for the SOL mint); the missing part a previous answer reported is restated under a
+partial answer, never called uncovered (`answer_gate._prior_reference`); an exit control reads the wallet the focus
+carries; the deployer check names the contract's symbol; no "No evidence available" panel under a clarifying
+question; "What happened, and what does it mean for the market?" with nothing to point at asks which story
+(`context_entities.event_question`); a day span is not a figure. At phone width the tap journey passed end to end and
+no turn scrolled the page sideways.
+
 ## Home headline tap: grounded in the market's state (2026-09-26)
 
 "What does this mean for the market: <headline>" is open research on the headline (the tap fix of 2026-09-25), and

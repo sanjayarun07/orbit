@@ -124,7 +124,9 @@ for (const j of JOURNEYS) {
   if (j.tap === "news") {
     turnNo += 1;
     const card = page.locator('#homePrompts .prompt-card[data-msg^="What does this mean for the market"]').first();
-    const present = await card.count();
+    await card.waitFor({ timeout: 10000 }).catch(() => {});      // the Home highlights load after the chat resets
+    let present = await card.count();
+    if (!present) { await page.waitForTimeout(2500); present = await card.count(); console.log(`tap: ${present} card(s) after retry; grid hidden=${await page.evaluate(() => document.querySelector("#homePrompts")?.hidden)}`); }
     if (!present) { records.push({ journey: j.id, turn: turnNo, prompt: "(Home news tap)", error: "no news card on Home" }); }
     else {
       const title = await card.locator("strong").innerText();

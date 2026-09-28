@@ -126,3 +126,31 @@ def test_quoted_material_in_a_note_is_never_read_by_a_tool_matcher():
     assert mobula_wallet.matches(request)                                   # the excerpt alone would make it a wallet ask
     assert not mobula_wallet.matches(provider_router._matchable(request))   # the router never lets a matcher read it
     assert "«" not in provider_router._matchable(request) and "live price" in provider_router._matchable(request)
+
+
+def test_what_happened_with_nothing_to_point_at_asks_which_story():
+    from app import context_entities
+    q = "What happened, and what does it mean for the market?"
+    assert context_entities.event_question(q, {}).startswith("Which event or headline do you mean?")
+    assert context_entities.event_question(q, {"focus": {"kind": "topic", "label": "Fed proposes stablecoin rules", "source": "home_headline"}}) is None
+    assert context_entities.event_question(q, {"last_answer": "# Why is SOL moving? ..."}) is None
+    assert context_entities.event_question("What happened to Solana in the last 24 hours?", {}) is None      # names its subject
+    assert context_entities.event_question("What does this mean for the market: Fed hikes", {}) is None      # a tap carries its headline
+
+
+def test_a_missing_part_that_the_previous_answer_reported_is_restated_not_called_uncovered(monkeypatch):
+    from app import answer_gate
+    question = ('What is the live price versus the reported catalyst?\nResolved from canonical session context: token SOL mint So11111111111111111111111111111111111111112 on solana.\n'
+                'Resolved from conversation context: "the reported catalyst" is what the previous answer reported; restate it from that answer, never from a new search, and set the live figure against it: «SOL is moving on the Alpenglow upgrade and ETF inflows.»')
+    async def check(q, a):
+        return {"verdict": "missing", "subject": "SOL", "missing": "the reported catalyst comparison"}
+    async def web(q):
+        return None
+    monkeypatch.setattr(answer_gate, "check", check)
+    monkeypatch.setattr(answer_gate, "_web_answer", web)
+    monkeypatch.setattr(answer_gate, "eligible", lambda answer, result: True)
+    out = asyncio.run(answer_gate.gate(question, {"answer": "# Solana (SOL)\nPrice: $119.39", "trajectory": {"tool_name_0": "mobula_token_details"}}))
+    assert "**The reported catalyst, from the previous answer:** SOL is moving on the Alpenglow upgrade and ETF inflows." in out["answer"]
+    assert "Not covered by the sources this turn" not in out["answer"] and out["answer_gate"]["resolved_by"] == "prior_answer"
+    out = asyncio.run(answer_gate.gate("What is the live price versus funding?", {"answer": "# Solana (SOL)\nPrice: $119.39", "trajectory": {"tool_name_0": "x"}}))
+    assert "Not covered by the sources this turn" in out["answer"]
