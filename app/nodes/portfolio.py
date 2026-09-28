@@ -62,6 +62,17 @@ async def _verified_mint(symbol: str) -> str | None:
     return top.get("id")
 
 
+def _stated_swap_fields(request: str) -> bool:
+    """Whether the transaction contract read a complete swap from the request
+    itself: an amount, an input token and an output token."""
+    from app import contracts
+    plan = contracts.plan_by_rules(request or "")
+    if plan.kind != "transaction_intent":
+        return False
+    filters = plan.filters or {}
+    return all(filters.get(key) for key in ("amount", "input_token", "output_token"))
+
+
 async def _portfolio_node(state: AgentState) -> dict:
     handle = handles.social_handle(_effective_request(state))
     if handle:
@@ -73,6 +84,12 @@ async def _portfolio_node(state: AgentState) -> dict:
     # A hypothetical amount needs no wallet: "How much USDC would 0.05 SOL
     # get? Just estimate." is a read-only Jupiter quote of the stated size
     # (expanded UI review, 2026-09-24: it asked to connect a wallet).
+    # A stated size is a simulation of that size, whether or not a wallet is
+    # bound: the contract already read the amount and the pair, and the model
+    # must not re-derive them (a bound wallet sent "what would selling 1 ANSEM
+    # for USDC return" to the ReAct simulator, which quoted 1,000 ANSEM, and
+    # earlier claimed the wallet held none; wallet UAT 2026-09-28).
+    stated_swap_fields = "trade_simulation" in capabilities and _stated_swap_fields(request)
     hypothetical = not state.get("wallet_address") and "trade_simulation" in capabilities and bool(re.search(r"\b\d+(?:\.\d+)?\s*[A-Za-z]{2,10}\b", request))
     if hypothetical:
         state = {**state, "wallet_address": ""}
@@ -270,7 +287,7 @@ async def _portfolio_node(state: AgentState) -> dict:
     if "trade_simulation" in capabilities:
         from types import SimpleNamespace
         pre = (None, None, None, None)
-        if hypothetical:
+        if hypothetical or stated_swap_fields:
             # The transaction contract already read the amount and the pair in
             # any wording ("selling 0.05 SOL to USDC", "the minimum USDC I'd
             # get for 0.05 SOL"); the swap fields come from those, in the one
@@ -283,10 +300,11 @@ async def _portfolio_node(state: AgentState) -> dict:
                 # The completer takes mints, not tickers: the output ticker is
                 # resolved against Jupiter's verified list, exact symbol only.
                 pre = (pre[0], await _verified_mint(f["output_token"]), pre[2], pre[3])
-        if hypothetical and pre[0] and pre[1] and pre[2]:
-            # No wallet and a stated amount: the request's own words carry the
-            # swap ("0.05 SOL to USDC"), so the extractor and its balance read
-            # are skipped (it asked for a wallet it did not need, 2026-09-24).
+        if (hypothetical or stated_swap_fields) and pre[0] and pre[1] and pre[2]:
+            # A stated amount: the request's own words carry the swap ("0.05
+            # SOL to USDC", "1 ANSEM for USDC"), so the extractor and its
+            # balance read are skipped (it asked for a wallet it did not need,
+            # 2026-09-24; it re-derived the size, wallet UAT 2026-09-28).
             result = SimpleNamespace(answer="", trajectory=None, input_mint=pre[0], output_mint=pre[1], amount_atomic=pre[2], should_simulate=True)
         else:
             result = await runtime.answer(

@@ -1,8 +1,9 @@
 import asyncio
+import logging
 
 from app.jupiter import jupiter
 from app.portfolio import build_portfolio_snapshot
-from app.solana_rpc import get_sol_balance, get_token_accounts
+from app.solana_rpc import get_sol_balance, get_token_accounts, get_token_accounts_2022
 
 
 def _run(coro):
@@ -21,26 +22,50 @@ def sol_balance(wallet_address: str) -> dict:
 # model only ever sees the largest positions plus an honest count of the rest.
 LLM_MAX_HOLDINGS = 50
 
+logger = logging.getLogger(__name__)
+
 
 def spl_balances(wallet_address: str) -> dict:
-    """Read confirmed SPL token accounts for a Solana wallet address.
+    """Read confirmed SPL token accounts for a Solana wallet address, from
+    BOTH token programs (the original and Token-2022, where pump.fun-era
+    mints live).
 
     Returns the largest `LLM_MAX_HOLDINGS` positions by token amount as
     `{mint, amount}` plus `token_account_count` / `truncated` so a wallet with
-    thousands of accounts is summarised, not dumped."""
-    accounts = _run(get_token_accounts(wallet_address))
-    holdings = []
-    for entry in accounts.get("value", []):
-        parsed = entry["account"]["data"]["parsed"]["info"]
-        amount = float(parsed["tokenAmount"]["uiAmount"] or 0)
-        if amount > 0:
-            holdings.append({"mint": parsed["mint"], "amount": amount})
+    thousands of accounts is summarised, not dumped.
+
+    `complete` is False when a program could not be read or the list was
+    truncated: the wallet may hold a token that is not in `holdings`, so this
+    result NEVER establishes that a wallet holds none of something. Say the
+    balance could not be confirmed instead (a Token-2022 position read as
+    "your wallet holds no ANSEM", wallet UAT 2026-09-28)."""
+    holdings, failed = [], []
+    for reader, label in ((get_token_accounts, "token program"), (get_token_accounts_2022, "token-2022 program")):
+        try:
+            accounts = _run(reader(wallet_address))
+        except Exception as exc:                        # noqa: BLE001 -- a failed read is not a zero
+            logger.info("spl_balances: %s failed for %s", label, wallet_address[:8], exc_info=True)
+            failed.append(f"{label}: {type(exc).__name__}")
+            continue
+        for entry in (accounts or {}).get("value") or []:
+            parsed = entry["account"]["data"]["parsed"]["info"]
+            amount = float(parsed["tokenAmount"]["uiAmount"] or 0)
+            if amount > 0:
+                holdings.append({"mint": parsed["mint"], "amount": amount})
     holdings.sort(key=lambda h: -h["amount"])
-    return {
+    truncated = len(holdings) > LLM_MAX_HOLDINGS
+    result = {
         "token_account_count": len(holdings),
         "holdings": holdings[:LLM_MAX_HOLDINGS],
-        "truncated": len(holdings) > LLM_MAX_HOLDINGS,
+        "truncated": truncated,
+        "programs_read_failed": failed,
+        "complete": not failed and not truncated,
     }
+    if failed or truncated:
+        result["absence_not_established"] = (
+            "This list is incomplete" + (f" ({'; '.join(failed)})" if failed else " (truncated)")
+            + ": do not say the wallet holds none of a token; say the balance could not be confirmed.")
+    return result
 
 
 def portfolio_snapshot(wallet_address: str) -> dict:

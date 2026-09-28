@@ -211,7 +211,9 @@ _PORTFOLIO_ASK = re.compile(r"\b(?:my|connected)\b.{0,30}\b(?:portfolio|wallet|h
 # A swap, sell, buy or bridge with an amount or a pair: a transaction intent,
 # quoted for the exact size or refused with the exact reason, never a
 # guess ("Start a cross-chain swap" got a generic clarification, 2026-09-23).
-_TRANSACTION = re.compile(r"\b(?:swap(?:ped|ping)?|sell(?:ing)?|sold|buy(?:ing)?|bought|bridg(?:e|ed|ing)|convert(?:ed|ing)?|exchang(?:e|ed|ing))\b.{0,60}\b(?:\d+(?:\.\d+)?\s*[A-Za-z$][A-Za-z0-9]{1,9}|[A-Z]{2,10}\s+(?:to|into|for)\s+[A-Z]{2,10})"
+_TRANSACTION = re.compile(r"\b(?:swap(?:ped|ping)?|sell(?:ing)?|sold|buy(?:ing)?|bought|bridg(?:e|ed|ing)|convert(?:ed|ing)?|exchang(?:e|ed|ing)"
+                          # the nominalisations: "prepare a sale of 1 ANSEM for USDC", "a purchase of 2 SOL" (wallet UAT 2026-09-28)
+                          r"|sale\s+of|purchase\s+of|swap\s+of|conversion\s+of)\b.{0,60}\b(?:\d+(?:\.\d+)?\s*[A-Za-z$][A-Za-z0-9]{1,9}|[A-Z]{2,10}\s+(?:to|into|for)\s+[A-Z]{2,10})"
                           r"|\b(?:start|begin|prepare|quote)\s+(?:a\s+|an\s+|the\s+)?(?:cross[- ]chain\s+)?(?:swap|bridge|trade|quote)\b|\bquote\s+me\b"
                           r"|\bexit\b.{0,40}\bposition\b|\bexit\s+(?:quotes?|analysis)\b"
                           r"|\b(?:how\s+much|what\s+would|what(?:'s|\s+is)\s+the\s+minimum|i'?d\s+get|would\s+i\s+get|estimate|simulat\w+|price[- ]check|quote)\b.{0,50}\b\d+(?:\.\d+)?\s*[A-Za-z$][A-Za-z0-9]{1,9}\b(?:.{0,50}\b(?:get|receive|fetch|for|into|to|→)\b|.{0,30}\bslippage\b)"
@@ -458,7 +460,10 @@ def plan_by_rules(request: str, context: str = "") -> QuestionContract:
         # "quote me 1 SOL to USDC" and "if I sold 0.05 SOL for USDC" are swap
         # intents in other words; an exit ask takes its size from the wallet.
         from app.routing.trade_parser import parse_execution_draft
-        normalised = re.sub(r"\bquote\s+me\b", "swap", re.sub(r"\b(?:sold|sell(?:ing)?)\b", "sell", text, flags=re.I), flags=re.I)
+        # the nominalisations become their verb before the draft parser reads them
+        normalised = re.sub(r"\b(?:a\s+|an\s+|the\s+)?(?:sale|purchase|swap|conversion)\s+of\b",
+                            lambda m: {"sale": "sell", "purchase": "buy", "swap": "swap", "conversion": "convert"}[m.group(0).split()[-2].lower()], text, flags=re.I)
+        normalised = re.sub(r"\bquote\s+me\b", "swap", re.sub(r"\b(?:sold|sell(?:ing)?)\b", "sell", normalised, flags=re.I), flags=re.I)
         normalised = re.sub(r"\b(?:how\s+much\s+\w+\s+would|what\s+would|estimate\s+(?:selling\s+)?|simulat\w+\s+(?:selling\s+)?|price[- ]check\s+(?:my\s+)?|quote\s+for\s+)", "swap ", normalised, flags=re.I)
         draft = parse_execution_draft(normalised, (chain,) if chain else ())
         usd_amount: float | None = None

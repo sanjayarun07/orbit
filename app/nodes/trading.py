@@ -54,9 +54,13 @@ async def trade_planner_node(state: AgentState) -> dict:
     from app import contracts
     from app.settings import settings as _settings
     contract = contracts.plan_by_rules(state["request"]) if _settings.contract_pipeline_enabled else None
-    if contract is not None and contract.kind == "transaction_intent" and contract.ambiguity:
-        note = "" if deployment.execution_enabled() else " This deployment is in research mode: even with those, I can only research the route, not prepare a swap."
-        return {"answer": contract.ambiguity + note, "trajectory": None, "cross_chain_swap": None, "contract": contract.model_dump(), "pipeline": "contract"}
+    if (contract is not None and contract.kind == "transaction_intent" and contract.ambiguity
+            and deployment.execution_enabled()):
+        # A missing field is worth asking for only where a swap could be
+        # prepared at all; in research mode the mode is the answer and asking
+        # for a chain first reads as though the swap were otherwise available
+        # (wallet UAT 2026-09-28).
+        return {"answer": contract.ambiguity, "trajectory": None, "cross_chain_swap": None, "contract": contract.model_dump(), "pipeline": "contract"}
     if not deployment.execution_enabled():
         f = (contract.filters if contract is not None else {}) or {}
         what = (f"{f.get('amount')} {f.get('input_token')} to {f.get('output_token')}" + (f" on {f.get('source_chain')}" if f.get("source_chain") else "")) if f.get("input_token") and f.get("output_token") else "this one"

@@ -212,8 +212,17 @@ def matches(request: str) -> bool:
 
 def is_product_question(request: str) -> bool:
     """A question about what this product does or how to use it, or about one
-    of its own concepts (an exit watch, marked value against sale proceeds)."""
+    of its own concepts (an exit watch, marked value against sale proceeds).
+
+    A message that states a concrete action on a named asset is that action's
+    request, not a question about the product, however it describes the
+    wallet: "with this view-only wallet, prepare a sale of 1 ANSEM for USDC at
+    max 50 bps" was answered with the read-only-wallet explainer (wallet UAT
+    2026-09-28)."""
     text = request or ""
+    from app.routing.resolver import stated_swap
+    if stated_swap(text):
+        return False
     if _FIND_CHAT.search(text) or _EXIT_WATCH_MEANING.search(text) or _MARKED_VS_PROCEEDS.search(text) or _WALLET_VIEW.search(text) or _asks_quote_failure_behaviour(text) or _HOME_HEADLINES.search(text) or _FEED_COVERAGE.search(text) or _DETERIORATION.search(text):
         return True
     return bool(_WHAT_CAN.search(text)) and not re.search(r"\b(?:price|holders?|liquidity|volume|market\s+cap|tvl)\b", text, re.I)

@@ -3570,6 +3570,30 @@ so first and reads the web card as dated reporting; a ticker-shaped topic focus 
 three conversations once each: BTC after the market answer, NEAR after its funding card, SOL's follow-ups; the
 definitional "what is a liquidation cluster?" stays general.
 
+### The contract decides a stated swap, and a balance read covers both token programs (2026-09-28)
+
+The wallet and action-flow probe (`reports/uat-wallet-action-2026-09-28/`) found one request — sell 1 ANSEM for USDC,
+read-only, 50 bps — read four different ways, and a Token-2022 position reported as "your wallet holds no ANSEM".
+Three general rules, not three prompt fixes (`tests/test_uat_wallet_action_20260928.py`):
+
+- **A stated swap is decided by the contract parser, not by keywords** (`routing/resolver.stated_swap`): a message
+  that states an amount, an input token and an output token is a swap or its quote whatever words surround it, and no
+  topical rule may claim it (the keyword rules had produced `own_wallet`, the model, `current_information` and
+  `trade_simulation` for the same fields). The contract decides the family; the read-only wording decides quote
+  versus preparation; the deployment gate decides what may be prepared. It is a branch in the decision chain, so team
+  mode, venue detection and chain extraction still apply. `product_actions.is_product_question` is False for a stated
+  action, and the contract vocabulary reads the nominalisations ("a sale of", "a purchase of", "a swap of").
+- **A stated size is never re-derived** (`nodes/portfolio._stated_swap_fields`): the contract's amount and pair are
+  used whether or not a wallet is bound. With one bound, the ReAct simulator had quoted 1,000 ANSEM for "selling 1
+  ANSEM".
+- **A balance read covers both token programs and a failed read is not a zero** (`agent.spl_balances`): the original
+  SPL program and Token-2022, with `programs_read_failed`, `complete` and, when incomplete, `absence_not_established`
+  so an absence is never claimed from a partial list. The wallet's ANSEM is a Token-2022 mint, invisible before; the
+  same contract `exit_monitor.position_of` has carried since 2026-09-22.
+
+In research mode the refusal now leads, rather than asking for a missing chain first and only then saying nothing can
+be prepared.
+
 ## Home headline tap: grounded in the market's state (2026-09-26)
 
 "What does this mean for the market: <headline>" is open research on the headline (the tap fix of 2026-09-25), and

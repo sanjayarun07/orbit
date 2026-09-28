@@ -277,6 +277,28 @@ async def _model_first(request: str, candidate: CapabilityRoute | None, call_lm,
     return update, meta
 
 
+_QUOTE_ONLY = re.compile(r"\b(?:quote\s+only|only\s+a\s+quote|read[- ]only|just\s+(?:an?\s+)?(?:quote|estimate)|estimate\s+only|do\s+not\s+prepare|don'?t\s+prepare|no\s+transaction|without\s+preparing"
+                         r"|what\s+would\s+i\s+get|how\s+much\s+would\s+i\s+get|what\s+would\s+(?:selling|buying|swapping)\b|what\s+would\s+happen\s+if)\b", re.I)
+
+
+def _quote_only(request: str) -> bool:
+    """Whether the stated swap asks only what it would fetch, with nothing
+    prepared: the read-only quote, not the execution route."""
+    return bool(_QUOTE_ONLY.search(request or ""))
+
+
+def stated_swap(request: str) -> bool:
+    """Whether the message states a complete swap or quote: an amount, an
+    input token and an output token, read by the contract parser rather than
+    by keywords."""
+    from app import contracts
+    plan = contracts.plan_by_rules(request or "")
+    if plan.kind != "transaction_intent":
+        return False
+    filters = plan.filters or {}
+    return all(filters.get(key) for key in ("amount", "input_token", "output_token"))
+
+
 def _bare_referent(request: str, state: dict) -> bool:
     """A pronoun question with nothing in the conversation for it to point at."""
     from app.routing.subject_probe import has_own_subject, is_referent
@@ -292,41 +314,50 @@ async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> d
     request = state["request"]
     contextual = state.get("contextual_request") or request
     controlled = is_trade_cancellation(request) or is_trade_confirmation(request)
-    if not controlled and product_actions.is_product_question(request):
+    # A message that states an amount, an input token and an output token is a
+    # swap or its quote, whatever words surround it, so no topical rule below
+    # may claim it: the keyword rules read one request four different ways in
+    # a live session ("prepare a sale of 1 ANSEM for USDC" → own_wallet, "sell
+    # 1 ANSEM for USDC" → the model, "read-only quote: what would selling 1
+    # ANSEM for USDC return" → current_information, "what would I get if I
+    # sold 1 ANSEM" → trade_simulation, wallet UAT 2026-09-28). The contract
+    # parser is the one reading that knows the fields.
+    swap_stated = not controlled and stated_swap(request)
+    if not controlled and not swap_stated and product_actions.is_product_question(request):
         # "What can I do here without connecting a wallet": about this product,
         # answered deterministically; the classifier read it as explain and the
         # web described marketplaces (funded UI run, 2026-09-23).
         return {"intent": "general", "capabilities": [], "chains": [], "route_source": "rules",
                 "routing_decision": {"method": "rules", "reason": "product_question", "speech_act": "app"}}
-    if not controlled and answer_audit.is_provenance_ask(request):
+    if not controlled and not swap_stated and answer_audit.is_provenance_ask(request):
         # "Which fact was observed live and which part was an inference?" is
         # about this conversation's previous answer, read from the session,
         # never a web search for it (live UI test 2026-09-25).
         return {"intent": "general", "capabilities": [], "chains": [], "route_source": "rules",
                 "routing_decision": {"method": "rules", "reason": "answer_audit", "speech_act": "app"}}
-    if not controlled and _bare_referent(request, state):
+    if not controlled and not swap_stated and _bare_referent(request, state):
         # "What did it do today?" in a fresh chat: "it" points at nothing this
         # conversation holds, so the answer is a question, never a web read
         # of whatever "it" the search returns (Iran sanctions, expanded UI
         # review 2026-09-24).
         return {**_clarify_route("rules"), "clarification": "Which token, protocol or topic do you mean by that? Name it and I'll look.",
                 "routing_decision": {"method": "rules", "reason": "bare_referent"}}
-    if not controlled:
+    if not controlled and not swap_stated:
         index_ask = await listed_asset.index_namesake_ask(request)
         if index_ask:
             return {**_clarify_route("rules"), "clarification": index_ask, "routing_decision": {"method": "rules", "reason": "index_namesake"}}
-    if not controlled and ((state.get("session_context") or {}).get("focus") or {}).get("source") == "home_headline" and subject_probe.continues_subject(request):
+    if not controlled and not swap_stated and ((state.get("session_context") or {}).get("focus") or {}).get("source") == "home_headline" and subject_probe.continues_subject(request):
         # A follow-up about a Home headline is web research on that story
         # (its words are not a topic: "as yields rise" reached the yields tool).
         return {"intent": "research", "capabilities": ["web_research", "news"], "chains": [],
                 "route_source": "rules", "routing_decision": {"method": "rules", "reason": "headline_followup", "speech_act": "research"}}
-    if not controlled and snapshot_compare.dated_ask(request):
+    if not controlled and not swap_stated and snapshot_compare.dated_ask(request):
         # A comparison between dates is research on the snapshot ledger,
         # whatever else the sentence says ("using saved snapshots" read as an
         # app action; "September" read as an asset, live run 2026-09-23).
         return {"intent": "research", "capabilities": ["token_discovery", "market_data", "token_security"], "chains": list(extract_chains(request)),
                 "route_source": "rules", "routing_decision": {"method": "rules", "reason": "dated_comparison", "speech_act": "research"}}
-    if not controlled and is_conditional_order(request):
+    if not controlled and not swap_stated and is_conditional_order(request):
         # "If SOL drops below $100, automatically buy 2 SOL": there is no
         # such order here, and no rule or model should turn it into one.
         return {**_clarify_route("rules"), "clarification": CONDITIONAL_ORDER_ANSWER, "routing_decision": {"method": "rules", "reason": "conditional_order"}}
@@ -343,6 +374,19 @@ async def resolve(state: dict, call_lm, embedding_factory=embedding_router) -> d
     entity_source = "session_entity" if contextual != request else None
     if controlled:
         update = route_fields(candidate)
+    elif swap_stated:
+        # The contract decides the family; the read-only wording decides quote
+        # versus preparation, and the deployment gate downstream decides what
+        # may actually be prepared. A keyword candidate already in the family
+        # is kept, so venue and chain detection stand.
+        if candidate is not None and candidate.intent in {"trade", "cross_chain_swap"} and not _quote_only(request):
+            update = route_fields(candidate, entity_source)
+        elif not _quote_only(request):
+            update = route_fields(plan_execution_route("swap", tuple(extract_chains(request))))
+        else:
+            update = {"intent": "portfolio", "capabilities": ["trade_simulation", "portfolio"], "chains": list(extract_chains(request)),
+                      "route_source": "rules"}
+        metadata = {**metadata, "reason": "stated_swap" if not _quote_only(request) else "stated_swap_quote"}
     elif action.get("intent") in {"research", "portfolio", "general"}:
         update = {"intent": action["intent"], "capabilities": list(action.get("capabilities") or default_capabilities(action["intent"])),
                   "chains": [action["chain"]] if action.get("chain") else [], "route_source": "quick_action"}
